@@ -1,0 +1,80 @@
+name: meshagent_flutter_shadcn
+description: widgets for bootstrapping meshagent projects
+# The following line prevents the package from being accidentally published to
+# pub.dev using `flutter pub publish`. This is preferred for private packages.
+publish_to: "none" # Remove this line if you wish to publish to pub.dev
+
+# The following defines the version and build number for your application.
+# A version number is three numbers separated by dots, like 1.2.43
+# followed by an optional build number separated by a +.
+# Both the version and the builder number may be overridden in flutter
+# build by specifying --build-name and --build-number, respectively.
+# In Android, build-name is used as versionName while build-number used as versionCode.
+# Read more about Android versioning at https://developer.android.com/studio/publish/versioning
+# In iOS, build-name is used as CFBundleShortVersionString while build-number is used as CFBundleVersion.
+# Read more about iOS versioning at
+# https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
+# In Windows, build-name is used as the major, minor, and patch parts
+# of the product and file versions while build-number is used as the build suffix.
+version: 1.0.4
+
+environment:
+  sdk: ">=3.5.0"
+
+# Dependencies specify other packages that your package needs in order to work.
+# To automatically upgrade your package dependencies to the latest versions
+# consider running `flutter pub upgrade --major-versions`. Alternatively,
+# dependencies can be manually updated by changing the version numbers below to
+# the latest version available on pub.dev. To see which dependencies have newer
+# versions available, run `flutter pub outdated`.
+dependencies:
+  meshagent_super_editor: ^0.0.1
+  video_player: ^2.9.2
+  chewie: ^1.8.5
+  pdfrx: ^1.0.103
+  shadcn_ui: ^0.20.1
+  markdown_widget: ^2.3.2+6
+  lucide_icons_flutter: ^1.2.5
+  google_fonts: ^6.2.1
+  interactive_viewer_2: ^0.0.10
+  just_audio: ^0.9.43
+  url_launcher: ^6.3.1
+  universal_image: ^1.0.8
+  flutter_svg: ^2.0.17
+  meshagent:
+    path:
+      ../meshagent-dart
+
+dependency_overrides:
+
+  meshagent_super_editor:
+    path: ../meshagent-super-editor
+
+  flutter_webrtc:
+    git:
+      url: https://github.com/jezell/flutter-webrtc
+      ref: e34a9fb73c6b01d799ee79cc9ab435cf3be06bac
+
+  livekit_client:
+    git: 
+      url: https://github.com/jezell/client-sdk-flutter
+      ref: 1f542c473de75b6d0dae8da094fa7eb74f12a882
+
+  dart_webrtc:
+    git:
+      url: https://github.com/jezell/dart-webrtc
+      ref: a6a18675e48fc7d6b89aa798a18283add17a6b60
+
+  video_player_web:
+    git:
+      url: https://github.com/jezell/packages.git
+      path: packages/video_player/video_player_web
+      ref: video_player_web_texture
+
+dev_dependencies:
+  test: ^1.25.8
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+
