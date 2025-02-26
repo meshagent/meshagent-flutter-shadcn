@@ -41,6 +41,8 @@ dependencies:
   url_launcher: ^6.3.1
   universal_image: ^1.0.8
   flutter_svg: ^2.0.17
+  siri_wave: ^2.2.0
+  shared_preferences: ^2.3.3
   meshagent:
     path:
       ../meshagent-dart
