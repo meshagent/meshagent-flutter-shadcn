@@ -1,32 +1,16 @@
-import 'dart:math';
-
-import 'package:flutter/gestures.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:markdown_widget/markdown_widget.dart';
 import 'package:meshagent/room_server_client.dart';
-import 'package:meshagent/participant_token.dart';
-import 'package:meshagent_flutter/meshagent_flutter.dart';
 import 'package:meshagent_flutter_shadcn/chat/jumping_dots.dart';
 import 'package:meshagent_flutter_shadcn/meetings/meetings.dart';
-import 'package:meshagent_flutter_shadcn/ui/ui.dart';
-import 'package:meshagent_super_editor/editor.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import 'dart:async';
-import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
-import 'package:meshagent/agent.dart';
-import 'package:meshagent_flutter_shadcn/viewers/file.dart';
-import 'package:meshagent_flutter_shadcn/viewers/gallery.dart';
 import 'package:flutter/services.dart';
 import 'package:livekit_client/livekit_client.dart' as livekit;
 
-
-import 'package:path/path.dart' as path;
-import 'package:meshagent_flutter_shadcn/file_preview/file_preview.dart';
-
-import 'package:uuid/uuid.dart';
 
 // ignore: depend_on_referenced_packages
 
@@ -326,7 +310,7 @@ class _MessagingPaneState extends State<MessagingPane> {
       widget.room.messaging.sendMessage(
         to: selectedParticipant!,
         type: "chat",
-        message: {"text": controller.text},
+        message: {"text": controller.text, "attachments" : attachments.map((a)=>a.json).toList() },
       );
 
       addMessage(
@@ -335,11 +319,15 @@ class _MessagingPaneState extends State<MessagingPane> {
           local: true,
           fromParticipantId: widget.room.localParticipant!.id,
           type: "chat",
-          message: {"text": controller.text},
+          message: {"text": controller.text,  "attachments" : attachments.map((a)=>a.json).toList()},
         ),
       );
 
+      attachments.clear();
       controller.text = "";
+      setState(() {
+        
+      });
     }
   }
 
@@ -355,108 +343,116 @@ class _MessagingPaneState extends State<MessagingPane> {
       context,
     ).textScaler.scale((DefaultTextStyle.of(context).style.fontSize ?? 14));
 
-    return Container(
-      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      margin: EdgeInsets.only(
-        top: 8,
-        right: mine ? 0 : 50,
-        left: mine ? 50 : 0,
-      ),
-      decoration: BoxDecoration(
-        color: ShadTheme.of(context).ghostButtonTheme.hoverBackgroundColor,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: MediaQuery(
-        data: MediaQuery.of(
-          context,
-        ).copyWith(textScaler: const TextScaler.linear(1.0)),
-        child: MarkdownWidget(
-          padding: const EdgeInsets.all(0),
-          config: MarkdownConfig(
-            configs: [
-              HrConfig(color: mdColor),
-              H1Config(
-                style: TextStyle(
-                  fontSize: baseFontSize * 2,
-                  color: mdColor,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              H2Config(
-                style: TextStyle(
-                  fontSize: baseFontSize * 1.8,
-                  color: mdColor,
-                  inherit: false,
-                ),
-              ),
-              H3Config(
-                style: TextStyle(
-                  fontSize: baseFontSize * 1.6,
-                  color: mdColor,
-                  inherit: false,
-                ),
-              ),
-              H4Config(
-                style: TextStyle(
-                  fontSize: baseFontSize * 1.4,
-                  color: mdColor,
-                  inherit: false,
-                ),
-              ),
-              H5Config(
-                style: TextStyle(
-                  fontSize: baseFontSize * 1.2,
-                  color: mdColor,
-                  inherit: false,
-                ),
-              ),
-              H6Config(
-                style: TextStyle(
-                  fontSize: baseFontSize * 1.0,
-                  color: mdColor,
-                  inherit: false,
-                ),
-              ),
-              PreConfig(
-                textStyle: TextStyle(
-                  fontSize: baseFontSize * 1.0,
-                  color: mdColor,
-                  inherit: false,
-                ),
-              ),
-              PConfig(
-                textStyle: TextStyle(
-                  fontSize: baseFontSize * 1.0,
-                  color: mdColor,
-                  inherit: false,
-                ),
-              ),
-              CodeConfig(
-                style: TextStyle(
-                  fontSize: baseFontSize * 1.0,
-                  color: mdColor,
-                  inherit: false,
-                ),
-              ),
-              BlockquoteConfig(textColor: mdColor),
-              ListConfig(marker: (isOrdered, depth, index) {
-                return Padding(padding: EdgeInsets.only(right: 5), child: Text("${index + 1}.", textAlign: TextAlign.right,));
-              }),
-            ],
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [ 
+        Container(
+          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          margin: EdgeInsets.only(
+            top: 8,
+            right: mine ? 0 : 50,
+            left: mine ? 50 : 0,
           ),
-          shrinkWrap: true,
-          selectable: true,
+          decoration: BoxDecoration(
+            color: ShadTheme.of(context).ghostButtonTheme.hoverBackgroundColor,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: MediaQuery(
+            data: MediaQuery.of(
+              context,
+            ).copyWith(textScaler: const TextScaler.linear(1.0)),
+            child: MarkdownWidget(
+              padding: const EdgeInsets.all(0),
+              config: MarkdownConfig(
+                configs: [
+                  HrConfig(color: mdColor),
+                  H1Config(
+                    style: TextStyle(
+                      fontSize: baseFontSize * 2,
+                      color: mdColor,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  H2Config(
+                    style: TextStyle(
+                      fontSize: baseFontSize * 1.8,
+                      color: mdColor,
+                      inherit: false,
+                    ),
+                  ),
+                  H3Config(
+                    style: TextStyle(
+                      fontSize: baseFontSize * 1.6,
+                      color: mdColor,
+                      inherit: false,
+                    ),
+                  ),
+                  H4Config(
+                    style: TextStyle(
+                      fontSize: baseFontSize * 1.4,
+                      color: mdColor,
+                      inherit: false,
+                    ),
+                  ),
+                  H5Config(
+                    style: TextStyle(
+                      fontSize: baseFontSize * 1.2,
+                      color: mdColor,
+                      inherit: false,
+                    ),
+                  ),
+                  H6Config(
+                    style: TextStyle(
+                      fontSize: baseFontSize * 1.0,
+                      color: mdColor,
+                      inherit: false,
+                    ),
+                  ),
+                  PreConfig(
+                    textStyle: TextStyle(
+                      fontSize: baseFontSize * 1.0,
+                      color: mdColor,
+                      inherit: false,
+                    ),
+                  ),
+                  PConfig(
+                    textStyle: TextStyle(
+                      fontSize: baseFontSize * 1.0,
+                      color: mdColor,
+                      inherit: false,
+                    ),
+                  ),
+                  CodeConfig(
+                    style: TextStyle(
+                      fontSize: baseFontSize * 1.0,
+                      color: mdColor,
+                      inherit: false,
+                    ),
+                  ),
+                  BlockquoteConfig(textColor: mdColor),
+                  ListConfig(marker: (isOrdered, depth, index) {
+                    return Padding(padding: EdgeInsets.only(right: 5), child: Text("${index + 1}.", textAlign: TextAlign.right,));
+                  }),
+                ],
+              ),
+              shrinkWrap: true,
+              selectable: true,
 
-          /*builders: {
-          "code": CodeElementBuilder(
-              document: ChatDocumentProvider.of(context).document,
-              api: TimuApiProvider.of(context).api,
-              layer: layer),
-        },*/
-          data: message.message["text"],
+              /*builders: {
+              "code": CodeElementBuilder(
+                  document: ChatDocumentProvider.of(context).document,
+                  api: TimuApiProvider.of(context).api,
+                  layer: layer),
+            },*/
+              data: message.message["text"],
+            ),
+          ),
         ),
-      ),
-    );
+        if(message.message["attachments"] != null) 
+          for(final attachment in message.message["attachments"] as List) 
+            Padding(padding: EdgeInsets.only(top: 10), child: ShadCard(width: double.infinity, padding: EdgeInsets.all(10), description: Text(attachment["filename"]))  )
+      ]);
   }
 
   Widget buildParticipants(BuildContext context) {
@@ -476,6 +472,7 @@ class _MessagingPaneState extends State<MessagingPane> {
   }
 
   bool showSend = false;
+  List<JsonResponse> attachments = [];
 
   Widget buildMessages(BuildContext context) {
     bool bottomAlign =
@@ -538,13 +535,60 @@ class _MessagingPaneState extends State<MessagingPane> {
                 ),
               ),
             ),
+          for(final attachment in attachments) 
+            Padding(padding: EdgeInsets.all(10), child: ShadCard(padding: EdgeInsets.only(left: 15), width: double.infinity, description: Row(children: [ Expanded(child: Text(attachment.json['filename'])), ShadIconButton.ghost(
+              onPressed: () {
+                setState(() {
+                                    attachments.remove(attachment);
+                });
+
+              },
+              icon: Icon(LucideIcons.x)) ]))),
           Padding(
             padding: EdgeInsets.symmetric(horizontal: 15, vertical: 8),
             child: LayoutBuilder(
               builder:
                   (context, constraints) => ShadInput(
                     inputPadding: EdgeInsets.all(2),
-                    suffix:
+                    leading: ShadTooltip(
+                              waitDuration: Duration(seconds: 1),
+                              builder: (context) => Text("Attach"),
+                              child: ShadGestureDetector(
+                                cursor: SystemMouseCursors.click,
+                                onTap: () async {
+                                  final response = await widget.room.agents.invokeTool(toolkit: "meshagent.markitdown", tool: "markitdown_from_user", arguments: {
+                                    "title" : "Attach a file",
+                                    "description" : "You can select PDFs or Office Docs"
+                                  });
+                                  
+                                  if(!mounted) {
+                                    return;
+                                  }
+                                  if(response is JsonResponse) {
+                                    setState(() {
+                                      attachments.add(response);
+                                    });
+                                  }
+                               
+                                },
+                                child: Container(
+                                  width: 22,
+                                  height: 22,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: ShadTheme.of(context).colorScheme.foreground,
+                                  ),
+                                  child: Icon(
+                                    LucideIcons.paperclip,
+                                    color:
+                                        ShadTheme.of(
+                                          context,
+                                        ).colorScheme.background,
+                                  ),
+                                ),
+                              ),
+                            ),
+                    trailing:
                         showSend
                             ? ShadTooltip(
                               waitDuration: Duration(seconds: 1),
@@ -576,7 +620,7 @@ class _MessagingPaneState extends State<MessagingPane> {
                             )
                             : null,
                     padding: EdgeInsets.only(
-                      left: 20,
+                      left: 5,
                       right: 5,
                       top: 5,
                       bottom: 5,

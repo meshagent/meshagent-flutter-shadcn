@@ -43,6 +43,7 @@ dependencies:
   flutter_svg: ^2.0.17
   siri_wave: ^2.2.0
   shared_preferences: ^2.3.3
+  file_picker: ^8.1.5
   meshagent:
     path:
       ../meshagent-dart
