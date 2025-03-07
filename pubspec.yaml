@@ -32,7 +32,7 @@ dependencies:
   video_player: ^2.9.2
   chewie: ^1.8.5
   pdfrx: ^1.0.103
-  shadcn_ui: ^0.20.1
+  shadcn_ui: ^0.22.5
   markdown_widget: ^2.3.2+6
   lucide_icons_flutter: ^1.2.5
   google_fonts: ^6.2.1
@@ -52,27 +52,6 @@ dependency_overrides:
 
   meshagent_super_editor:
     path: ../meshagent-super-editor
-
-  flutter_webrtc:
-    git:
-      url: https://github.com/jezell/flutter-webrtc
-      ref: e34a9fb73c6b01d799ee79cc9ab435cf3be06bac
-
-  livekit_client:
-    git: 
-      url: https://github.com/jezell/client-sdk-flutter
-      ref: 1f542c473de75b6d0dae8da094fa7eb74f12a882
-
-  dart_webrtc:
-    git:
-      url: https://github.com/jezell/dart-webrtc
-      ref: a6a18675e48fc7d6b89aa798a18283add17a6b60
-
-  video_player_web:
-    git:
-      url: https://github.com/jezell/packages.git
-      path: packages/video_player/video_player_web
-      ref: video_player_web_texture
 
 dev_dependencies:
   test: ^1.25.8
