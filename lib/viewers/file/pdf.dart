@@ -10,14 +10,6 @@ class PdfViewer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      children: [
-        Container(
-          color: Color.from(alpha: 1, red: .9, green: .9, blue: .9),
-          padding: EdgeInsets.all(50),
-          child: FilePreview(client: client, path: path),
-        ),
-      ],
-    );
+    return  FilePreview(client: client, path: path);
   }
 }

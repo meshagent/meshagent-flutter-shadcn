@@ -28,13 +28,60 @@ class PdfPreview extends StatefulWidget {
 }
 
 class _PdfPreviewState extends State<PdfPreview> {
+  
+
+  @override
+  void initState() {
+    super.initState();
+    PdfDocument.openUri(widget.url).then((d) {
+      if (mounted) {
+        setState(() {
+          doc = d;
+        });
+      } else {
+        d.dispose();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+    doc?.dispose();
+  }
+
+  PdfDocument? doc;
+
+  @override
+  Widget build(BuildContext context) {
+    if(doc != null) {
+          return ListView.builder(
+            itemCount: doc!.pages.length,
+            itemBuilder: (context, index) => Padding(padding: EdgeInsets.all(30), child: PdfPage(document: doc!, pageNumber: index, backgroundColor: widget.backgroundColor, fit: widget.fit)));
+    } else {
+      return Container();
+    }
+  }
+}
+
+class PdfPage extends StatefulWidget {
+  PdfPage({ super.key, required this.document, required this.pageNumber, required this.backgroundColor, required this.fit });
+
+  final PdfDocument document;
+  final int pageNumber;
+  final Color backgroundColor;
+  final BoxFit fit;
+
+  @override
+  State createState() => _PdfPageState();
+}
+
+class _PdfPageState extends State<PdfPage> {
   static final _lock = Lock();
 
   static Future<T?> queue<T>(Future<T?> Function() op) async {
     return await _lock.synchronized(op);
   }
-
-  PdfDocument? doc;
 
   bool loaded = false;
   bool loading = false;
@@ -123,46 +170,28 @@ class _PdfPreviewState extends State<PdfPreview> {
   }
 
   @override
-  void initState() {
-    super.initState();
-    PdfDocument.openUri(widget.url).then((d) {
-      if (mounted) {
-        setState(() {
-          doc = d;
-        });
-      } else {
-        d.dispose();
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    super.dispose();
-    doc?.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    return AspectRatio(
+
+    final doc = widget.document;
+  return AspectRatio(
       aspectRatio:
-          doc != null ? (doc!.pages[page].width / doc!.pages[page].height) : 1,
+         (doc!.pages[page].width / doc!.pages[page].height),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          if (doc != null) {
-            final ro = context.findRenderObject() as RenderBox?;
+         
+          final ro = context.findRenderObject() as RenderBox?;
 
-            if (ro != null && ro.hasSize) {
-              renderAtScreenSize(doc!, page, ro);
-            } else {
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) {
-                  final ro = context.findRenderObject() as RenderBox;
-                  renderAtScreenSize(doc!, page, ro);
-                }
-              });
-            }
+          if (ro != null && ro.hasSize) {
+            renderAtScreenSize(doc!, page, ro);
+          } else {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                final ro = context.findRenderObject() as RenderBox;
+                renderAtScreenSize(doc!, page, ro);
+              }
+            });
           }
+        
 
           if (image != null) {
             if (constraints.hasBoundedHeight && constraints.hasBoundedWidth) {
