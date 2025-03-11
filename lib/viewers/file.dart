@@ -9,6 +9,8 @@ import "file/pdf.dart";
 import "file/code.dart";
 import "file/parquet.dart";
 
+
+
 Widget? fileViewer(RoomClient client, String path) {
   return switch (extension(path).toLowerCase()) {
     ".jpg" => ImageViewer(client: client, path: path),
@@ -22,6 +24,9 @@ Widget? fileViewer(RoomClient client, String path) {
     ".txt" => CodeViewer(client: client, path: path),
     ".json" => CodeViewer(client: client, path: path),
     ".parquet" => ParquetViewer(client: client, path: path),
+    ".docx" => Center(child: Text("No preview available")),
+    ".pptx" => Center(child: Text("No preview available")),
+    ".xlsx" => Center(child: Text("No preview available")),
     _ => null,
   };
 }
