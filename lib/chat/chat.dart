@@ -708,7 +708,7 @@ class _MessagingPaneState extends State<MessagingPane> {
               SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  "Participants",
+                  "Messaging",
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(fontWeight: FontWeight.w600),
                 ),
