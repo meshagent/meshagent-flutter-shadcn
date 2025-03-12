@@ -111,7 +111,9 @@ class _GalleryViewerElementState extends State<GalleryViewerElement> {
         return Stack(
           children: [
             Positioned.fill(
-              child: GridView.builder(
+              child: Offstage(
+                offstage: selectedImage != null,
+                child: GridView.builder(
                 padding: EdgeInsets.symmetric(horizontal: 10),
                 itemCount: children.length,
                 gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
@@ -159,7 +161,7 @@ class _GalleryViewerElementState extends State<GalleryViewerElement> {
                         ),
                       ),
                     ),
-              ),
+              )),
             ),
             if (selectedImage != null)
               renderSelectedImage(
