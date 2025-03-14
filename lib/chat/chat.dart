@@ -58,7 +58,12 @@ class _MessagingPaneState extends State<MessagingPane> {
 
   late StreamSubscription<RoomEvent> sub;
 
+ 
   void onRoomMessage(RoomEvent event) {
+    if(!mounted) {
+      return;
+    }
+
     if (event is RoomMessageEvent) {
       if (event.message.type == "chat") {
         addMessage(event.message.fromParticipantId, event.message);
@@ -346,7 +351,7 @@ class _MessagingPaneState extends State<MessagingPane> {
     return Column(
       mainAxisAlignment: MainAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
-      children: [ 
+      children: [
         Container(
           padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           margin: EdgeInsets.only(
@@ -431,6 +436,8 @@ class _MessagingPaneState extends State<MessagingPane> {
                     ),
                   ),
                   BlockquoteConfig(textColor: mdColor),
+                  LinkConfig(style: TextStyle(color: ShadTheme.of(context).linkButtonTheme.foregroundColor, decoration: TextDecoration.underline)),
+                    
                   ListConfig(marker: (isOrdered, depth, index) {
                     return Padding(padding: EdgeInsets.only(right: 5), child: Text("${index + 1}.", textAlign: TextAlign.right,));
                   }),
@@ -454,6 +461,7 @@ class _MessagingPaneState extends State<MessagingPane> {
             Padding(padding: EdgeInsets.only(top: 10), child: ShadCard(width: double.infinity, padding: EdgeInsets.all(10), description: Text(attachment["filename"]))  )
       ]);
   }
+
 
   Widget buildParticipants(BuildContext context) {
     return ListView(
@@ -508,6 +516,8 @@ class _MessagingPaneState extends State<MessagingPane> {
                 ],
               ),
             ),
+
+         
           if (!bottomAlign)
             Padding(
               padding: EdgeInsets.symmetric(vertical: 20, horizontal: 50),
