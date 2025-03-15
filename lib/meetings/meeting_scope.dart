@@ -81,7 +81,7 @@ class _MeetingScopeState extends State<MeetingScope> {
 
 class MeetingController extends ChangeNotifier {
   MeetingController({required this.client, livekit.RoomOptions? roomOptions})
-    : room = livekit.Room(roomOptions: roomOptions ?? livekit.RoomOptions()) {
+      : room = livekit.Room(roomOptions: roomOptions ?? livekit.RoomOptions()) {
     room.addListener(_onRoomChanged);
   }
 

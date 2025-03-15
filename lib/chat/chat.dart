@@ -12,7 +12,6 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:livekit_client/livekit_client.dart' as livekit;
 
-
 // ignore: depend_on_referenced_packages
 
 import "package:meshagent_flutter_shadcn/viewers/viewers.dart";
@@ -40,7 +39,7 @@ class MessagingPane extends StatefulWidget {
   final String projectId;
   final RoomClient room;
   final MeetingController? meeting;
-  
+
   @override
   State createState() => _MessagingPaneState();
 }
@@ -59,9 +58,8 @@ class _MessagingPaneState extends State<MessagingPane> {
 
   late StreamSubscription<RoomEvent> sub;
 
- 
   void onRoomMessage(RoomEvent event) {
-    if(!mounted) {
+    if (!mounted) {
       return;
     }
 
@@ -105,22 +103,18 @@ class _MessagingPaneState extends State<MessagingPane> {
       }
     }
 
-    final agents =
-        widget.room.messaging.remoteParticipants
-            .where((p) => p.role == "agent")
-            .toList();
+    final agents = widget.room.messaging.remoteParticipants
+        .where((p) => p.role == "agent")
+        .toList();
     if (selectedParticipant == null && agents.isNotEmpty) {
       if (widget.defaultAgent == null) {
         selectedParticipant = agents.first;
       } else {
-        selectedParticipant =
-            agents
-                .where(
-                  (a) =>
-                      a.getAttribute("name") ==
-                      widget.defaultAgent,
-                )
-                .firstOrNull;
+        selectedParticipant = agents
+            .where(
+              (a) => a.getAttribute("name") == widget.defaultAgent,
+            )
+            .firstOrNull;
       }
       if (mounted) {
         setState(() {});
@@ -140,10 +134,9 @@ class _MessagingPaneState extends State<MessagingPane> {
       if (selectedParticipant?.id != threadId) {
         unreadMessages[threadId] = unreadMessages[threadId]! + 1;
         if (selectedParticipant == null) {
-          selectedParticipant =
-              widget.room.messaging.remoteParticipants
-                  .where((x) => x.id == threadId)
-                  .firstOrNull;
+          selectedParticipant = widget.room.messaging.remoteParticipants
+              .where((x) => x.id == threadId)
+              .firstOrNull;
         }
       }
 
@@ -164,10 +157,9 @@ class _MessagingPaneState extends State<MessagingPane> {
 
   Widget participantEntry(BuildContext context, Participant participant) {
     final me = widget.room.localParticipant!.id == participant.id;
-    final name =
-        me
-            ? "${participant.getAttribute("name")} (me)"
-            : participant.getAttribute("name");
+    final name = me
+        ? "${participant.getAttribute("name")} (me)"
+        : participant.getAttribute("name");
     final color =
         me ? Colors.green : ShadTheme.of(context).colorScheme.foreground;
     final icon =
@@ -195,9 +187,7 @@ class _MessagingPaneState extends State<MessagingPane> {
           ),
         ),
       );
-    } else {
-      
-    }
+    } else {}
 
     return ShadContextMenuRegion(
       items: [
@@ -207,7 +197,6 @@ class _MessagingPaneState extends State<MessagingPane> {
           },
           child: Text("Copy Participant ID"),
         ),
-
         ShadContextMenuItem(
           onPressed: () {
             widget.room.messaging.sendMessage(
@@ -225,54 +214,53 @@ class _MessagingPaneState extends State<MessagingPane> {
       child: Row(
         children: [
           Expanded(
-            child:
-                selectedParticipant?.id == participant.id
-                    ? ShadButton.secondary(
-                      mainAxisAlignment: MainAxisAlignment.start,
-                      child: Expanded(
-                        child: Row(
-                          children: [
-                            ...prefix,
-                            Expanded(
-                              child: Text(
-                                name,
-                                textAlign: TextAlign.left,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(color: me ? color : null),
-                              ),
+            child: selectedParticipant?.id == participant.id
+                ? ShadButton.secondary(
+                    mainAxisAlignment: MainAxisAlignment.start,
+                    child: Expanded(
+                      child: Row(
+                        children: [
+                          ...prefix,
+                          Expanded(
+                            child: Text(
+                              name,
+                              textAlign: TextAlign.left,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(color: me ? color : null),
                             ),
-                            icon,
-                          ],
-                        ),
-                      ),
-                    )
-                    : ShadButton.ghost(
-                      onTapDown: (_) {
-                        setState(() {
-                          selectedParticipant = participant;
-                          if (unreadMessages[participant.id] != null) {
-                            unreadMessages[participant.id] = 0;
-                          }
-                        });
-                      },
-                      mainAxisAlignment: MainAxisAlignment.start,
-                      child: Expanded(
-                        child: Row(
-                          children: [
-                            ...prefix,
-                            Expanded(
-                              child: Text(
-                                name,
-                                textAlign: TextAlign.left,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(color: me ? color : null),
-                              ),
-                            ),
-                            icon,
-                          ],
-                        ),
+                          ),
+                          icon,
+                        ],
                       ),
                     ),
+                  )
+                : ShadButton.ghost(
+                    onTapDown: (_) {
+                      setState(() {
+                        selectedParticipant = participant;
+                        if (unreadMessages[participant.id] != null) {
+                          unreadMessages[participant.id] = 0;
+                        }
+                      });
+                    },
+                    mainAxisAlignment: MainAxisAlignment.start,
+                    child: Expanded(
+                      child: Row(
+                        children: [
+                          ...prefix,
+                          Expanded(
+                            child: Text(
+                              name,
+                              textAlign: TextAlign.left,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(color: me ? color : null),
+                            ),
+                          ),
+                          icon,
+                        ],
+                      ),
+                    ),
+                  ),
           ),
         ],
       ),
@@ -295,30 +283,26 @@ class _MessagingPaneState extends State<MessagingPane> {
     _selectedParticipant = participant;
     if (participant != null) {
       thread = null;
-      
- 
 
-      final newThreadId = "${participant.getAttribute("name")}-${widget.room.localParticipant!.getAttribute("name")}";
+      final newThreadId =
+          "${participant.getAttribute("name")}-${widget.room.localParticipant!.getAttribute("name")}";
 
-      if(threadId == newThreadId) {
+      if (threadId == newThreadId) {
         return;
       }
 
-
-      if(threadId != null) {
+      if (threadId != null) {
         widget.room.sync.close(".threads/${threadId}.thread");
       }
 
-      
       thread = null;
       threadError = null;
       threadId = newThreadId;
-      
-      
+
       threadFuture = widget.room.sync.open(".threads/${threadId}.thread");
-      
+
       threadFuture!.then((doc) {
-        if(threadId != newThreadId) {
+        if (threadId != newThreadId) {
           return;
         }
         setState(() {
@@ -326,25 +310,19 @@ class _MessagingPaneState extends State<MessagingPane> {
         });
 
         thread!.addListener(() {
-          if(!mounted) return;
-          setState(() {
-            
-          });
+          if (!mounted) return;
+          setState(() {});
         });
-
 
         widget.room.messaging.sendMessage(
           to: participant,
           type: "opened",
-          message: {
-            "thread_id" : newThreadId
-          },
+          message: {"thread_id": newThreadId},
         );
       }).catchError((err) {
         print(err);
         threadError = err;
       });
-      
     }
   }
 
@@ -366,53 +344,54 @@ class _MessagingPaneState extends State<MessagingPane> {
 
   void send() async {
     if (controller.text.trim().isNotEmpty) {
-
       addMessage(
         selectedParticipant!.id,
         RoomMessage(
           local: true,
           fromParticipantId: widget.room.localParticipant!.id,
           type: "chat",
-          message: {"text": controller.text,  "attachments" : attachments.map((a)=>a.json).toList()},
+          message: {
+            "text": controller.text,
+            "attachments": attachments.map((a) => a.json).toList()
+          },
         ),
       );
 
-      final messages = thread!.root.getChildren().whereType<MeshElement>().firstWhere((x) =>  x.tagName == "messages");
+      final messages = thread!.root
+          .getChildren()
+          .whereType<MeshElement>()
+          .firstWhere((x) => x.tagName == "messages");
 
       messages.createChildElement("message", {
-          "id" : const Uuid().v4().toString(),
-          "text" : controller.text,
-          "created_at" : DateTime.now().toUtc().toIso8601String(),
-          "author_name" : widget.room.localParticipant!.getAttribute("name"),
-          "author_ref" : null
+        "id": const Uuid().v4().toString(),
+        "text": controller.text,
+        "created_at": DateTime.now().toUtc().toIso8601String(),
+        "author_name": widget.room.localParticipant!.getAttribute("name"),
+        "author_ref": null
       });
 
       widget.room.messaging.sendMessage(
         to: selectedParticipant!,
         type: "chat",
         message: {
-          "thread_id" : threadId,
-          "text": controller.text, 
-          "attachments" : attachments.map((a)=>a.json).toList() 
+          "thread_id": threadId,
+          "text": controller.text,
+          "attachments": attachments.map((a) => a.json).toList()
         },
-      ); 
-      
-      
+      );
+
       attachments.clear();
       controller.text = "";
-      setState(() {
-        
-      });
-
+      setState(() {});
     }
   }
 
   final controller = ShadTextEditingController();
 
   Widget buildMessage(BuildContext context, MeshElement message) {
-    bool mine = message.attributes["author_name"] == widget.room.localParticipant!.getAttribute("name");
-    final mdColor =
-        ShadTheme.of(context).textTheme.p.color ??
+    bool mine = message.attributes["author_name"] ==
+        widget.room.localParticipant!.getAttribute("name");
+    final mdColor = ShadTheme.of(context).textTheme.p.color ??
         DefaultTextStyle.of(context).style.color ??
         ShadTheme.of(context).colorScheme.foreground;
     final baseFontSize = MediaQuery.of(
@@ -420,131 +399,144 @@ class _MessagingPaneState extends State<MessagingPane> {
     ).textScaler.scale((DefaultTextStyle.of(context).style.fontSize ?? 14));
 
     return Column(
-      mainAxisAlignment: MainAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          margin: EdgeInsets.only(
-            top: 8,
-            right: mine ? 0 : 50,
-            left: mine ? 50 : 0,
-          ),
-          decoration: BoxDecoration(
-            color: ShadTheme.of(context).ghostButtonTheme.hoverBackgroundColor,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: MediaQuery(
-            data: MediaQuery.of(
-              context,
-            ).copyWith(textScaler: const TextScaler.linear(1.0)),
-            child: MarkdownWidget(
-              padding: const EdgeInsets.all(0),
-              config: MarkdownConfig(
-                configs: [
-                  HrConfig(color: mdColor),
-                  H1Config(
-                    style: TextStyle(
-                      fontSize: baseFontSize * 2,
-                      color: mdColor,
-                      fontWeight: FontWeight.bold,
+        mainAxisAlignment: MainAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            margin: EdgeInsets.only(
+              top: 8,
+              right: mine ? 0 : 50,
+              left: mine ? 50 : 0,
+            ),
+            decoration: BoxDecoration(
+              color:
+                  ShadTheme.of(context).ghostButtonTheme.hoverBackgroundColor,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: MediaQuery(
+              data: MediaQuery.of(
+                context,
+              ).copyWith(textScaler: const TextScaler.linear(1.0)),
+              child: MarkdownWidget(
+                padding: const EdgeInsets.all(0),
+                config: MarkdownConfig(
+                  configs: [
+                    HrConfig(color: mdColor),
+                    H1Config(
+                      style: TextStyle(
+                        fontSize: baseFontSize * 2,
+                        color: mdColor,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                  ),
-                  H2Config(
-                    style: TextStyle(
-                      fontSize: baseFontSize * 1.8,
-                      color: mdColor,
-                      inherit: false,
+                    H2Config(
+                      style: TextStyle(
+                        fontSize: baseFontSize * 1.8,
+                        color: mdColor,
+                        inherit: false,
+                      ),
                     ),
-                  ),
-                  H3Config(
-                    style: TextStyle(
-                      fontSize: baseFontSize * 1.6,
-                      color: mdColor,
-                      inherit: false,
+                    H3Config(
+                      style: TextStyle(
+                        fontSize: baseFontSize * 1.6,
+                        color: mdColor,
+                        inherit: false,
+                      ),
                     ),
-                  ),
-                  H4Config(
-                    style: TextStyle(
-                      fontSize: baseFontSize * 1.4,
-                      color: mdColor,
-                      inherit: false,
+                    H4Config(
+                      style: TextStyle(
+                        fontSize: baseFontSize * 1.4,
+                        color: mdColor,
+                        inherit: false,
+                      ),
                     ),
-                  ),
-                  H5Config(
-                    style: TextStyle(
-                      fontSize: baseFontSize * 1.2,
-                      color: mdColor,
-                      inherit: false,
+                    H5Config(
+                      style: TextStyle(
+                        fontSize: baseFontSize * 1.2,
+                        color: mdColor,
+                        inherit: false,
+                      ),
                     ),
-                  ),
-                  H6Config(
-                    style: TextStyle(
-                      fontSize: baseFontSize * 1.0,
-                      color: mdColor,
-                      inherit: false,
+                    H6Config(
+                      style: TextStyle(
+                        fontSize: baseFontSize * 1.0,
+                        color: mdColor,
+                        inherit: false,
+                      ),
                     ),
-                  ),
-                  PreConfig(
-                    textStyle: TextStyle(
-                      fontSize: baseFontSize * 1.0,
-                      color: mdColor,
-                      inherit: false,
+                    PreConfig(
+                      textStyle: TextStyle(
+                        fontSize: baseFontSize * 1.0,
+                        color: mdColor,
+                        inherit: false,
+                      ),
                     ),
-                  ),
-                  PConfig(
-                    textStyle: TextStyle(
-                      fontSize: baseFontSize * 1.0,
-                      color: mdColor,
-                      inherit: false,
+                    PConfig(
+                      textStyle: TextStyle(
+                        fontSize: baseFontSize * 1.0,
+                        color: mdColor,
+                        inherit: false,
+                      ),
                     ),
-                  ),
-                  CodeConfig(
-                    style: TextStyle(
-                      fontSize: baseFontSize * 1.0,
-                      color: mdColor,
-                      inherit: false,
+                    CodeConfig(
+                      style: TextStyle(
+                        fontSize: baseFontSize * 1.0,
+                        color: mdColor,
+                        inherit: false,
+                      ),
                     ),
-                  ),
-                  BlockquoteConfig(textColor: mdColor),
-                  LinkConfig(style: TextStyle(color: ShadTheme.of(context).linkButtonTheme.foregroundColor, decoration: TextDecoration.underline)),
-                    
-                  ListConfig(marker: (isOrdered, depth, index) {
-                    return Padding(padding: EdgeInsets.only(right: 5), child: Text("${index + 1}.", textAlign: TextAlign.right,));
-                  }),
-                ],
-              ),
-              shrinkWrap: true,
-              selectable: true,
+                    BlockquoteConfig(textColor: mdColor),
+                    LinkConfig(
+                        style: TextStyle(
+                            color: ShadTheme.of(context)
+                                .linkButtonTheme
+                                .foregroundColor,
+                            decoration: TextDecoration.underline)),
+                    ListConfig(marker: (isOrdered, depth, index) {
+                      return Padding(
+                          padding: EdgeInsets.only(right: 5),
+                          child: Text(
+                            "${index + 1}.",
+                            textAlign: TextAlign.right,
+                          ));
+                    }),
+                  ],
+                ),
+                shrinkWrap: true,
+                selectable: true,
 
-              /*builders: {
+                /*builders: {
               "code": CodeElementBuilder(
                   document: ChatDocumentProvider.of(context).document,
                   api: TimuApiProvider.of(context).api,
                   layer: layer),
             },*/
-              data: message.getAttribute("text"),
+                data: message.getAttribute("text"),
+              ),
             ),
           ),
-        ),
-        for(final attachment in message.getChildren()) 
-          Padding(padding: EdgeInsets.only(top: 10), child: ShadCard(width: double.infinity, padding: EdgeInsets.all(10), description: Text((attachment as MeshElement).getAttribute("filename"))))
-      ]);
+          for (final attachment in message.getChildren())
+            Padding(
+                padding: EdgeInsets.only(top: 10),
+                child: ShadCard(
+                    width: double.infinity,
+                    padding: EdgeInsets.all(10),
+                    description: Text(
+                        (attachment as MeshElement).getAttribute("filename"))))
+        ]);
   }
-
 
   Widget buildParticipants(BuildContext context) {
     return ListView(
       padding: EdgeInsets.all(4),
       children: [
-        if(widget.room.messaging.remoteParticipants.isEmpty && widget.emptyParticipantsBuilder != null)
+        if (widget.room.messaging.remoteParticipants.isEmpty &&
+            widget.emptyParticipantsBuilder != null)
           widget.emptyParticipantsBuilder!(context),
-      
         participantEntry(context, widget.room.localParticipant!),
-      
         for (final participant in widget.room.messaging.remoteParticipants)
           participantEntry(context, participant),
-      
       ],
     );
   }
@@ -553,10 +545,14 @@ class _MessagingPaneState extends State<MessagingPane> {
   List<JsonResponse> attachments = [];
 
   Widget buildMessages(BuildContext context) {
-    final threadMessages = thread?.root.getChildren().whereType<MeshElement>().where((x) =>  x.tagName == "messages").firstOrNull;
+    final threadMessages = thread?.root
+        .getChildren()
+        .whereType<MeshElement>()
+        .where((x) => x.tagName == "messages")
+        .firstOrNull;
 
-    bool bottomAlign =
-        widget.startChatCentered || (messages[selectedParticipant?.id ?? ""] ?? []).isNotEmpty;
+    bool bottomAlign = widget.startChatCentered ||
+        (messages[selectedParticipant?.id ?? ""] ?? []).isNotEmpty;
     return Column(
       mainAxisAlignment:
           bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
@@ -577,20 +573,23 @@ class _MessagingPaneState extends State<MessagingPane> {
             ),
           ),
         if (selectedParticipant != null) ...[
-          
-            Expanded(
-              child: threadError != null ? Center(child: Text("Unable to load thread", style: ShadTheme.of(context).textTheme.p)) : thread == null ? Center(child: CircularProgressIndicator()) :  ListView(
-                reverse: true,
-                padding: EdgeInsets.all(16),
-                children: [
-                  
-                  for (final message in (threadMessages?.getChildren() ?? []).reversed)
-                    buildMessage(context, message as MeshElement),
-                ],
-              ),
-            ),
-
-         
+          Expanded(
+            child: threadError != null
+                ? Center(
+                    child: Text("Unable to load thread",
+                        style: ShadTheme.of(context).textTheme.p))
+                : thread == null
+                    ? Center(child: CircularProgressIndicator())
+                    : ListView(
+                        reverse: true,
+                        padding: EdgeInsets.all(16),
+                        children: [
+                          for (final message
+                              in (threadMessages?.getChildren() ?? []).reversed)
+                            buildMessage(context, message as MeshElement),
+                        ],
+                      ),
+          ),
           if (!bottomAlign)
             Padding(
               padding: EdgeInsets.symmetric(vertical: 20, horizontal: 50),
@@ -618,151 +617,151 @@ class _MessagingPaneState extends State<MessagingPane> {
                 ),
               ),
             ),
-          for(final attachment in attachments) 
-            Padding(padding: EdgeInsets.all(10), child: ShadCard(padding: EdgeInsets.only(left: 15), width: double.infinity, description: Row(children: [ Expanded(child: Text(attachment.json['filename'])), ShadIconButton.ghost(
-              onPressed: () {
-                setState(() {
-                                    attachments.remove(attachment);
-                });
-
-              },
-              icon: Icon(LucideIcons.x)) ]))),
+          for (final attachment in attachments)
+            Padding(
+                padding: EdgeInsets.all(10),
+                child: ShadCard(
+                    padding: EdgeInsets.only(left: 15),
+                    width: double.infinity,
+                    description: Row(children: [
+                      Expanded(child: Text(attachment.json['filename'])),
+                      ShadIconButton.ghost(
+                          onPressed: () {
+                            setState(() {
+                              attachments.remove(attachment);
+                            });
+                          },
+                          icon: Icon(LucideIcons.x))
+                    ]))),
           Padding(
             padding: EdgeInsets.symmetric(horizontal: 15, vertical: 8),
             child: LayoutBuilder(
-              builder:
-                  (context, constraints) => ShadInput(
-                    inputPadding: EdgeInsets.all(2),
-                    leading: ShadTooltip(
-                              waitDuration: Duration(seconds: 1),
-                              builder: (context) => Text("Attach"),
-                              child: ShadGestureDetector(
-                                cursor: SystemMouseCursors.click,
-                                onTap: () async {
-                                  final response = await widget.room.agents.invokeTool(toolkit: "meshagent.markitdown", tool: "markitdown_from_user", arguments: {
-                                    "title" : "Attach a file",
-                                    "description" : "You can select PDFs or Office Docs"
-                                  });
-                                  
-                                  if(!mounted) {
-                                    return;
-                                  }
-                                  if(response is JsonResponse) {
-                                    setState(() {
-                                      attachments.add(response);
-                                    });
-                                  }
-                               
-                                },
-                                child: Container(
-                                  width: 22,
-                                  height: 22,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: ShadTheme.of(context).colorScheme.foreground,
-                                  ),
-                                  child: Icon(
-                                    LucideIcons.paperclip,
-                                    color:
-                                        ShadTheme.of(
-                                          context,
-                                        ).colorScheme.background,
-                                  ),
-                                ),
-                              ),
-                            ),
-                    trailing:
-                        showSend
-                            ? ShadTooltip(
-                              waitDuration: Duration(seconds: 1),
-                              builder: (context) => Text("Send"),
-                              child: ShadGestureDetector(
-                                cursor: SystemMouseCursors.click,
-                                onTap: () {
-                                  send();
-                                },
-                                child: Container(
-                                  width: 22,
-                                  height: 22,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color:
-                                        ShadTheme.of(
-                                          context,
-                                        ).colorScheme.foreground,
-                                  ),
-                                  child: Icon(
-                                    LucideIcons.arrowUp,
-                                    color:
-                                        ShadTheme.of(
-                                          context,
-                                        ).colorScheme.background,
-                                  ),
-                                ),
-                              ),
-                            )
-                            : null,
-                    padding: EdgeInsets.only(
-                      left: 5,
-                      right: 5,
-                      top: 5,
-                      bottom: 5,
-                    ),
-                    decoration: ShadDecoration(
-                      secondaryFocusedBorder: ShadBorder.none,
-                      secondaryBorder: ShadBorder.none,
-                      color:
-                          ShadTheme.of(
-                            context,
-                          ).ghostButtonTheme.hoverBackgroundColor,
-                      border: ShadBorder.all(radius: BorderRadius.circular(30)),
-                    ),
-                    onChanged: (value) {
-                      if (!value.isEmpty != showSend) {
+              builder: (context, constraints) => ShadInput(
+                inputPadding: EdgeInsets.all(2),
+                leading: ShadTooltip(
+                  waitDuration: Duration(seconds: 1),
+                  builder: (context) => Text("Attach"),
+                  child: ShadGestureDetector(
+                    cursor: SystemMouseCursors.click,
+                    onTap: () async {
+                      final response = await widget.room.agents.invokeTool(
+                          toolkit: "meshagent.markitdown",
+                          tool: "markitdown_from_user",
+                          arguments: {
+                            "title": "Attach a file",
+                            "description": "You can select PDFs or Office Docs"
+                          });
+
+                      if (!mounted) {
+                        return;
+                      }
+                      if (response is JsonResponse) {
                         setState(() {
-                          showSend = !value.isEmpty;
+                          attachments.add(response);
                         });
                       }
-
-                      final part = selectedParticipant;
-
-                      if (part != null) {
-                        widget.room.messaging.sendMessage(
-                          to: part,
-                          type: "typing",
-                          message: {},
-                        );
-                      }
                     },
-                    enabled:
-                        selectedParticipant is! RemoteParticipant ||
+                    child: Container(
+                      width: 22,
+                      height: 22,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: ShadTheme.of(context).colorScheme.foreground,
+                      ),
+                      child: Icon(
+                        LucideIcons.paperclip,
+                        color: ShadTheme.of(
+                          context,
+                        ).colorScheme.background,
+                      ),
+                    ),
+                  ),
+                ),
+                trailing: showSend
+                    ? ShadTooltip(
+                        waitDuration: Duration(seconds: 1),
+                        builder: (context) => Text("Send"),
+                        child: ShadGestureDetector(
+                          cursor: SystemMouseCursors.click,
+                          onTap: () {
+                            send();
+                          },
+                          child: Container(
+                            width: 22,
+                            height: 22,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: ShadTheme.of(
+                                context,
+                              ).colorScheme.foreground,
+                            ),
+                            child: Icon(
+                              LucideIcons.arrowUp,
+                              color: ShadTheme.of(
+                                context,
+                              ).colorScheme.background,
+                            ),
+                          ),
+                        ),
+                      )
+                    : null,
+                padding: EdgeInsets.only(
+                  left: 5,
+                  right: 5,
+                  top: 5,
+                  bottom: 5,
+                ),
+                decoration: ShadDecoration(
+                  secondaryFocusedBorder: ShadBorder.none,
+                  secondaryBorder: ShadBorder.none,
+                  color: ShadTheme.of(
+                    context,
+                  ).ghostButtonTheme.hoverBackgroundColor,
+                  border: ShadBorder.all(radius: BorderRadius.circular(30)),
+                ),
+                onChanged: (value) {
+                  if (!value.isEmpty != showSend) {
+                    setState(() {
+                      showSend = !value.isEmpty;
+                    });
+                  }
+
+                  final part = selectedParticipant;
+
+                  if (part != null) {
+                    widget.room.messaging.sendMessage(
+                      to: part,
+                      type: "typing",
+                      message: {},
+                    );
+                  }
+                },
+                enabled: selectedParticipant is! RemoteParticipant ||
+                    ((selectedParticipant as RemoteParticipant).role !=
+                            "agent" ||
+                        (selectedParticipant as RemoteParticipant)
+                                .getAttribute("busy") !=
+                            true),
+                maxLines: null,
+                placeholder: selectedParticipant is! RemoteParticipant ||
                         ((selectedParticipant as RemoteParticipant).role !=
                                 "agent" ||
                             (selectedParticipant as RemoteParticipant)
                                     .getAttribute("busy") !=
-                                true),
-                    maxLines: null,
-                    placeholder:
-                        selectedParticipant is! RemoteParticipant ||
-                                ((selectedParticipant as RemoteParticipant)
-                                            .role !=
-                                        "agent" ||
-                                    (selectedParticipant as RemoteParticipant)
-                                            .getAttribute("busy") !=
-                                        true)
-                            ? Text("Message")
-                            : Align(
-                              alignment: Alignment.centerLeft,
-                              child: SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(),
-                              ),
-                            ),
-                    focusNode: focusNode,
-                    //textInputAction: TextInputAction.newline,
-                    controller: controller,
-                  ),
+                                true)
+                    ? Text("Message")
+                    : Align(
+                        alignment: Alignment.centerLeft,
+                        child: SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(),
+                        ),
+                      ),
+                focusNode: focusNode,
+                //textInputAction: TextInputAction.newline,
+                controller: controller,
+              ),
             ),
           ),
         ],
@@ -772,12 +771,10 @@ class _MessagingPaneState extends State<MessagingPane> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.showParticipants &&
-        !widget.showChat) {
+    if (widget.showParticipants && !widget.showChat) {
       return buildParticipants(context);
     }
-    if (!widget.showParticipants &&
-        widget.showChat) {
+    if (!widget.showParticipants && widget.showChat) {
       return buildMessages(context);
     }
     return Column(
@@ -803,33 +800,31 @@ class _MessagingPaneState extends State<MessagingPane> {
         Expanded(
           child: ChangeNotifierBuilder(
             source: widget.room.messaging,
-            builder:
-                (context) => ShadResizablePanelGroup(
-                  axis: Axis.vertical,
-                  showHandle: true,
-                  dividerSize: 1,
-                  dividerThickness: 1,
-                  children: [
-                    ShadResizablePanel(
-                      id: "participants",
-                      minSize: .1,
-                      defaultSize: .25,
-                      child: buildParticipants(context),
-                    ),
-                    ShadResizablePanel(
-                      id: "messages",
-                      defaultSize: .75,
-                      child: buildMessages(context),
-                    ),
-                  ],
+            builder: (context) => ShadResizablePanelGroup(
+              axis: Axis.vertical,
+              showHandle: true,
+              dividerSize: 1,
+              dividerThickness: 1,
+              children: [
+                ShadResizablePanel(
+                  id: "participants",
+                  minSize: .1,
+                  defaultSize: .25,
+                  child: buildParticipants(context),
                 ),
+                ShadResizablePanel(
+                  id: "messages",
+                  defaultSize: .75,
+                  child: buildMessages(context),
+                ),
+              ],
+            ),
           ),
         ),
       ],
     );
   }
 }
-
 
 class JoinMeetingButton extends StatelessWidget {
   const JoinMeetingButton({super.key, required this.controller});
@@ -840,8 +835,7 @@ class JoinMeetingButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return ShadButton.outline(
       leading: Icon(LucideIcons.mic),
-      enabled:
-          controller.room.connectionState ==
+      enabled: controller.room.connectionState ==
           livekit.ConnectionState.disconnected,
       onPressed: () async {
         await controller.connect(

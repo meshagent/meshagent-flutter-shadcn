@@ -10,6 +10,6 @@ class PdfViewer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return  FilePreview(client: client, path: path);
+    return FilePreview(client: client, path: path);
   }
 }

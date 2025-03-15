@@ -112,16 +112,15 @@ class _GalleryViewerElementState extends State<GalleryViewerElement> {
           children: [
             Positioned.fill(
               child: Offstage(
-                offstage: selectedImage != null,
-                child: GridView.builder(
-                padding: EdgeInsets.symmetric(horizontal: 10),
-                itemCount: children.length,
-                gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-                  childAspectRatio: 4 / 3,
-                  maxCrossAxisExtent: 600,
-                ),
-                itemBuilder:
-                    (context, index) => ShadGestureDetector(
+                  offstage: selectedImage != null,
+                  child: GridView.builder(
+                    padding: EdgeInsets.symmetric(horizontal: 10),
+                    itemCount: children.length,
+                    gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                      childAspectRatio: 4 / 3,
+                      maxCrossAxisExtent: 600,
+                    ),
+                    itemBuilder: (context, index) => ShadGestureDetector(
                       cursor: SystemMouseCursors.click,
                       onTapUp: (_) {
                         setState(() {
@@ -155,13 +154,14 @@ class _GalleryViewerElementState extends State<GalleryViewerElement> {
                         clipBehavior: Clip.antiAlias,
                         child: FilePreview(
                           client: client,
-                          path: (children[index] as docs.MeshElement).getAttribute(
+                          path: (children[index] as docs.MeshElement)
+                              .getAttribute(
                             "path",
                           ),
                         ),
                       ),
                     ),
-              )),
+                  )),
             ),
             if (selectedImage != null)
               renderSelectedImage(

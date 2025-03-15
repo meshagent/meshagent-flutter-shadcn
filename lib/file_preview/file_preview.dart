@@ -25,12 +25,7 @@ final videoExtensions = <String>{"mp4", "mkv", "mov"};
 final audioExtensions = <String>{"mp3", "ogg", "wav"};
 final codeExtension = <String>{"json"};
 
-final officeExtensions = <String>{
-  "docx",
-  "pptx",
-  "xlsx"
-};
-
+final officeExtensions = <String>{"docx", "pptx", "xlsx"};
 
 Widget filePreview({
   Key? key,

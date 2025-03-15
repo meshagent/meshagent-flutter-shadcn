@@ -26,13 +26,11 @@ class _ParquetViewer extends State<ParquetViewer> {
 
   void query() async {
     try {
-      final data =
-          await widget.client.agents.invokeTool(
-                toolkit: "meshagent.duckdb",
-                tool: "duckdb_query",
-                arguments: {"database": dbName, "query": queryValue},
-              )
-              as JsonResponse;
+      final data = await widget.client.agents.invokeTool(
+        toolkit: "meshagent.duckdb",
+        tool: "duckdb_query",
+        arguments: {"database": dbName, "query": queryValue},
+      ) as JsonResponse;
 
       if (mounted) {
         setState(() {
@@ -60,6 +58,5 @@ class _ParquetViewer extends State<ParquetViewer> {
         "Use duckdb tools to load this parquet file into a database.",
       ),
     );
-  
   }
 }

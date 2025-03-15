@@ -135,8 +135,7 @@ class _ElementTextFieldState extends State<ElementTextField> {
   }
 
   void onControllerChanged() {
-    editing =
-        widget.controller.editing == widget.element &&
+    editing = widget.controller.editing == widget.element &&
         widget.controller.editingAttribute == widget.attributeName;
     focused = false;
   }
@@ -157,60 +156,59 @@ class _ElementTextFieldState extends State<ElementTextField> {
 
     return editing
         ? Container(
-          foregroundDecoration: BoxDecoration(
-            border: Border.all(color: widget.cursorColor, width: 2),
-          ),
-          child: IntrinsicHeight(
-            child: IntrinsicWidth(
-              child: EditableText(
-                onChanged: (value) {
-                  controller.editingValue = value;
-                },
-                textHeightBehavior: TextHeightBehavior(
-                  applyHeightToFirstAscent: true,
-                  applyHeightToLastDescent: true,
-                  leadingDistribution: TextLeadingDistribution.even,
+            foregroundDecoration: BoxDecoration(
+              border: Border.all(color: widget.cursorColor, width: 2),
+            ),
+            child: IntrinsicHeight(
+              child: IntrinsicWidth(
+                child: EditableText(
+                  onChanged: (value) {
+                    controller.editingValue = value;
+                  },
+                  textHeightBehavior: TextHeightBehavior(
+                    applyHeightToFirstAscent: true,
+                    applyHeightToLastDescent: true,
+                    leadingDistribution: TextLeadingDistribution.even,
+                  ),
+                  scrollPadding: EdgeInsets.zero,
+                  expands: true,
+                  textAlign: widget.textAlign ?? TextAlign.start,
+                  maxLines: widget.maxLines,
+                  minLines: widget.minLines,
+                  controller: controller.controller!,
+                  focusNode: controller.editingFocusNode!,
+                  style: widget.style,
+                  cursorColor: widget.cursorColor,
+                  backgroundCursorColor: widget.selectionColor,
+                  selectionColor: widget.selectionColor,
                 ),
-                scrollPadding: EdgeInsets.zero,
-                expands: true,
-                textAlign: widget.textAlign ?? TextAlign.start,
-                maxLines: widget.maxLines,
-                minLines: widget.minLines,
-                controller: controller.controller!,
-                focusNode: controller.editingFocusNode!,
-                style: widget.style,
-                cursorColor: widget.cursorColor,
-                backgroundCursorColor: widget.selectionColor,
-                selectionColor: widget.selectionColor,
               ),
             ),
-          ),
-        )
+          )
         : Focus(
-          focusNode: focusNode,
-          child: GestureDetector(
-            onTap: () {
-              focusNode.requestFocus();
-            },
-            onDoubleTap: () {
-              controller.startEditing(widget.element, widget.attributeName);
-            },
-            child: Container(
-              constraints: BoxConstraints(minWidth: 10),
-              foregroundDecoration:
-                  focused
-                      ? BoxDecoration(
+            focusNode: focusNode,
+            child: GestureDetector(
+              onTap: () {
+                focusNode.requestFocus();
+              },
+              onDoubleTap: () {
+                controller.startEditing(widget.element, widget.attributeName);
+              },
+              child: Container(
+                constraints: BoxConstraints(minWidth: 10),
+                foregroundDecoration: focused
+                    ? BoxDecoration(
                         border: Border.all(color: widget.cursorColor, width: 2),
                       )
-                      : null,
-              padding: EdgeInsets.only(right: 3),
-              child: Text(
-                widget.element.attributes[widget.attributeName],
-                style: widget.style,
-                textAlign: widget.textAlign,
+                    : null,
+                padding: EdgeInsets.only(right: 3),
+                child: Text(
+                  widget.element.attributes[widget.attributeName],
+                  style: widget.style,
+                  textAlign: widget.textAlign,
+                ),
               ),
             ),
-          ),
-        );
+          );
   }
 }

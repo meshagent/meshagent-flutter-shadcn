@@ -9,8 +9,6 @@ import "file/pdf.dart";
 import "file/code.dart";
 import "file/parquet.dart";
 
-
-
 Widget? fileViewer(RoomClient client, String path) {
   return switch (extension(path).toLowerCase()) {
     ".jpg" => ImageViewer(client: client, path: path),

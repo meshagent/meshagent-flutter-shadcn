@@ -141,38 +141,38 @@ class ConnectionButton extends StatelessWidget {
       builder: (context, _) {
         return switch (room.connectionState) {
           livekit.ConnectionState.connected => _MeetingControlsButon(
-            text: "Hangup",
-            on: false,
-            onColor: Colors.black,
-            onForeground: Colors.white,
-            offColor: Colors.red,
-            offForeground: Colors.white,
-            icon: Icons.phone,
-            onPressed: () {
-              controller.disconnect();
-            },
-          ),
+              text: "Hangup",
+              on: false,
+              onColor: Colors.black,
+              onForeground: Colors.white,
+              offColor: Colors.red,
+              offForeground: Colors.white,
+              icon: Icons.phone,
+              onPressed: () {
+                controller.disconnect();
+              },
+            ),
           livekit.ConnectionState.disconnected => _MeetingControlsButon(
-            text: "Connect",
-            on: false,
-            onColor: Colors.black,
-            onForeground: Colors.white,
-            offColor: Colors.black,
-            offForeground: Colors.white,
-            icon: Icons.phone,
-            onPressed: () {
-              controller.disconnect();
-            },
-          ),
+              text: "Connect",
+              on: false,
+              onColor: Colors.black,
+              onForeground: Colors.white,
+              offColor: Colors.black,
+              offForeground: Colors.white,
+              icon: Icons.phone,
+              onPressed: () {
+                controller.disconnect();
+              },
+            ),
           _ => const _MeetingControlsButon(
-            text: "Connecting",
-            on: false,
-            onColor: Colors.black,
-            onForeground: Colors.white,
-            offColor: Colors.red,
-            offForeground: Colors.white,
-            icon: Icons.phone,
-          ),
+              text: "Connecting",
+              on: false,
+              onColor: Colors.black,
+              onForeground: Colors.white,
+              offColor: Colors.red,
+              offForeground: Colors.white,
+              icon: Icons.phone,
+            ),
         };
       },
     );
@@ -221,10 +221,9 @@ class _MeetingControlsButon extends StatelessWidget {
                 child: Icon(
                   icon,
                   size: 22,
-                  color:
-                      on
-                          ? onForeground
-                          : (onPressed != null ? offForeground : Colors.grey),
+                  color: on
+                      ? onForeground
+                      : (onPressed != null ? offForeground : Colors.grey),
                 ),
               ),
             ),
@@ -376,18 +375,15 @@ class _ChangeDeviceButtonState extends State<_ChangeDeviceButton> {
     final audioOutputs =
         _devices.where((d) => d.kind == "audiooutput").toList();
 
-    final selectedVideoDevice =
-        videoInputs
+    final selectedVideoDevice = videoInputs
             .where((device) => device.deviceId == videoInput)
             .firstOrNull ??
         videoInputs.firstOrNull;
-    final selectedAudioInputDevice =
-        audioInputs
+    final selectedAudioInputDevice = audioInputs
             .where((device) => device.deviceId == audioInput)
             .firstOrNull ??
         audioInputs.firstOrNull;
-    final selectedAudioOutputDevice =
-        audioOutputs
+    final selectedAudioOutputDevice = audioOutputs
             .where((device) => device.deviceId == audioOutput)
             .firstOrNull ??
         audioOutputs.firstOrNull;
@@ -416,10 +412,9 @@ class _ChangeDeviceButtonState extends State<_ChangeDeviceButton> {
             widget.kind == _DeviceKind.audioOutput)
           for (final device in audioOutputs)
             ShadContextMenuItem(
-              trailing:
-                  selectedAudioOutputDevice == device
-                      ? Icon(Icons.check)
-                      : null,
+              trailing: selectedAudioOutputDevice == device
+                  ? Icon(Icons.check)
+                  : null,
               onPressed: () => onChangeAudioOutput(device),
               child: Text(device.label),
             ),

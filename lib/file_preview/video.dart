@@ -137,10 +137,10 @@ class _VideoAttachmentState extends State<_VideoAttachment> {
 
       final v = controller!.value;
       final currentlyPlaying =
-          v
-              .isPlaying /*&&
+          v.isPlaying /*&&
           controller!.value.position != controller!.value.duration &&
-          controller!.value.position > Duration.zero*/;
+          controller!.value.position > Duration.zero*/
+          ;
 
       if (playing != currentlyPlaying) {
         playing = currentlyPlaying;
@@ -233,10 +233,9 @@ class _VideoAttachmentState extends State<_VideoAttachment> {
     return LayoutBuilder(
       builder: (context, constraints) {
         return MouseRegion(
-          cursor:
-              widget.playOnTap
-                  ? SystemMouseCursors.click
-                  : SystemMouseCursors.basic,
+          cursor: widget.playOnTap
+              ? SystemMouseCursors.click
+              : SystemMouseCursors.basic,
           child: _wrapTap(
             AspectRatio(
               aspectRatio:
@@ -444,25 +443,22 @@ class _AudioAttachmentState extends State<_AudioAttachment> {
     return player == null
         ? const CircularProgressIndicator()
         : StreamBuilder(
-          stream: player!.playerStateStream,
-          builder:
-              (context, snapshot) => ShadButton(
-                onPressed: () {
-                  if (snapshot.data?.playing == true) {
-                    player!.pause();
-                  } else {
-                    player!.play();
-                  }
-                },
-                icon:
-                    snapshot.data?.playing == true
-                        ? const Icon(size: 16, LucideIcons.pause)
-                        : const Icon(size: 16, LucideIcons.play),
-                child:
-                    snapshot.data?.playing == true
-                        ? const Text("Pause")
-                        : const Text("Play"),
-              ),
-        );
+            stream: player!.playerStateStream,
+            builder: (context, snapshot) => ShadButton(
+              onPressed: () {
+                if (snapshot.data?.playing == true) {
+                  player!.pause();
+                } else {
+                  player!.play();
+                }
+              },
+              icon: snapshot.data?.playing == true
+                  ? const Icon(size: 16, LucideIcons.pause)
+                  : const Icon(size: 16, LucideIcons.play),
+              child: snapshot.data?.playing == true
+                  ? const Text("Pause")
+                  : const Text("Play"),
+            ),
+          );
   }
 }

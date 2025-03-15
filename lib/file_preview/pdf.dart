@@ -28,8 +28,6 @@ class PdfPreview extends StatefulWidget {
 }
 
 class _PdfPreviewState extends State<PdfPreview> {
-  
-
   @override
   void initState() {
     super.initState();
@@ -54,10 +52,16 @@ class _PdfPreviewState extends State<PdfPreview> {
 
   @override
   Widget build(BuildContext context) {
-    if(doc != null) {
-          return ListView.builder(
-            itemCount: doc!.pages.length,
-            itemBuilder: (context, index) => Padding(padding: EdgeInsets.all(30), child: PdfPage(document: doc!, pageNumber: index, backgroundColor: widget.backgroundColor, fit: widget.fit)));
+    if (doc != null) {
+      return ListView.builder(
+          itemCount: doc!.pages.length,
+          itemBuilder: (context, index) => Padding(
+              padding: EdgeInsets.all(30),
+              child: PdfPage(
+                  document: doc!,
+                  pageNumber: index,
+                  backgroundColor: widget.backgroundColor,
+                  fit: widget.fit)));
     } else {
       return Container();
     }
@@ -65,7 +69,12 @@ class _PdfPreviewState extends State<PdfPreview> {
 }
 
 class PdfPage extends StatefulWidget {
-  PdfPage({ super.key, required this.document, required this.pageNumber, required this.backgroundColor, required this.fit });
+  PdfPage(
+      {super.key,
+      required this.document,
+      required this.pageNumber,
+      required this.backgroundColor,
+      required this.fit});
 
   final PdfDocument document;
   final int pageNumber;
@@ -96,8 +105,7 @@ class _PdfPageState extends State<PdfPage> {
     size = size * scale * mq.devicePixelRatio;
     final maxSize = mq.size * mq.devicePixelRatio;
     if (size.width > maxSize.width || size.height > maxSize.height) {
-      size =
-          size *
+      size = size *
           (math.min(maxSize.width / size.width, maxSize.height / size.height));
     }
     if ((!loaded || size != loadedSize) && !loading && size != Size.zero) {
@@ -158,8 +166,7 @@ class _PdfPageState extends State<PdfPage> {
   }
 
   void renderAtScreenSize(PdfDocument doc, int pageNumber, RenderBox ro) {
-    final screenSize =
-        ro.localToGlobal(Offset(ro.size.width, ro.size.height)) -
+    final screenSize = ro.localToGlobal(Offset(ro.size.width, ro.size.height)) -
         ro.localToGlobal(Offset.zero);
 
     render(doc, Size(screenSize.dx, screenSize.dy), pageNumber, 1.0);
@@ -171,14 +178,11 @@ class _PdfPageState extends State<PdfPage> {
 
   @override
   Widget build(BuildContext context) {
-
     final doc = widget.document;
-  return AspectRatio(
-      aspectRatio:
-         (doc!.pages[page].width / doc!.pages[page].height),
+    return AspectRatio(
+      aspectRatio: (doc!.pages[page].width / doc!.pages[page].height),
       child: LayoutBuilder(
         builder: (context, constraints) {
-         
           final ro = context.findRenderObject() as RenderBox?;
 
           if (ro != null && ro.hasSize) {
@@ -191,7 +195,6 @@ class _PdfPageState extends State<PdfPage> {
               }
             });
           }
-        
 
           if (image != null) {
             if (constraints.hasBoundedHeight && constraints.hasBoundedWidth) {
@@ -206,8 +209,7 @@ class _PdfPageState extends State<PdfPage> {
               );
             } else if (constraints.hasBoundedHeight) {
               return SizedBox(
-                width:
-                    constraints.maxHeight *
+                width: constraints.maxHeight *
                     image!.width.toDouble() /
                     image!.height.toDouble(),
                 height: constraints.maxHeight,
@@ -216,8 +218,7 @@ class _PdfPageState extends State<PdfPage> {
             } else if (constraints.hasBoundedWidth) {
               return SizedBox(
                 width: constraints.maxWidth,
-                height:
-                    constraints.maxWidth *
+                height: constraints.maxWidth *
                     image!.height.toDouble() /
                     image!.width.toDouble(),
                 child: CustomPaint(painter: _ImagePainter(image!)),

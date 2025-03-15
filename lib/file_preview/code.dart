@@ -32,23 +32,23 @@ class _CodePreview extends State<CodePreview> {
     return text == null
         ? Center(child: CircularProgressIndicator())
         : SizedBox(
-          width: 700,
-          child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: 5),
-            child: ColoredBox(
-              color: Colors.black,
-              child: Padding(
-                padding: EdgeInsets.all(16),
-                child: SelectableText(
-                  text!,
-                  style: GoogleFonts.sourceCodePro(
-                    color: Color.from(alpha: 1, red: .8, green: .8, blue: .8),
-                    fontWeight: FontWeight.w500,
+            width: 700,
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: 5),
+              child: ColoredBox(
+                color: Colors.black,
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: SelectableText(
+                    text!,
+                    style: GoogleFonts.sourceCodePro(
+                      color: Color.from(alpha: 1, red: .8, green: .8, blue: .8),
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-        );
+          );
   }
 }

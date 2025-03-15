@@ -28,28 +28,27 @@ class _ParticipantCamerasListState extends State<ParticipantCamerasList> {
     final controller = widget.controller;
     return ListenableBuilder(
       listenable: widget.controller.room,
-      builder:
-          (context, _) => ListView(
-            padding: widget.padding,
-            scrollDirection: Axis.horizontal,
-            children: [
-              if (controller.room.localParticipant != null)
-                ParticipantTile(
-                  room: controller.room,
-                  participant: controller.room.localParticipant!,
-                ),
-              SizedBox(width: widget.spacing),
-              ...controller.room.remoteParticipants.values.map(
-                (participant) => Padding(
-                  padding: EdgeInsets.only(right: widget.spacing),
-                  child: ParticipantTile(
-                    room: controller.room,
-                    participant: participant,
-                  ),
-                ),
+      builder: (context, _) => ListView(
+        padding: widget.padding,
+        scrollDirection: Axis.horizontal,
+        children: [
+          if (controller.room.localParticipant != null)
+            ParticipantTile(
+              room: controller.room,
+              participant: controller.room.localParticipant!,
+            ),
+          SizedBox(width: widget.spacing),
+          ...controller.room.remoteParticipants.values.map(
+            (participant) => Padding(
+              padding: EdgeInsets.only(right: widget.spacing),
+              child: ParticipantTile(
+                room: controller.room,
+                participant: participant,
               ),
-            ],
+            ),
           ),
+        ],
+      ),
     );
   }
 }
@@ -65,26 +64,24 @@ class ParticipantTile extends StatelessWidget {
     return ListenableBuilder(
       listenable: participant,
       builder: (context, _) {
-        final track =
-            participant.trackPublications.values
-                .map((x) => x.track)
-                .whereType<VideoTrack>()
-                .firstOrNull;
+        final track = participant.trackPublications.values
+            .map((x) => x.track)
+            .whereType<VideoTrack>()
+            .firstOrNull;
         return AspectRatio(
           aspectRatio: 4 / 3,
           child: _CameraBox(
             muted: participant.isMuted,
-            camera:
-                track != null
-                    ? VideoTrackRenderer(
-                      track,
-                      fit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-                    )
-                    : (participant.kind == ParticipantKind.AGENT
-                        ? AudioWave(room: room, participant: participant)
-                        : ColoredBox(
-                          color: ShadTheme.of(context).colorScheme.foreground,
-                        )),
+            camera: track != null
+                ? VideoTrackRenderer(
+                    track,
+                    fit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                  )
+                : (participant.kind == ParticipantKind.AGENT
+                    ? AudioWave(room: room, participant: participant)
+                    : ColoredBox(
+                        color: ShadTheme.of(context).colorScheme.foreground,
+                      )),
             participantName: participant.name,
           ),
         );

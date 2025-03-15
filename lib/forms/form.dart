@@ -16,39 +16,35 @@ class FormDocumentViewer extends StatelessWidget {
   Widget build(BuildContext context) {
     return ChangeNotifierBuilder(
       source: document,
-      builder:
-          (context) =>
-              document.root.getChildren().isEmpty
-                  ? Container()
-                  : Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 15),
-                    child: ShadCard(
-                      title:
-                          document.root.getAttribute("title") != null
-                              ? Text(document.root.getAttribute("title"))
-                              : null,
-                      description:
-                          document.root.getAttribute("description") != null
-                              ? Text(document.root.getAttribute("description"))
-                              : null,
-                      child: Padding(
-                        padding: EdgeInsets.symmetric(vertical: 16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            for (final fieldElement
-                                in document.root.getChildren()) ...[
-                              FormDocumentField(
-                                element: fieldElement as doc.MeshElement,
-                              ),
-                              const SizedBox(height: 26),
-                            ],
-                          ],
+      builder: (context) => document.root.getChildren().isEmpty
+          ? Container()
+          : Padding(
+              padding: EdgeInsets.symmetric(horizontal: 15),
+              child: ShadCard(
+                title: document.root.getAttribute("title") != null
+                    ? Text(document.root.getAttribute("title"))
+                    : null,
+                description: document.root.getAttribute("description") != null
+                    ? Text(document.root.getAttribute("description"))
+                    : null,
+                child: Padding(
+                  padding: EdgeInsets.symmetric(vertical: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (final fieldElement
+                          in document.root.getChildren()) ...[
+                        FormDocumentField(
+                          element: fieldElement as doc.MeshElement,
                         ),
-                      ),
-                    ),
+                        const SizedBox(height: 26),
+                      ],
+                    ],
                   ),
+                ),
+              ),
+            ),
     );
   }
 }
@@ -73,27 +69,24 @@ class FormDocumentSelect extends StatelessWidget {
   Widget build(BuildContext context) {
     return ChangeNotifierBuilder(
       source: element,
-      builder:
-          (context) => ShadSelectFormField<String?>(
-            selectedOptionBuilder: (context, value) => Text("${value ?? ''}"),
-            placeholder: Text("pick a value"),
-            label:
-                element.getAttribute("label") == null
-                    ? null
-                    : Text(element.getAttribute("label")),
-            description:
-                element.getAttribute("description") == null
-                    ? null
-                    : Text(element.getAttribute("description")),
-            options: [
-              for (final option
-                  in element.getChildren().whereType<doc.MeshElement>())
-                ShadOption<String?>(
-                  value: option.getAttribute("value"),
-                  child: Text(option.getAttribute("text")),
-                ),
-            ],
-          ),
+      builder: (context) => ShadSelectFormField<String?>(
+        selectedOptionBuilder: (context, value) => Text("${value ?? ''}"),
+        placeholder: Text("pick a value"),
+        label: element.getAttribute("label") == null
+            ? null
+            : Text(element.getAttribute("label")),
+        description: element.getAttribute("description") == null
+            ? null
+            : Text(element.getAttribute("description")),
+        options: [
+          for (final option
+              in element.getChildren().whereType<doc.MeshElement>())
+            ShadOption<String?>(
+              value: option.getAttribute("value"),
+              child: Text(option.getAttribute("text")),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -106,17 +99,14 @@ class FormDocumentInput extends StatelessWidget {
   Widget build(BuildContext context) {
     return ChangeNotifierBuilder(
       source: element,
-      builder:
-          (context) => ShadInputFormField(
-            label:
-                element.getAttribute("label") == null
-                    ? null
-                    : Text(element.getAttribute("label")),
-            description:
-                element.getAttribute("description") == null
-                    ? null
-                    : Text(element.getAttribute("description")),
-          ),
+      builder: (context) => ShadInputFormField(
+        label: element.getAttribute("label") == null
+            ? null
+            : Text(element.getAttribute("label")),
+        description: element.getAttribute("description") == null
+            ? null
+            : Text(element.getAttribute("description")),
+      ),
     );
   }
 }

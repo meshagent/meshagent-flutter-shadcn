@@ -90,11 +90,10 @@ class _AudioWaveState extends State<AudioWave> {
   late IOS7SiriWaveformController controller;
 
   void onTick(Timer t) async {
-    final track =
-        widget.participant.audioTrackPublications
-            .where((x) => !x.muted)
-            .firstOrNull
-            ?.track;
+    final track = widget.participant.audioTrackPublications
+        .where((x) => !x.muted)
+        .firstOrNull
+        ?.track;
 
     final receiver = (track as AudioTrack?)?.receiver;
 
