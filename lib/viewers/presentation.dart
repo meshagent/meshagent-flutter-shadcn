@@ -51,7 +51,7 @@ class PresentationViewerElement extends StatefulWidget {
   });
 
   final RoomClient client;
-  final docs.Element element;
+  final docs.MeshElement element;
 
   @override
   State createState() => _PresentationViewerElementState();
@@ -65,7 +65,7 @@ class _PresentationViewerElementState extends State<PresentationViewerElement> {
     final children = element.getChildren();
     return [
       for (var child in children)
-        if (child is docs.Element)
+        if (child is docs.MeshElement)
           PresentationViewerElement(client: client, element: child),
     ];
   }
@@ -87,7 +87,7 @@ class _PresentationViewerElementState extends State<PresentationViewerElement> {
 
   final controller = ElementEditorController();
 
-  Widget buildSlide(BuildContext context, docs.Element slide) {
+  Widget buildSlide(BuildContext context, docs.MeshElement slide) {
     final client = widget.client;
 
     return FittedBox(
@@ -135,7 +135,7 @@ class _PresentationViewerElementState extends State<PresentationViewerElement> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           for (final bp
-                              in slide.getChildren().whereType<docs.Element>())
+                              in slide.getChildren().whereType<docs.MeshElement>())
                             ElementTextField(
                               controller: controller,
                               element: bp,
@@ -176,7 +176,7 @@ class _PresentationViewerElementState extends State<PresentationViewerElement> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 ...element.getChildren().map(
-                  (slide) => buildSlide(context, slide as docs.Element),
+                  (slide) => buildSlide(context, slide as docs.MeshElement),
                 ),
               ],
             ),

@@ -40,7 +40,7 @@ class FormDocumentViewer extends StatelessWidget {
                             for (final fieldElement
                                 in document.root.getChildren()) ...[
                               FormDocumentField(
-                                element: fieldElement as doc.Element,
+                                element: fieldElement as doc.MeshElement,
                               ),
                               const SizedBox(height: 26),
                             ],
@@ -55,7 +55,7 @@ class FormDocumentViewer extends StatelessWidget {
 
 class FormDocumentField extends StatelessWidget {
   const FormDocumentField({super.key, required this.element});
-  final doc.Element element;
+  final doc.MeshElement element;
   @override
   Widget build(BuildContext context) {
     return switch (element.tagName) {
@@ -68,7 +68,7 @@ class FormDocumentField extends StatelessWidget {
 
 class FormDocumentSelect extends StatelessWidget {
   const FormDocumentSelect({super.key, required this.element});
-  final doc.Element element;
+  final doc.MeshElement element;
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierBuilder(
@@ -87,7 +87,7 @@ class FormDocumentSelect extends StatelessWidget {
                     : Text(element.getAttribute("description")),
             options: [
               for (final option
-                  in element.getChildren().whereType<doc.Element>())
+                  in element.getChildren().whereType<doc.MeshElement>())
                 ShadOption<String?>(
                   value: option.getAttribute("value"),
                   child: Text(option.getAttribute("text")),
@@ -100,7 +100,7 @@ class FormDocumentSelect extends StatelessWidget {
 
 class FormDocumentInput extends StatelessWidget {
   const FormDocumentInput({super.key, required this.element});
-  final doc.Element element;
+  final doc.MeshElement element;
 
   @override
   Widget build(BuildContext context) {

@@ -53,13 +53,13 @@ class DocumentViewerElement extends StatelessWidget {
   });
 
   final RoomClient client;
-  final docs.Element element;
+  final docs.MeshElement element;
 
   List<Widget> buildChildren(BuildContext context) {
     final children = element.getChildren();
     return [
       for (var child in children)
-        if (child is docs.Element)
+        if (child is docs.MeshElement)
           DocumentViewerElement(client: client, element: child),
     ];
   }

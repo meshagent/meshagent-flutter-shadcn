@@ -1,11 +1,12 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:markdown_widget/markdown_widget.dart';
+import 'package:meshagent/document.dart';
 import 'package:meshagent/room_server_client.dart';
 import 'package:meshagent_flutter_shadcn/chat/jumping_dots.dart';
 import 'package:meshagent_flutter_shadcn/meetings/meetings.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
-
+import 'package:uuid/uuid.dart';
 import 'dart:async';
 
 import 'package:flutter/services.dart';
@@ -286,16 +287,68 @@ class _MessagingPaneState extends State<MessagingPane> {
     return _selectedParticipant;
   }
 
+  Future<MeshDocument>? threadFuture;
+
+  String? threadId;
+
   set selectedParticipant(Participant? participant) {
     _selectedParticipant = participant;
     if (participant != null) {
-      widget.room.messaging.sendMessage(
-        to: participant,
-        type: "opened",
-        message: {},
-      );
+      thread = null;
+      
+ 
+
+      final newThreadId = "${participant.getAttribute("name")}-${widget.room.localParticipant!.getAttribute("name")}";
+
+      if(threadId == newThreadId) {
+        return;
+      }
+
+
+      if(threadId != null) {
+        widget.room.sync.close(".threads/${threadId}.thread");
+      }
+
+      
+      thread = null;
+      threadError = null;
+      threadId = newThreadId;
+      
+      
+      threadFuture = widget.room.sync.open(".threads/${threadId}.thread");
+      
+      threadFuture!.then((doc) {
+        if(threadId != newThreadId) {
+          return;
+        }
+        setState(() {
+          thread = doc;
+        });
+
+        thread!.addListener(() {
+          if(!mounted) return;
+          setState(() {
+            
+          });
+        });
+
+
+        widget.room.messaging.sendMessage(
+          to: participant,
+          type: "opened",
+          message: {
+            "thread_id" : newThreadId
+          },
+        );
+      }).catchError((err) {
+        print(err);
+        threadError = err;
+      });
+      
     }
   }
+
+  Object? threadError;
 
   late final focusNode = FocusNode(
     onKeyEvent: (_, event) {
@@ -309,14 +362,10 @@ class _MessagingPaneState extends State<MessagingPane> {
       return KeyEventResult.ignored;
     },
   );
+  MeshDocument? thread;
 
-  void send() {
+  void send() async {
     if (controller.text.trim().isNotEmpty) {
-      widget.room.messaging.sendMessage(
-        to: selectedParticipant!,
-        type: "chat",
-        message: {"text": controller.text, "attachments" : attachments.map((a)=>a.json).toList() },
-      );
 
       addMessage(
         selectedParticipant!.id,
@@ -328,18 +377,40 @@ class _MessagingPaneState extends State<MessagingPane> {
         ),
       );
 
+      final messages = thread!.root.getChildren().whereType<MeshElement>().firstWhere((x) =>  x.tagName == "messages");
+
+      messages.createChildElement("message", {
+          "id" : const Uuid().v4().toString(),
+          "text" : controller.text,
+          "created_at" : DateTime.now().toUtc().toIso8601String(),
+          "author_name" : widget.room.localParticipant!.getAttribute("name"),
+          "author_ref" : null
+      });
+
+      widget.room.messaging.sendMessage(
+        to: selectedParticipant!,
+        type: "chat",
+        message: {
+          "thread_id" : threadId,
+          "text": controller.text, 
+          "attachments" : attachments.map((a)=>a.json).toList() 
+        },
+      ); 
+      
+      
       attachments.clear();
       controller.text = "";
       setState(() {
         
       });
+
     }
   }
 
   final controller = ShadTextEditingController();
 
-  Widget buildMessage(BuildContext context, RoomMessage message) {
-    bool mine = message.local;
+  Widget buildMessage(BuildContext context, MeshElement message) {
+    bool mine = message.attributes["author_name"] == widget.room.localParticipant!.getAttribute("name");
     final mdColor =
         ShadTheme.of(context).textTheme.p.color ??
         DefaultTextStyle.of(context).style.color ??
@@ -452,13 +523,12 @@ class _MessagingPaneState extends State<MessagingPane> {
                   api: TimuApiProvider.of(context).api,
                   layer: layer),
             },*/
-              data: message.message["text"],
+              data: message.getAttribute("text"),
             ),
           ),
         ),
-        if(message.message["attachments"] != null) 
-          for(final attachment in message.message["attachments"] as List) 
-            Padding(padding: EdgeInsets.only(top: 10), child: ShadCard(width: double.infinity, padding: EdgeInsets.all(10), description: Text(attachment["filename"]))  )
+        for(final attachment in message.getChildren()) 
+          Padding(padding: EdgeInsets.only(top: 10), child: ShadCard(width: double.infinity, padding: EdgeInsets.all(10), description: Text((attachment as MeshElement).getAttribute("filename"))))
       ]);
   }
 
@@ -483,6 +553,8 @@ class _MessagingPaneState extends State<MessagingPane> {
   List<JsonResponse> attachments = [];
 
   Widget buildMessages(BuildContext context) {
+    final threadMessages = thread?.root.getChildren().whereType<MeshElement>().where((x) =>  x.tagName == "messages").firstOrNull;
+
     bool bottomAlign =
         widget.startChatCentered || (messages[selectedParticipant?.id ?? ""] ?? []).isNotEmpty;
     return Column(
@@ -505,14 +577,15 @@ class _MessagingPaneState extends State<MessagingPane> {
             ),
           ),
         if (selectedParticipant != null) ...[
-          if ((messages[selectedParticipant!.id] ?? []).isNotEmpty)
+          
             Expanded(
-              child: ListView(
+              child: threadError != null ? Center(child: Text("Unable to load thread", style: ShadTheme.of(context).textTheme.p)) : thread == null ? Center(child: CircularProgressIndicator()) :  ListView(
                 reverse: true,
                 padding: EdgeInsets.all(16),
                 children: [
-                  for (final message in messages[selectedParticipant!.id] ?? [])
-                    buildMessage(context, message),
+                  
+                  for (final message in (threadMessages?.getChildren() ?? []).reversed)
+                    buildMessage(context, message as MeshElement),
                 ],
               ),
             ),

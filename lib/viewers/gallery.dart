@@ -51,7 +51,7 @@ class GalleryViewerElement extends StatefulWidget {
   });
 
   final RoomClient client;
-  final docs.Element element;
+  final docs.MeshElement element;
 
   @override
   State createState() => _GalleryViewerElementState();
@@ -59,7 +59,7 @@ class GalleryViewerElement extends StatefulWidget {
 
 class _GalleryViewerElementState extends State<GalleryViewerElement> {
   late final RoomClient client = widget.client;
-  late final docs.Element element = widget.element;
+  late final docs.MeshElement element = widget.element;
   String? selectedImage;
 
   String? selectedDescription;
@@ -125,19 +125,19 @@ class _GalleryViewerElementState extends State<GalleryViewerElement> {
                       cursor: SystemMouseCursors.click,
                       onTapUp: (_) {
                         setState(() {
-                          selectedImage = (children[index] as docs.Element)
+                          selectedImage = (children[index] as docs.MeshElement)
                               .getAttribute("path");
                           selectedDescription =
-                              (children[index] as docs.Element)
+                              (children[index] as docs.MeshElement)
                                   .attributes["description"];
                         });
                       },
                       onTapDown: (_) {
                         setState(() {
-                          selectedImage = (children[index] as docs.Element)
+                          selectedImage = (children[index] as docs.MeshElement)
                               .getAttribute("path");
                           selectedDescription =
-                              (children[index] as docs.Element)
+                              (children[index] as docs.MeshElement)
                                   .attributes["description"];
                         });
                       },
@@ -155,7 +155,7 @@ class _GalleryViewerElementState extends State<GalleryViewerElement> {
                         clipBehavior: Clip.antiAlias,
                         child: FilePreview(
                           client: client,
-                          path: (children[index] as docs.Element).getAttribute(
+                          path: (children[index] as docs.MeshElement).getAttribute(
                             "path",
                           ),
                         ),

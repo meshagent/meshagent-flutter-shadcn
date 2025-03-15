@@ -25,7 +25,7 @@ class ElementEditorController extends ChangeNotifier {
     return _controller;
   }
 
-  void startEditing(docs.Element element, String attributeName) {
+  void startEditing(docs.MeshElement element, String attributeName) {
     String text = element.attributes[attributeName] ?? "";
     _controller = TextEditingController(text: text);
     _controller!.selection = TextSelection(
@@ -106,7 +106,7 @@ class ElementTextField extends StatefulWidget {
   });
 
   final ElementEditorController controller;
-  final docs.Element element;
+  final docs.MeshElement element;
   final String attributeName;
   final TextStyle style;
   final Color selectionColor;
