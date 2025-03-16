@@ -28,6 +28,8 @@ environment:
 # the latest version available on pub.dev. To see which dependencies have newer
 # versions available, run `flutter pub outdated`.
 dependencies:
+  flutter:
+    sdk: flutter
   meshagent_super_editor: ^0.0.1
   video_player: ^2.9.2
   chewie: ^1.8.5
