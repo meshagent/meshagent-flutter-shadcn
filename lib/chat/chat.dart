@@ -8,21 +8,66 @@ import 'package:meshagent_flutter_shadcn/meetings/meetings.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:uuid/uuid.dart';
 import 'dart:async';
+import 'package:meshagent_flutter/meshagent_flutter.dart';
 
 import 'package:flutter/services.dart';
 import 'package:livekit_client/livekit_client.dart' as livekit;
 
 // ignore: depend_on_referenced_packages
 
-class ChatThread extends StatefulWidget {
-  const ChatThread(
+class ChatThreadLoader extends StatefulWidget {
+    const ChatThreadLoader(
       {super.key,
+      
+
       required this.threadId,
       required this.room,
       required this.participant,
       this.startChatCentered = false});
 
+
   final String threadId;
+  final RoomClient room;
+  final Participant participant;
+  final bool startChatCentered;
+
+  @override
+  State createState() => _ChatThreadLoader();
+}
+
+class _ChatThreadLoader extends State<ChatThreadLoader> {
+
+  Future<MeshDocument>? threadFuture;
+  
+
+  @override
+  Widget build(BuildContext context) {
+    return DocumentConnectionScope(path: ".threads/${widget.threadId}.thread", room: widget.room, builder: (context,document,error) {
+      
+      if(error != null) {
+        return Center(child: Text("Unable to load thread", style: ShadTheme.of(context).textTheme.p,));
+      }
+
+      if(document == null) {
+        return Center(child: CircularProgressIndicator());
+      }
+
+      return ChatThread(threadId: widget.threadId, document: document, room: widget.room, participant: widget.participant);
+    });
+  }
+}
+
+class ChatThread extends StatefulWidget {
+  const ChatThread(
+      {super.key,
+      required this.threadId,
+      required this.document,
+      required this.room,
+      required this.participant,
+      this.startChatCentered = false});
+
+  final String threadId;
+  final MeshDocument document;
   final RoomClient room;
   final Participant participant;
   final bool startChatCentered;
@@ -32,13 +77,7 @@ class ChatThread extends StatefulWidget {
 }
 
 class _ChatThread extends State<ChatThread> {
-  Object? threadError;
-  MeshDocument? thread;
-
-  Future<MeshDocument>? threadFuture;
-
-  String? threadId;
-
+    
   bool showSend = false;
 
   List<JsonResponse> attachments = [];
@@ -51,7 +90,6 @@ class _ChatThread extends State<ChatThread> {
   void initState() {
     super.initState();
     sub = widget.room.listen(onRoomMessage);
-    load();
   }
 
   void onRoomMessage(RoomEvent event) {
@@ -91,7 +129,7 @@ class _ChatThread extends State<ChatThread> {
 
   void send() async {
     if (controller.text.trim().isNotEmpty) {
-      final messages = thread!.root
+      final messages = widget.document.root
           .getChildren()
           .whereType<MeshElement>()
           .firstWhere((x) => x.tagName == "messages");
@@ -108,7 +146,7 @@ class _ChatThread extends State<ChatThread> {
         to: widget.participant,
         type: "chat",
         message: {
-          "thread_id": threadId,
+          "thread_id": widget.threadId,
           "text": controller.text,
           "attachments": attachments.map((a) => a.json).toList()
         },
@@ -122,45 +160,6 @@ class _ChatThread extends State<ChatThread> {
 
   final controller = ShadTextEditingController();
 
-  void load() async {
-    final newThreadId = widget.threadId;
-    if (threadId == newThreadId) {
-      return;
-    }
-
-    if (threadId != null) {
-      widget.room.sync.close(".threads/${threadId}.thread");
-    }
-
-    thread = null;
-    threadError = null;
-    threadId = newThreadId;
-
-    threadFuture = widget.room.sync.open(".threads/${threadId}.thread");
-
-    threadFuture!.then((doc) {
-      if (threadId != newThreadId) {
-        return;
-      }
-      setState(() {
-        thread = doc;
-      });
-
-      thread!.addListener(() {
-        if (!mounted) return;
-        setState(() {});
-      });
-
-      widget.room.messaging.sendMessage(
-        to: widget.participant,
-        type: "opened",
-        message: {"thread_id": newThreadId},
-      );
-    }).catchError((err) {
-      print(err);
-      threadError = err;
-    });
-  }
 
   Widget buildMessage(BuildContext context, MeshElement message) {
     bool mine = message.attributes["author_name"] ==
@@ -305,7 +304,8 @@ class _ChatThread extends State<ChatThread> {
 
   @override
   Widget build(BuildContext context) {
-    final threadMessages = thread?.root
+    final thread = widget.document;
+    final threadMessages = thread.root
         .getChildren()
         .whereType<MeshElement>()
         .where((x) => x.tagName == "messages")
@@ -318,13 +318,8 @@ class _ChatThread extends State<ChatThread> {
           bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
       children: [
         Expanded(
-          child: threadError != null
-              ? Center(
-                  child: Text("Unable to load thread",
-                      style: ShadTheme.of(context).textTheme.p))
-              : thread == null
-                  ? Center(child: CircularProgressIndicator())
-                  : ListView(
+          child:
+                  ListView(
                       reverse: true,
                       padding: EdgeInsets.all(16),
                       children: [
