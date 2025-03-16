@@ -67,14 +67,13 @@ class _MessagingPaneState extends State<MessagingPane> {
     }
 
     if (event is RoomMessageEvent) {
-      if(event.message.type == "openai.event") {
-          if(event.message.message["type"] == "response.output_text.delta") {
-            partial += event.message.message["delta"];
-            if(!mounted) {
-              return;
-            }
+      if (event.message.type == "openai.event") {
+        if (event.message.message["type"] == "response.output_text.delta") {
+          partial += event.message.message["delta"];
+          if (!mounted) {
+            return;
           }
-
+        }
       } else if (event.message.type == "chat") {
         addMessage(event.message.fromParticipantId, event.message);
       } else if (event.message.type == "typing") {
@@ -477,7 +476,9 @@ class _MessagingPaneState extends State<MessagingPane> {
                       ),
                     ),
                     PreConfig(
-                      decoration: BoxDecoration(color: ShadTheme.of(context).cardTheme.backgroundColor),
+                      decoration: BoxDecoration(
+                          color:
+                              ShadTheme.of(context).cardTheme.backgroundColor),
                       textStyle: TextStyle(
                         fontSize: baseFontSize * 1.0,
                         color: mdColor,
@@ -495,7 +496,6 @@ class _MessagingPaneState extends State<MessagingPane> {
                       style: GoogleFonts.sourceCodePro(
                         fontSize: baseFontSize * 1.0,
                         color: mdColor,
-                       
                       ),
                     ),
                     BlockquoteConfig(textColor: mdColor),
@@ -596,12 +596,14 @@ class _MessagingPaneState extends State<MessagingPane> {
                         reverse: true,
                         padding: EdgeInsets.all(16),
                         children: [
-                           if(partial != "") 
-                            Text(partial, style: ShadTheme.of(context).textTheme.p,),
+                          if (partial != "")
+                            Text(
+                              partial,
+                              style: ShadTheme.of(context).textTheme.p,
+                            ),
                           for (final message
                               in (threadMessages?.getChildren() ?? []).reversed)
                             buildMessage(context, message as MeshElement),
-                         
                         ],
                       ),
           ),
