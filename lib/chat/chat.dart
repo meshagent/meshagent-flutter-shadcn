@@ -16,19 +16,16 @@ import 'package:livekit_client/livekit_client.dart' as livekit;
 // ignore: depend_on_referenced_packages
 
 class ChatThreadLoader extends StatefulWidget {
-    const ChatThreadLoader(
+  const ChatThreadLoader(
       {super.key,
-      
-
-      required this.threadId,
+      this.participants,
+      required this.path,
       required this.room,
-      required this.participant,
       this.startChatCentered = false});
 
-
-  final String threadId;
+  final List<Participant>? participants;
+  final String path;
   final RoomClient room;
-  final Participant participant;
   final bool startChatCentered;
 
   @override
@@ -36,40 +33,67 @@ class ChatThreadLoader extends StatefulWidget {
 }
 
 class _ChatThreadLoader extends State<ChatThreadLoader> {
-
   Future<MeshDocument>? threadFuture;
-  
+
+  void ensureParticipants(MeshDocument document) {
+    if (widget.participants != null) {
+      Set<String> existing = {};
+
+      for (final child
+          in document.root.getChildren().whereType<MeshElement>()) {
+        if (child.tagName == "members") {
+          for (final member in child.getChildren().whereType<MeshElement>()) {
+            existing.add(member.getAttribute("name"));
+          }
+
+          for (final part in widget.participants!) {
+            if (!existing.contains(part.getAttribute("name"))) {
+              child.createChildElement(
+                  "member", {"name": part.getAttribute("name")});
+            }
+          }
+        }
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return DocumentConnectionScope(path: ".threads/${widget.threadId}.thread", room: widget.room, builder: (context,document,error) {
-      
-      if(error != null) {
-        return Center(child: Text("Unable to load thread", style: ShadTheme.of(context).textTheme.p,));
-      }
+    return DocumentConnectionScope(
+        path: widget.path,
+        room: widget.room,
+        builder: (context, document, error) {
+          if (error != null) {
+            return Center(
+                child: Text(
+              "Unable to load thread",
+              style: ShadTheme.of(context).textTheme.p,
+            ));
+          }
 
-      if(document == null) {
-        return Center(child: CircularProgressIndicator());
-      }
+          if (document == null) {
+            return Center(child: CircularProgressIndicator());
+          }
 
-      return ChatThread(threadId: widget.threadId, document: document, room: widget.room, participant: widget.participant);
-    });
+          ensureParticipants(document);
+
+          return ChatThread(
+              path: widget.path, document: document, room: widget.room);
+        });
   }
 }
 
 class ChatThread extends StatefulWidget {
   const ChatThread(
       {super.key,
-      required this.threadId,
+      required this.path,
       required this.document,
       required this.room,
-      required this.participant,
       this.startChatCentered = false});
 
-  final String threadId;
+  final String path;
   final MeshDocument document;
   final RoomClient room;
-  final Participant participant;
   final bool startChatCentered;
 
   @override
@@ -77,7 +101,6 @@ class ChatThread extends StatefulWidget {
 }
 
 class _ChatThread extends State<ChatThread> {
-    
   bool showSend = false;
 
   List<JsonResponse> attachments = [];
@@ -90,6 +113,14 @@ class _ChatThread extends State<ChatThread> {
   void initState() {
     super.initState();
     sub = widget.room.listen(onRoomMessage);
+    widget.document.addListener(onDocumentChanged);
+  }
+
+  void onDocumentChanged() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {});
   }
 
   void onRoomMessage(RoomEvent event) {
@@ -98,7 +129,8 @@ class _ChatThread extends State<ChatThread> {
     }
 
     if (event is RoomMessageEvent) {
-      if (event.message.type == "typing") {
+      if (event.message.type == "typing" &&
+          event.message.message["path"] == widget.path) {
         // TODO: verify thread_id matches
         typing[event.message.fromParticipantId]?.cancel();
         typing[event.message.fromParticipantId] = Timer(
@@ -113,7 +145,8 @@ class _ChatThread extends State<ChatThread> {
         if (mounted) {
           setState(() {});
         }
-      } else if (event.message.type == "thinking") {
+      } else if (event.message.type == "thinking" &&
+          event.message.message["path"] == widget.path) {
         if (event.message.message["thinking"] == true) {
           thinking.add(event.message.fromParticipantId);
         } else {
@@ -123,6 +156,26 @@ class _ChatThread extends State<ChatThread> {
         if (mounted) {
           setState(() {});
         }
+      }
+    }
+  }
+
+  Iterable<String> getParticipantNames() sync* {
+    for (final child
+        in widget.document.root.getChildren().whereType<MeshElement>()) {
+      if (child.tagName == "members") {
+        for (final member in child.getChildren().whereType<MeshElement>()) {
+          yield member.attributes["name"];
+        }
+      }
+    }
+  }
+
+  Iterable<RemoteParticipant> getOnlineParticipants() sync* {
+    for (final participantName in getParticipantNames()) {
+      for (final part in widget.room.messaging.remoteParticipants
+          .where((x) => x.getAttribute("name") == participantName)) {
+        yield part;
       }
     }
   }
@@ -142,15 +195,17 @@ class _ChatThread extends State<ChatThread> {
         "author_ref": null
       });
 
-      widget.room.messaging.sendMessage(
-        to: widget.participant,
-        type: "chat",
-        message: {
-          "thread_id": widget.threadId,
-          "text": controller.text,
-          "attachments": attachments.map((a) => a.json).toList()
-        },
-      );
+      for (final participant in getOnlineParticipants()) {
+        widget.room.messaging.sendMessage(
+          to: participant,
+          type: "chat",
+          message: {
+            "path": widget.path,
+            "text": controller.text,
+            "attachments": attachments.map((a) => a.json).toList()
+          },
+        );
+      }
 
       attachments.clear();
       controller.text = "";
@@ -159,7 +214,6 @@ class _ChatThread extends State<ChatThread> {
   }
 
   final controller = ShadTextEditingController();
-
 
   Widget buildMessage(BuildContext context, MeshElement message) {
     bool mine = message.attributes["author_name"] ==
@@ -312,34 +366,35 @@ class _ChatThread extends State<ChatThread> {
         .firstOrNull;
 
     bool bottomAlign = !widget.startChatCentered ||
-        (threadMessages?.children ?? []).isNotEmpty;
+        (threadMessages?.getChildren() ?? []).isNotEmpty;
     return Column(
       mainAxisAlignment:
           bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
       children: [
         Expanded(
-          child:
-                  ListView(
-                      reverse: true,
-                      padding: EdgeInsets.all(16),
-                      children: [
-                        for (final message
-                            in (threadMessages?.getChildren() ?? []).reversed)
-                          buildMessage(context, message as MeshElement),
-                      ],
-                    ),
+          child: ListView(
+            reverse: true,
+            padding: EdgeInsets.all(16),
+            children: [
+              for (final message
+                  in (threadMessages?.getChildren() ?? []).reversed)
+                buildMessage(context, message as MeshElement),
+            ],
+          ),
         ),
         if (!bottomAlign)
-          Padding(
-            padding: EdgeInsets.symmetric(vertical: 20, horizontal: 50),
-            child: Text(
-              widget.participant.getAttribute("empty_state_title") ??
-                  "How can I help you?",
-              style: ShadTheme.of(context).textTheme.h3,
+          if (getOnlineParticipants().firstOrNull != null)
+            Padding(
+              padding: EdgeInsets.symmetric(vertical: 20, horizontal: 50),
+              child: Text(
+                getOnlineParticipants()
+                        .first
+                        .getAttribute("empty_state_title") ??
+                    "How can I help you?",
+                style: ShadTheme.of(context).textTheme.h3,
+              ),
             ),
-          ),
-        if ((typing.containsKey(widget.participant.id) == true ||
-            thinking.contains(widget.participant.id)))
+        if ((typing.isNotEmpty || thinking.isNotEmpty))
           Container(
             width: double.infinity,
             height: 30,
@@ -464,35 +519,17 @@ class _ChatThread extends State<ChatThread> {
                   });
                 }
 
-                final part = widget.participant;
-
-                widget.room.messaging.sendMessage(
-                  to: part,
-                  type: "typing",
-                  message: {},
-                );
+                for (final part in getOnlineParticipants()) {
+                  widget.room.messaging.sendMessage(
+                    to: part,
+                    type: "typing",
+                    message: {"path": widget.path},
+                  );
+                }
               },
-              enabled: widget.participant is! RemoteParticipant ||
-                  ((widget.participant as RemoteParticipant).role != "agent" ||
-                      (widget.participant as RemoteParticipant)
-                              .getAttribute("thinking") !=
-                          true),
+
               maxLines: null,
-              placeholder: widget.participant is! RemoteParticipant ||
-                      ((widget.participant as RemoteParticipant).role !=
-                              "agent" ||
-                          (widget.participant as RemoteParticipant)
-                                  .getAttribute("thinking") !=
-                              true)
-                  ? Text("Message")
-                  : Align(
-                      alignment: Alignment.centerLeft,
-                      child: SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(),
-                      ),
-                    ),
+              placeholder: Text("Message"),
               focusNode: focusNode,
               //textInputAction: TextInputAction.newline,
               controller: controller,
@@ -522,6 +559,7 @@ class _ChatThread extends State<ChatThread> {
     focusNode.dispose();
     controller.dispose();
     sub.cancel();
+    widget.document.removeListener(onDocumentChanged);
   }
 }
 

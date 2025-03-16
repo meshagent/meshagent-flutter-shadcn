@@ -72,7 +72,9 @@ class DocumentViewerElement extends StatelessWidget {
               width: double.infinity,
               child: Padding(
                 padding: EdgeInsets.only(
-                    top: element.parent!.children.indexOf(element) > 0 ? 50 : 0,
+                    top: element.parent!.getChildren().indexOf(element) > 0
+                        ? 50
+                        : 0,
                     left: 30,
                     right: 30),
                 child: Text(
