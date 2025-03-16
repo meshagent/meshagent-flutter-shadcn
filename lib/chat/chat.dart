@@ -1,5 +1,6 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:markdown_widget/markdown_widget.dart';
 import 'package:meshagent/document.dart';
 import 'package:meshagent/room_server_client.dart';
@@ -58,13 +59,23 @@ class _MessagingPaneState extends State<MessagingPane> {
 
   late StreamSubscription<RoomEvent> sub;
 
+  String partial = "";
+
   void onRoomMessage(RoomEvent event) {
     if (!mounted) {
       return;
     }
 
     if (event is RoomMessageEvent) {
-      if (event.message.type == "chat") {
+      if(event.message.type == "openai.event") {
+          if(event.message.message["type"] == "response.output_text.delta") {
+            partial += event.message.message["delta"];
+            if(!mounted) {
+              return;
+            }
+          }
+
+      } else if (event.message.type == "chat") {
         addMessage(event.message.fromParticipantId, event.message);
       } else if (event.message.type == "typing") {
         typing[event.message.fromParticipantId]?.cancel();
@@ -466,6 +477,7 @@ class _MessagingPaneState extends State<MessagingPane> {
                       ),
                     ),
                     PreConfig(
+                      decoration: BoxDecoration(color: ShadTheme.of(context).cardTheme.backgroundColor),
                       textStyle: TextStyle(
                         fontSize: baseFontSize * 1.0,
                         color: mdColor,
@@ -480,10 +492,10 @@ class _MessagingPaneState extends State<MessagingPane> {
                       ),
                     ),
                     CodeConfig(
-                      style: TextStyle(
+                      style: GoogleFonts.sourceCodePro(
                         fontSize: baseFontSize * 1.0,
                         color: mdColor,
-                        inherit: false,
+                       
                       ),
                     ),
                     BlockquoteConfig(textColor: mdColor),
@@ -584,9 +596,12 @@ class _MessagingPaneState extends State<MessagingPane> {
                         reverse: true,
                         padding: EdgeInsets.all(16),
                         children: [
+                           if(partial != "") 
+                            Text(partial, style: ShadTheme.of(context).textTheme.p,),
                           for (final message
                               in (threadMessages?.getChildren() ?? []).reversed)
                             buildMessage(context, message as MeshElement),
+                         
                         ],
                       ),
           ),
@@ -808,7 +823,7 @@ class _MessagingPaneState extends State<MessagingPane> {
               children: [
                 ShadResizablePanel(
                   id: "participants",
-                  minSize: .1,
+                  minSize: 0,
                   defaultSize: .25,
                   child: buildParticipants(context),
                 ),
