@@ -53,12 +53,12 @@ class _VideoPreviewState extends State<VideoPreview> {
 
   @override
   Widget build(BuildContext context) {
-    return _VideoAttachment(videoUrl: widget.url.toString());
+    return VideoAttachment(videoUrl: widget.url.toString());
   }
 }
 
-class _VideoAttachment extends StatefulWidget {
-  const _VideoAttachment({
+class VideoAttachment extends StatefulWidget {
+  const VideoAttachment({
     // ignore: unused_element
     super.key,
     required this.videoUrl,
@@ -97,7 +97,7 @@ class _VideoAttachment extends StatefulWidget {
   State<StatefulWidget> createState() => _VideoAttachmentState();
 }
 
-class _VideoAttachmentState extends State<_VideoAttachment> {
+class _VideoAttachmentState extends State<VideoAttachment> {
   bool isLoaded = false;
 
   VideoPlayerController? controller;
@@ -452,7 +452,7 @@ class _AudioAttachmentState extends State<_AudioAttachment> {
                   player!.play();
                 }
               },
-              icon: snapshot.data?.playing == true
+              leading: snapshot.data?.playing == true
                   ? const Icon(size: 16, LucideIcons.pause)
                   : const Icon(size: 16, LucideIcons.play),
               child: snapshot.data?.playing == true

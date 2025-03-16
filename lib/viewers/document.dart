@@ -6,7 +6,6 @@ import '../file_preview/file_preview.dart';
 import 'package:flutter/material.dart';
 import "builder.dart";
 import 'package:markdown_widget/markdown_widget.dart';
-import 'package:markdown_widget/widget/all.dart';
 
 class DocumentViewer extends StatefulWidget {
   DocumentViewer({required this.document, super.key, required this.client});

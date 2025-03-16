@@ -180,18 +180,18 @@ class _PdfPageState extends State<PdfPage> {
   Widget build(BuildContext context) {
     final doc = widget.document;
     return AspectRatio(
-      aspectRatio: (doc!.pages[page].width / doc!.pages[page].height),
+      aspectRatio: (doc.pages[page].width / doc.pages[page].height),
       child: LayoutBuilder(
         builder: (context, constraints) {
           final ro = context.findRenderObject() as RenderBox?;
 
           if (ro != null && ro.hasSize) {
-            renderAtScreenSize(doc!, page, ro);
+            renderAtScreenSize(doc, page, ro);
           } else {
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (mounted) {
                 final ro = context.findRenderObject() as RenderBox;
-                renderAtScreenSize(doc!, page, ro);
+                renderAtScreenSize(doc, page, ro);
               }
             });
           }
