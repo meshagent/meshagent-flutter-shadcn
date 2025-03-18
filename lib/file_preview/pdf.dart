@@ -9,12 +9,7 @@ class PdfPreview extends StatefulWidget {
     super.key,
     this.pageNumber = 0,
     required this.url,
-    this.backgroundColor = const Color.from(
-      alpha: 1,
-      red: 1,
-      green: 1,
-      blue: 1,
-    ),
+    this.backgroundColor = const Color.from(alpha: 1, red: 1, green: 1, blue: 1),
     required this.fit,
   });
 
@@ -54,14 +49,13 @@ class _PdfPreviewState extends State<PdfPreview> {
   Widget build(BuildContext context) {
     if (doc != null) {
       return ListView.builder(
-          itemCount: doc!.pages.length,
-          itemBuilder: (context, index) => Padding(
+        itemCount: doc!.pages.length,
+        itemBuilder:
+            (context, index) => Padding(
               padding: EdgeInsets.all(30),
-              child: PdfPage(
-                  document: doc!,
-                  pageNumber: index,
-                  backgroundColor: widget.backgroundColor,
-                  fit: widget.fit)));
+              child: PdfPage(document: doc!, pageNumber: index, backgroundColor: widget.backgroundColor, fit: widget.fit),
+            ),
+      );
     } else {
       return Container();
     }
@@ -69,12 +63,7 @@ class _PdfPreviewState extends State<PdfPreview> {
 }
 
 class PdfPage extends StatefulWidget {
-  PdfPage(
-      {super.key,
-      required this.document,
-      required this.pageNumber,
-      required this.backgroundColor,
-      required this.fit});
+  PdfPage({super.key, required this.document, required this.pageNumber, required this.backgroundColor, required this.fit});
 
   final PdfDocument document;
   final int pageNumber;
@@ -105,8 +94,7 @@ class _PdfPageState extends State<PdfPage> {
     size = size * scale * mq.devicePixelRatio;
     final maxSize = mq.size * mq.devicePixelRatio;
     if (size.width > maxSize.width || size.height > maxSize.height) {
-      size = size *
-          (math.min(maxSize.width / size.width, maxSize.height / size.height));
+      size = size * (math.min(maxSize.width / size.width, maxSize.height / size.height));
     }
     if ((!loaded || size != loadedSize) && !loading && size != Size.zero) {
       debugPrint("loading pdf $size vs $loadedSize $loaded");
@@ -166,8 +154,7 @@ class _PdfPageState extends State<PdfPage> {
   }
 
   void renderAtScreenSize(PdfDocument doc, int pageNumber, RenderBox ro) {
-    final screenSize = ro.localToGlobal(Offset(ro.size.width, ro.size.height)) -
-        ro.localToGlobal(Offset.zero);
+    final screenSize = ro.localToGlobal(Offset(ro.size.width, ro.size.height)) - ro.localToGlobal(Offset.zero);
 
     render(doc, Size(screenSize.dx, screenSize.dy), pageNumber, 1.0);
   }
@@ -209,18 +196,14 @@ class _PdfPageState extends State<PdfPage> {
               );
             } else if (constraints.hasBoundedHeight) {
               return SizedBox(
-                width: constraints.maxHeight *
-                    image!.width.toDouble() /
-                    image!.height.toDouble(),
+                width: constraints.maxHeight * image!.width.toDouble() / image!.height.toDouble(),
                 height: constraints.maxHeight,
                 child: CustomPaint(painter: _ImagePainter(image!)),
               );
             } else if (constraints.hasBoundedWidth) {
               return SizedBox(
                 width: constraints.maxWidth,
-                height: constraints.maxWidth *
-                    image!.height.toDouble() /
-                    image!.width.toDouble(),
+                height: constraints.maxWidth * image!.height.toDouble() / image!.width.toDouble(),
                 child: CustomPaint(painter: _ImagePainter(image!)),
               );
             } else {

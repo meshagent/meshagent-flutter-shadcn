@@ -12,12 +12,7 @@ class AudioWave extends StatefulWidget {
     required this.participant,
     super.key,
     this.alignment = Alignment.center,
-    this.backgroundColor = const Color.from(
-      alpha: 1,
-      red: 1,
-      green: 1,
-      blue: 1,
-    ),
+    this.backgroundColor = const Color.from(alpha: 1, red: 1, green: 1, blue: 1),
   });
 
   final Room room;
@@ -66,8 +61,7 @@ class _AudioWaveState extends State<AudioWave> {
   void onParticipantUpdated() {
     if (mounted) {
       setState(() {
-        thinking =
-            widget.participant.attributes["lk.agent.state"] == "thinking";
+        thinking = widget.participant.attributes["lk.agent.state"] == "thinking";
 
         listening = widget.participant.attributes["busy"] != "true";
 
@@ -90,10 +84,7 @@ class _AudioWaveState extends State<AudioWave> {
   late IOS7SiriWaveformController controller;
 
   void onTick(Timer t) async {
-    final track = widget.participant.audioTrackPublications
-        .where((x) => !x.muted)
-        .firstOrNull
-        ?.track;
+    final track = widget.participant.audioTrackPublications.where((x) => !x.muted).firstOrNull?.track;
 
     final receiver = (track as AudioTrack?)?.receiver;
 
@@ -135,10 +126,7 @@ class _AudioWaveState extends State<AudioWave> {
         //    colors: [filledButtonColor, darken(filledButtonColor, 20)]),
         //borderRadius: BorderRadius.circular(10),
       ),
-      child: Opacity(
-        opacity: hasReceivedLevels ? 1 : 0.1,
-        child: SiriWaveform.ios7(controller: controller),
-      ),
+      child: Opacity(opacity: hasReceivedLevels ? 1 : 0.1, child: SiriWaveform.ios7(controller: controller)),
     );
   }
 }

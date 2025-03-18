@@ -8,18 +8,7 @@ import "pdf.dart";
 import "video.dart";
 import "code.dart";
 
-final imageExtensions = <String>{
-  "png",
-  "jpeg",
-  "jfif",
-  "jpg",
-  "heic",
-  "webp",
-  "tif",
-  "tiff",
-  "gif",
-  "svg",
-};
+final imageExtensions = <String>{"png", "jpeg", "jfif", "jpg", "heic", "webp", "tif", "tiff", "gif", "svg"};
 final pdfExtensions = <String>{"pdf"};
 final videoExtensions = <String>{"mp4", "mkv", "mov"};
 final audioExtensions = <String>{"mp3", "ogg", "wav"};
@@ -27,12 +16,7 @@ final codeExtension = <String>{"json"};
 
 final officeExtensions = <String>{"docx", "pptx", "xlsx"};
 
-Widget filePreview({
-  Key? key,
-  required String filename,
-  required Uri url,
-  BoxFit fit = BoxFit.cover,
-}) {
+Widget filePreview({Key? key, required String filename, required Uri url, BoxFit fit = BoxFit.cover}) {
   // assuming URL has extension, which is generally bad
   final extension = filename.split(".").last.toLowerCase();
   if (imageExtensions.contains(extension)) {
@@ -51,11 +35,7 @@ Widget filePreview({
 }
 
 class FilePreview extends StatefulWidget {
-  FilePreview({
-    required this.client,
-    required this.path,
-    this.fit = BoxFit.cover,
-  }) : super(key: Key(path));
+  FilePreview({required this.client, required this.path, this.fit = BoxFit.cover}) : super(key: Key(path));
 
   final String path;
   final RoomClient client;
@@ -66,9 +46,7 @@ class FilePreview extends StatefulWidget {
 }
 
 class _FilePreviewState extends State<FilePreview> {
-  late final Future<String> urlLookup = widget.client.storage.downloadUrl(
-    widget.path,
-  );
+  late final Future<String> urlLookup = widget.client.storage.downloadUrl(widget.path);
 
   @override
   Widget build(BuildContext context) {
@@ -86,16 +64,10 @@ class _FilePreviewState extends State<FilePreview> {
                 child: Text("Download"),
               ),
             ],
-            child: filePreview(
-              filename: widget.path,
-              url: Uri.parse(snapshot.data!),
-              fit: widget.fit,
-            ),
+            child: filePreview(filename: widget.path, url: Uri.parse(snapshot.data!), fit: widget.fit),
           );
         } else {
-          return ColoredBox(
-            color: ShadTheme.of(context).colorScheme.background,
-          );
+          return ColoredBox(color: ShadTheme.of(context).colorScheme.background);
         }
       },
     );

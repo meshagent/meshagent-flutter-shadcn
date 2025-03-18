@@ -36,19 +36,12 @@ class _PresentationViewerState extends State<PresentationViewer> {
 
   @override
   Widget build(BuildContext context) {
-    return PresentationViewerElement(
-      client: widget.client,
-      element: widget.document.root,
-    );
+    return PresentationViewerElement(client: widget.client, element: widget.document.root);
   }
 }
 
 class PresentationViewerElement extends StatefulWidget {
-  PresentationViewerElement({
-    required this.client,
-    required this.element,
-    super.key,
-  });
+  PresentationViewerElement({required this.client, required this.element, super.key});
 
   final RoomClient client;
   final docs.MeshElement element;
@@ -65,8 +58,7 @@ class _PresentationViewerElementState extends State<PresentationViewerElement> {
     final children = element.getChildren();
     return [
       for (var child in children)
-        if (child is docs.MeshElement)
-          PresentationViewerElement(client: client, element: child),
+        if (child is docs.MeshElement) PresentationViewerElement(client: client, element: child),
     ];
   }
 
@@ -97,19 +89,10 @@ class _PresentationViewerElementState extends State<PresentationViewerElement> {
           height: 900,
           decoration: BoxDecoration(color: Colors.black),
           margin: EdgeInsets.all(30),
-          foregroundDecoration: BoxDecoration(
-            border: Border.all(
-              color: Color.from(alpha: .1, red: 0, green: 0, blue: 0),
-            ),
-          ),
+          foregroundDecoration: BoxDecoration(border: Border.all(color: Color.from(alpha: .1, red: 0, green: 0, blue: 0))),
           child: Stack(
             children: [
-              Positioned.fill(
-                child: FilePreview(
-                  client: client,
-                  path: slide.getAttribute("background"),
-                ),
-              ),
+              Positioned.fill(child: FilePreview(client: client, path: slide.getAttribute("background"))),
               Center(
                 child: Padding(
                   padding: EdgeInsets.all(50),
@@ -134,9 +117,7 @@ class _PresentationViewerElementState extends State<PresentationViewerElement> {
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          for (final bp in slide
-                              .getChildren()
-                              .whereType<docs.MeshElement>())
+                          for (final bp in slide.getChildren().whereType<docs.MeshElement>())
                             ElementTextField(
                               controller: controller,
                               element: bp,
@@ -169,18 +150,15 @@ class _PresentationViewerElementState extends State<PresentationViewerElement> {
 
     return ChangeNotifierBuilder(
       source: element,
-      builder: (context) => Padding(
-        padding: EdgeInsets.symmetric(horizontal: 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ...element.getChildren().map(
-                  (slide) => buildSlide(context, slide as docs.MeshElement),
-                ),
-          ],
-        ),
-      ),
+      builder:
+          (context) => Padding(
+            padding: EdgeInsets.symmetric(horizontal: 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [...element.getChildren().map((slide) => buildSlide(context, slide as docs.MeshElement))],
+            ),
+          ),
     );
   }
 }

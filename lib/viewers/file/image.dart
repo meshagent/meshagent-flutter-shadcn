@@ -29,24 +29,21 @@ class _ImageViewerState extends State<ImageViewer> {
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
-      builder: (context, constraints) => Container(
-        color: ShadTheme.of(context).colorScheme.background,
-        child: InteractiveViewer2(
-          child: OverflowBox(
-            maxHeight: double.infinity,
-            maxWidth: double.infinity,
-            child: Container(
-              padding: EdgeInsets.all(30),
-              width: constraints.maxWidth * .7,
-              child: FilePreview(
-                client: widget.client,
-                path: widget.path,
-                fit: BoxFit.contain,
+      builder:
+          (context, constraints) => Container(
+            color: ShadTheme.of(context).colorScheme.background,
+            child: InteractiveViewer2(
+              child: OverflowBox(
+                maxHeight: double.infinity,
+                maxWidth: double.infinity,
+                child: Container(
+                  padding: EdgeInsets.all(30),
+                  width: constraints.maxWidth * .7,
+                  child: FilePreview(client: widget.client, path: widget.path, fit: BoxFit.contain),
+                ),
               ),
             ),
           ),
-        ),
-      ),
     );
   }
 }

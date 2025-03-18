@@ -7,12 +7,7 @@ import 'package:webrtc_interface/webrtc_interface.dart';
 import './meetings.dart';
 
 class ParticipantCamerasList extends StatefulWidget {
-  ParticipantCamerasList({
-    required this.controller,
-    this.padding = EdgeInsets.zero,
-    this.spacing = 10,
-    super.key,
-  });
+  ParticipantCamerasList({required this.controller, this.padding = EdgeInsets.zero, this.spacing = 10, super.key});
 
   final double spacing;
   final EdgeInsets padding;
@@ -28,27 +23,22 @@ class _ParticipantCamerasListState extends State<ParticipantCamerasList> {
     final controller = widget.controller;
     return ListenableBuilder(
       listenable: widget.controller.room,
-      builder: (context, _) => ListView(
-        padding: widget.padding,
-        scrollDirection: Axis.horizontal,
-        children: [
-          if (controller.room.localParticipant != null)
-            ParticipantTile(
-              room: controller.room,
-              participant: controller.room.localParticipant!,
-            ),
-          SizedBox(width: widget.spacing),
-          ...controller.room.remoteParticipants.values.map(
-            (participant) => Padding(
-              padding: EdgeInsets.only(right: widget.spacing),
-              child: ParticipantTile(
-                room: controller.room,
-                participant: participant,
+      builder:
+          (context, _) => ListView(
+            padding: widget.padding,
+            scrollDirection: Axis.horizontal,
+            children: [
+              if (controller.room.localParticipant != null)
+                ParticipantTile(room: controller.room, participant: controller.room.localParticipant!),
+              SizedBox(width: widget.spacing),
+              ...controller.room.remoteParticipants.values.map(
+                (participant) => Padding(
+                  padding: EdgeInsets.only(right: widget.spacing),
+                  child: ParticipantTile(room: controller.room, participant: participant),
+                ),
               ),
-            ),
+            ],
           ),
-        ],
-      ),
     );
   }
 }
@@ -64,24 +54,17 @@ class ParticipantTile extends StatelessWidget {
     return ListenableBuilder(
       listenable: participant,
       builder: (context, _) {
-        final track = participant.trackPublications.values
-            .map((x) => x.track)
-            .whereType<VideoTrack>()
-            .firstOrNull;
+        final track = participant.trackPublications.values.map((x) => x.track).whereType<VideoTrack>().firstOrNull;
         return AspectRatio(
           aspectRatio: 4 / 3,
           child: _CameraBox(
             muted: participant.isMuted,
-            camera: track != null
-                ? VideoTrackRenderer(
-                    track,
-                    fit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-                  )
-                : (participant.kind == ParticipantKind.AGENT
-                    ? AudioWave(room: room, participant: participant)
-                    : ColoredBox(
-                        color: ShadTheme.of(context).colorScheme.foreground,
-                      )),
+            camera:
+                track != null
+                    ? VideoTrackRenderer(track, fit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover)
+                    : (participant.kind == ParticipantKind.AGENT
+                        ? AudioWave(room: room, participant: participant)
+                        : ColoredBox(color: ShadTheme.of(context).colorScheme.foreground)),
             participantName: participant.name,
           ),
         );
@@ -91,11 +74,7 @@ class ParticipantTile extends StatelessWidget {
 }
 
 class _ParticipantOverlay extends StatefulWidget {
-  const _ParticipantOverlay({
-    required this.name,
-    required this.muted,
-    this.showName = true,
-  });
+  const _ParticipantOverlay({required this.name, required this.muted, this.showName = true});
 
   final String name;
   final bool muted;
@@ -105,8 +84,7 @@ class _ParticipantOverlay extends StatefulWidget {
   _ParticipantOverlayState createState() => _ParticipantOverlayState();
 }
 
-class _ParticipantOverlayState extends State<_ParticipantOverlay>
-    with SingleTickerProviderStateMixin {
+class _ParticipantOverlayState extends State<_ParticipantOverlay> with SingleTickerProviderStateMixin {
   late AnimationController _animationController;
   late Animation<double> _animation;
 
@@ -123,19 +101,14 @@ class _ParticipantOverlayState extends State<_ParticipantOverlay>
       vsync: this,
     );
 
-    _animation = CurvedAnimation(
-      parent: _animationController,
-      curve: Curves.easeOut,
-    );
+    _animation = CurvedAnimation(parent: _animationController, curve: Curves.easeOut);
   }
 
   @override
   void didUpdateWidget(covariant _ParticipantOverlay oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.showName != oldWidget.showName) {
-      widget.showName
-          ? _animationController.forward()
-          : _animationController.reverse();
+      widget.showName ? _animationController.forward() : _animationController.reverse();
     }
   }
 
@@ -149,28 +122,17 @@ class _ParticipantOverlayState extends State<_ParticipantOverlay>
   Widget build(BuildContext context) {
     const audioIconSize = 16.0;
     const audioIconColor = Colors.white;
-    const textStyle = TextStyle(
-      color: audioIconColor,
-      fontSize: 11,
-      fontWeight: FontWeight.w500,
-    );
+    const textStyle = TextStyle(color: audioIconColor, fontSize: 11, fontWeight: FontWeight.w500);
 
     return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        color: const Color(0x992f2d57),
-      ),
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: const Color(0x992f2d57)),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Icon(
-            widget.muted ? Icons.mic_off : Icons.mic,
-            color: audioIconColor,
-            size: audioIconSize,
-          ),
+          Icon(widget.muted ? Icons.mic_off : Icons.mic, color: audioIconColor, size: audioIconSize),
           if (widget.name.isNotEmpty)
             AnimatedBuilder(
               animation: _animationController,
@@ -178,23 +140,13 @@ class _ParticipantOverlayState extends State<_ParticipantOverlay>
                 return Flexible(
                   child: SizedBox(
                     height: audioIconSize,
-                    child: ClipRect(
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        widthFactor: _animation.value,
-                        child: child,
-                      ),
-                    ),
+                    child: ClipRect(child: Align(alignment: Alignment.centerLeft, widthFactor: _animation.value, child: child)),
                   ),
                 );
               },
               child: Padding(
                 padding: const EdgeInsets.only(left: 1, right: 3),
-                child: Text(
-                  widget.name,
-                  style: textStyle,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                child: Text(widget.name, style: textStyle, overflow: TextOverflow.ellipsis),
               ),
             ),
         ],
@@ -204,11 +156,7 @@ class _ParticipantOverlayState extends State<_ParticipantOverlay>
 }
 
 class _CameraBox extends StatelessWidget {
-  const _CameraBox({
-    required this.camera,
-    required this.participantName,
-    this.muted = false,
-  });
+  const _CameraBox({required this.camera, required this.participantName, this.muted = false});
 
   final Widget camera;
   final String participantName;
@@ -240,13 +188,7 @@ class _CameraBox extends StatelessWidget {
               alignment: overlayAlignment,
               child: Padding(
                 padding: const EdgeInsets.all(5),
-                child: IntrinsicWidth(
-                  child: _ParticipantOverlay(
-                    name: participantName,
-                    muted: muted,
-                    showName: showName,
-                  ),
-                ),
+                child: IntrinsicWidth(child: _ParticipantOverlay(name: participantName, muted: muted, showName: showName)),
               ),
             ),
           ],

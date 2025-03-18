@@ -12,32 +12,17 @@ Future<livekit.RoomOptions> getSavedRoomOptions() async {
   final preferedAudioOutputDeviceId = preferences.getString("audioOutput");
 
   savedRoomOptions = livekit.RoomOptions(
-    defaultScreenShareCaptureOptions: const livekit.ScreenShareCaptureOptions(
-      useiOSBroadcastExtension: true,
-      preferCurrentTab: false,
-    ),
-    defaultCameraCaptureOptions: livekit.CameraCaptureOptions(
-      deviceId: preferedVideoDeviceId,
-    ),
-    defaultAudioCaptureOptions: livekit.AudioCaptureOptions(
-      deviceId: preferedAudioInputDeviceId,
-    ),
-    defaultAudioOutputOptions: livekit.AudioOutputOptions(
-      deviceId: preferedAudioOutputDeviceId,
-    ),
+    defaultScreenShareCaptureOptions: const livekit.ScreenShareCaptureOptions(useiOSBroadcastExtension: true, preferCurrentTab: false),
+    defaultCameraCaptureOptions: livekit.CameraCaptureOptions(deviceId: preferedVideoDeviceId),
+    defaultAudioCaptureOptions: livekit.AudioCaptureOptions(deviceId: preferedAudioInputDeviceId),
+    defaultAudioOutputOptions: livekit.AudioOutputOptions(deviceId: preferedAudioOutputDeviceId),
   );
 
   return savedRoomOptions;
 }
 
 class MeetingScope extends StatefulWidget {
-  const MeetingScope({
-    super.key,
-    required this.client,
-    required this.roomName,
-    required this.builder,
-    this.roomOptions,
-  });
+  const MeetingScope({super.key, required this.client, required this.roomName, required this.builder, this.roomOptions});
 
   final livekit.RoomOptions? roomOptions;
   final RoomClient client;
@@ -49,10 +34,7 @@ class MeetingScope extends StatefulWidget {
 }
 
 class _MeetingScopeState extends State<MeetingScope> {
-  late final MeetingController controller = MeetingController(
-    client: widget.client,
-    roomOptions: widget.roomOptions,
-  );
+  late final MeetingController controller = MeetingController(client: widget.client, roomOptions: widget.roomOptions);
 
   @override
   void initState() {
@@ -72,16 +54,13 @@ class _MeetingScopeState extends State<MeetingScope> {
 
   @override
   Widget build(BuildContext context) {
-    return _MeetingControllerData(
-      controller: controller,
-      child: widget.builder(context, controller),
-    );
+    return _MeetingControllerData(controller: controller, child: widget.builder(context, controller));
   }
 }
 
 class MeetingController extends ChangeNotifier {
   MeetingController({required this.client, livekit.RoomOptions? roomOptions})
-      : room = livekit.Room(roomOptions: roomOptions ?? livekit.RoomOptions()) {
+    : room = livekit.Room(roomOptions: roomOptions ?? livekit.RoomOptions()) {
     room.addListener(_onRoomChanged);
   }
 
@@ -99,19 +78,8 @@ class MeetingController extends ChangeNotifier {
   }
 
   bool get hasParticipantsWithVideo {
-    return room.localParticipant?.videoTrackPublications
-                .where((pub) => !pub.muted)
-                .isNotEmpty ==
-            true ||
-        room.remoteParticipants.values
-            .where(
-              (p) =>
-                  p.videoTrackPublications
-                      .where((pub) => !pub.muted)
-                      .isNotEmpty ==
-                  true,
-            )
-            .isNotEmpty;
+    return room.localParticipant?.videoTrackPublications.where((pub) => !pub.muted).isNotEmpty == true ||
+        room.remoteParticipants.values.where((p) => p.videoTrackPublications.where((pub) => !pub.muted).isNotEmpty == true).isNotEmpty;
   }
 
   void _onRoomChanged() {
@@ -120,9 +88,7 @@ class MeetingController extends ChangeNotifier {
 
   Future<void> configure(String roomName) async {
     if (room.connectionState != livekit.ConnectionState.disconnected) {
-      throw new Exception(
-        "You cannot reconfigure while the controller is connected",
-      );
+      throw new Exception("You cannot reconfigure while the controller is connected");
     }
     _config = null;
     _configurationError = null;
@@ -142,11 +108,7 @@ class MeetingController extends ChangeNotifier {
     if (config == null) {
       throw new Exception("The controller has not been configured");
     }
-    await room.connect(
-      config.url,
-      config.token,
-      fastConnectOptions: fastConnectOptions,
-    );
+    await room.connect(config.url, config.token, fastConnectOptions: fastConnectOptions);
   }
 
   Future<void> disconnect() async {

@@ -2,11 +2,7 @@ import 'package:meshagent/document.dart' as docs;
 import 'package:flutter/widgets.dart';
 
 class ChangeNotifierBuilder extends StatefulWidget {
-  ChangeNotifierBuilder({
-    required this.source,
-    super.key,
-    required this.builder,
-  });
+  ChangeNotifierBuilder({required this.source, super.key, required this.builder});
 
   final docs.ChangeEmitter source;
   final Widget Function(BuildContext) builder;

@@ -36,19 +36,12 @@ class _GalleryViewerState extends State<GalleryViewer> {
 
   @override
   Widget build(BuildContext context) {
-    return GalleryViewerElement(
-      client: widget.client,
-      element: widget.document.root,
-    );
+    return GalleryViewerElement(client: widget.client, element: widget.document.root);
   }
 }
 
 class GalleryViewerElement extends StatefulWidget {
-  const GalleryViewerElement({
-    required this.client,
-    required this.element,
-    super.key,
-  });
+  const GalleryViewerElement({required this.client, required this.element, super.key});
 
   final RoomClient client;
   final docs.MeshElement element;
@@ -64,11 +57,7 @@ class _GalleryViewerElementState extends State<GalleryViewerElement> {
 
   String? selectedDescription;
 
-  Widget renderSelectedImage(
-    BuildContext context,
-    String path,
-    String description,
-  ) {
+  Widget renderSelectedImage(BuildContext context, String path, String description) {
     return Column(
       children: [
         Container(
@@ -112,63 +101,41 @@ class _GalleryViewerElementState extends State<GalleryViewerElement> {
           children: [
             Positioned.fill(
               child: Offstage(
-                  offstage: selectedImage != null,
-                  child: GridView.builder(
-                    padding: EdgeInsets.symmetric(horizontal: 10),
-                    itemCount: children.length,
-                    gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-                      childAspectRatio: 4 / 3,
-                      maxCrossAxisExtent: 600,
-                    ),
-                    itemBuilder: (context, index) => ShadGestureDetector(
-                      cursor: SystemMouseCursors.click,
-                      onTapUp: (_) {
-                        setState(() {
-                          selectedImage = (children[index] as docs.MeshElement)
-                              .getAttribute("path");
-                          selectedDescription =
-                              (children[index] as docs.MeshElement)
-                                  .attributes["description"];
-                        });
-                      },
-                      onTapDown: (_) {
-                        setState(() {
-                          selectedImage = (children[index] as docs.MeshElement)
-                              .getAttribute("path");
-                          selectedDescription =
-                              (children[index] as docs.MeshElement)
-                                  .attributes["description"];
-                        });
-                      },
-                      child: Container(
-                        margin: EdgeInsets.all(5),
-                        foregroundDecoration: BoxDecoration(
-                          border: Border.all(
-                            color: Color.fromARGB(20, 0, 0, 0),
+                offstage: selectedImage != null,
+                child: GridView.builder(
+                  padding: EdgeInsets.symmetric(horizontal: 10),
+                  itemCount: children.length,
+                  gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(childAspectRatio: 4 / 3, maxCrossAxisExtent: 600),
+                  itemBuilder:
+                      (context, index) => ShadGestureDetector(
+                        cursor: SystemMouseCursors.click,
+                        onTapUp: (_) {
+                          setState(() {
+                            selectedImage = (children[index] as docs.MeshElement).getAttribute("path");
+                            selectedDescription = (children[index] as docs.MeshElement).attributes["description"];
+                          });
+                        },
+                        onTapDown: (_) {
+                          setState(() {
+                            selectedImage = (children[index] as docs.MeshElement).getAttribute("path");
+                            selectedDescription = (children[index] as docs.MeshElement).attributes["description"];
+                          });
+                        },
+                        child: Container(
+                          margin: EdgeInsets.all(5),
+                          foregroundDecoration: BoxDecoration(
+                            border: Border.all(color: Color.fromARGB(20, 0, 0, 0)),
+                            borderRadius: BorderRadius.circular(5),
                           ),
-                          borderRadius: BorderRadius.circular(5),
-                        ),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(5),
-                        ),
-                        clipBehavior: Clip.antiAlias,
-                        child: FilePreview(
-                          client: client,
-                          path: (children[index] as docs.MeshElement)
-                              .getAttribute(
-                            "path",
-                          ),
+                          decoration: BoxDecoration(borderRadius: BorderRadius.circular(5)),
+                          clipBehavior: Clip.antiAlias,
+                          child: FilePreview(client: client, path: (children[index] as docs.MeshElement).getAttribute("path")),
                         ),
                       ),
-                    ),
-                  )),
-            ),
-            if (selectedImage != null)
-              renderSelectedImage(
-                context,
-                selectedImage!,
-                selectedDescription!,
+                ),
               ),
+            ),
+            if (selectedImage != null) renderSelectedImage(context, selectedImage!, selectedDescription!),
           ],
         );
       },

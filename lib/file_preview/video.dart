@@ -137,10 +137,10 @@ class _VideoAttachmentState extends State<VideoAttachment> {
 
       final v = controller!.value;
       final currentlyPlaying =
-          v.isPlaying /*&&
+          v
+              .isPlaying /*&&
           controller!.value.position != controller!.value.duration &&
-          controller!.value.position > Duration.zero*/
-          ;
+          controller!.value.position > Duration.zero*/;
 
       if (playing != currentlyPlaying) {
         playing = currentlyPlaying;
@@ -156,9 +156,7 @@ class _VideoAttachmentState extends State<VideoAttachment> {
       }
 
       if (widget.onPositionChanged != null) {
-        controller!.position.then(
-          (duration) => widget.onPositionChanged!(duration ?? Duration.zero),
-        );
+        controller!.position.then((duration) => widget.onPositionChanged!(duration ?? Duration.zero));
       }
 
       if (mounted) {
@@ -215,12 +213,7 @@ class _VideoAttachmentState extends State<VideoAttachment> {
   @override
   Widget build(BuildContext context) {
     if (controller?.value.isInitialized != true) {
-      return AspectRatio(
-        aspectRatio: 1,
-        child: Container(
-          color: Color.from(alpha: 1, red: 0, green: 0, blue: 0),
-        ),
-      );
+      return AspectRatio(aspectRatio: 1, child: Container(color: Color.from(alpha: 1, red: 0, green: 0, blue: 0)));
     }
 
     var scale = 1.0;
@@ -233,13 +226,10 @@ class _VideoAttachmentState extends State<VideoAttachment> {
     return LayoutBuilder(
       builder: (context, constraints) {
         return MouseRegion(
-          cursor: widget.playOnTap
-              ? SystemMouseCursors.click
-              : SystemMouseCursors.basic,
+          cursor: widget.playOnTap ? SystemMouseCursors.click : SystemMouseCursors.basic,
           child: _wrapTap(
             AspectRatio(
-              aspectRatio:
-                  controller!.value.size.width / controller!.value.size.height,
+              aspectRatio: controller!.value.size.width / controller!.value.size.height,
               child: Container(
                 color: Color.from(alpha: 1, red: 0, green: 0, blue: 0),
                 child: Stack(
@@ -249,25 +239,19 @@ class _VideoAttachmentState extends State<VideoAttachment> {
                     if (widget.onPlay != null)
                       Center(
                         child: Container(
-                          decoration: BoxDecoration(
-                            color: const Color.fromARGB(80, 0, 0, 0),
-                            borderRadius: BorderRadius.circular(500),
-                          ),
+                          decoration: BoxDecoration(color: const Color.fromARGB(80, 0, 0, 0), borderRadius: BorderRadius.circular(500)),
                           padding: EdgeInsets.all(15 * scale),
                           child: IgnorePointer(
                             ignoring: processing,
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                if (controller?.value.isInitialized == true &&
-                                    controller?.value.isPlaying == false)
+                                if (controller?.value.isInitialized == true && controller?.value.isPlaying == false)
                                   MouseRegion(
                                     cursor: SystemMouseCursors.click,
                                     child: GestureDetector(
                                       onTap: () async {
-                                        if (controller?.value.isPlaying !=
-                                                false ||
-                                            processing) {
+                                        if (controller?.value.isPlaying != false || processing) {
                                           return;
                                         }
                                         setState(() {
@@ -290,25 +274,17 @@ class _VideoAttachmentState extends State<VideoAttachment> {
                                       },
                                       child: Icon(
                                         Icons.play_arrow,
-                                        color: Color.from(
-                                          alpha: 1,
-                                          red: 1,
-                                          green: 1,
-                                          blue: 1,
-                                        ),
+                                        color: Color.from(alpha: 1, red: 1, green: 1, blue: 1),
                                         size: 30 * scale,
                                       ),
                                     ),
                                   ),
-                                if (controller?.value.isInitialized == true &&
-                                    controller?.value.isPlaying == true)
+                                if (controller?.value.isInitialized == true && controller?.value.isPlaying == true)
                                   MouseRegion(
                                     cursor: SystemMouseCursors.click,
                                     child: GestureDetector(
                                       onTap: () async {
-                                        if (controller?.value.isPlaying !=
-                                                true ||
-                                            processing) {
+                                        if (controller?.value.isPlaying != true || processing) {
                                           return;
                                         }
 
@@ -326,27 +302,15 @@ class _VideoAttachmentState extends State<VideoAttachment> {
                                           });
                                         }
                                       },
-                                      child: Icon(
-                                        Icons.pause,
-                                        color: Color.from(
-                                          alpha: 1,
-                                          red: 1,
-                                          green: 1,
-                                          blue: 1,
-                                        ),
-                                        size: 30 * scale,
-                                      ),
+                                      child: Icon(Icons.pause, color: Color.from(alpha: 1, red: 1, green: 1, blue: 1), size: 30 * scale),
                                     ),
                                   ),
-                                if (controller?.value.isInitialized == true &&
-                                    controller?.value.isPlaying == true)
+                                if (controller?.value.isInitialized == true && controller?.value.isPlaying == true)
                                   MouseRegion(
                                     cursor: SystemMouseCursors.click,
                                     child: GestureDetector(
                                       onTap: () async {
-                                        if (controller?.value.isPlaying !=
-                                                true ||
-                                            processing) {
+                                        if (controller?.value.isPlaying != true || processing) {
                                           return;
                                         }
                                         setState(() {
@@ -354,9 +318,7 @@ class _VideoAttachmentState extends State<VideoAttachment> {
                                         });
                                         try {
                                           await controller!.pause();
-                                          await controller!.seekTo(
-                                            Duration.zero,
-                                          );
+                                          await controller!.seekTo(Duration.zero);
 
                                           if (widget.onPreviewStopped != null) {
                                             widget.onPreviewStopped!();
@@ -374,12 +336,7 @@ class _VideoAttachmentState extends State<VideoAttachment> {
                                       child: Container(
                                         padding: EdgeInsets.all(3 * scale),
                                         child: Container(
-                                          color: Color.from(
-                                            alpha: 1,
-                                            red: 1,
-                                            green: 1,
-                                            blue: 1,
-                                          ),
+                                          color: Color.from(alpha: 1, red: 1, green: 1, blue: 1),
                                           width: 20 * scale,
                                           height: 20 * scale,
                                         ),
@@ -443,22 +400,19 @@ class _AudioAttachmentState extends State<_AudioAttachment> {
     return player == null
         ? const CircularProgressIndicator()
         : StreamBuilder(
-            stream: player!.playerStateStream,
-            builder: (context, snapshot) => ShadButton(
-              onPressed: () {
-                if (snapshot.data?.playing == true) {
-                  player!.pause();
-                } else {
-                  player!.play();
-                }
-              },
-              leading: snapshot.data?.playing == true
-                  ? const Icon(size: 16, LucideIcons.pause)
-                  : const Icon(size: 16, LucideIcons.play),
-              child: snapshot.data?.playing == true
-                  ? const Text("Pause")
-                  : const Text("Play"),
-            ),
-          );
+          stream: player!.playerStateStream,
+          builder:
+              (context, snapshot) => ShadButton(
+                onPressed: () {
+                  if (snapshot.data?.playing == true) {
+                    player!.pause();
+                  } else {
+                    player!.play();
+                  }
+                },
+                leading: snapshot.data?.playing == true ? const Icon(size: 16, LucideIcons.pause) : const Icon(size: 16, LucideIcons.play),
+                child: snapshot.data?.playing == true ? const Text("Pause") : const Text("Play"),
+              ),
+        );
   }
 }

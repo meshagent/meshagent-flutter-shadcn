@@ -70,10 +70,7 @@ class _CameraToggleState extends State<CameraToggle> {
                 });
               },
             ),
-            _ChangeSettings(
-              kind: _DeviceKind.videoInput,
-              room: widget.controller.room,
-            ),
+            _ChangeSettings(kind: _DeviceKind.videoInput, room: widget.controller.room),
           ],
         );
       },
@@ -116,10 +113,7 @@ class _MicToggleState extends State<MicToggle> {
                 });
               },
             ),
-            _ChangeSettings(
-              kind: _DeviceKind.audioInput,
-              room: widget.controller.room,
-            ),
+            _ChangeSettings(kind: _DeviceKind.audioInput, room: widget.controller.room),
           ],
         );
       },
@@ -141,38 +135,38 @@ class ConnectionButton extends StatelessWidget {
       builder: (context, _) {
         return switch (room.connectionState) {
           livekit.ConnectionState.connected => _MeetingControlsButon(
-              text: "Hangup",
-              on: false,
-              onColor: Colors.black,
-              onForeground: Colors.white,
-              offColor: Colors.red,
-              offForeground: Colors.white,
-              icon: Icons.phone,
-              onPressed: () {
-                controller.disconnect();
-              },
-            ),
+            text: "Hangup",
+            on: false,
+            onColor: Colors.black,
+            onForeground: Colors.white,
+            offColor: Colors.red,
+            offForeground: Colors.white,
+            icon: Icons.phone,
+            onPressed: () {
+              controller.disconnect();
+            },
+          ),
           livekit.ConnectionState.disconnected => _MeetingControlsButon(
-              text: "Connect",
-              on: false,
-              onColor: Colors.black,
-              onForeground: Colors.white,
-              offColor: Colors.black,
-              offForeground: Colors.white,
-              icon: Icons.phone,
-              onPressed: () {
-                controller.disconnect();
-              },
-            ),
+            text: "Connect",
+            on: false,
+            onColor: Colors.black,
+            onForeground: Colors.white,
+            offColor: Colors.black,
+            offForeground: Colors.white,
+            icon: Icons.phone,
+            onPressed: () {
+              controller.disconnect();
+            },
+          ),
           _ => const _MeetingControlsButon(
-              text: "Connecting",
-              on: false,
-              onColor: Colors.black,
-              onForeground: Colors.white,
-              offColor: Colors.red,
-              offForeground: Colors.white,
-              icon: Icons.phone,
-            ),
+            text: "Connecting",
+            on: false,
+            onColor: Colors.black,
+            onForeground: Colors.white,
+            offColor: Colors.red,
+            offForeground: Colors.white,
+            icon: Icons.phone,
+          ),
         };
       },
     );
@@ -213,19 +207,8 @@ class _MeetingControlsButon extends StatelessWidget {
             width: 40,
             height: 40,
             child: DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(100),
-                color: on ? onColor : offColor,
-              ),
-              child: Center(
-                child: Icon(
-                  icon,
-                  size: 22,
-                  color: on
-                      ? onForeground
-                      : (onPressed != null ? offForeground : Colors.grey),
-                ),
-              ),
+              decoration: BoxDecoration(borderRadius: BorderRadius.circular(100), color: on ? onColor : offColor),
+              child: Center(child: Icon(icon, size: 22, color: on ? onForeground : (onPressed != null ? offForeground : Colors.grey))),
             ),
           ),
         ),
@@ -242,24 +225,15 @@ class _ChangeSettings extends StatelessWidget {
   final livekit.Room room;
   final _DeviceKind kind;
 
-  void _selectVideoInput(
-    BuildContext context,
-    livekit.MediaDevice device,
-  ) async {
+  void _selectVideoInput(BuildContext context, livekit.MediaDevice device) async {
     await room.setVideoInputDevice(device);
   }
 
-  void _selectAudioInput(
-    BuildContext context,
-    livekit.MediaDevice device,
-  ) async {
+  void _selectAudioInput(BuildContext context, livekit.MediaDevice device) async {
     await room.setAudioInputDevice(device);
   }
 
-  void _selectAudioOutput(
-    BuildContext context,
-    livekit.MediaDevice device,
-  ) async {
+  void _selectAudioOutput(BuildContext context, livekit.MediaDevice device) async {
     await room.setAudioOutputDevice(device);
   }
 
@@ -303,9 +277,7 @@ class _ChangeDeviceButtonState extends State<_ChangeDeviceButton> {
     super.initState();
     _load();
 
-    _subscription = livekit.Hardware.instance.onDeviceChange.stream.listen((
-      List<livekit.MediaDevice> devices,
-    ) {
+    _subscription = livekit.Hardware.instance.onDeviceChange.stream.listen((List<livekit.MediaDevice> devices) {
       _devices = _sanitizeDevices(devices);
       if (mounted) {
         setState(() {});
@@ -336,28 +308,19 @@ class _ChangeDeviceButtonState extends State<_ChangeDeviceButton> {
     return _sanitizeDevices(devices);
   }
 
-  List<livekit.MediaDevice> _sanitizeDevices(
-    List<livekit.MediaDevice> devices,
-  ) {
+  List<livekit.MediaDevice> _sanitizeDevices(List<livekit.MediaDevice> devices) {
     return devices.where((d) => d.deviceId.isNotEmpty).toList();
   }
 
-  void _updateDevice(
-    String key,
-    livekit.MediaDevice device,
-    Function(livekit.MediaDevice) onChange,
-  ) {
+  void _updateDevice(String key, livekit.MediaDevice device, Function(livekit.MediaDevice) onChange) {
     onChange(device);
     _preferences.setString(key, device.deviceId);
     setState(() {});
   }
 
-  void onChangeVideoInput(livekit.MediaDevice device) =>
-      _updateDevice("videoInput", device, widget.onChangeVideoInput);
-  void onChangeAudioInput(livekit.MediaDevice device) =>
-      _updateDevice("audioInput", device, widget.onChangeAudioInput);
-  void onChangeAudioOutput(livekit.MediaDevice device) =>
-      _updateDevice("audioOutput", device, widget.onChangeAudioOutput);
+  void onChangeVideoInput(livekit.MediaDevice device) => _updateDevice("videoInput", device, widget.onChangeVideoInput);
+  void onChangeAudioInput(livekit.MediaDevice device) => _updateDevice("audioInput", device, widget.onChangeAudioInput);
+  void onChangeAudioOutput(livekit.MediaDevice device) => _updateDevice("audioOutput", device, widget.onChangeAudioOutput);
 
   final menuController = ShadContextMenuController();
   @override
@@ -372,21 +335,12 @@ class _ChangeDeviceButtonState extends State<_ChangeDeviceButton> {
 
     final videoInputs = _devices.where((d) => d.kind == "videoinput").toList();
     final audioInputs = _devices.where((d) => d.kind == "audioinput").toList();
-    final audioOutputs =
-        _devices.where((d) => d.kind == "audiooutput").toList();
+    final audioOutputs = _devices.where((d) => d.kind == "audiooutput").toList();
 
-    final selectedVideoDevice = videoInputs
-            .where((device) => device.deviceId == videoInput)
-            .firstOrNull ??
-        videoInputs.firstOrNull;
-    final selectedAudioInputDevice = audioInputs
-            .where((device) => device.deviceId == audioInput)
-            .firstOrNull ??
-        audioInputs.firstOrNull;
-    final selectedAudioOutputDevice = audioOutputs
-            .where((device) => device.deviceId == audioOutput)
-            .firstOrNull ??
-        audioOutputs.firstOrNull;
+    final selectedVideoDevice = videoInputs.where((device) => device.deviceId == videoInput).firstOrNull ?? videoInputs.firstOrNull;
+    final selectedAudioInputDevice = audioInputs.where((device) => device.deviceId == audioInput).firstOrNull ?? audioInputs.firstOrNull;
+    final selectedAudioOutputDevice =
+        audioOutputs.where((device) => device.deviceId == audioOutput).firstOrNull ?? audioOutputs.firstOrNull;
 
     return ShadContextMenuRegion(
       controller: menuController,
@@ -395,26 +349,21 @@ class _ChangeDeviceButtonState extends State<_ChangeDeviceButton> {
         if (widget.kind == null || widget.kind == _DeviceKind.videoInput)
           for (final device in videoInputs)
             ShadContextMenuItem(
-              trailing:
-                  selectedVideoDevice == device ? Icon(Icons.check) : null,
+              trailing: selectedVideoDevice == device ? Icon(Icons.check) : null,
               onPressed: () => onChangeVideoInput(device),
               child: Text(device.label),
             ),
         if (widget.kind == null || widget.kind == _DeviceKind.audioInput)
           for (final device in audioInputs)
             ShadContextMenuItem(
-              trailing:
-                  selectedAudioInputDevice == device ? Icon(Icons.check) : null,
+              trailing: selectedAudioInputDevice == device ? Icon(Icons.check) : null,
               onPressed: () => onChangeAudioInput(device),
               child: Text(device.label),
             ),
-        if (kIsWeb && widget.kind == null ||
-            widget.kind == _DeviceKind.audioOutput)
+        if (kIsWeb && widget.kind == null || widget.kind == _DeviceKind.audioOutput)
           for (final device in audioOutputs)
             ShadContextMenuItem(
-              trailing: selectedAudioOutputDevice == device
-                  ? Icon(Icons.check)
-                  : null,
+              trailing: selectedAudioOutputDevice == device ? Icon(Icons.check) : null,
               onPressed: () => onChangeAudioOutput(device),
               child: Text(device.label),
             ),

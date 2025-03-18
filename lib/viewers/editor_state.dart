@@ -28,10 +28,7 @@ class ElementEditorController extends ChangeNotifier {
   void startEditing(docs.MeshElement element, String attributeName) {
     String text = element.attributes[attributeName] ?? "";
     _controller = TextEditingController(text: text);
-    _controller!.selection = TextSelection(
-      baseOffset: 0,
-      extentOffset: text.length,
-    );
+    _controller!.selection = TextSelection(baseOffset: 0, extentOffset: text.length);
     editingValue = _controller!.text;
     _editing = element;
     _editingAttribute = attributeName;
@@ -78,12 +75,7 @@ class ElementEditorController extends ChangeNotifier {
   }
 }
 
-const defaultSelectionColor = Color.from(
-  alpha: 1,
-  red: .1,
-  green: .2,
-  blue: .1,
-);
+const defaultSelectionColor = Color.from(alpha: 1, red: .1, green: .2, blue: .1);
 
 class ElementTextField extends StatefulWidget {
   const ElementTextField({
@@ -97,12 +89,7 @@ class ElementTextField extends StatefulWidget {
     required this.style,
     this.cursorColor = Colors.green,
     this.selectionColor = defaultSelectionColor,
-    this.editingBackground = const Color.from(
-      alpha: .1,
-      red: 1,
-      green: 1,
-      blue: 1,
-    ),
+    this.editingBackground = const Color.from(alpha: .1, red: 1, green: 1, blue: 1),
   });
 
   final ElementEditorController controller;
@@ -135,8 +122,7 @@ class _ElementTextFieldState extends State<ElementTextField> {
   }
 
   void onControllerChanged() {
-    editing = widget.controller.editing == widget.element &&
-        widget.controller.editingAttribute == widget.attributeName;
+    editing = widget.controller.editing == widget.element && widget.controller.editingAttribute == widget.attributeName;
     focused = false;
   }
 
@@ -156,59 +142,49 @@ class _ElementTextFieldState extends State<ElementTextField> {
 
     return editing
         ? Container(
-            foregroundDecoration: BoxDecoration(
-              border: Border.all(color: widget.cursorColor, width: 2),
-            ),
-            child: IntrinsicHeight(
-              child: IntrinsicWidth(
-                child: EditableText(
-                  onChanged: (value) {
-                    controller.editingValue = value;
-                  },
-                  textHeightBehavior: TextHeightBehavior(
-                    applyHeightToFirstAscent: true,
-                    applyHeightToLastDescent: true,
-                    leadingDistribution: TextLeadingDistribution.even,
-                  ),
-                  scrollPadding: EdgeInsets.zero,
-                  expands: true,
-                  textAlign: widget.textAlign ?? TextAlign.start,
-                  maxLines: widget.maxLines,
-                  minLines: widget.minLines,
-                  controller: controller.controller!,
-                  focusNode: controller.editingFocusNode!,
-                  style: widget.style,
-                  cursorColor: widget.cursorColor,
-                  backgroundCursorColor: widget.selectionColor,
-                  selectionColor: widget.selectionColor,
+          foregroundDecoration: BoxDecoration(border: Border.all(color: widget.cursorColor, width: 2)),
+          child: IntrinsicHeight(
+            child: IntrinsicWidth(
+              child: EditableText(
+                onChanged: (value) {
+                  controller.editingValue = value;
+                },
+                textHeightBehavior: TextHeightBehavior(
+                  applyHeightToFirstAscent: true,
+                  applyHeightToLastDescent: true,
+                  leadingDistribution: TextLeadingDistribution.even,
                 ),
+                scrollPadding: EdgeInsets.zero,
+                expands: true,
+                textAlign: widget.textAlign ?? TextAlign.start,
+                maxLines: widget.maxLines,
+                minLines: widget.minLines,
+                controller: controller.controller!,
+                focusNode: controller.editingFocusNode!,
+                style: widget.style,
+                cursorColor: widget.cursorColor,
+                backgroundCursorColor: widget.selectionColor,
+                selectionColor: widget.selectionColor,
               ),
             ),
-          )
+          ),
+        )
         : Focus(
-            focusNode: focusNode,
-            child: GestureDetector(
-              onTap: () {
-                focusNode.requestFocus();
-              },
-              onDoubleTap: () {
-                controller.startEditing(widget.element, widget.attributeName);
-              },
-              child: Container(
-                constraints: BoxConstraints(minWidth: 10),
-                foregroundDecoration: focused
-                    ? BoxDecoration(
-                        border: Border.all(color: widget.cursorColor, width: 2),
-                      )
-                    : null,
-                padding: EdgeInsets.only(right: 3),
-                child: Text(
-                  widget.element.attributes[widget.attributeName],
-                  style: widget.style,
-                  textAlign: widget.textAlign,
-                ),
-              ),
+          focusNode: focusNode,
+          child: GestureDetector(
+            onTap: () {
+              focusNode.requestFocus();
+            },
+            onDoubleTap: () {
+              controller.startEditing(widget.element, widget.attributeName);
+            },
+            child: Container(
+              constraints: BoxConstraints(minWidth: 10),
+              foregroundDecoration: focused ? BoxDecoration(border: Border.all(color: widget.cursorColor, width: 2)) : null,
+              padding: EdgeInsets.only(right: 3),
+              child: Text(widget.element.attributes[widget.attributeName], style: widget.style, textAlign: widget.textAlign),
             ),
-          );
+          ),
+        );
   }
 }

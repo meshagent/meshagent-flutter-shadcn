@@ -5,14 +5,11 @@ String timeAgo(DateTime d) {
   Duration diff = DateTime.now().difference(d);
   String ago;
   if (diff.inDays > 365) {
-    ago =
-        "${(diff.inDays / 365).floor()} ${(diff.inDays / 365).floor() == 1 ? "year" : "years"}";
+    ago = "${(diff.inDays / 365).floor()} ${(diff.inDays / 365).floor() == 1 ? "year" : "years"}";
   } else if (diff.inDays > 30) {
-    ago =
-        "${(diff.inDays / 30).floor()} ${(diff.inDays / 30).floor() == 1 ? "month" : "months"}";
+    ago = "${(diff.inDays / 30).floor()} ${(diff.inDays / 30).floor() == 1 ? "month" : "months"}";
   } else if (diff.inDays > 7) {
-    ago =
-        "${(diff.inDays / 7).floor()} ${(diff.inDays / 7).floor() == 1 ? "week" : "weeks"}";
+    ago = "${(diff.inDays / 7).floor()} ${(diff.inDays / 7).floor() == 1 ? "week" : "weeks"}";
   } else if (diff.inDays > 0) {
     ago = "${diff.inDays} ${diff.inDays == 1 ? "day" : "days"}";
   } else if (diff.inHours > 0) {
@@ -20,21 +17,17 @@ String timeAgo(DateTime d) {
   } else if (diff.inMinutes > 0) {
     ago = "${diff.inMinutes} ${diff.inMinutes == 1 ? "minute" : "minutes"}";
   } else if (diff.inDays < -365) {
-    ago =
-        "${(diff.inDays / 365).floor().abs()} ${(diff.inDays / 365).floor() == -1 ? "year" : "years"}";
+    ago = "${(diff.inDays / 365).floor().abs()} ${(diff.inDays / 365).floor() == -1 ? "year" : "years"}";
   } else if (diff.inDays < -30) {
-    ago =
-        "${(diff.inDays / 30).floor().abs()} ${(diff.inDays / 30).floor() == -1 ? "month" : "months"}";
+    ago = "${(diff.inDays / 30).floor().abs()} ${(diff.inDays / 30).floor() == -1 ? "month" : "months"}";
   } else if (diff.inDays < -7) {
-    ago =
-        "${(diff.inDays / 7).floor().abs()} ${(diff.inDays / 7).floor() == -1 ? "week" : "weeks"}";
+    ago = "${(diff.inDays / 7).floor().abs()} ${(diff.inDays / 7).floor() == -1 ? "week" : "weeks"}";
   } else if (diff.inDays < 0) {
     ago = "${diff.inDays.abs()} ${diff.inDays == -1 ? "day" : "days"}";
   } else if (diff.inHours < 0) {
     ago = "${diff.inHours.abs()} ${diff.inHours == -1 ? "hour" : "hours"}";
   } else if (diff.inMinutes < 0) {
-    ago =
-        "${diff.inMinutes.abs()} ${diff.inMinutes == -1 ? "minute" : "minutes"}";
+    ago = "${diff.inMinutes.abs()} ${diff.inMinutes == -1 ? "minute" : "minutes"}";
   } else {
     return "just now";
   }
@@ -53,33 +46,25 @@ class CenteredScrollable extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
-      builder: (context, constraints) => ListView(
-        children: [
-          Container(
-            alignment: Alignment.center,
-            padding: const EdgeInsets.all(20.0),
-            constraints: BoxConstraints(minHeight: constraints.maxHeight),
-            child: child,
+      builder:
+          (context, constraints) => ListView(
+            children: [
+              Container(
+                alignment: Alignment.center,
+                padding: const EdgeInsets.all(20.0),
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: child,
+              ),
+            ],
           ),
-        ],
-      ),
     );
   }
 }
 
 class ControlledForm extends StatefulWidget {
-  const ControlledForm({
-    super.key,
-    required this.builder,
-    this.initialValue = const {},
-    this.controller,
-  });
+  const ControlledForm({super.key, required this.builder, this.initialValue = const {}, this.controller});
 
-  final Widget Function(
-    BuildContext context,
-    FormController controller,
-    GlobalKey<ShadFormState> key,
-  ) builder;
+  final Widget Function(BuildContext context, FormController controller, GlobalKey<ShadFormState> key) builder;
   final Map<String, Object> initialValue;
   final FormController? controller;
 
