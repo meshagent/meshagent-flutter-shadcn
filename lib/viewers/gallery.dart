@@ -106,31 +106,32 @@ class _GalleryViewerElementState extends State<GalleryViewerElement> {
                   padding: EdgeInsets.symmetric(horizontal: 10),
                   itemCount: children.length,
                   gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(childAspectRatio: 4 / 3, maxCrossAxisExtent: 600),
-                  itemBuilder: (context, index) => ShadGestureDetector(
-                    cursor: SystemMouseCursors.click,
-                    onTapUp: (_) {
-                      setState(() {
-                        selectedImage = (children[index] as docs.MeshElement).getAttribute("path");
-                        selectedDescription = (children[index] as docs.MeshElement).attributes["description"];
-                      });
-                    },
-                    onTapDown: (_) {
-                      setState(() {
-                        selectedImage = (children[index] as docs.MeshElement).getAttribute("path");
-                        selectedDescription = (children[index] as docs.MeshElement).attributes["description"];
-                      });
-                    },
-                    child: Container(
-                      margin: EdgeInsets.all(5),
-                      foregroundDecoration: BoxDecoration(
-                        border: Border.all(color: Color.fromARGB(20, 0, 0, 0)),
-                        borderRadius: BorderRadius.circular(5),
+                  itemBuilder:
+                      (context, index) => ShadGestureDetector(
+                        cursor: SystemMouseCursors.click,
+                        onTapUp: (_) {
+                          setState(() {
+                            selectedImage = (children[index] as docs.MeshElement).getAttribute("path");
+                            selectedDescription = (children[index] as docs.MeshElement).attributes["description"];
+                          });
+                        },
+                        onTapDown: (_) {
+                          setState(() {
+                            selectedImage = (children[index] as docs.MeshElement).getAttribute("path");
+                            selectedDescription = (children[index] as docs.MeshElement).attributes["description"];
+                          });
+                        },
+                        child: Container(
+                          margin: EdgeInsets.all(5),
+                          foregroundDecoration: BoxDecoration(
+                            border: Border.all(color: Color.fromARGB(20, 0, 0, 0)),
+                            borderRadius: BorderRadius.circular(5),
+                          ),
+                          decoration: BoxDecoration(borderRadius: BorderRadius.circular(5)),
+                          clipBehavior: Clip.antiAlias,
+                          child: FilePreview(client: client, path: (children[index] as docs.MeshElement).getAttribute("path")),
+                        ),
                       ),
-                      decoration: BoxDecoration(borderRadius: BorderRadius.circular(5)),
-                      clipBehavior: Clip.antiAlias,
-                      child: FilePreview(client: client, path: (children[index] as docs.MeshElement).getAttribute("path")),
-                    ),
-                  ),
                 ),
               ),
             ),

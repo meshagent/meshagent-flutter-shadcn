@@ -150,14 +150,15 @@ class _PresentationViewerElementState extends State<PresentationViewerElement> {
 
     return ChangeNotifierBuilder(
       source: element,
-      builder: (context) => Padding(
-        padding: EdgeInsets.symmetric(horizontal: 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          mainAxisSize: MainAxisSize.min,
-          children: [...element.getChildren().map((slide) => buildSlide(context, slide as docs.MeshElement))],
-        ),
-      ),
+      builder:
+          (context) => Padding(
+            padding: EdgeInsets.symmetric(horizontal: 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [...element.getChildren().map((slide) => buildSlide(context, slide as docs.MeshElement))],
+            ),
+          ),
     );
   }
 }
