@@ -46,7 +46,7 @@ class _ChatThreadLoader extends State<ChatThreadLoader> {
             for (final part in widget.participants!) {
               if (!existing.contains(part.getAttribute("name"))) {
                 child.createChildElement("member", {"name": part.getAttribute("name")});
-                existing.add(part.getAttribute("name").getAttribute("name"));
+                existing.add(part.getAttribute("name"));
               }
             }
           }
