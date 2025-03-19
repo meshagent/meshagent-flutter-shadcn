@@ -16,8 +16,14 @@ import 'package:livekit_client/livekit_client.dart' as livekit;
 // ignore: depend_on_referenced_packages
 
 class ChatThreadLoader extends StatefulWidget {
-  const ChatThreadLoader(
-      {super.key, this.participants, required this.path, required this.room, this.startChatCentered = false, this.participantNames});
+  const ChatThreadLoader({
+    super.key,
+    this.participants,
+    required this.path,
+    required this.room,
+    this.startChatCentered = false,
+    this.participantNames,
+  });
 
   final List<Participant>? participants;
   final List<String>? participantNames;
@@ -337,80 +343,82 @@ class _ChatThread extends State<ChatThread> {
         Padding(
           padding: EdgeInsets.symmetric(horizontal: 15, vertical: 8),
           child: LayoutBuilder(
-            builder: (context, constraints) => ShadInput(
-              inputPadding: EdgeInsets.all(2),
-              leading: ShadTooltip(
-                waitDuration: Duration(seconds: 1),
-                builder: (context) => Text("Attach"),
-                child: ShadGestureDetector(
-                  cursor: SystemMouseCursors.click,
-                  onTap: () async {
-                    final response = await widget.room.agents.invokeTool(
-                      toolkit: "meshagent.markitdown",
-                      tool: "markitdown_from_user",
-                      arguments: {"title": "Attach a file", "description": "You can select PDFs or Office Docs"},
-                    );
+            builder:
+                (context, constraints) => ShadInput(
+                  inputPadding: EdgeInsets.all(2),
+                  leading: ShadTooltip(
+                    waitDuration: Duration(seconds: 1),
+                    builder: (context) => Text("Attach"),
+                    child: ShadGestureDetector(
+                      cursor: SystemMouseCursors.click,
+                      onTap: () async {
+                        final response = await widget.room.agents.invokeTool(
+                          toolkit: "meshagent.markitdown",
+                          tool: "markitdown_from_user",
+                          arguments: {"title": "Attach a file", "description": "You can select PDFs or Office Docs"},
+                        );
 
-                    if (!mounted) {
-                      return;
-                    }
-                    if (response is JsonResponse) {
+                        if (!mounted) {
+                          return;
+                        }
+                        if (response is JsonResponse) {
+                          setState(() {
+                            attachments.add(response);
+                          });
+                        }
+                      },
+                      child: Container(
+                        width: 22,
+                        height: 22,
+                        decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
+                        child: Icon(LucideIcons.paperclip, color: ShadTheme.of(context).colorScheme.background),
+                      ),
+                    ),
+                  ),
+                  trailing:
+                      showSend
+                          ? ShadTooltip(
+                            waitDuration: Duration(seconds: 1),
+                            builder: (context) => Text("Send"),
+                            child: ShadGestureDetector(
+                              cursor: SystemMouseCursors.click,
+                              onTap: () {
+                                send();
+                              },
+                              child: Container(
+                                width: 22,
+                                height: 22,
+                                decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
+                                child: Icon(LucideIcons.arrowUp, color: ShadTheme.of(context).colorScheme.background),
+                              ),
+                            ),
+                          )
+                          : null,
+                  padding: EdgeInsets.only(left: 5, right: 5, top: 5, bottom: 5),
+                  decoration: ShadDecoration(
+                    secondaryFocusedBorder: ShadBorder.none,
+                    secondaryBorder: ShadBorder.none,
+                    color: ShadTheme.of(context).ghostButtonTheme.hoverBackgroundColor,
+                    border: ShadBorder.all(radius: BorderRadius.circular(30)),
+                  ),
+                  onChanged: (value) {
+                    if (!value.isEmpty != showSend) {
                       setState(() {
-                        attachments.add(response);
+                        showSend = !value.isEmpty;
                       });
                     }
+
+                    for (final part in getOnlineParticipants()) {
+                      widget.room.messaging.sendMessage(to: part, type: "typing", message: {"path": widget.path});
+                    }
                   },
-                  child: Container(
-                    width: 22,
-                    height: 22,
-                    decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
-                    child: Icon(LucideIcons.paperclip, color: ShadTheme.of(context).colorScheme.background),
-                  ),
+
+                  maxLines: null,
+                  placeholder: Text("Message"),
+                  focusNode: focusNode,
+                  //textInputAction: TextInputAction.newline,
+                  controller: controller,
                 ),
-              ),
-              trailing: showSend
-                  ? ShadTooltip(
-                      waitDuration: Duration(seconds: 1),
-                      builder: (context) => Text("Send"),
-                      child: ShadGestureDetector(
-                        cursor: SystemMouseCursors.click,
-                        onTap: () {
-                          send();
-                        },
-                        child: Container(
-                          width: 22,
-                          height: 22,
-                          decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
-                          child: Icon(LucideIcons.arrowUp, color: ShadTheme.of(context).colorScheme.background),
-                        ),
-                      ),
-                    )
-                  : null,
-              padding: EdgeInsets.only(left: 5, right: 5, top: 5, bottom: 5),
-              decoration: ShadDecoration(
-                secondaryFocusedBorder: ShadBorder.none,
-                secondaryBorder: ShadBorder.none,
-                color: ShadTheme.of(context).ghostButtonTheme.hoverBackgroundColor,
-                border: ShadBorder.all(radius: BorderRadius.circular(30)),
-              ),
-              onChanged: (value) {
-                if (!value.isEmpty != showSend) {
-                  setState(() {
-                    showSend = !value.isEmpty;
-                  });
-                }
-
-                for (final part in getOnlineParticipants()) {
-                  widget.room.messaging.sendMessage(to: part, type: "typing", message: {"path": widget.path});
-                }
-              },
-
-              maxLines: null,
-              placeholder: Text("Message"),
-              focusNode: focusNode,
-              //textInputAction: TextInputAction.newline,
-              controller: controller,
-            ),
           ),
         ),
       ],

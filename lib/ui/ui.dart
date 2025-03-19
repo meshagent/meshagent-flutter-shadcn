@@ -46,16 +46,17 @@ class CenteredScrollable extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
-      builder: (context, constraints) => ListView(
-        children: [
-          Container(
-            alignment: Alignment.center,
-            padding: const EdgeInsets.all(20.0),
-            constraints: BoxConstraints(minHeight: constraints.maxHeight),
-            child: child,
+      builder:
+          (context, constraints) => ListView(
+            children: [
+              Container(
+                alignment: Alignment.center,
+                padding: const EdgeInsets.all(20.0),
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: child,
+              ),
+            ],
           ),
-        ],
-      ),
     );
   }
 }
