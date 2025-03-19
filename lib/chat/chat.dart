@@ -15,10 +15,12 @@ import 'package:livekit_client/livekit_client.dart' as livekit;
 
 // ignore: depend_on_referenced_packages
 
+
 class ChatThreadLoader extends StatefulWidget {
-  const ChatThreadLoader({super.key, this.participants, required this.path, required this.room, this.startChatCentered = false});
+  const ChatThreadLoader({super.key, this.participants, required this.path, required this.room, this.startChatCentered = false, this.participantNames });
 
   final List<Participant>? participants;
+  final List<String>? participantNames;
   final String path;
   final RoomClient room;
   final bool startChatCentered;
@@ -42,7 +44,16 @@ class _ChatThreadLoader extends State<ChatThreadLoader> {
 
           for (final part in widget.participants!) {
             if (!existing.contains(part.getAttribute("name"))) {
+              
               child.createChildElement("member", {"name": part.getAttribute("name")});
+               existing.add(part.getAttribute("name").getAttribute("name"));
+            }
+          }
+
+           for (final part in widget.participantNames!) {
+            if (!existing.contains(part)) {
+              child.createChildElement("member", {"name": part });
+              existing.add(part);
             }
           }
         }
