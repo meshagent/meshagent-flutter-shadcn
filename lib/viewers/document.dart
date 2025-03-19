@@ -8,7 +8,7 @@ import "builder.dart";
 import 'package:markdown_widget/markdown_widget.dart';
 
 class DocumentViewer extends StatefulWidget {
-  DocumentViewer({required this.document, super.key, required this.client});
+  const DocumentViewer({required this.document, super.key, required this.client});
 
   final RoomClient client;
   final MeshDocument document;
@@ -22,13 +22,13 @@ class _DocumentViewerState extends State<DocumentViewer> {
   void initState() {
     super.initState();
 
-    widget.document.addListener(this.onDocumentChanged);
+    widget.document.addListener(onDocumentChanged);
   }
 
   @override
   void dispose() {
     super.dispose();
-    widget.document.removeListener(this.onDocumentChanged);
+    widget.document.removeListener(onDocumentChanged);
   }
 
   void onDocumentChanged() {
@@ -42,7 +42,7 @@ class _DocumentViewerState extends State<DocumentViewer> {
 }
 
 class DocumentViewerElement extends StatelessWidget {
-  DocumentViewerElement({required this.client, required this.element, super.key});
+  const DocumentViewerElement({required this.client, required this.element, super.key});
 
   final RoomClient client;
   final docs.MeshElement element;

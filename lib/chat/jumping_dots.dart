@@ -4,7 +4,7 @@ class DotWidget extends StatelessWidget {
   final Color? color;
   final double? radius;
 
-  const DotWidget({Key? key, @required this.color, @required this.radius}) : super(key: key);
+  const DotWidget({super.key, @required this.color, @required this.radius});
 
   @override
   Widget build(BuildContext context) {
@@ -31,7 +31,7 @@ class JumpingDots extends StatefulWidget {
   final int delay;
 
   JumpingDots({
-    Key? key,
+    super.key,
     this.numberOfDots = 3,
     this.radius = 10,
     this.innerPadding = 2.5,
@@ -40,17 +40,16 @@ class JumpingDots extends StatefulWidget {
     this.verticalOffset = -20,
     this.delay = 0,
   }) : assert(verticalOffset.isFinite, "Non-finite values cannot be set as an animation offset."),
-       assert(verticalOffset != 0, "Zero values (0) cannot be set as an animation offset."),
-       super(key: key);
+       assert(verticalOffset != 0, "Zero values (0) cannot be set as an animation offset.");
 
   @override
-  _JumpingDotsState createState() => _JumpingDotsState();
+  State<JumpingDots> createState() => _JumpingDotsState();
 }
 
 class _JumpingDotsState extends State<JumpingDots> with TickerProviderStateMixin {
   List<AnimationController>? _animationControllers;
 
-  List<Animation<double>> _animations = [];
+  final List<Animation<double>> _animations = [];
 
   @override
   void initState() {

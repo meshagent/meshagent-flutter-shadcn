@@ -2,7 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 class ImagePreview extends StatelessWidget {
-  ImagePreview({super.key, required this.url, required this.fit});
+  const ImagePreview({super.key, required this.url, required this.fit});
 
   final BoxFit fit;
   final Uri url;

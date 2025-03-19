@@ -7,7 +7,7 @@ import 'package:webrtc_interface/webrtc_interface.dart';
 import './meetings.dart';
 
 class ParticipantCamerasList extends StatefulWidget {
-  ParticipantCamerasList({required this.controller, this.padding = EdgeInsets.zero, this.spacing = 10, super.key});
+  const ParticipantCamerasList({required this.controller, this.padding = EdgeInsets.zero, this.spacing = 10, super.key});
 
   final double spacing;
   final EdgeInsets padding;
@@ -44,7 +44,7 @@ class _ParticipantCamerasListState extends State<ParticipantCamerasList> {
 }
 
 class ParticipantTile extends StatelessWidget {
-  ParticipantTile({super.key, required this.room, required this.participant});
+  const ParticipantTile({super.key, required this.room, required this.participant});
 
   final Room room;
   final Participant participant;

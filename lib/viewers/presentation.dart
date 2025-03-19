@@ -7,7 +7,7 @@ import '../file_preview/file_preview.dart';
 import 'package:flutter/material.dart';
 
 class PresentationViewer extends StatefulWidget {
-  PresentationViewer({required this.document, super.key, required this.client});
+  const PresentationViewer({required this.document, super.key, required this.client});
 
   final RoomClient client;
   final MeshDocument document;
@@ -21,13 +21,13 @@ class _PresentationViewerState extends State<PresentationViewer> {
   void initState() {
     super.initState();
 
-    widget.document.addListener(this.onDocumentChanged);
+    widget.document.addListener(onDocumentChanged);
   }
 
   @override
   void dispose() {
     super.dispose();
-    widget.document.removeListener(this.onDocumentChanged);
+    widget.document.removeListener(onDocumentChanged);
   }
 
   void onDocumentChanged() {
@@ -41,7 +41,7 @@ class _PresentationViewerState extends State<PresentationViewer> {
 }
 
 class PresentationViewerElement extends StatefulWidget {
-  PresentationViewerElement({required this.client, required this.element, super.key});
+  const PresentationViewerElement({required this.client, required this.element, super.key});
 
   final RoomClient client;
   final docs.MeshElement element;

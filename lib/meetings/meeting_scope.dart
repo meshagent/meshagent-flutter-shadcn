@@ -88,7 +88,7 @@ class MeetingController extends ChangeNotifier {
 
   Future<void> configure(String roomName) async {
     if (room.connectionState != livekit.ConnectionState.disconnected) {
-      throw new Exception("You cannot reconfigure while the controller is connected");
+      throw Exception("You cannot reconfigure while the controller is connected");
     }
     _config = null;
     _configurationError = null;
@@ -104,9 +104,9 @@ class MeetingController extends ChangeNotifier {
   }
 
   Future<void> connect([livekit.FastConnectOptions? fastConnectOptions]) async {
-    final config = this._config;
+    final config = _config;
     if (config == null) {
-      throw new Exception("The controller has not been configured");
+      throw Exception("The controller has not been configured");
     }
     await room.connect(config.url, config.token, fastConnectOptions: fastConnectOptions);
   }
@@ -121,7 +121,7 @@ class MeetingController extends ChangeNotifier {
 }
 
 class _MeetingControllerData extends InheritedWidget {
-  _MeetingControllerData({required this.controller, required super.child});
+  const _MeetingControllerData({required this.controller, required super.child});
 
   final MeetingController controller;
 

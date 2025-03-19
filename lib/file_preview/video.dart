@@ -5,7 +5,7 @@ import 'package:video_player/video_player.dart';
 import 'package:just_audio/just_audio.dart';
 
 class AudioPreview extends StatefulWidget {
-  AudioPreview({super.key, required this.url});
+  const AudioPreview({super.key, required this.url});
 
   final Uri url;
 
@@ -31,7 +31,7 @@ class _AudioPreviewState extends State<AudioPreview> {
 }
 
 class VideoPreview extends StatefulWidget {
-  VideoPreview({super.key, required this.url, required this.fit});
+  const VideoPreview({super.key, required this.url, required this.fit});
 
   final BoxFit fit;
   final Uri url;

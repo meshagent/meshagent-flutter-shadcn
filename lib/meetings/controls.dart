@@ -8,7 +8,7 @@ import '../meetings/meetings.dart';
 import 'package:flutter/material.dart';
 
 class MeetingControls extends StatelessWidget {
-  MeetingControls({required this.controller, this.spacing = 5, super.key});
+  const MeetingControls({required this.controller, this.spacing = 5, super.key});
 
   final double spacing;
   final MeetingController controller;

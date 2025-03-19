@@ -63,7 +63,7 @@ class _PdfPreviewState extends State<PdfPreview> {
 }
 
 class PdfPage extends StatefulWidget {
-  PdfPage({super.key, required this.document, required this.pageNumber, required this.backgroundColor, required this.fit});
+  const PdfPage({super.key, required this.document, required this.pageNumber, required this.backgroundColor, required this.fit});
 
   final PdfDocument document;
   final int pageNumber;

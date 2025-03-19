@@ -30,7 +30,6 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  meshagent_super_editor: ^0.0.1
   video_player: ^2.9.2
   chewie: ^1.8.5
   pdfrx: ^1.0.103
@@ -46,11 +45,20 @@ dependencies:
   siri_wave: ^2.2.0
   shared_preferences: ^2.3.3
   file_picker: ^8.1.5
-  meshagent:
-    path:
-      ../meshagent-dart
+  livekit_client: ^2.4.0
+  uuid: ^4.5.1
+  http: ^1.3.0
+  synchronized: ^3.3.0+3
+  logging: ^1.3.0
+  path: ^1.9.1
+  flutter_webrtc: ^0.12.11
+  webrtc_interface: ^1.2.0
 
-dependency_overrides:
+  meshagent:
+    path: ../meshagent-dart
+
+  meshagent_flutter:
+    path: ../meshagent-flutter
 
   meshagent_super_editor:
     path: ../meshagent-super-editor
