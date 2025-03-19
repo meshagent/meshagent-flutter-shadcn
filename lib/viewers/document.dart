@@ -71,8 +71,7 @@ class DocumentViewerElement extends StatelessWidget {
         ),
       ];
     } else if (element.tagName == "content" || element.tagName == "body" || element.tagName == "speech") {
-      final mdColor =
-          ShadTheme.of(context).textTheme.p.color ??
+      final mdColor = ShadTheme.of(context).textTheme.p.color ??
           DefaultTextStyle.of(context).style.color ??
           ShadTheme.of(context).colorScheme.foreground;
       final baseFontSize = MediaQuery.of(context).textScaler.scale((DefaultTextStyle.of(context).style.fontSize ?? 14)) * 1.3;
@@ -161,15 +160,14 @@ class DocumentViewerElement extends StatelessWidget {
   Widget build(BuildContext context) {
     return ChangeNotifierBuilder(
       source: element,
-      builder:
-          (context) => Padding(
-            padding: EdgeInsets.symmetric(horizontal: 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              mainAxisSize: MainAxisSize.min,
-              children: [...buildElement(context)],
-            ),
-          ),
+      builder: (context) => Padding(
+        padding: EdgeInsets.symmetric(horizontal: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [...buildElement(context)],
+        ),
+      ),
     );
   }
 }

@@ -137,10 +137,10 @@ class _VideoAttachmentState extends State<VideoAttachment> {
 
       final v = controller!.value;
       final currentlyPlaying =
-          v
-              .isPlaying /*&&
+          v.isPlaying /*&&
           controller!.value.position != controller!.value.duration &&
-          controller!.value.position > Duration.zero*/;
+          controller!.value.position > Duration.zero*/
+          ;
 
       if (playing != currentlyPlaying) {
         playing = currentlyPlaying;
@@ -400,19 +400,18 @@ class _AudioAttachmentState extends State<_AudioAttachment> {
     return player == null
         ? const CircularProgressIndicator()
         : StreamBuilder(
-          stream: player!.playerStateStream,
-          builder:
-              (context, snapshot) => ShadButton(
-                onPressed: () {
-                  if (snapshot.data?.playing == true) {
-                    player!.pause();
-                  } else {
-                    player!.play();
-                  }
-                },
-                leading: snapshot.data?.playing == true ? const Icon(size: 16, LucideIcons.pause) : const Icon(size: 16, LucideIcons.play),
-                child: snapshot.data?.playing == true ? const Text("Pause") : const Text("Play"),
-              ),
-        );
+            stream: player!.playerStateStream,
+            builder: (context, snapshot) => ShadButton(
+              onPressed: () {
+                if (snapshot.data?.playing == true) {
+                  player!.pause();
+                } else {
+                  player!.play();
+                }
+              },
+              leading: snapshot.data?.playing == true ? const Icon(size: 16, LucideIcons.pause) : const Icon(size: 16, LucideIcons.play),
+              child: snapshot.data?.playing == true ? const Text("Pause") : const Text("Play"),
+            ),
+          );
   }
 }

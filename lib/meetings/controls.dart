@@ -135,38 +135,38 @@ class ConnectionButton extends StatelessWidget {
       builder: (context, _) {
         return switch (room.connectionState) {
           livekit.ConnectionState.connected => _MeetingControlsButon(
-            text: "Hangup",
-            on: false,
-            onColor: Colors.black,
-            onForeground: Colors.white,
-            offColor: Colors.red,
-            offForeground: Colors.white,
-            icon: Icons.phone,
-            onPressed: () {
-              controller.disconnect();
-            },
-          ),
+              text: "Hangup",
+              on: false,
+              onColor: Colors.black,
+              onForeground: Colors.white,
+              offColor: Colors.red,
+              offForeground: Colors.white,
+              icon: Icons.phone,
+              onPressed: () {
+                controller.disconnect();
+              },
+            ),
           livekit.ConnectionState.disconnected => _MeetingControlsButon(
-            text: "Connect",
-            on: false,
-            onColor: Colors.black,
-            onForeground: Colors.white,
-            offColor: Colors.black,
-            offForeground: Colors.white,
-            icon: Icons.phone,
-            onPressed: () {
-              controller.disconnect();
-            },
-          ),
+              text: "Connect",
+              on: false,
+              onColor: Colors.black,
+              onForeground: Colors.white,
+              offColor: Colors.black,
+              offForeground: Colors.white,
+              icon: Icons.phone,
+              onPressed: () {
+                controller.disconnect();
+              },
+            ),
           _ => const _MeetingControlsButon(
-            text: "Connecting",
-            on: false,
-            onColor: Colors.black,
-            onForeground: Colors.white,
-            offColor: Colors.red,
-            offForeground: Colors.white,
-            icon: Icons.phone,
-          ),
+              text: "Connecting",
+              on: false,
+              onColor: Colors.black,
+              onForeground: Colors.white,
+              offColor: Colors.red,
+              offForeground: Colors.white,
+              icon: Icons.phone,
+            ),
         };
       },
     );
