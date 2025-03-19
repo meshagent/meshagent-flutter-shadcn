@@ -49,7 +49,7 @@ class FormDocumentField extends StatelessWidget {
     return switch (element.tagName) {
       "select" => FormDocumentSelect(element: element),
       "input" => FormDocumentInput(element: element),
-      _ => throw new Exception("Unexpected form field type"),
+      _ => throw Exception("Unexpected form field type"),
     };
   }
 }
@@ -63,7 +63,7 @@ class FormDocumentSelect extends StatelessWidget {
       source: element,
       builder:
           (context) => ShadSelectFormField<String?>(
-            selectedOptionBuilder: (context, value) => Text("${value ?? ''}"),
+            selectedOptionBuilder: (context, value) => Text(value ?? ''),
             placeholder: Text("pick a value"),
             label: element.getAttribute("label") == null ? null : Text(element.getAttribute("label")),
             description: element.getAttribute("description") == null ? null : Text(element.getAttribute("description")),

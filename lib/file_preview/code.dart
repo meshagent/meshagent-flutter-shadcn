@@ -3,7 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart';
 
 class CodePreview extends StatefulWidget {
-  CodePreview({super.key, required this.url});
+  const CodePreview({super.key, required this.url});
 
   final Uri url;
 

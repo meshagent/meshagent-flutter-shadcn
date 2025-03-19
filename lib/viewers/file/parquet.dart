@@ -17,7 +17,7 @@ class _ParquetViewer extends State<ParquetViewer> {
   var columns = [];
 
   late String defaultTableName = pathlib.withoutExtension(pathlib.basename(widget.path));
-  late String queryValue = "select * from ${defaultTableName}";
+  late String queryValue = "select * from $defaultTableName";
 
   void query() async {
     try {

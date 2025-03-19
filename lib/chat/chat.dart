@@ -402,9 +402,9 @@ class _ChatThread extends State<ChatThread> {
                     border: ShadBorder.all(radius: BorderRadius.circular(30)),
                   ),
                   onChanged: (value) {
-                    if (!value.isEmpty != showSend) {
+                    if (value.isNotEmpty != showSend) {
                       setState(() {
-                        showSend = !value.isEmpty;
+                        showSend = value.isNotEmpty;
                       });
                     }
 

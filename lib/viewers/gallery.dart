@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import "builder.dart";
 
 class GalleryViewer extends StatefulWidget {
-  GalleryViewer({required this.document, super.key, required this.client});
+  const GalleryViewer({required this.document, super.key, required this.client});
 
   final RoomClient client;
   final MeshDocument document;
@@ -21,13 +21,13 @@ class _GalleryViewerState extends State<GalleryViewer> {
   void initState() {
     super.initState();
 
-    widget.document.addListener(this.onDocumentChanged);
+    widget.document.addListener(onDocumentChanged);
   }
 
   @override
   void dispose() {
     super.dispose();
-    widget.document.removeListener(this.onDocumentChanged);
+    widget.document.removeListener(onDocumentChanged);
   }
 
   void onDocumentChanged() {

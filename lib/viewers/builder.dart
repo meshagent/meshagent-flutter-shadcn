@@ -2,7 +2,7 @@ import 'package:meshagent/document.dart' as docs;
 import 'package:flutter/widgets.dart';
 
 class ChangeNotifierBuilder extends StatefulWidget {
-  ChangeNotifierBuilder({required this.source, super.key, required this.builder});
+  const ChangeNotifierBuilder({required this.source, super.key, required this.builder});
 
   final docs.ChangeEmitter source;
   final Widget Function(BuildContext) builder;
@@ -16,13 +16,13 @@ class _ChangeNotifierBuilderState extends State<ChangeNotifierBuilder> {
   void initState() {
     super.initState();
 
-    widget.source.addListener(this.onDocumentChanged);
+    widget.source.addListener(onDocumentChanged);
   }
 
   @override
   void dispose() {
     super.dispose();
-    widget.source.removeListener(this.onDocumentChanged);
+    widget.source.removeListener(onDocumentChanged);
   }
 
   void onDocumentChanged() {
