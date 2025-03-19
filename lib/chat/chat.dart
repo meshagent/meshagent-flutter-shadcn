@@ -33,7 +33,7 @@ class _ChatThreadLoader extends State<ChatThreadLoader> {
   Future<MeshDocument>? threadFuture;
 
   void ensureParticipants(MeshDocument document) {
-    if (widget.participants != null) {
+    if (widget.participants != null || widget.participantNames != null) {
       Set<String> existing = {};
 
       for (final child in document.root.getChildren().whereType<MeshElement>()) {
@@ -42,17 +42,21 @@ class _ChatThreadLoader extends State<ChatThreadLoader> {
             existing.add(member.getAttribute("name"));
           }
 
-          for (final part in widget.participants!) {
-            if (!existing.contains(part.getAttribute("name"))) {
-              child.createChildElement("member", {"name": part.getAttribute("name")});
-              existing.add(part.getAttribute("name").getAttribute("name"));
+          if (widget.participants != null) {
+            for (final part in widget.participants!) {
+              if (!existing.contains(part.getAttribute("name"))) {
+                child.createChildElement("member", {"name": part.getAttribute("name")});
+                existing.add(part.getAttribute("name").getAttribute("name"));
+              }
             }
           }
 
-          for (final part in widget.participantNames!) {
-            if (!existing.contains(part)) {
-              child.createChildElement("member", {"name": part});
-              existing.add(part);
+          if (widget.participantNames != null) {
+            for (final part in widget.participantNames!) {
+              if (!existing.contains(part)) {
+                child.createChildElement("member", {"name": part});
+                existing.add(part);
+              }
             }
           }
         }
