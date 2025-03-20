@@ -10,6 +10,6 @@ class CodeViewer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return FilePreview(client: client, path: path);
+    return FilePreview(room: client, path: path);
   }
 }

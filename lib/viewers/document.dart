@@ -138,7 +138,7 @@ class DocumentViewerElement extends StatelessWidget {
     } else if (element.tagName == "step") {
       return [Text(element.attributes["description"])];
     } else if (element.tagName == "file") {
-      return [FilePreview(client: client, path: element.getAttribute("name"))];
+      return [FilePreview(room: client, path: element.getAttribute("name"))];
     } else if (element.tagName == "plan") {
       return [
         Container(

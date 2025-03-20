@@ -92,7 +92,7 @@ class _PresentationViewerElementState extends State<PresentationViewerElement> {
           foregroundDecoration: BoxDecoration(border: Border.all(color: Color.from(alpha: .1, red: 0, green: 0, blue: 0))),
           child: Stack(
             children: [
-              Positioned.fill(child: FilePreview(client: client, path: slide.getAttribute("background"))),
+              Positioned.fill(child: FilePreview(room: client, path: slide.getAttribute("background"))),
               Center(
                 child: Padding(
                   padding: EdgeInsets.all(50),

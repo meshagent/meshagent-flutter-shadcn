@@ -129,7 +129,7 @@ class _GalleryViewerElementState extends State<GalleryViewerElement> {
                           ),
                           decoration: BoxDecoration(borderRadius: BorderRadius.circular(5)),
                           clipBehavior: Clip.antiAlias,
-                          child: FilePreview(client: client, path: (children[index] as docs.MeshElement).getAttribute("path")),
+                          child: FilePreview(room: client, path: (children[index] as docs.MeshElement).getAttribute("path")),
                         ),
                       ),
                 ),

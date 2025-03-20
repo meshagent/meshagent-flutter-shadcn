@@ -1,26 +1,28 @@
 import 'package:flutter/widgets.dart';
 import 'package:meshagent/room_server_client.dart';
+import "package:meshagent_flutter_shadcn/file_preview/file_preview.dart";
 import 'package:path/path.dart';
 
 import "file/image.dart";
 import "file/video.dart";
 import "file/audio.dart";
 import "file/pdf.dart";
-import "file/code.dart";
 import "file/parquet.dart";
 
 Widget? fileViewer(RoomClient client, String path) {
+  final ext = extension(path).toLowerCase();
+  if (customViewers[ext.split(".").last] != null) {
+    return FilePreview(room: client, path: path);
+  }
   return switch (extension(path).toLowerCase()) {
-    ".jpg" => ImageViewer(client: client, path: path),
-    ".jpeg" => ImageViewer(client: client, path: path),
-    ".webp" => ImageViewer(client: client, path: path),
-    ".png" => ImageViewer(client: client, path: path),
-    ".svg" => ImageViewer(client: client, path: path),
-    ".mp4" => VideoViewer(client: client, path: path),
-    ".wav" => AudioViewer(client: client, path: path),
-    ".pdf" => PdfViewer(client: client, path: path),
-    ".txt" => CodeViewer(client: client, path: path),
-    ".json" => CodeViewer(client: client, path: path),
+    ".jpg" => ImageViewer(room: client, path: path),
+    ".jpeg" => ImageViewer(room: client, path: path),
+    ".webp" => ImageViewer(room: client, path: path),
+    ".png" => ImageViewer(room: client, path: path),
+    ".svg" => ImageViewer(room: client, path: path),
+    ".mp4" => VideoViewer(room: client, path: path),
+    ".wav" => AudioViewer(room: client, path: path),
+    ".pdf" => PdfViewer(room: client, path: path),
     ".parquet" => ParquetViewer(client: client, path: path),
     ".docx" => Center(child: Text("No preview available")),
     ".pptx" => Center(child: Text("No preview available")),

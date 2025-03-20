@@ -6,9 +6,9 @@ import 'package:meshagent_flutter_shadcn/file_preview/file_preview.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 class ImageViewer extends StatefulWidget {
-  const ImageViewer({super.key, required this.client, required this.path});
+  const ImageViewer({super.key, required this.room, required this.path});
 
-  final RoomClient client;
+  final RoomClient room;
   final String path;
 
   @override
@@ -39,7 +39,7 @@ class _ImageViewerState extends State<ImageViewer> {
                 child: Container(
                   padding: EdgeInsets.all(30),
                   width: constraints.maxWidth * .7,
-                  child: FilePreview(client: widget.client, path: widget.path, fit: BoxFit.contain),
+                  child: FilePreview(room: widget.room, path: widget.path, fit: BoxFit.contain),
                 ),
               ),
             ),
