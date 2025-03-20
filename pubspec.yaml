@@ -33,7 +33,7 @@ dependencies:
   video_player: ^2.9.2
   chewie: ^1.8.5
   pdfrx: ^1.0.103
-  shadcn_ui: ^0.22.5
+  shadcn_ui: ^0.23.0
   markdown_widget: ^2.3.2+6
   lucide_icons_flutter: ^1.2.5
   google_fonts: ^6.2.1
