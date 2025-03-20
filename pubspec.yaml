@@ -1,5 +1,6 @@
 name: meshagent_flutter_shadcn
 description: widgets for bootstrapping meshagent projects
+homepage: https://www.meshagent.com
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: "none" # Remove this line if you wish to publish to pub.dev
@@ -16,10 +17,12 @@ publish_to: "none" # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.4
+version: 0.0.6
 
 environment:
   sdk: "^3.7.0"
+
+resolution: workspace
 
 # Dependencies specify other packages that your package needs in order to work.
 # To automatically upgrade your package dependencies to the latest versions
@@ -53,15 +56,9 @@ dependencies:
   path: ^1.9.1
   flutter_webrtc: ^0.12.11
   webrtc_interface: ^1.2.0
-
-  meshagent:
-    path: ../meshagent-dart
-
-  meshagent_flutter:
-    path: ../meshagent-flutter
-
-  meshagent_super_editor:
-    path: ../meshagent-super-editor
+  meshagent: ^0.0.6
+  meshagent_flutter: ^0.0.6
+  meshagent_super_editor: ^0.0.6
   re_editor: ^0.7.0
   re_highlight: ^0.0.3
 
