@@ -62,9 +62,7 @@ dependencies:
 
   meshagent_super_editor:
     path: ../meshagent-super-editor
-  re_editor: ^0.7.0
-  re_highlight: ^0.0.3
-
+ 
 dev_dependencies:
   flutter_lints: ^5.0.0
   test: ^1.25.8
