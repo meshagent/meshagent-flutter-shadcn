@@ -23,6 +23,7 @@ class ChatThreadLoader extends StatefulWidget {
     required this.room,
     this.startChatCentered = false,
     this.participantNames,
+    this.participantNameBuilder,
   });
 
   final List<Participant>? participants;
@@ -30,6 +31,7 @@ class ChatThreadLoader extends StatefulWidget {
   final String path;
   final RoomClient room;
   final bool startChatCentered;
+  final Widget Function(String, DateTime)? participantNameBuilder;
 
   @override
   State createState() => _ChatThreadLoader();
@@ -86,19 +88,27 @@ class _ChatThreadLoader extends State<ChatThreadLoader> {
 
         ensureParticipants(document);
 
-        return ChatThread(path: widget.path, document: document, room: widget.room);
+        return ChatThread(path: widget.path, document: document, room: widget.room, participantNameBuilder: widget.participantNameBuilder);
       },
     );
   }
 }
 
 class ChatThread extends StatefulWidget {
-  const ChatThread({super.key, required this.path, required this.document, required this.room, this.startChatCentered = false});
+  const ChatThread({
+    super.key,
+    required this.path,
+    required this.document,
+    required this.room,
+    this.startChatCentered = false,
+    this.participantNameBuilder,
+  });
 
   final String path;
   final MeshDocument document;
   final RoomClient room;
   final bool startChatCentered;
+  final Widget Function(String, DateTime)? participantNameBuilder;
 
   @override
   State createState() => _ChatThread();
@@ -106,6 +116,7 @@ class ChatThread extends StatefulWidget {
 
 class _ChatThread extends State<ChatThread> {
   bool showSend = false;
+  String prevAuthor = "";
 
   List<JsonResponse> attachments = [];
   late StreamSubscription<RoomEvent> sub;
@@ -207,14 +218,21 @@ class _ChatThread extends State<ChatThread> {
 
   Widget buildMessage(BuildContext context, MeshElement message) {
     bool mine = message.attributes["author_name"] == widget.room.localParticipant!.getAttribute("name");
+    bool isSameAuthor = message.attributes["author_name"] == prevAuthor;
+
     final mdColor =
         ShadTheme.of(context).textTheme.p.color ?? DefaultTextStyle.of(context).style.color ?? ShadTheme.of(context).colorScheme.foreground;
     final baseFontSize = MediaQuery.of(context).textScaler.scale((DefaultTextStyle.of(context).style.fontSize ?? 14));
+
+    prevAuthor = message.attributes["author_name"];
 
     return Column(
       mainAxisAlignment: MainAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
+        if (!isSameAuthor && widget.participantNameBuilder != null)
+          widget.participantNameBuilder!(message.attributes["author_name"], DateTime.parse(message.attributes["created_at"])),
+
         Container(
           padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           margin: EdgeInsets.only(top: 8, right: mine ? 0 : 50, left: mine ? 50 : 0),
