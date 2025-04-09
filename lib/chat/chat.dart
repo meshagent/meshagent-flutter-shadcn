@@ -64,8 +64,7 @@ class _ChatThreadLoader extends State<ChatThreadLoader> {
           if (widget.participants != null) {
             for (final part in widget.participants!) {
               if (!existing.contains(part.getAttribute("name"))) {
-                child.createChildElement("member", {
-                  "name": part.getAttribute("name")});
+                child.createChildElement("member", {"name": part.getAttribute("name")});
                 existing.add(part.getAttribute("name"));
               }
             }
@@ -137,9 +136,7 @@ class _ChatThread extends State<ChatThread> {
   List<MeshElement> messages = [];
 
   List<MeshElement> _getMessages() {
-    final threadMessages = widget.document.root
-        .getChildren().whereType<MeshElement>()
-        .where((x) => x.tagName == "messages").firstOrNull;
+    final threadMessages = widget.document.root.getChildren().whereType<MeshElement>().where((x) => x.tagName == "messages").firstOrNull;
 
     return (threadMessages?.getChildren() ?? []).reversed.whereType<MeshElement>().toList();
   }
@@ -330,10 +327,7 @@ class _ChatThread extends State<ChatThread> {
           child: ListView(
             reverse: true,
             padding: EdgeInsets.all(16),
-            children: messages
-              .map(mapMeshElement())
-              .map<Widget>((item) => buildMessage(context, item.$1, item.$2))
-              .toList(),
+            children: messages.map(mapMeshElement()).map<Widget>((item) => buildMessage(context, item.$1, item.$2)).toList(),
           ),
         ),
         if (!bottomAlign)
