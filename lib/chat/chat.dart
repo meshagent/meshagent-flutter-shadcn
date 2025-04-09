@@ -14,6 +14,17 @@ import 'package:flutter/services.dart';
 import 'package:livekit_client/livekit_client.dart' as livekit;
 
 // ignore: depend_on_referenced_packages
+typedef PreviousMeshElementMapper = (MeshElement element, MeshElement? previous) Function(MeshElement);
+PreviousMeshElementMapper mapMeshElement() {
+  MeshElement? previous;
+
+  return (element) {
+    final result = (element, previous);
+
+    previous = element;
+    return result;
+  };
+}
 
 class ChatThreadLoader extends StatefulWidget {
   const ChatThreadLoader({
@@ -53,7 +64,8 @@ class _ChatThreadLoader extends State<ChatThreadLoader> {
           if (widget.participants != null) {
             for (final part in widget.participants!) {
               if (!existing.contains(part.getAttribute("name"))) {
-                child.createChildElement("member", {"name": part.getAttribute("name")});
+                child.createChildElement("member", {
+                  "name": part.getAttribute("name")});
                 existing.add(part.getAttribute("name"));
               }
             }
@@ -116,26 +128,39 @@ class ChatThread extends StatefulWidget {
 
 class _ChatThread extends State<ChatThread> {
   bool showSend = false;
-  String prevAuthor = "";
 
   List<JsonResponse> attachments = [];
   late StreamSubscription<RoomEvent> sub;
 
   Map<String, Timer> typing = {};
   Set<String> thinking = {};
+  List<MeshElement> messages = [];
+
+  List<MeshElement> _getMessages() {
+    final threadMessages = widget.document.root
+        .getChildren().whereType<MeshElement>()
+        .where((x) => x.tagName == "messages").firstOrNull;
+
+    return (threadMessages?.getChildren() ?? []).reversed.whereType<MeshElement>().toList();
+  }
 
   @override
   void initState() {
     super.initState();
+
     sub = widget.room.listen(onRoomMessage);
     widget.document.addListener(onDocumentChanged);
+    messages = _getMessages();
   }
 
   void onDocumentChanged() {
     if (!mounted) {
       return;
     }
-    setState(() {});
+
+    setState(() {
+      messages = _getMessages();
+    });
   }
 
   void onRoomMessage(RoomEvent event) {
@@ -216,15 +241,13 @@ class _ChatThread extends State<ChatThread> {
 
   final controller = ShadTextEditingController();
 
-  Widget buildMessage(BuildContext context, MeshElement message) {
-    bool mine = message.attributes["author_name"] == widget.room.localParticipant!.getAttribute("name");
-    bool isSameAuthor = message.attributes["author_name"] == prevAuthor;
+  Widget buildMessage(BuildContext context, MeshElement message, MeshElement? previous) {
+    final isSameAuthor = message.attributes["author_name"] == previous?.attributes["author_name"];
+    final mine = message.attributes["author_name"] == widget.room.localParticipant!.getAttribute("name");
 
     final mdColor =
         ShadTheme.of(context).textTheme.p.color ?? DefaultTextStyle.of(context).style.color ?? ShadTheme.of(context).colorScheme.foreground;
     final baseFontSize = MediaQuery.of(context).textScaler.scale((DefaultTextStyle.of(context).style.fontSize ?? 14));
-
-    prevAuthor = message.attributes["author_name"];
 
     return Column(
       mainAxisAlignment: MainAxisAlignment.start,
@@ -298,10 +321,8 @@ class _ChatThread extends State<ChatThread> {
 
   @override
   Widget build(BuildContext context) {
-    final thread = widget.document;
-    final threadMessages = thread.root.getChildren().whereType<MeshElement>().where((x) => x.tagName == "messages").firstOrNull;
+    bool bottomAlign = !widget.startChatCentered || messages.isNotEmpty;
 
-    bool bottomAlign = !widget.startChatCentered || (threadMessages?.getChildren() ?? []).isNotEmpty;
     return Column(
       mainAxisAlignment: bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
       children: [
@@ -309,7 +330,10 @@ class _ChatThread extends State<ChatThread> {
           child: ListView(
             reverse: true,
             padding: EdgeInsets.all(16),
-            children: [for (final message in (threadMessages?.getChildren() ?? []).reversed) buildMessage(context, message as MeshElement)],
+            children: messages
+              .map(mapMeshElement())
+              .map<Widget>((item) => buildMessage(context, item.$1, item.$2))
+              .toList(),
           ),
         ),
         if (!bottomAlign)
