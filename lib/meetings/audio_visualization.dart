@@ -13,12 +13,16 @@ class AudioWave extends StatefulWidget {
     super.key,
     this.alignment = Alignment.center,
     this.backgroundColor = const Color.from(alpha: 1, red: 1, green: 1, blue: 1),
+    this.speakingColor = const Color.from(alpha: .2, red: 0, green: 0, blue: 0),
+    this.notSpeakingColor = const Color.from(alpha: 1, red: 0, green: 0, blue: 0),
   });
 
   final Room room;
   final Participant participant;
   final Alignment alignment;
   final Color backgroundColor;
+  final Color speakingColor;
+  final Color notSpeakingColor;
 
   @override
   State createState() => _AudioWaveState();
@@ -69,12 +73,12 @@ class _AudioWaveState extends State<AudioWave> {
           controller.amplitude = .2;
           controller.speed = 0.05;
           controller.frequency = 1;
-          controller.color = Color.from(alpha: .2, red: 0, green: 0, blue: 0);
+          controller.color = widget.speakingColor;
         } else {
           controller.amplitude = audioLevel;
           controller.frequency = 6;
           controller.speed = 0.2;
-          controller.color = Color.from(alpha: 1, red: 0, green: 0, blue: 0);
+          controller.color = widget.notSpeakingColor;
         }
       });
     }

@@ -23,11 +23,11 @@ Future<livekit.RoomOptions> getSavedRoomOptions() async {
 }
 
 class MeetingScope extends StatefulWidget {
-  const MeetingScope({super.key, required this.client, required this.roomName, required this.builder, this.roomOptions});
+  const MeetingScope({super.key, required this.client, this.breakoutRoom, required this.builder, this.roomOptions});
 
   final livekit.RoomOptions? roomOptions;
   final RoomClient client;
-  final String roomName;
+  final String? breakoutRoom;
   final Widget Function(BuildContext, MeetingController) builder;
 
   @override
@@ -35,12 +35,12 @@ class MeetingScope extends StatefulWidget {
 }
 
 class _MeetingScopeState extends State<MeetingScope> {
-  late final MeetingController controller = MeetingController(client: widget.client, roomOptions: widget.roomOptions);
+  late final MeetingController controller = MeetingController(room: widget.client, roomOptions: widget.roomOptions);
 
   @override
   void initState() {
     super.initState();
-    controller.configure(widget.roomName);
+    controller.configure(breakoutRoom: widget.breakoutRoom);
   }
 
   @override
@@ -60,14 +60,14 @@ class _MeetingScopeState extends State<MeetingScope> {
 }
 
 class MeetingController extends ChangeNotifier {
-  MeetingController({required this.client, livekit.RoomOptions? roomOptions})
-    : room = livekit.Room(roomOptions: roomOptions ?? livekit.RoomOptions()) {
-    room.addListener(_onRoomChanged);
+  MeetingController({required this.room, livekit.RoomOptions? roomOptions})
+    : livekitRoom = livekit.Room(roomOptions: roomOptions ?? livekit.RoomOptions()) {
+    livekitRoom.addListener(_onRoomChanged);
   }
 
-  final RoomClient client;
+  final RoomClient room;
   LivekitConnectionInfo? _config;
-  final livekit.Room room;
+  final livekit.Room livekitRoom;
 
   LivekitConnectionInfo? get config {
     return _config;
@@ -79,23 +79,25 @@ class MeetingController extends ChangeNotifier {
   }
 
   bool get hasParticipantsWithVideo {
-    return room.localParticipant?.videoTrackPublications.where((pub) => !pub.muted).isNotEmpty == true ||
-        room.remoteParticipants.values.where((p) => p.videoTrackPublications.where((pub) => !pub.muted).isNotEmpty == true).isNotEmpty;
+    return livekitRoom.localParticipant?.videoTrackPublications.where((pub) => !pub.muted).isNotEmpty == true ||
+        livekitRoom.remoteParticipants.values
+            .where((p) => p.videoTrackPublications.where((pub) => !pub.muted).isNotEmpty == true)
+            .isNotEmpty;
   }
 
   void _onRoomChanged() {
     notifyListeners();
   }
 
-  Future<void> configure(String roomName) async {
-    if (room.connectionState != livekit.ConnectionState.disconnected) {
+  Future<void> configure({String? breakoutRoom}) async {
+    if (livekitRoom.connectionState != livekit.ConnectionState.disconnected) {
       throw Exception("You cannot reconfigure while the controller is connected");
     }
     _config = null;
     _configurationError = null;
     notifyListeners();
     try {
-      _config = await client.livekit.getConnectionInfo();
+      _config = await room.livekit.getConnectionInfo(breakoutRoom: breakoutRoom);
       notifyListeners();
     } catch (err) {
       _configurationError = err;
@@ -109,15 +111,15 @@ class MeetingController extends ChangeNotifier {
     if (config == null) {
       throw Exception("The controller has not been configured");
     }
-    await room.connect(config.url, config.token, fastConnectOptions: fastConnectOptions);
+    await livekitRoom.connect(config.url, config.token, fastConnectOptions: fastConnectOptions);
   }
 
   Future<void> disconnect() async {
-    await room.disconnect();
+    await livekitRoom.disconnect();
   }
 
   bool get isConnected {
-    return room.connectionState != livekit.ConnectionState.disconnected;
+    return livekitRoom.connectionState != livekit.ConnectionState.disconnected;
   }
 }
 

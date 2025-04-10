@@ -473,7 +473,7 @@ class JoinMeetingButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return ShadButton.outline(
       leading: Icon(LucideIcons.mic),
-      enabled: controller.room.connectionState == livekit.ConnectionState.disconnected,
+      enabled: controller.livekitRoom.connectionState == livekit.ConnectionState.disconnected,
       onPressed: () async {
         await controller.connect(livekit.FastConnectOptions(microphone: livekit.TrackOption(enabled: true)));
       },

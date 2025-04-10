@@ -22,19 +22,19 @@ class _ParticipantCamerasListState extends State<ParticipantCamerasList> {
   Widget build(BuildContext context) {
     final controller = widget.controller;
     return ListenableBuilder(
-      listenable: widget.controller.room,
+      listenable: widget.controller.livekitRoom,
       builder:
           (context, _) => ListView(
             padding: widget.padding,
             scrollDirection: Axis.horizontal,
             children: [
-              if (controller.room.localParticipant != null)
-                ParticipantTile(room: controller.room, participant: controller.room.localParticipant!),
+              if (controller.livekitRoom.localParticipant != null)
+                ParticipantTile(room: controller.livekitRoom, participant: controller.livekitRoom.localParticipant!),
               SizedBox(width: widget.spacing),
-              ...controller.room.remoteParticipants.values.map(
+              ...controller.livekitRoom.remoteParticipants.values.map(
                 (participant) => Padding(
                   padding: EdgeInsets.only(right: widget.spacing),
-                  child: ParticipantTile(room: controller.room, participant: participant),
+                  child: ParticipantTile(room: controller.livekitRoom, participant: participant),
                 ),
               ),
             ],
@@ -58,12 +58,20 @@ class ParticipantTile extends StatelessWidget {
         return AspectRatio(
           aspectRatio: 4 / 3,
           child: _CameraBox(
+            borderColor: Colors.transparent,
+            borderWidth: 0,
             muted: participant.isMuted,
             camera:
                 track != null
                     ? VideoTrackRenderer(track, fit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover)
                     : (participant.kind == ParticipantKind.AGENT
-                        ? AudioWave(room: room, participant: participant)
+                        ? AudioWave(
+                          room: room,
+                          participant: participant,
+                          backgroundColor: ShadTheme.of(context).colorScheme.background,
+                          speakingColor: ShadTheme.of(context).colorScheme.foreground.withAlpha(50),
+                          notSpeakingColor: ShadTheme.of(context).colorScheme.foreground.withAlpha(25),
+                        )
                         : ColoredBox(color: ShadTheme.of(context).colorScheme.foreground)),
             participantName: participant.name,
           ),
@@ -156,26 +164,33 @@ class _ParticipantOverlayState extends State<_ParticipantOverlay> with SingleTic
 }
 
 class _CameraBox extends StatelessWidget {
-  const _CameraBox({required this.camera, required this.participantName, this.muted = false});
+  const _CameraBox({
+    required this.camera,
+    required this.participantName,
+    this.muted = false,
+    this.borderColor = Colors.white,
+    this.borderWidth = 1.0,
+  });
 
   final Widget camera;
   final String participantName;
   final bool muted;
   final bool showName = true;
   final Alignment overlayAlignment = Alignment.bottomLeft;
-  final BoxDecoration decoration = const BoxDecoration(
-    border: Border(
-      top: BorderSide(color: Colors.white, width: 2.0),
-      bottom: BorderSide(color: Colors.white, width: 2.0),
-      left: BorderSide(color: Colors.white, width: 2.0),
-      right: BorderSide(color: Colors.white, width: 2.0),
-    ),
-    borderRadius: BorderRadius.all(Radius.circular(8.0)),
-    boxShadow: [BoxShadow(blurRadius: 5, color: Color.fromARGB(50, 0, 0, 0))],
-  );
+  final Color borderColor;
+  final double borderWidth;
 
   @override
   Widget build(BuildContext context) {
+    final BoxDecoration decoration = BoxDecoration(
+      border: Border(
+        top: BorderSide(color: borderColor, width: borderWidth),
+        bottom: BorderSide(color: borderColor, width: borderWidth),
+        left: BorderSide(color: borderColor, width: borderWidth),
+        right: BorderSide(color: borderColor, width: borderWidth),
+      ),
+      borderRadius: BorderRadius.all(Radius.circular(8.0)),
+    );
     return Container(
       decoration: decoration,
       clipBehavior: Clip.antiAlias,

@@ -16,13 +16,13 @@ class MeetingControls extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: controller.room,
+      listenable: controller.livekitRoom,
       builder: (context, _) {
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             ConnectionButton(controller: controller),
-            if (controller.room.localParticipant != null) ...[
+            if (controller.livekitRoom.localParticipant != null) ...[
               SizedBox(width: spacing),
               CameraToggle(controller: controller),
               SizedBox(width: spacing),
@@ -47,7 +47,7 @@ class CameraToggle extends StatefulWidget {
 class _CameraToggleState extends State<CameraToggle> {
   @override
   Widget build(BuildContext context) {
-    final localParticipant = widget.controller.room.localParticipant;
+    final localParticipant = widget.controller.livekitRoom.localParticipant;
     return ListenableBuilder(
       listenable: localParticipant!,
       builder: (context, _) {
@@ -70,7 +70,7 @@ class _CameraToggleState extends State<CameraToggle> {
                 });
               },
             ),
-            _ChangeSettings(kind: _DeviceKind.videoInput, room: widget.controller.room),
+            _ChangeSettings(kind: _DeviceKind.videoInput, room: widget.controller.livekitRoom),
           ],
         );
       },
@@ -90,7 +90,7 @@ class MicToggle extends StatefulWidget {
 class _MicToggleState extends State<MicToggle> {
   @override
   Widget build(BuildContext context) {
-    final localParticipant = widget.controller.room.localParticipant;
+    final localParticipant = widget.controller.livekitRoom.localParticipant;
     return ListenableBuilder(
       listenable: localParticipant!,
       builder: (context, _) {
@@ -113,7 +113,7 @@ class _MicToggleState extends State<MicToggle> {
                 });
               },
             ),
-            _ChangeSettings(kind: _DeviceKind.audioInput, room: widget.controller.room),
+            _ChangeSettings(kind: _DeviceKind.audioInput, room: widget.controller.livekitRoom),
           ],
         );
       },
@@ -128,7 +128,7 @@ class ConnectionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final room = controller.room;
+    final room = controller.livekitRoom;
 
     return ListenableBuilder(
       listenable: room,
