@@ -37,20 +37,23 @@ class VoiceAgentCaller extends StatelessWidget {
                     builder: (c, _) {
                       final participant = meeting.livekitRoom.remoteParticipants.values.firstOrNull;
                       return participant == null
-                          ? Container()
+                          ? Container(constraints: BoxConstraints(maxWidth: 800), child: AspectRatio(aspectRatio: 1.25))
                           : Padding(
                             padding: EdgeInsets.all(30),
-                            child: AudioWave(
-                              room: meeting.livekitRoom,
-                              participant: participant,
-                              backgroundColor: ShadTheme.of(context).colorScheme.background,
-                              speakingColor: Colors.green,
-                              notSpeakingColor: Colors.green.withAlpha(50),
+                            child: AspectRatio(
+                              aspectRatio: 1.25,
+                              child: AudioWave(
+                                room: meeting.livekitRoom,
+                                participant: participant,
+                                backgroundColor: ShadTheme.of(context).colorScheme.background,
+                                speakingColor: Colors.green,
+                                notSpeakingColor: Colors.green.withAlpha(50),
+                              ),
                             ),
                           );
                     },
                   ),
-                  MeetingControls(controller: meeting),
+                  if (meeting.livekitRoom.connectionState == livekit.ConnectionState.connected) MeetingControls(controller: meeting),
                 ],
               ],
             ),
