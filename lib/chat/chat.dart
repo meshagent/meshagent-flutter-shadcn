@@ -133,12 +133,12 @@ class _ChatThread extends State<ChatThread> {
 
   Map<String, Timer> typing = {};
   Set<String> thinking = {};
-  List<MeshElement> messages = [];
+  Iterable<MeshElement> messages = [];
 
-  List<MeshElement> _getMessages() {
+  Iterable<MeshElement> _getMessages() {
     final threadMessages = widget.document.root.getChildren().whereType<MeshElement>().where((x) => x.tagName == "messages").firstOrNull;
 
-    return (threadMessages?.getChildren() ?? []).reversed.whereType<MeshElement>().toList();
+    return (threadMessages?.getChildren() ?? []).whereType<MeshElement>();
   }
 
   @override
@@ -320,16 +320,12 @@ class _ChatThread extends State<ChatThread> {
   Widget build(BuildContext context) {
     bool bottomAlign = !widget.startChatCentered || messages.isNotEmpty;
 
+    final rendredMessages = messages.map(mapMeshElement()).map<Widget>((item) => buildMessage(context, item.$1, item.$2)).toList().reversed;
+
     return Column(
       mainAxisAlignment: bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
       children: [
-        Expanded(
-          child: ListView(
-            reverse: true,
-            padding: EdgeInsets.all(16),
-            children: messages.map(mapMeshElement()).map<Widget>((item) => buildMessage(context, item.$1, item.$2)).toList(),
-          ),
-        ),
+        Expanded(child: ListView(reverse: true, padding: EdgeInsets.all(16), children: rendredMessages.toList())),
         if (!bottomAlign)
           if (getOnlineParticipants().firstOrNull != null)
             Padding(
