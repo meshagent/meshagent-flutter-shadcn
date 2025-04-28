@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:markdown_widget/markdown_widget.dart';
@@ -7,7 +9,6 @@ import 'package:meshagent_flutter_shadcn/chat/jumping_dots.dart';
 import 'package:meshagent_flutter_shadcn/meetings/meetings.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:uuid/uuid.dart';
-import 'dart:async';
 import 'package:meshagent_flutter/meshagent_flutter.dart';
 
 import 'package:flutter/services.dart';
@@ -49,8 +50,6 @@ class ChatThreadLoader extends StatefulWidget {
 }
 
 class _ChatThreadLoader extends State<ChatThreadLoader> {
-  Future<MeshDocument>? threadFuture;
-
   void ensureParticipants(MeshDocument document) {
     if (widget.participants != null || widget.participantNames != null) {
       Set<String> existing = {};
@@ -105,6 +104,121 @@ class _ChatThreadLoader extends State<ChatThreadLoader> {
   }
 }
 
+class ChatThreadInput extends StatefulWidget {
+  const ChatThreadInput({super.key, required this.room, required this.onFileAttached, required this.onSend, this.onChanged});
+
+  final RoomClient room;
+  final void Function(JsonResponse) onFileAttached;
+  final void Function(String) onSend;
+  final void Function(String)? onChanged;
+
+  @override
+  State createState() => _ChatThreadInput();
+}
+
+class _ChatThreadInput extends State<ChatThreadInput> {
+  bool showSend = false;
+
+  final controller = ShadTextEditingController();
+
+  late final focusNode = FocusNode(
+    onKeyEvent: (_, event) {
+      if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.enter && !HardwareKeyboard.instance.isShiftPressed) {
+        widget.onSend(controller.text);
+        controller.text = "";
+
+        return KeyEventResult.handled;
+      }
+
+      return KeyEventResult.ignored;
+    },
+  );
+
+  void onChanged(String value) {
+    if (controller.text.isNotEmpty != showSend) {
+      setState(() {
+        showSend = controller.text.isNotEmpty;
+      });
+    }
+
+    widget.onChanged?.call(controller.text);
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+
+    focusNode.dispose();
+    controller.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+      child: ShadInput(
+        inputPadding: EdgeInsets.all(2),
+        leading: ShadTooltip(
+          waitDuration: Duration(seconds: 1),
+          builder: (context) => Text("Attach"),
+          child: ShadGestureDetector(
+            cursor: SystemMouseCursors.click,
+            onTap: () async {
+              final response = await widget.room.agents.invokeTool(
+                toolkit: "meshagent.markitdown",
+                tool: "markitdown_from_user",
+                arguments: {"title": "Attach a file", "description": "You can select PDFs or Office Docs"},
+              );
+
+              if (response is JsonResponse) {
+                widget.onFileAttached(response);
+              }
+            },
+            child: Container(
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
+              child: Icon(LucideIcons.paperclip, color: ShadTheme.of(context).colorScheme.background),
+            ),
+          ),
+        ),
+        trailing:
+            showSend
+                ? ShadTooltip(
+                  waitDuration: Duration(seconds: 1),
+                  builder: (context) => Text("Send"),
+                  child: ShadGestureDetector(
+                    cursor: SystemMouseCursors.click,
+                    onTap: () {
+                      widget.onSend(controller.text);
+                      controller.text = "";
+                    },
+                    child: Container(
+                      width: 22,
+                      height: 22,
+                      decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
+                      child: Icon(LucideIcons.arrowUp, color: ShadTheme.of(context).colorScheme.background),
+                    ),
+                  ),
+                )
+                : null,
+        padding: EdgeInsets.only(left: 5, right: 5, top: 5, bottom: 5),
+        decoration: ShadDecoration(
+          secondaryFocusedBorder: ShadBorder.none,
+          secondaryBorder: ShadBorder.none,
+          color: ShadTheme.of(context).ghostButtonTheme.hoverBackgroundColor,
+          border: ShadBorder.all(radius: BorderRadius.circular(30)),
+        ),
+        onChanged: onChanged,
+        maxLines: null,
+        placeholder: Text("Message"),
+        focusNode: focusNode,
+        controller: controller,
+      ),
+    );
+  }
+}
+
 class ChatThread extends StatefulWidget {
   const ChatThread({
     super.key,
@@ -126,8 +240,6 @@ class ChatThread extends StatefulWidget {
 }
 
 class _ChatThread extends State<ChatThread> {
-  bool showSend = false;
-
   List<JsonResponse> attachments = [];
   late StreamSubscription<RoomEvent> sub;
 
@@ -210,13 +322,13 @@ class _ChatThread extends State<ChatThread> {
     }
   }
 
-  void send() async {
-    if (controller.text.trim().isNotEmpty) {
+  void send(String value) async {
+    if (value.trim().isNotEmpty) {
       final messages = widget.document.root.getChildren().whereType<MeshElement>().firstWhere((x) => x.tagName == "messages");
 
       messages.createChildElement("message", {
         "id": const Uuid().v4().toString(),
-        "text": controller.text,
+        "text": value,
         "created_at": DateTime.now().toUtc().toIso8601String(),
         "author_name": widget.room.localParticipant!.getAttribute("name"),
         "author_ref": null,
@@ -226,17 +338,14 @@ class _ChatThread extends State<ChatThread> {
         widget.room.messaging.sendMessage(
           to: participant,
           type: "chat",
-          message: {"path": widget.path, "text": controller.text, "attachments": attachments.map((a) => a.json).toList()},
+          message: {"path": widget.path, "text": value, "attachments": attachments.map((a) => a.json).toList()},
         );
       }
 
       attachments.clear();
-      controller.text = "";
       setState(() {});
     }
   }
-
-  final controller = ShadTextEditingController();
 
   Widget buildMessage(BuildContext context, MeshElement message, MeshElement? previous) {
     final isSameAuthor = message.attributes["author_name"] == previous?.attributes["author_name"];
@@ -326,6 +435,7 @@ class _ChatThread extends State<ChatThread> {
       mainAxisAlignment: bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
       children: [
         Expanded(child: ListView(reverse: true, padding: EdgeInsets.all(16), children: rendredMessages.toList())),
+
         if (!bottomAlign)
           if (getOnlineParticipants().firstOrNull != null)
             Padding(
@@ -335,6 +445,7 @@ class _ChatThread extends State<ChatThread> {
                 style: ShadTheme.of(context).textTheme.h3,
               ),
             ),
+
         if ((typing.isNotEmpty || thinking.isNotEmpty))
           Container(
             width: double.infinity,
@@ -351,6 +462,7 @@ class _ChatThread extends State<ChatThread> {
               ),
             ),
           ),
+
         for (final attachment in attachments)
           Padding(
             padding: EdgeInsets.all(10),
@@ -372,107 +484,30 @@ class _ChatThread extends State<ChatThread> {
               ),
             ),
           ),
+
         Padding(
           padding: EdgeInsets.symmetric(horizontal: 15, vertical: 8),
-          child: LayoutBuilder(
-            builder:
-                (context, constraints) => ShadInput(
-                  inputPadding: EdgeInsets.all(2),
-                  leading: ShadTooltip(
-                    waitDuration: Duration(seconds: 1),
-                    builder: (context) => Text("Attach"),
-                    child: ShadGestureDetector(
-                      cursor: SystemMouseCursors.click,
-                      onTap: () async {
-                        final response = await widget.room.agents.invokeTool(
-                          toolkit: "meshagent.markitdown",
-                          tool: "markitdown_from_user",
-                          arguments: {"title": "Attach a file", "description": "You can select PDFs or Office Docs"},
-                        );
-
-                        if (!mounted) {
-                          return;
-                        }
-                        if (response is JsonResponse) {
-                          setState(() {
-                            attachments.add(response);
-                          });
-                        }
-                      },
-                      child: Container(
-                        width: 22,
-                        height: 22,
-                        decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
-                        child: Icon(LucideIcons.paperclip, color: ShadTheme.of(context).colorScheme.background),
-                      ),
-                    ),
-                  ),
-                  trailing:
-                      showSend
-                          ? ShadTooltip(
-                            waitDuration: Duration(seconds: 1),
-                            builder: (context) => Text("Send"),
-                            child: ShadGestureDetector(
-                              cursor: SystemMouseCursors.click,
-                              onTap: () {
-                                send();
-                              },
-                              child: Container(
-                                width: 22,
-                                height: 22,
-                                decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
-                                child: Icon(LucideIcons.arrowUp, color: ShadTheme.of(context).colorScheme.background),
-                              ),
-                            ),
-                          )
-                          : null,
-                  padding: EdgeInsets.only(left: 5, right: 5, top: 5, bottom: 5),
-                  decoration: ShadDecoration(
-                    secondaryFocusedBorder: ShadBorder.none,
-                    secondaryBorder: ShadBorder.none,
-                    color: ShadTheme.of(context).ghostButtonTheme.hoverBackgroundColor,
-                    border: ShadBorder.all(radius: BorderRadius.circular(30)),
-                  ),
-                  onChanged: (value) {
-                    if (value.isNotEmpty != showSend) {
-                      setState(() {
-                        showSend = value.isNotEmpty;
-                      });
-                    }
-
-                    for (final part in getOnlineParticipants()) {
-                      widget.room.messaging.sendMessage(to: part, type: "typing", message: {"path": widget.path});
-                    }
-                  },
-
-                  maxLines: null,
-                  placeholder: Text("Message"),
-                  focusNode: focusNode,
-                  //textInputAction: TextInputAction.newline,
-                  controller: controller,
-                ),
+          child: ChatThreadInput(
+            room: widget.room,
+            onFileAttached: (attachment) {
+              attachments.add(attachment);
+            },
+            onSend: send,
+            onChanged: (value) {
+              for (final part in getOnlineParticipants()) {
+                widget.room.messaging.sendMessage(to: part, type: "typing", message: {"path": widget.path});
+              }
+            },
           ),
         ),
       ],
     );
   }
 
-  late final focusNode = FocusNode(
-    onKeyEvent: (_, event) {
-      if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.enter && !HardwareKeyboard.instance.isShiftPressed) {
-        send();
-        return KeyEventResult.handled;
-      }
-
-      return KeyEventResult.ignored;
-    },
-  );
-
   @override
   void dispose() {
     super.dispose();
-    focusNode.dispose();
-    controller.dispose();
+
     sub.cancel();
     widget.document.removeListener(onDocumentChanged);
   }
