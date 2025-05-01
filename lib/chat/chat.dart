@@ -154,67 +154,64 @@ class _ChatThreadInput extends State<ChatThreadInput> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.symmetric(horizontal: 15, vertical: 8),
-      child: ShadInput(
-        inputPadding: EdgeInsets.all(2),
-        leading: ShadTooltip(
-          waitDuration: Duration(seconds: 1),
-          builder: (context) => Text("Attach"),
-          child: ShadGestureDetector(
-            cursor: SystemMouseCursors.click,
-            onTap: () async {
-              final response = await widget.room.agents.invokeTool(
-                toolkit: "meshagent.markitdown",
-                tool: "markitdown_from_user",
-                arguments: {"title": "Attach a file", "description": "You can select PDFs or Office Docs"},
-              );
+    return ShadInput(
+      inputPadding: EdgeInsets.all(2),
+      leading: ShadTooltip(
+        waitDuration: Duration(seconds: 1),
+        builder: (context) => Text("Attach"),
+        child: ShadGestureDetector(
+          cursor: SystemMouseCursors.click,
+          onTap: () async {
+            final response = await widget.room.agents.invokeTool(
+              toolkit: "meshagent.markitdown",
+              tool: "markitdown_from_user",
+              arguments: {"title": "Attach a file", "description": "You can select PDFs or Office Docs"},
+            );
 
-              if (response is JsonResponse) {
-                widget.onFileAttached(response);
-              }
-            },
-            child: Container(
-              width: 22,
-              height: 22,
-              decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
-              child: Icon(LucideIcons.paperclip, color: ShadTheme.of(context).colorScheme.background),
-            ),
+            if (response is JsonResponse) {
+              widget.onFileAttached(response);
+            }
+          },
+          child: Container(
+            width: 22,
+            height: 22,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
+            child: Icon(LucideIcons.paperclip, color: ShadTheme.of(context).colorScheme.background),
           ),
         ),
-        trailing:
-            showSend
-                ? ShadTooltip(
-                  waitDuration: Duration(seconds: 1),
-                  builder: (context) => Text("Send"),
-                  child: ShadGestureDetector(
-                    cursor: SystemMouseCursors.click,
-                    onTap: () {
-                      widget.onSend(controller.text);
-                      controller.text = "";
-                    },
-                    child: Container(
-                      width: 22,
-                      height: 22,
-                      decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
-                      child: Icon(LucideIcons.arrowUp, color: ShadTheme.of(context).colorScheme.background),
-                    ),
-                  ),
-                )
-                : null,
-        padding: EdgeInsets.only(left: 5, right: 5, top: 5, bottom: 5),
-        decoration: ShadDecoration(
-          secondaryFocusedBorder: ShadBorder.none,
-          secondaryBorder: ShadBorder.none,
-          color: ShadTheme.of(context).ghostButtonTheme.hoverBackgroundColor,
-          border: ShadBorder.all(radius: BorderRadius.circular(30)),
-        ),
-        onChanged: onChanged,
-        maxLines: null,
-        placeholder: Text("Message"),
-        focusNode: focusNode,
-        controller: controller,
       ),
+      trailing:
+          showSend
+              ? ShadTooltip(
+                waitDuration: Duration(seconds: 1),
+                builder: (context) => Text("Send"),
+                child: ShadGestureDetector(
+                  cursor: SystemMouseCursors.click,
+                  onTap: () {
+                    widget.onSend(controller.text);
+                    controller.text = "";
+                  },
+                  child: Container(
+                    width: 22,
+                    height: 22,
+                    decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
+                    child: Icon(LucideIcons.arrowUp, color: ShadTheme.of(context).colorScheme.background),
+                  ),
+                ),
+              )
+              : null,
+      padding: EdgeInsets.only(left: 5, right: 5, top: 5, bottom: 5),
+      decoration: ShadDecoration(
+        secondaryFocusedBorder: ShadBorder.none,
+        secondaryBorder: ShadBorder.none,
+        color: ShadTheme.of(context).ghostButtonTheme.hoverBackgroundColor,
+        border: ShadBorder.all(radius: BorderRadius.circular(30)),
+      ),
+      onChanged: onChanged,
+      maxLines: null,
+      placeholder: Text("Message"),
+      focusNode: focusNode,
+      controller: controller,
     );
   }
 }
