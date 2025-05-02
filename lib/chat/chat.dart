@@ -36,6 +36,10 @@ class ChatThreadLoader extends StatefulWidget {
     this.startChatCentered = false,
     this.participantNames,
     this.participantNameBuilder,
+
+    this.initialMessageID,
+    this.initialMessageText,
+    this.initialMessageAttachments,
   });
 
   final List<Participant>? participants;
@@ -44,6 +48,10 @@ class ChatThreadLoader extends StatefulWidget {
   final RoomClient room;
   final bool startChatCentered;
   final Widget Function(String, DateTime)? participantNameBuilder;
+
+  final String? initialMessageID;
+  final String? initialMessageText;
+  final List<JsonResponse>? initialMessageAttachments;
 
   @override
   State createState() => _ChatThreadLoader();
@@ -98,7 +106,16 @@ class _ChatThreadLoader extends State<ChatThreadLoader> {
 
         ensureParticipants(document);
 
-        return ChatThread(path: widget.path, document: document, room: widget.room, participantNameBuilder: widget.participantNameBuilder);
+        return ChatThread(
+          path: widget.path,
+          document: document,
+          room: widget.room,
+          participantNameBuilder: widget.participantNameBuilder,
+
+          initialMessageID: widget.initialMessageID,
+          initialMessageText: widget.initialMessageText,
+          initialMessageAttachments: widget.initialMessageAttachments,
+        );
       },
     );
   }
@@ -227,6 +244,10 @@ class ChatThread extends StatefulWidget {
     required this.room,
     this.startChatCentered = false,
     this.participantNameBuilder,
+
+    this.initialMessageID,
+    this.initialMessageText,
+    this.initialMessageAttachments,
   });
 
   final String path;
@@ -234,6 +255,10 @@ class ChatThread extends StatefulWidget {
   final RoomClient room;
   final bool startChatCentered;
   final Widget Function(String, DateTime)? participantNameBuilder;
+
+  final String? initialMessageID;
+  final String? initialMessageText;
+  final List<JsonResponse>? initialMessageAttachments;
 
   @override
   State createState() => _ChatThread();
@@ -256,6 +281,16 @@ class _ChatThread extends State<ChatThread> {
   @override
   void initState() {
     super.initState();
+
+    if (widget.initialMessageID != null) {
+      final threadMessages = widget.document.root.getChildren().whereType<MeshElement>().where((x) => x.tagName == "messages").firstOrNull;
+      final initialMessage =
+          threadMessages?.getChildren().whereType<MeshElement>().where((x) => x.attributes["id"] == widget.initialMessageID).firstOrNull;
+
+      if (initialMessage == null) {
+        send(widget.initialMessageText ?? "", widget.initialMessageAttachments ?? []);
+      }
+    }
 
     sub = widget.room.listen(onRoomMessage);
     widget.document.addListener(onDocumentChanged);
@@ -322,7 +357,7 @@ class _ChatThread extends State<ChatThread> {
     }
   }
 
-  void send(String value) async {
+  void send(String value, List<JsonResponse> attachments) async {
     if (value.trim().isNotEmpty) {
       final messages = widget.document.root.getChildren().whereType<MeshElement>().firstWhere((x) => x.tagName == "messages");
 
@@ -342,8 +377,9 @@ class _ChatThread extends State<ChatThread> {
         );
       }
 
-      attachments.clear();
-      setState(() {});
+      setState(() {
+        this.attachments.clear();
+      });
     }
   }
 
@@ -492,7 +528,9 @@ class _ChatThread extends State<ChatThread> {
             onFileAttached: (attachment) {
               attachments.add(attachment);
             },
-            onSend: send,
+            onSend: (value) {
+              send(value, attachments);
+            },
             onChanged: (value) {
               for (final part in getOnlineParticipants()) {
                 widget.room.messaging.sendMessage(to: part, type: "typing", message: {"path": widget.path});
