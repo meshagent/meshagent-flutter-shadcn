@@ -1,17 +1,21 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:markdown_widget/markdown_widget.dart';
-import 'package:meshagent/document.dart';
-import 'package:meshagent/room_server_client.dart';
-import 'package:meshagent_flutter_shadcn/chat/jumping_dots.dart';
-import 'package:meshagent_flutter_shadcn/meetings/meetings.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:uuid/uuid.dart';
-import 'package:meshagent_flutter/meshagent_flutter.dart';
 
-import 'package:flutter/services.dart';
+import 'package:meshagent/document.dart';
+import 'package:meshagent/room_server_client.dart';
+import 'package:meshagent_flutter/meshagent_flutter.dart';
+import 'package:meshagent_flutter_shadcn/chat/jumping_dots.dart';
+import 'package:meshagent_flutter_shadcn/meetings/meetings.dart';
+import 'package:meshagent_flutter_shadcn/file_preview/file_preview.dart';
+
 import 'package:livekit_client/livekit_client.dart' as livekit;
 
 // ignore: depend_on_referenced_packages
@@ -25,6 +29,13 @@ PreviousMeshElementMapper mapMeshElement() {
     previous = element;
     return result;
   };
+}
+
+class MeshagentFileAttachment {
+  MeshagentFileAttachment(this.filename, this.path);
+
+  final String filename;
+  final String path;
 }
 
 class ChatThreadLoader extends StatefulWidget {
@@ -51,7 +62,7 @@ class ChatThreadLoader extends StatefulWidget {
 
   final String? initialMessageID;
   final String? initialMessageText;
-  final List<JsonResponse>? initialMessageAttachments;
+  final List<MeshagentFileAttachment>? initialMessageAttachments;
 
   @override
   State createState() => _ChatThreadLoader();
@@ -122,12 +133,20 @@ class _ChatThreadLoader extends State<ChatThreadLoader> {
 }
 
 class ChatThreadInput extends StatefulWidget {
-  const ChatThreadInput({super.key, required this.room, required this.onFileAttached, required this.onSend, this.onChanged});
+  const ChatThreadInput({
+    super.key,
+    required this.room,
+    required this.onFileAttached,
+    required this.onSend,
+    this.onChanged,
+    this.hasAttachments = false,
+  });
 
   final RoomClient room;
-  final void Function(JsonResponse) onFileAttached;
+  final void Function(MeshagentFileAttachment) onFileAttached;
   final void Function(String) onSend;
   final void Function(String)? onChanged;
+  final bool hasAttachments;
 
   @override
   State createState() => _ChatThreadInput();
@@ -179,14 +198,27 @@ class _ChatThreadInput extends State<ChatThreadInput> {
         child: ShadGestureDetector(
           cursor: SystemMouseCursors.click,
           onTap: () async {
-            final response = await widget.room.agents.invokeTool(
-              toolkit: "meshagent.markitdown",
-              tool: "markitdown_from_user",
-              arguments: {"title": "Attach a file", "description": "You can select PDFs or Office Docs"},
-            );
+            final picked = await FilePicker.platform.pickFiles(dialogTitle: "Select files", allowMultiple: true, withReadStream: true);
 
-            if (response is JsonResponse) {
-              widget.onFileAttached(response);
+            if (picked == null) {
+              return;
+            }
+
+            for (final PlatformFile file in picked.files) {
+              final stream = file.readStream!.map((x) => Uint8List.fromList(x));
+              final builder = await stream.fold<BytesBuilder>(BytesBuilder(), (builder, chunk) {
+                builder.add(chunk);
+                return builder;
+              });
+
+              final data = builder.takeBytes();
+
+              final fileName = "/${file.name}";
+              final handle = await widget.room.storage.open(fileName);
+              await widget.room.storage.write(handle, data);
+              await widget.room.storage.close(handle);
+
+              widget.onFileAttached(MeshagentFileAttachment(file.name, fileName));
             }
           },
           child: Container(
@@ -198,7 +230,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
         ),
       ),
       trailing:
-          showSend
+          (showSend || widget.hasAttachments)
               ? ShadTooltip(
                 waitDuration: Duration(seconds: 1),
                 builder: (context) => Text("Send"),
@@ -255,14 +287,14 @@ class ChatThread extends StatefulWidget {
 
   final String? initialMessageID;
   final String? initialMessageText;
-  final List<JsonResponse>? initialMessageAttachments;
+  final List<MeshagentFileAttachment>? initialMessageAttachments;
 
   @override
   State createState() => _ChatThread();
 }
 
 class _ChatThread extends State<ChatThread> {
-  List<JsonResponse> attachments = [];
+  List<MeshagentFileAttachment> attachments = [];
   late StreamSubscription<RoomEvent> sub;
 
   Map<String, Timer> typing = {};
@@ -354,11 +386,11 @@ class _ChatThread extends State<ChatThread> {
     }
   }
 
-  void send(String value, List<JsonResponse> attachments) async {
-    if (value.trim().isNotEmpty) {
+  void send(String value, List<MeshagentFileAttachment> attachments) async {
+    if (value.trim().isNotEmpty || attachments.isNotEmpty) {
       final messages = widget.document.root.getChildren().whereType<MeshElement>().firstWhere((x) => x.tagName == "messages");
 
-      messages.createChildElement("message", {
+      final message = messages.createChildElement("message", {
         "id": const Uuid().v4().toString(),
         "text": value,
         "created_at": DateTime.now().toUtc().toIso8601String(),
@@ -366,16 +398,20 @@ class _ChatThread extends State<ChatThread> {
         "author_ref": null,
       });
 
+      for (final attachment in attachments) {
+        message.createChildElement("file", {"path": attachment.path});
+      }
+
       for (final participant in getOnlineParticipants()) {
         widget.room.messaging.sendMessage(
           to: participant,
           type: "chat",
-          message: {"path": widget.path, "text": value, "attachments": attachments.map((a) => a.json).toList()},
+          message: {"path": widget.path, "text": value, "attachments": attachments.map((a) => a.path).toList()},
         );
       }
 
       setState(() {
-        this.attachments.clear();
+        this.attachments = [];
       });
     }
   }
@@ -388,6 +424,8 @@ class _ChatThread extends State<ChatThread> {
         ShadTheme.of(context).textTheme.p.color ?? DefaultTextStyle.of(context).style.color ?? ShadTheme.of(context).colorScheme.foreground;
     final baseFontSize = MediaQuery.of(context).textScaler.scale((DefaultTextStyle.of(context).style.fontSize ?? 14));
 
+    final text = message.getAttribute("text");
+
     return Column(
       mainAxisAlignment: MainAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -395,63 +433,69 @@ class _ChatThread extends State<ChatThread> {
         if (!isSameAuthor && widget.participantNameBuilder != null)
           widget.participantNameBuilder!(message.attributes["author_name"], DateTime.parse(message.attributes["created_at"])),
 
-        Container(
-          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          margin: EdgeInsets.only(top: 8, right: mine ? 0 : 50, left: mine ? 50 : 0),
-          decoration: BoxDecoration(
-            color: ShadTheme.of(context).ghostButtonTheme.hoverBackgroundColor,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: MediaQuery(
-            data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
-            child: MarkdownWidget(
-              padding: const EdgeInsets.all(0),
-              config: MarkdownConfig(
-                configs: [
-                  HrConfig(color: mdColor),
-                  H1Config(style: TextStyle(fontSize: baseFontSize * 2, color: mdColor, fontWeight: FontWeight.bold)),
-                  H2Config(style: TextStyle(fontSize: baseFontSize * 1.8, color: mdColor, inherit: false)),
-                  H3Config(style: TextStyle(fontSize: baseFontSize * 1.6, color: mdColor, inherit: false)),
-                  H4Config(style: TextStyle(fontSize: baseFontSize * 1.4, color: mdColor, inherit: false)),
-                  H5Config(style: TextStyle(fontSize: baseFontSize * 1.2, color: mdColor, inherit: false)),
-                  H6Config(style: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false)),
-                  PreConfig(
-                    decoration: BoxDecoration(color: ShadTheme.of(context).cardTheme.backgroundColor),
-                    textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
-                  ),
-                  PConfig(textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false)),
-                  CodeConfig(style: GoogleFonts.sourceCodePro(fontSize: baseFontSize * 1.0, color: mdColor)),
-                  BlockquoteConfig(textColor: mdColor),
-                  LinkConfig(
-                    style: TextStyle(color: ShadTheme.of(context).linkButtonTheme.foregroundColor, decoration: TextDecoration.underline),
-                  ),
-                  ListConfig(
-                    marker: (isOrdered, depth, index) {
-                      return Padding(padding: EdgeInsets.only(right: 5), child: Text("${index + 1}.", textAlign: TextAlign.right));
-                    },
-                  ),
-                ],
-              ),
-              shrinkWrap: true,
-              selectable: true,
+        if (text.isNotEmpty)
+          Container(
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            margin: EdgeInsets.only(top: 8, right: mine ? 0 : 50, left: mine ? 50 : 0),
+            decoration: BoxDecoration(
+              color: ShadTheme.of(context).ghostButtonTheme.hoverBackgroundColor,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: MediaQuery(
+              data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
+              child: MarkdownWidget(
+                padding: const EdgeInsets.all(0),
+                config: MarkdownConfig(
+                  configs: [
+                    HrConfig(color: mdColor),
+                    H1Config(style: TextStyle(fontSize: baseFontSize * 2, color: mdColor, fontWeight: FontWeight.bold)),
+                    H2Config(style: TextStyle(fontSize: baseFontSize * 1.8, color: mdColor, inherit: false)),
+                    H3Config(style: TextStyle(fontSize: baseFontSize * 1.6, color: mdColor, inherit: false)),
+                    H4Config(style: TextStyle(fontSize: baseFontSize * 1.4, color: mdColor, inherit: false)),
+                    H5Config(style: TextStyle(fontSize: baseFontSize * 1.2, color: mdColor, inherit: false)),
+                    H6Config(style: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false)),
+                    PreConfig(
+                      decoration: BoxDecoration(color: ShadTheme.of(context).cardTheme.backgroundColor),
+                      textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
+                    ),
+                    PConfig(textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false)),
+                    CodeConfig(style: GoogleFonts.sourceCodePro(fontSize: baseFontSize * 1.0, color: mdColor)),
+                    BlockquoteConfig(textColor: mdColor),
+                    LinkConfig(
+                      style: TextStyle(color: ShadTheme.of(context).linkButtonTheme.foregroundColor, decoration: TextDecoration.underline),
+                    ),
+                    ListConfig(
+                      marker: (isOrdered, depth, index) {
+                        return Padding(padding: EdgeInsets.only(right: 5), child: Text("${index + 1}.", textAlign: TextAlign.right));
+                      },
+                    ),
+                  ],
+                ),
+                shrinkWrap: true,
+                selectable: true,
 
-              /*builders: {
+                /*builders: {
               "code": CodeElementBuilder(
                   document: ChatDocumentProvider.of(context).document,
                   api: TimuApiProvider.of(context).api,
                   layer: layer),
             },*/
-              data: message.getAttribute("text"),
+                data: message.getAttribute("text"),
+              ),
             ),
           ),
-        ),
         for (final attachment in message.getChildren())
-          Padding(
-            padding: EdgeInsets.only(top: 10),
-            child: ShadCard(
-              width: double.infinity,
-              padding: EdgeInsets.all(10),
-              description: Text((attachment as MeshElement).getAttribute("filename")),
+          Container(
+            margin: EdgeInsets.only(top: 8),
+            child: Align(
+              alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+              child: SizedBox(
+                width: 300,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: FilePreview(room: widget.room, path: (attachment as MeshElement).getAttribute("path")),
+                ),
+              ),
             ),
           ),
       ],
@@ -499,21 +543,36 @@ class _ChatThread extends State<ChatThread> {
         for (final attachment in attachments)
           Padding(
             padding: EdgeInsets.all(10),
-            child: ShadCard(
-              padding: EdgeInsets.only(left: 15),
-              width: double.infinity,
-              description: Row(
-                children: [
-                  Expanded(child: Text(attachment.json['filename'])),
-                  ShadIconButton.ghost(
-                    onPressed: () {
-                      setState(() {
-                        attachments.remove(attachment);
-                      });
-                    },
-                    icon: Icon(LucideIcons.x),
-                  ),
-                ],
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: ShadCard(
+                padding: EdgeInsets.only(left: 15),
+                width: 300.0,
+                description: Column(
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(child: Text(attachment.filename)),
+                        ShadIconButton.ghost(
+                          onPressed: () {
+                            setState(() {
+                              attachments.remove(attachment);
+                            });
+                          },
+                          icon: Icon(LucideIcons.x),
+                        ),
+                      ],
+                    ),
+
+                    ConstrainedBox(
+                      constraints: BoxConstraints(maxHeight: 300, maxWidth: 300),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(16),
+                        child: FilePreview(room: widget.room, path: attachment.path, fit: BoxFit.cover),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -523,7 +582,9 @@ class _ChatThread extends State<ChatThread> {
           child: ChatThreadInput(
             room: widget.room,
             onFileAttached: (attachment) {
-              attachments.add(attachment);
+              setState(() {
+                attachments.add(attachment);
+              });
             },
             onSend: (value) {
               send(value, attachments);
@@ -533,6 +594,7 @@ class _ChatThread extends State<ChatThread> {
                 widget.room.messaging.sendMessage(to: part, type: "typing", message: {"path": widget.path});
               }
             },
+            hasAttachments: attachments.isNotEmpty,
           ),
         ),
       ],
