@@ -1,3 +1,12 @@
+## [0.0.20]
+- Stability
+
+## [0.0.19]
+- Stability
+
+## [0.0.18]
+- Stability
+
 ## [0.0.17]
 - Stability
 - Meshagent cli 
