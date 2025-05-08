@@ -32,10 +32,35 @@ PreviousMeshElementMapper mapMeshElement() {
 }
 
 class MeshagentFileAttachment {
-  MeshagentFileAttachment(this.filename, this.path);
+  MeshagentFileAttachment(this.path);
 
-  final String filename;
   final String path;
+
+  String get filename {
+    final lastSlashIndex = path.lastIndexOf('/');
+
+    if (lastSlashIndex == -1) {
+      return path;
+    }
+
+    return path.substring(lastSlashIndex + 1);
+  }
+}
+
+class MeshagentFileAttachmentController extends ValueNotifier<List<MeshagentFileAttachment>> {
+  MeshagentFileAttachmentController() : super([]);
+
+  void add(MeshagentFileAttachment attachment) {
+    value = [...value, attachment];
+  }
+
+  void remove(MeshagentFileAttachment attachment) {
+    value = value.where((x) => x != attachment).toList();
+  }
+
+  void clear() {
+    value = [];
+  }
 }
 
 class ChatThreadLoader extends StatefulWidget {
@@ -44,6 +69,7 @@ class ChatThreadLoader extends StatefulWidget {
     this.participants,
     required this.path,
     required this.room,
+
     this.startChatCentered = false,
     this.participantNames,
     this.participantNameBuilder,
@@ -51,6 +77,10 @@ class ChatThreadLoader extends StatefulWidget {
     this.initialMessageID,
     this.initialMessageText,
     this.initialMessageAttachments,
+
+    this.onMessageSent,
+    this.attachmentController,
+    this.onSelectAttachment,
   });
 
   final List<Participant>? participants;
@@ -63,6 +93,10 @@ class ChatThreadLoader extends StatefulWidget {
   final String? initialMessageID;
   final String? initialMessageText;
   final List<MeshagentFileAttachment>? initialMessageAttachments;
+
+  final MeshagentFileAttachmentController? attachmentController;
+  final void Function(String message, List<MeshagentFileAttachment> attachments)? onMessageSent;
+  final void Function(MeshagentFileAttachmentController controller)? onSelectAttachment;
 
   @override
   State createState() => _ChatThreadLoader();
@@ -126,6 +160,10 @@ class _ChatThreadLoader extends State<ChatThreadLoader> {
           initialMessageID: widget.initialMessageID,
           initialMessageText: widget.initialMessageText,
           initialMessageAttachments: widget.initialMessageAttachments,
+
+          onMessageSent: widget.onMessageSent,
+          attachmentController: widget.attachmentController,
+          onSelectAttachment: widget.onSelectAttachment,
         );
       },
     );
@@ -136,32 +174,39 @@ class ChatThreadInput extends StatefulWidget {
   const ChatThreadInput({
     super.key,
     required this.room,
-    required this.onFileAttached,
     required this.onSend,
+
+    this.onMessageSent,
+    this.onSelectAttachment,
+    this.attachmentController,
+
     this.onChanged,
-    this.hasAttachments = false,
   });
 
   final RoomClient room;
-  final void Function(MeshagentFileAttachment) onFileAttached;
-  final void Function(String) onSend;
-  final void Function(String)? onChanged;
-  final bool hasAttachments;
+  final void Function(String, List<MeshagentFileAttachment>) onSend;
+  final void Function(String, List<MeshagentFileAttachment>)? onChanged;
+
+  final MeshagentFileAttachmentController? attachmentController;
+  final void Function(MeshagentFileAttachmentController controller)? onSelectAttachment;
+  final void Function(String message, List<MeshagentFileAttachment> attachments)? onMessageSent;
 
   @override
   State createState() => _ChatThreadInput();
 }
 
 class _ChatThreadInput extends State<ChatThreadInput> {
-  bool showSend = false;
-
   final controller = ShadTextEditingController();
+  late final MeshagentFileAttachmentController attachmentController;
+  bool showSendButton = false;
 
   late final focusNode = FocusNode(
     onKeyEvent: (_, event) {
       if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.enter && !HardwareKeyboard.instance.isShiftPressed) {
-        widget.onSend(controller.text);
+        widget.onSend(controller.text, attachmentController.value);
+
         controller.text = "";
+        attachmentController.clear();
 
         return KeyEventResult.handled;
       }
@@ -170,14 +215,34 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     },
   );
 
-  void onChanged(String value) {
-    if (controller.text.isNotEmpty != showSend) {
+  void _onChanged() {
+    widget.onChanged?.call(controller.text, attachmentController.value);
+
+    setShowSendButton();
+  }
+
+  void setShowSendButton() {
+    final value = controller.text.isNotEmpty || attachmentController.value.isNotEmpty;
+
+    if (showSendButton != value) {
       setState(() {
-        showSend = controller.text.isNotEmpty;
+        showSendButton = value;
       });
     }
+  }
 
-    widget.onChanged?.call(controller.text);
+  @override
+  void initState() {
+    super.initState();
+
+    if (widget.attachmentController != null) {
+      attachmentController = widget.attachmentController!;
+    } else {
+      attachmentController = MeshagentFileAttachmentController();
+    }
+
+    attachmentController.addListener(_onChanged);
+    controller.addListener(_onChanged);
   }
 
   @override
@@ -186,81 +251,155 @@ class _ChatThreadInput extends State<ChatThreadInput> {
 
     focusNode.dispose();
     controller.dispose();
+    attachmentController.dispose();
+  }
+
+  Future<void> _onSelectAttachment() async {
+    if (widget.onSelectAttachment != null) {
+      widget.onSelectAttachment!(attachmentController);
+      return;
+    }
+
+    final picked = await FilePicker.platform.pickFiles(dialogTitle: "Select files", allowMultiple: true, withReadStream: true);
+
+    if (picked == null) {
+      return;
+    }
+
+    for (final PlatformFile file in picked.files) {
+      final stream = file.readStream!.map((x) => Uint8List.fromList(x));
+      final builder = await stream.fold<BytesBuilder>(BytesBuilder(), (builder, chunk) {
+        builder.add(chunk);
+        return builder;
+      });
+
+      final data = builder.takeBytes();
+      final fileName = "/${file.name}";
+
+      final handle = await widget.room.storage.open(fileName);
+      await widget.room.storage.write(handle, data);
+      await widget.room.storage.close(handle);
+
+      if (mounted) {
+        attachmentController.add(MeshagentFileAttachment(fileName));
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return ShadInput(
-      inputPadding: EdgeInsets.all(2),
-      leading: ShadTooltip(
-        waitDuration: Duration(seconds: 1),
-        builder: (context) => Text("Attach"),
-        child: ShadGestureDetector(
-          cursor: SystemMouseCursors.click,
-          onTap: () async {
-            final picked = await FilePicker.platform.pickFiles(dialogTitle: "Select files", allowMultiple: true, withReadStream: true);
-
-            if (picked == null) {
-              return;
+    return Column(
+      children: [
+        ValueListenableBuilder<List<MeshagentFileAttachment>>(
+          valueListenable: attachmentController,
+          builder: (context, attachments, child) {
+            if (attachments.isEmpty) {
+              return SizedBox.shrink();
             }
 
-            for (final PlatformFile file in picked.files) {
-              final stream = file.readStream!.map((x) => Uint8List.fromList(x));
-              final builder = await stream.fold<BytesBuilder>(BytesBuilder(), (builder, chunk) {
-                builder.add(chunk);
-                return builder;
-              });
+            return SizedBox(
+              width: double.infinity,
+              height: 250.0,
+              child: ListView.separated(
+                itemCount: attachments.length,
+                separatorBuilder: (context, index) => const SizedBox(width: 10),
+                scrollDirection: Axis.horizontal,
+                itemBuilder: (context, index) {
+                  final attachment = attachments[index];
 
-              final data = builder.takeBytes();
+                  return Container(
+                    key: ValueKey(attachment.path),
+                    width: 200.0,
+                    height: 250.0,
+                    decoration: BoxDecoration(
+                      border: Border.all(color: ShadTheme.of(context).colorScheme.border),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Container(
+                          padding: EdgeInsets.only(left: 15),
+                          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: ShadTheme.of(context).colorScheme.border))),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  attachment.filename,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: ShadTheme.of(context).textTheme.small,
+                                ),
+                              ),
 
-              final fileName = "/${file.name}";
-              final handle = await widget.room.storage.open(fileName);
-              await widget.room.storage.write(handle, data);
-              await widget.room.storage.close(handle);
-
-              widget.onFileAttached(MeshagentFileAttachment(file.name, fileName));
-            }
+                              ShadIconButton.ghost(
+                                onPressed: () {
+                                  attachmentController.remove(attachment);
+                                },
+                                icon: Icon(LucideIcons.x),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Expanded(child: SizedBox(width: 200, child: _AttachmentPreview(room: widget.room, path: attachment.path))),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            );
           },
-          child: Container(
-            width: 22,
-            height: 22,
-            decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
-            child: Icon(LucideIcons.paperclip, color: ShadTheme.of(context).colorScheme.background),
-          ),
         ),
-      ),
-      trailing:
-          (showSend || widget.hasAttachments)
-              ? ShadTooltip(
-                waitDuration: Duration(seconds: 1),
-                builder: (context) => Text("Send"),
-                child: ShadGestureDetector(
-                  cursor: SystemMouseCursors.click,
-                  onTap: () {
-                    widget.onSend(controller.text);
-                    controller.text = "";
-                  },
-                  child: Container(
-                    width: 22,
-                    height: 22,
-                    decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
-                    child: Icon(LucideIcons.arrowUp, color: ShadTheme.of(context).colorScheme.background),
-                  ),
-                ),
-              )
-              : null,
-      padding: EdgeInsets.only(left: 5, right: 5, top: 5, bottom: 5),
-      decoration: ShadDecoration(
-        secondaryFocusedBorder: ShadBorder.none,
-        secondaryBorder: ShadBorder.none,
-        color: ShadTheme.of(context).ghostButtonTheme.hoverBackgroundColor,
-        border: ShadBorder.all(radius: BorderRadius.circular(30)),
-      ),
-      onChanged: onChanged,
-      maxLines: null,
-      placeholder: Text("Message"),
-      focusNode: focusNode,
-      controller: controller,
+        ShadInput(
+          inputPadding: EdgeInsets.all(2),
+          leading: ShadTooltip(
+            waitDuration: Duration(seconds: 1),
+            builder: (context) => Text("Attach"),
+            child: ShadGestureDetector(
+              cursor: SystemMouseCursors.click,
+              onTap: _onSelectAttachment,
+              child: Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
+                child: Icon(LucideIcons.paperclip, color: ShadTheme.of(context).colorScheme.background),
+              ),
+            ),
+          ),
+          trailing:
+              showSendButton
+                  ? ShadTooltip(
+                    waitDuration: Duration(seconds: 1),
+                    builder: (context) => Text("Send"),
+                    child: ShadGestureDetector(
+                      cursor: SystemMouseCursors.click,
+                      onTap: () {
+                        widget.onSend(controller.text, attachmentController.value);
+                        controller.text = "";
+                        attachmentController.clear();
+                      },
+                      child: Container(
+                        width: 22,
+                        height: 22,
+                        decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
+                        child: Icon(LucideIcons.arrowUp, color: ShadTheme.of(context).colorScheme.background),
+                      ),
+                    ),
+                  )
+                  : null,
+          padding: EdgeInsets.only(left: 5, right: 5, top: 5, bottom: 5),
+          decoration: ShadDecoration(
+            secondaryFocusedBorder: ShadBorder.none,
+            secondaryBorder: ShadBorder.none,
+            color: ShadTheme.of(context).ghostButtonTheme.hoverBackgroundColor,
+            border: ShadBorder.all(radius: BorderRadius.circular(30)),
+          ),
+          maxLines: null,
+          placeholder: Text("Message"),
+          focusNode: focusNode,
+          controller: controller,
+        ),
+      ],
     );
   }
 }
@@ -271,12 +410,17 @@ class ChatThread extends StatefulWidget {
     required this.path,
     required this.document,
     required this.room,
+
     this.startChatCentered = false,
     this.participantNameBuilder,
 
     this.initialMessageID,
     this.initialMessageText,
     this.initialMessageAttachments,
+
+    this.onMessageSent,
+    this.attachmentController,
+    this.onSelectAttachment,
   });
 
   final String path;
@@ -288,13 +432,16 @@ class ChatThread extends StatefulWidget {
   final String? initialMessageID;
   final String? initialMessageText;
   final List<MeshagentFileAttachment>? initialMessageAttachments;
+  final void Function(String message, List<MeshagentFileAttachment> attachments)? onMessageSent;
+
+  final MeshagentFileAttachmentController? attachmentController;
+  final void Function(MeshagentFileAttachmentController controller)? onSelectAttachment;
 
   @override
   State createState() => _ChatThread();
 }
 
 class _ChatThread extends State<ChatThread> {
-  List<MeshagentFileAttachment> attachments = [];
   late StreamSubscription<RoomEvent> sub;
 
   Map<String, Timer> typing = {};
@@ -406,13 +553,15 @@ class _ChatThread extends State<ChatThread> {
         widget.room.messaging.sendMessage(
           to: participant,
           type: "chat",
-          message: {"path": widget.path, "text": value, "attachments": attachments.map((a) => a.path).toList()},
+          message: {
+            "path": widget.path,
+            "text": value,
+            "attachments": attachments.map((a) => {"path": a.path}).toList(),
+          },
         );
       }
 
-      setState(() {
-        this.attachments = [];
-      });
+      widget.onMessageSent?.call(value, attachments);
     }
   }
 
@@ -540,61 +689,19 @@ class _ChatThread extends State<ChatThread> {
             ),
           ),
 
-        for (final attachment in attachments)
-          Padding(
-            padding: EdgeInsets.all(10),
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: ShadCard(
-                padding: EdgeInsets.only(left: 15),
-                width: 300.0,
-                description: Column(
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(child: Text(attachment.filename)),
-                        ShadIconButton.ghost(
-                          onPressed: () {
-                            setState(() {
-                              attachments.remove(attachment);
-                            });
-                          },
-                          icon: Icon(LucideIcons.x),
-                        ),
-                      ],
-                    ),
-
-                    ConstrainedBox(
-                      constraints: BoxConstraints(maxHeight: 300, maxWidth: 300),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(16),
-                        child: FilePreview(room: widget.room, path: attachment.path, fit: BoxFit.cover),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-
         Padding(
           padding: EdgeInsets.symmetric(horizontal: 15, vertical: 8),
           child: ChatThreadInput(
             room: widget.room,
-            onFileAttached: (attachment) {
-              setState(() {
-                attachments.add(attachment);
-              });
-            },
-            onSend: (value) {
+            onSend: (value, attachments) {
               send(value, attachments);
             },
-            onChanged: (value) {
+            onChanged: (value, attachments) {
               for (final part in getOnlineParticipants()) {
                 widget.room.messaging.sendMessage(to: part, type: "typing", message: {"path": widget.path});
               }
             },
-            hasAttachments: attachments.isNotEmpty,
+            onSelectAttachment: widget.onSelectAttachment,
           ),
         ),
       ],
@@ -607,6 +714,87 @@ class _ChatThread extends State<ChatThread> {
 
     sub.cancel();
     widget.document.removeListener(onDocumentChanged);
+  }
+}
+
+class _AttachmentPreview extends StatelessWidget {
+  const _AttachmentPreview({required this.room, required this.path});
+
+  final RoomClient room;
+  final String path;
+
+  String _getFileExtension(String filename) {
+    final lastDotIndex = filename.lastIndexOf('.');
+
+    if (lastDotIndex == -1) {
+      return '';
+    }
+
+    return filename.substring(lastDotIndex + 1);
+  }
+
+  static const filePreviewExtensions = {'jpg', 'gif', 'png', 'webp', 'mp3', 'wav', 'ogg', 'pdf'};
+
+  static const textFiles = {'txt', 'csv', 'json', 'xml'};
+
+  static const documentFiles = {'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx'};
+
+  static const presentationFiles = {'ppt', 'pptx'};
+
+  static const audioFiles = {
+    'aac',
+    'm4a',
+    'ogg',
+    'opus',
+    'wma',
+    'amr',
+    'flac',
+    'alac',
+    'aiff',
+    'ape',
+    'wv',
+    'tta',
+    'caf',
+    'dff',
+    'dsf',
+    'mka',
+    'pcm',
+    'mod',
+    'xm',
+    's3m',
+    'it',
+    'mid',
+    'midi',
+  };
+
+  static const archiveFiles = {'zip', 'tar', 'gz', 'bz2', 'xz', '7z', 'rar', 'iso', 'dmg'};
+
+  static const videoFiles = {'mp4', 'avi', 'mov', 'mkv', 'flv', 'wmv', 'webm', 'mpeg', 'mpg', '3gp', '3g2', 'rmvb', 'rm'};
+
+  @override
+  Widget build(BuildContext context) {
+    final ext = _getFileExtension(path);
+    IconData icon = LucideIcons.file;
+
+    if (filePreviewExtensions.contains(ext)) {
+      return FilePreview(room: room, path: path, fit: BoxFit.cover);
+    }
+
+    if (audioFiles.contains(ext)) {
+      icon = LucideIcons.fileAudio;
+    } else if (textFiles.contains(ext)) {
+      icon = LucideIcons.fileText;
+    } else if (documentFiles.contains(ext)) {
+      icon = LucideIcons.fileText;
+    } else if (archiveFiles.contains(ext)) {
+      icon = LucideIcons.fileArchive;
+    } else if (presentationFiles.contains(ext)) {
+      icon = LucideIcons.fileChartPie;
+    } else if (videoFiles.contains(ext)) {
+      icon = LucideIcons.fileVideo;
+    }
+
+    return Icon(icon, size: 100, color: ShadTheme.of(context).colorScheme.foreground);
   }
 }
 
