@@ -8,6 +8,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:markdown_widget/markdown_widget.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:uuid/uuid.dart';
+import "package:url_launcher/url_launcher.dart";
 
 import 'package:meshagent/document.dart';
 import 'package:meshagent/room_server_client.dart';
@@ -15,6 +16,7 @@ import 'package:meshagent_flutter/meshagent_flutter.dart';
 import 'package:meshagent_flutter_shadcn/chat/jumping_dots.dart';
 import 'package:meshagent_flutter_shadcn/meetings/meetings.dart';
 import 'package:meshagent_flutter_shadcn/file_preview/file_preview.dart';
+import 'package:meshagent_flutter_shadcn/file_preview/image.dart';
 
 import 'package:livekit_client/livekit_client.dart' as livekit;
 
@@ -297,59 +299,71 @@ class _ChatThreadInput extends State<ChatThreadInput> {
               return SizedBox.shrink();
             }
 
-            return SizedBox(
-              width: double.infinity,
-              height: 250.0,
-              child: ListView.separated(
-                itemCount: attachments.length,
-                separatorBuilder: (context, index) => const SizedBox(width: 10),
-                scrollDirection: Axis.horizontal,
-                itemBuilder: (context, index) {
-                  final attachment = attachments[index];
+            return Padding(
+              padding: EdgeInsets.only(bottom: 5),
+              child: SizedBox(
+                height: 40,
+                child: Center(
+                  child: ListView.separated(
+                    itemCount: attachments.length,
+                    separatorBuilder: (context, index) => const SizedBox(width: 10),
+                    scrollDirection: Axis.horizontal,
+                    itemBuilder: (context, index) {
+                      final attachment = attachments[index];
+                      return FilePreviewCard(
+                        icon: LucideIcons.file,
+                        text: attachment.filename,
+                        onClose: () {
+                          attachmentController.remove(attachment);
+                        },
+                      );
 
-                  return Container(
-                    key: ValueKey(attachment.path),
-                    width: 200.0,
-                    height: 250.0,
-                    decoration: BoxDecoration(
-                      border: Border.all(color: ShadTheme.of(context).colorScheme.border),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Container(
-                          padding: EdgeInsets.only(left: 15),
-                          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: ShadTheme.of(context).colorScheme.border))),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  attachment.filename,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: ShadTheme.of(context).textTheme.small,
-                                ),
-                              ),
-
-                              ShadIconButton.ghost(
-                                onPressed: () {
-                                  attachmentController.remove(attachment);
-                                },
-                                icon: Icon(LucideIcons.x),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Expanded(child: SizedBox(width: 200, child: _AttachmentPreview(room: widget.room, path: attachment.path))),
-                      ],
-                    ),
-                  );
-                },
+                      //                  return Container(
+                      //                    key: ValueKey(attachment.path),
+                      //                    width: 200.0,
+                      //                    height: 250.0,
+                      //                    decoration: BoxDecoration(
+                      //                      border: Border.all(color: ShadTheme.of(context).colorScheme.border),
+                      //                      borderRadius: BorderRadius.circular(8),
+                      //                    ),
+                      //                    child: Column(
+                      //                      crossAxisAlignment: CrossAxisAlignment.end,
+                      //                      children: [
+                      //                        Container(
+                      //                          padding: EdgeInsets.only(left: 15),
+                      //                          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: ShadTheme.of(context).colorScheme.border))),
+                      //                          child: Row(
+                      //                            mainAxisAlignment: MainAxisAlignment.center,
+                      //                            children: [
+                      //                              Expanded(
+                      //                                child: Text(
+                      //                                  attachment.filename,
+                      //                                  overflow: TextOverflow.ellipsis,
+                      //                                  style: ShadTheme.of(context).textTheme.small,
+                      //                                ),
+                      //                              ),
+                      //
+                      //                              ShadIconButton.ghost(
+                      //                                onPressed: () {
+                      //                                  attachmentController.remove(attachment);
+                      //                                },
+                      //                                icon: Icon(LucideIcons.x),
+                      //                              ),
+                      //                            ],
+                      //                          ),
+                      //                        ),
+                      //                        Expanded(child: SizedBox(width: 200, child: _AttachmentPreview(room: widget.room, path: attachment.path))),
+                      //                      ],
+                      //                    ),
+                      //                  );
+                    },
+                  ),
+                ),
               ),
             );
           },
         ),
+
         ShadInput(
           inputPadding: EdgeInsets.all(2),
           leading: ShadTooltip(
@@ -638,13 +652,7 @@ class _ChatThread extends State<ChatThread> {
             margin: EdgeInsets.only(top: 8),
             child: Align(
               alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-              child: SizedBox(
-                width: 300,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: FilePreview(room: widget.room, path: (attachment as MeshElement).getAttribute("path")),
-                ),
-              ),
+              child: ChatThreadPreview(room: widget.room, path: (attachment as MeshElement).getAttribute("path")),
             ),
           ),
       ],
@@ -717,21 +725,12 @@ class _ChatThread extends State<ChatThread> {
   }
 }
 
+/*
 class _AttachmentPreview extends StatelessWidget {
   const _AttachmentPreview({required this.room, required this.path});
 
   final RoomClient room;
   final String path;
-
-  String _getFileExtension(String filename) {
-    final lastDotIndex = filename.lastIndexOf('.');
-
-    if (lastDotIndex == -1) {
-      return '';
-    }
-
-    return filename.substring(lastDotIndex + 1);
-  }
 
   static const filePreviewExtensions = {'jpg', 'gif', 'png', 'webp', 'mp3', 'wav', 'ogg', 'pdf'};
 
@@ -773,7 +772,7 @@ class _AttachmentPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ext = _getFileExtension(path);
+    final ext = path.split(".").last.toLowerCase();
     IconData icon = LucideIcons.file;
 
     if (filePreviewExtensions.contains(ext)) {
@@ -795,6 +794,49 @@ class _AttachmentPreview extends StatelessWidget {
     }
 
     return Icon(icon, size: 100, color: ShadTheme.of(context).colorScheme.foreground);
+  }
+}
+*/
+
+class ChatThreadPreview extends StatelessWidget {
+  const ChatThreadPreview({super.key, required this.room, required this.path});
+
+  final RoomClient room;
+  final String path;
+
+  @override
+  Widget build(BuildContext context) {
+    final ext = path.split(".").last.toLowerCase();
+
+    if (imageExtensions.contains(ext)) {
+      return FutureBuilder(
+        future: room.storage.downloadUrl(path),
+        builder: (context, snapshot) {
+          if (snapshot.hasData) {
+            return SizedBox(
+              width: 300,
+              height: 300,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: ImagePreview(key: ValueKey(path), url: Uri.parse(snapshot.data!), fit: BoxFit.cover),
+              ),
+            );
+          }
+
+          return ColoredBox(color: ShadTheme.of(context).colorScheme.background);
+        },
+      );
+    }
+
+    return FilePreviewCard(
+      icon: LucideIcons.file,
+      text: path.split("/").last,
+      onDownload: () async {
+        final url = await room.storage.downloadUrl(path);
+
+        launchUrl(Uri.parse(url));
+      },
+    );
   }
 }
 
