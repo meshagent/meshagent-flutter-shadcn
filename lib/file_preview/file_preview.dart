@@ -72,3 +72,37 @@ class _FilePreviewState extends State<FilePreview> {
     );
   }
 }
+
+class FilePreviewCard extends StatelessWidget {
+  const FilePreviewCard({super.key, required this.icon, required this.text, this.onClose, this.onDownload});
+
+  final IconData icon;
+  final String text;
+  final VoidCallback? onClose;
+  final VoidCallback? onDownload;
+
+  @override
+  Widget build(BuildContext context) {
+    return ShadContextMenuRegion(
+      items:
+          onDownload != null
+              ? [ShadContextMenuItem(trailing: Icon(LucideIcons.download), onPressed: onDownload, child: Text("Download"))]
+              : [],
+      child: ShadCard(
+        radius: BorderRadius.circular(16),
+        padding: EdgeInsets.only(left: 8, top: 8, bottom: 8, right: 8),
+        rowCrossAxisAlignment: CrossAxisAlignment.center,
+        trailing:
+            onClose != null ? ShadIconButton.ghost(width: 24, height: 24, icon: Icon(LucideIcons.x, size: 16), onPressed: onClose) : null,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(width: 24, height: 24, child: Center(child: Icon(icon, size: 20))),
+            const SizedBox(width: 12),
+            Text(text, style: ShadTheme.of(context).textTheme.small),
+          ],
+        ),
+      ),
+    );
+  }
+}
