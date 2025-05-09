@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
@@ -84,6 +85,8 @@ class ChatThreadLoader extends StatefulWidget {
     this.attachmentController,
     this.onSelectAttachment,
     this.includeLocalParticipant = true,
+
+    this.waitingForParticipantsBuilder,
   });
 
   final List<Participant>? participants;
@@ -92,7 +95,9 @@ class ChatThreadLoader extends StatefulWidget {
   final RoomClient room;
   final bool startChatCentered;
   final bool includeLocalParticipant;
+
   final Widget Function(String, DateTime)? participantNameBuilder;
+  final Widget Function(BuildContext, List<String>)? waitingForParticipantsBuilder;
 
   final String? initialMessageID;
   final String? initialMessageText;
@@ -163,6 +168,7 @@ class _ChatThreadLoader extends State<ChatThreadLoader> {
           document: document,
           room: widget.room,
           participantNameBuilder: widget.participantNameBuilder,
+          waitingForParticipantsBuilder: widget.waitingForParticipantsBuilder,
 
           initialMessageID: widget.initialMessageID,
           initialMessageText: widget.initialMessageText,
@@ -440,7 +446,10 @@ class ChatThread extends StatefulWidget {
     this.onMessageSent,
     this.attachmentController,
     this.onSelectAttachment,
+    this.waitingForParticipantsBuilder,
   });
+
+  final Widget Function(BuildContext, List<String>)? waitingForParticipantsBuilder;
 
   final String path;
   final MeshDocument document;
@@ -490,6 +499,8 @@ class _ChatThread extends State<ChatThread> {
     sub = widget.room.listen(onRoomMessage);
     widget.document.addListener(onDocumentChanged);
     messages = _getMessages();
+
+    checkParticipants();
   }
 
   void onDocumentChanged() {
@@ -500,6 +511,8 @@ class _ChatThread extends State<ChatThread> {
     setState(() {
       messages = _getMessages();
     });
+
+    checkParticipants();
   }
 
   void onRoomMessage(RoomEvent event) {
@@ -508,6 +521,10 @@ class _ChatThread extends State<ChatThread> {
     }
 
     if (event is RoomMessageEvent) {
+      if (event.message.type.startsWith("participant")) {
+        checkParticipants();
+      }
+
       if (event.message.type == "typing" && event.message.message["path"] == widget.path) {
         // TODO: verify thread_id matches
         typing[event.message.fromParticipantId]?.cancel();
@@ -534,6 +551,19 @@ class _ChatThread extends State<ChatThread> {
     }
   }
 
+  Set<String> offlineParticipants = {};
+
+  void checkParticipants() {
+    final parts = getOfflineParticipants().toSet();
+    if (!setEquals(parts, offlineParticipants)) {
+      offlineParticipants = parts;
+      if (!mounted) {
+        return;
+      }
+      setState(() {});
+    }
+  }
+
   Iterable<String> getParticipantNames() sync* {
     for (final child in widget.document.root.getChildren().whereType<MeshElement>()) {
       if (child.tagName == "members") {
@@ -544,8 +574,24 @@ class _ChatThread extends State<ChatThread> {
     }
   }
 
-  Iterable<RemoteParticipant> getOnlineParticipants() sync* {
+  Iterable<String> getOfflineParticipants() sync* {
     for (final participantName in getParticipantNames()) {
+      bool found = false;
+      if (widget.room.messaging.remoteParticipants.where((x) => x.getAttribute("name") == participantName).isNotEmpty ||
+          participantName == widget.room.localParticipant?.getAttribute("name")) {
+        found = true;
+      }
+      if (!found) {
+        yield participantName;
+      }
+    }
+  }
+
+  Iterable<Participant> getOnlineParticipants() sync* {
+    for (final participantName in getParticipantNames()) {
+      if (participantName == widget.room.localParticipant?.getAttribute("name")) {
+        yield widget.room.localParticipant!;
+      }
       for (final part in widget.room.messaging.remoteParticipants.where((x) => x.getAttribute("name") == participantName)) {
         yield part;
       }
@@ -666,6 +712,9 @@ class _ChatThread extends State<ChatThread> {
 
   @override
   Widget build(BuildContext context) {
+    if (offlineParticipants.isNotEmpty && widget.waitingForParticipantsBuilder != null) {
+      return widget.waitingForParticipantsBuilder!(context, offlineParticipants.toList());
+    }
     bool bottomAlign = !widget.startChatCentered || messages.isNotEmpty;
 
     final rendredMessages = messages.map(mapMeshElement()).map<Widget>((item) => buildMessage(context, item.$1, item.$2)).toList().reversed;
@@ -711,7 +760,9 @@ class _ChatThread extends State<ChatThread> {
             },
             onChanged: (value, attachments) {
               for (final part in getOnlineParticipants()) {
-                widget.room.messaging.sendMessage(to: part, type: "typing", message: {"path": widget.path});
+                if (part is! LocalParticipant) {
+                  widget.room.messaging.sendMessage(to: part, type: "typing", message: {"path": widget.path});
+                }
               }
             },
             onSelectAttachment: widget.onSelectAttachment,
