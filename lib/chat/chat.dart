@@ -21,8 +21,7 @@ import 'package:meshagent_flutter_shadcn/file_preview/image.dart';
 import 'package:livekit_client/livekit_client.dart' as livekit;
 
 // ignore: depend_on_referenced_packages
-typedef PreviousMeshElementMapper =
-    (MeshElement element, MeshElement? previous) Function(MeshElement);
+typedef PreviousMeshElementMapper = (MeshElement element, MeshElement? previous) Function(MeshElement);
 PreviousMeshElementMapper mapMeshElement() {
   MeshElement? previous;
 
@@ -50,8 +49,7 @@ class MeshagentFileAttachment {
   }
 }
 
-class MeshagentFileAttachmentController
-    extends ValueNotifier<List<MeshagentFileAttachment>> {
+class MeshagentFileAttachmentController extends ValueNotifier<List<MeshagentFileAttachment>> {
   MeshagentFileAttachmentController() : super([]);
 
   void add(MeshagentFileAttachment attachment) {
@@ -101,13 +99,8 @@ class ChatThreadLoader extends StatefulWidget {
   final List<MeshagentFileAttachment>? initialMessageAttachments;
 
   final MeshagentFileAttachmentController? attachmentController;
-  final void Function(
-    String message,
-    List<MeshagentFileAttachment> attachments,
-  )?
-  onMessageSent;
-  final void Function(MeshagentFileAttachmentController controller)?
-  onSelectAttachment;
+  final void Function(String message, List<MeshagentFileAttachment> attachments)? onMessageSent;
+  final void Function(MeshagentFileAttachmentController controller)? onSelectAttachment;
 
   @override
   State createState() => _ChatThreadLoader();
@@ -123,8 +116,7 @@ class _ChatThreadLoader extends State<ChatThreadLoader> {
     if (widget.participants != null || widget.participantNames != null) {
       Set<String> existing = {};
 
-      for (final child
-          in document.root.getChildren().whereType<MeshElement>()) {
+      for (final child in document.root.getChildren().whereType<MeshElement>()) {
         if (child.tagName == "members") {
           for (final member in child.getChildren().whereType<MeshElement>()) {
             existing.add(member.getAttribute("name"));
@@ -132,9 +124,7 @@ class _ChatThreadLoader extends State<ChatThreadLoader> {
 
           for (final part in participants) {
             if (!existing.contains(part.getAttribute("name"))) {
-              child.createChildElement("member", {
-                "name": part.getAttribute("name"),
-              });
+              child.createChildElement("member", {"name": part.getAttribute("name")});
               existing.add(part.getAttribute("name"));
             }
           }
@@ -159,12 +149,7 @@ class _ChatThreadLoader extends State<ChatThreadLoader> {
       room: widget.room,
       builder: (context, document, error) {
         if (error != null) {
-          return Center(
-            child: Text(
-              "Unable to load thread",
-              style: ShadTheme.of(context).textTheme.p,
-            ),
-          );
+          return Center(child: Text("Unable to load thread", style: ShadTheme.of(context).textTheme.p));
         }
 
         if (document == null) {
@@ -210,13 +195,8 @@ class ChatThreadInput extends StatefulWidget {
   final void Function(String, List<MeshagentFileAttachment>)? onChanged;
 
   final MeshagentFileAttachmentController? attachmentController;
-  final void Function(MeshagentFileAttachmentController controller)?
-  onSelectAttachment;
-  final void Function(
-    String message,
-    List<MeshagentFileAttachment> attachments,
-  )?
-  onMessageSent;
+  final void Function(MeshagentFileAttachmentController controller)? onSelectAttachment;
+  final void Function(String message, List<MeshagentFileAttachment> attachments)? onMessageSent;
 
   @override
   State createState() => _ChatThreadInput();
@@ -229,9 +209,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
 
   late final focusNode = FocusNode(
     onKeyEvent: (_, event) {
-      if (event is KeyDownEvent &&
-          event.logicalKey == LogicalKeyboardKey.enter &&
-          !HardwareKeyboard.instance.isShiftPressed) {
+      if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.enter && !HardwareKeyboard.instance.isShiftPressed) {
         widget.onSend(controller.text, attachmentController.value);
 
         controller.text = "";
@@ -251,8 +229,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   }
 
   void setShowSendButton() {
-    final value =
-        controller.text.isNotEmpty || attachmentController.value.isNotEmpty;
+    final value = controller.text.isNotEmpty || attachmentController.value.isNotEmpty;
 
     if (showSendButton != value) {
       setState(() {
@@ -290,11 +267,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
       return;
     }
 
-    final picked = await FilePicker.platform.pickFiles(
-      dialogTitle: "Select files",
-      allowMultiple: true,
-      withReadStream: true,
-    );
+    final picked = await FilePicker.platform.pickFiles(dialogTitle: "Select files", allowMultiple: true, withReadStream: true);
 
     if (picked == null) {
       return;
@@ -302,10 +275,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
 
     for (final PlatformFile file in picked.files) {
       final stream = file.readStream!.map((x) => Uint8List.fromList(x));
-      final builder = await stream.fold<BytesBuilder>(BytesBuilder(), (
-        builder,
-        chunk,
-      ) {
+      final builder = await stream.fold<BytesBuilder>(BytesBuilder(), (builder, chunk) {
         builder.add(chunk);
         return builder;
       });
@@ -410,14 +380,8 @@ class _ChatThreadInput extends State<ChatThreadInput> {
               child: Container(
                 width: 22,
                 height: 22,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: ShadTheme.of(context).colorScheme.foreground,
-                ),
-                child: Icon(
-                  LucideIcons.paperclip,
-                  color: ShadTheme.of(context).colorScheme.background,
-                ),
+                decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
+                child: Icon(LucideIcons.paperclip, color: ShadTheme.of(context).colorScheme.background),
               ),
             ),
           ),
@@ -429,24 +393,15 @@ class _ChatThreadInput extends State<ChatThreadInput> {
                     child: ShadGestureDetector(
                       cursor: SystemMouseCursors.click,
                       onTap: () {
-                        widget.onSend(
-                          controller.text,
-                          attachmentController.value,
-                        );
+                        widget.onSend(controller.text, attachmentController.value);
                         controller.text = "";
                         attachmentController.clear();
                       },
                       child: Container(
                         width: 22,
                         height: 22,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: ShadTheme.of(context).colorScheme.foreground,
-                        ),
-                        child: Icon(
-                          LucideIcons.arrowUp,
-                          color: ShadTheme.of(context).colorScheme.background,
-                        ),
+                        decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
+                        child: Icon(LucideIcons.arrowUp, color: ShadTheme.of(context).colorScheme.background),
                       ),
                     ),
                   )
@@ -496,15 +451,10 @@ class ChatThread extends StatefulWidget {
   final String? initialMessageID;
   final String? initialMessageText;
   final List<MeshagentFileAttachment>? initialMessageAttachments;
-  final void Function(
-    String message,
-    List<MeshagentFileAttachment> attachments,
-  )?
-  onMessageSent;
+  final void Function(String message, List<MeshagentFileAttachment> attachments)? onMessageSent;
 
   final MeshagentFileAttachmentController? attachmentController;
-  final void Function(MeshagentFileAttachmentController controller)?
-  onSelectAttachment;
+  final void Function(MeshagentFileAttachmentController controller)? onSelectAttachment;
 
   @override
   State createState() => _ChatThread();
@@ -518,12 +468,7 @@ class _ChatThread extends State<ChatThread> {
   Iterable<MeshElement> messages = [];
 
   Iterable<MeshElement> _getMessages() {
-    final threadMessages =
-        widget.document.root
-            .getChildren()
-            .whereType<MeshElement>()
-            .where((x) => x.tagName == "messages")
-            .firstOrNull;
+    final threadMessages = widget.document.root.getChildren().whereType<MeshElement>().where((x) => x.tagName == "messages").firstOrNull;
 
     return (threadMessages?.getChildren() ?? []).whereType<MeshElement>();
   }
@@ -533,24 +478,12 @@ class _ChatThread extends State<ChatThread> {
     super.initState();
 
     if (widget.initialMessageID != null) {
-      final threadMessages =
-          widget.document.root
-              .getChildren()
-              .whereType<MeshElement>()
-              .where((x) => x.tagName == "messages")
-              .firstOrNull;
+      final threadMessages = widget.document.root.getChildren().whereType<MeshElement>().where((x) => x.tagName == "messages").firstOrNull;
       final initialMessage =
-          threadMessages
-              ?.getChildren()
-              .whereType<MeshElement>()
-              .where((x) => x.attributes["id"] == widget.initialMessageID)
-              .firstOrNull;
+          threadMessages?.getChildren().whereType<MeshElement>().where((x) => x.attributes["id"] == widget.initialMessageID).firstOrNull;
 
       if (initialMessage == null) {
-        send(
-          widget.initialMessageText ?? "",
-          widget.initialMessageAttachments ?? [],
-        );
+        send(widget.initialMessageText ?? "", widget.initialMessageAttachments ?? []);
       }
     }
 
@@ -575,24 +508,19 @@ class _ChatThread extends State<ChatThread> {
     }
 
     if (event is RoomMessageEvent) {
-      if (event.message.type == "typing" &&
-          event.message.message["path"] == widget.path) {
+      if (event.message.type == "typing" && event.message.message["path"] == widget.path) {
         // TODO: verify thread_id matches
         typing[event.message.fromParticipantId]?.cancel();
-        typing[event.message.fromParticipantId] = Timer(
-          Duration(seconds: 1),
-          () {
-            typing.remove(event.message.fromParticipantId);
-            if (mounted) {
-              setState(() {});
-            }
-          },
-        );
+        typing[event.message.fromParticipantId] = Timer(Duration(seconds: 1), () {
+          typing.remove(event.message.fromParticipantId);
+          if (mounted) {
+            setState(() {});
+          }
+        });
         if (mounted) {
           setState(() {});
         }
-      } else if (event.message.type == "thinking" &&
-          event.message.message["path"] == widget.path) {
+      } else if (event.message.type == "thinking" && event.message.message["path"] == widget.path) {
         if (event.message.message["thinking"] == true) {
           thinking.add(event.message.fromParticipantId);
         } else {
@@ -607,8 +535,7 @@ class _ChatThread extends State<ChatThread> {
   }
 
   Iterable<String> getParticipantNames() sync* {
-    for (final child
-        in widget.document.root.getChildren().whereType<MeshElement>()) {
+    for (final child in widget.document.root.getChildren().whereType<MeshElement>()) {
       if (child.tagName == "members") {
         for (final member in child.getChildren().whereType<MeshElement>()) {
           yield member.attributes["name"];
@@ -619,9 +546,7 @@ class _ChatThread extends State<ChatThread> {
 
   Iterable<RemoteParticipant> getOnlineParticipants() sync* {
     for (final participantName in getParticipantNames()) {
-      for (final part in widget.room.messaging.remoteParticipants.where(
-        (x) => x.getAttribute("name") == participantName,
-      )) {
+      for (final part in widget.room.messaging.remoteParticipants.where((x) => x.getAttribute("name") == participantName)) {
         yield part;
       }
     }
@@ -629,10 +554,7 @@ class _ChatThread extends State<ChatThread> {
 
   void send(String value, List<MeshagentFileAttachment> attachments) async {
     if (value.trim().isNotEmpty || attachments.isNotEmpty) {
-      final messages = widget.document.root
-          .getChildren()
-          .whereType<MeshElement>()
-          .firstWhere((x) => x.tagName == "messages");
+      final messages = widget.document.root.getChildren().whereType<MeshElement>().firstWhere((x) => x.tagName == "messages");
 
       final message = messages.createChildElement("message", {
         "id": const Uuid().v4().toString(),
@@ -662,25 +584,13 @@ class _ChatThread extends State<ChatThread> {
     }
   }
 
-  Widget buildMessage(
-    BuildContext context,
-    MeshElement message,
-    MeshElement? previous,
-  ) {
-    final isSameAuthor =
-        message.attributes["author_name"] ==
-        previous?.attributes["author_name"];
-    final mine =
-        message.attributes["author_name"] ==
-        widget.room.localParticipant!.getAttribute("name");
+  Widget buildMessage(BuildContext context, MeshElement message, MeshElement? previous) {
+    final isSameAuthor = message.attributes["author_name"] == previous?.attributes["author_name"];
+    final mine = message.attributes["author_name"] == widget.room.localParticipant!.getAttribute("name");
 
     final mdColor =
-        ShadTheme.of(context).textTheme.p.color ??
-        DefaultTextStyle.of(context).style.color ??
-        ShadTheme.of(context).colorScheme.foreground;
-    final baseFontSize = MediaQuery.of(
-      context,
-    ).textScaler.scale((DefaultTextStyle.of(context).style.fontSize ?? 14));
+        ShadTheme.of(context).textTheme.p.color ?? DefaultTextStyle.of(context).style.color ?? ShadTheme.of(context).colorScheme.foreground;
+    final baseFontSize = MediaQuery.of(context).textScaler.scale((DefaultTextStyle.of(context).style.fontSize ?? 14));
 
     final text = message.getAttribute("text");
 
@@ -689,117 +599,42 @@ class _ChatThread extends State<ChatThread> {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (!isSameAuthor && widget.participantNameBuilder != null)
-          widget.participantNameBuilder!(
-            message.attributes["author_name"],
-            DateTime.parse(message.attributes["created_at"]),
-          ),
+          widget.participantNameBuilder!(message.attributes["author_name"], DateTime.parse(message.attributes["created_at"])),
 
         if (text.isNotEmpty)
           Container(
             padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            margin: EdgeInsets.only(
-              top: 8,
-              right: mine ? 0 : 50,
-              left: mine ? 50 : 0,
-            ),
+            margin: EdgeInsets.only(top: 8, right: mine ? 0 : 50, left: mine ? 50 : 0),
             decoration: BoxDecoration(
-              color:
-                  ShadTheme.of(context).ghostButtonTheme.hoverBackgroundColor,
+              color: ShadTheme.of(context).ghostButtonTheme.hoverBackgroundColor,
               borderRadius: BorderRadius.circular(8),
             ),
             child: MediaQuery(
-              data: MediaQuery.of(
-                context,
-              ).copyWith(textScaler: const TextScaler.linear(1.0)),
+              data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
               child: MarkdownWidget(
                 padding: const EdgeInsets.all(0),
                 config: MarkdownConfig(
                   configs: [
                     HrConfig(color: mdColor),
-                    H1Config(
-                      style: TextStyle(
-                        fontSize: baseFontSize * 2,
-                        color: mdColor,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    H2Config(
-                      style: TextStyle(
-                        fontSize: baseFontSize * 1.8,
-                        color: mdColor,
-                        inherit: false,
-                      ),
-                    ),
-                    H3Config(
-                      style: TextStyle(
-                        fontSize: baseFontSize * 1.6,
-                        color: mdColor,
-                        inherit: false,
-                      ),
-                    ),
-                    H4Config(
-                      style: TextStyle(
-                        fontSize: baseFontSize * 1.4,
-                        color: mdColor,
-                        inherit: false,
-                      ),
-                    ),
-                    H5Config(
-                      style: TextStyle(
-                        fontSize: baseFontSize * 1.2,
-                        color: mdColor,
-                        inherit: false,
-                      ),
-                    ),
-                    H6Config(
-                      style: TextStyle(
-                        fontSize: baseFontSize * 1.0,
-                        color: mdColor,
-                        inherit: false,
-                      ),
-                    ),
+                    H1Config(style: TextStyle(fontSize: baseFontSize * 2, color: mdColor, fontWeight: FontWeight.bold)),
+                    H2Config(style: TextStyle(fontSize: baseFontSize * 1.8, color: mdColor, inherit: false)),
+                    H3Config(style: TextStyle(fontSize: baseFontSize * 1.6, color: mdColor, inherit: false)),
+                    H4Config(style: TextStyle(fontSize: baseFontSize * 1.4, color: mdColor, inherit: false)),
+                    H5Config(style: TextStyle(fontSize: baseFontSize * 1.2, color: mdColor, inherit: false)),
+                    H6Config(style: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false)),
                     PreConfig(
-                      decoration: BoxDecoration(
-                        color: ShadTheme.of(context).cardTheme.backgroundColor,
-                      ),
-                      textStyle: TextStyle(
-                        fontSize: baseFontSize * 1.0,
-                        color: mdColor,
-                        inherit: false,
-                      ),
+                      decoration: BoxDecoration(color: ShadTheme.of(context).cardTheme.backgroundColor),
+                      textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
                     ),
-                    PConfig(
-                      textStyle: TextStyle(
-                        fontSize: baseFontSize * 1.0,
-                        color: mdColor,
-                        inherit: false,
-                      ),
-                    ),
-                    CodeConfig(
-                      style: GoogleFonts.sourceCodePro(
-                        fontSize: baseFontSize * 1.0,
-                        color: mdColor,
-                      ),
-                    ),
+                    PConfig(textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false)),
+                    CodeConfig(style: GoogleFonts.sourceCodePro(fontSize: baseFontSize * 1.0, color: mdColor)),
                     BlockquoteConfig(textColor: mdColor),
                     LinkConfig(
-                      style: TextStyle(
-                        color:
-                            ShadTheme.of(
-                              context,
-                            ).linkButtonTheme.foregroundColor,
-                        decoration: TextDecoration.underline,
-                      ),
+                      style: TextStyle(color: ShadTheme.of(context).linkButtonTheme.foregroundColor, decoration: TextDecoration.underline),
                     ),
                     ListConfig(
                       marker: (isOrdered, depth, index) {
-                        return Padding(
-                          padding: EdgeInsets.only(right: 5),
-                          child: Text(
-                            "${index + 1}.",
-                            textAlign: TextAlign.right,
-                          ),
-                        );
+                        return Padding(padding: EdgeInsets.only(right: 5), child: Text("${index + 1}.", textAlign: TextAlign.right));
                       },
                     ),
                   ],
@@ -822,20 +657,7 @@ class _ChatThread extends State<ChatThread> {
             margin: EdgeInsets.only(top: 8),
             child: Align(
               alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-<<<<<<< HEAD
-              child: SizedBox(
-                width: 300,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: FilePreview(
-                    room: widget.room,
-                    path: (attachment as MeshElement).getAttribute("path"),
-                  ),
-                ),
-              ),
-=======
               child: ChatThreadPreview(room: widget.room, path: (attachment as MeshElement).getAttribute("path")),
->>>>>>> 9866f9c8f053813fb7b22f5c0fb8edcefbc6746c
             ),
           ),
       ],
@@ -846,34 +668,19 @@ class _ChatThread extends State<ChatThread> {
   Widget build(BuildContext context) {
     bool bottomAlign = !widget.startChatCentered || messages.isNotEmpty;
 
-    final rendredMessages =
-        messages
-            .map(mapMeshElement())
-            .map<Widget>((item) => buildMessage(context, item.$1, item.$2))
-            .toList()
-            .reversed;
+    final rendredMessages = messages.map(mapMeshElement()).map<Widget>((item) => buildMessage(context, item.$1, item.$2)).toList().reversed;
 
     return Column(
-      mainAxisAlignment:
-          bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
+      mainAxisAlignment: bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
       children: [
-        Expanded(
-          child: ListView(
-            reverse: true,
-            padding: EdgeInsets.all(16),
-            children: rendredMessages.toList(),
-          ),
-        ),
+        Expanded(child: ListView(reverse: true, padding: EdgeInsets.all(16), children: rendredMessages.toList())),
 
         if (!bottomAlign)
           if (getOnlineParticipants().firstOrNull != null)
             Padding(
               padding: EdgeInsets.symmetric(vertical: 20, horizontal: 50),
               child: Text(
-                getOnlineParticipants().first.getAttribute(
-                      "empty_state_title",
-                    ) ??
-                    "How can I help you?",
+                getOnlineParticipants().first.getAttribute("empty_state_title") ?? "How can I help you?",
                 style: ShadTheme.of(context).textTheme.h3,
               ),
             ),
@@ -904,11 +711,7 @@ class _ChatThread extends State<ChatThread> {
             },
             onChanged: (value, attachments) {
               for (final part in getOnlineParticipants()) {
-                widget.room.messaging.sendMessage(
-                  to: part,
-                  type: "typing",
-                  message: {"path": widget.path},
-                );
+                widget.room.messaging.sendMessage(to: part, type: "typing", message: {"path": widget.path});
               }
             },
             onSelectAttachment: widget.onSelectAttachment,
@@ -934,30 +737,7 @@ class _AttachmentPreview extends StatelessWidget {
   final RoomClient room;
   final String path;
 
-<<<<<<< HEAD
-  String _getFileExtension(String filename) {
-    final lastDotIndex = filename.lastIndexOf('.');
-
-    if (lastDotIndex == -1) {
-      return '';
-    }
-
-    return filename.substring(lastDotIndex + 1);
-  }
-
-  static const filePreviewExtensions = {
-    'jpg',
-    'gif',
-    'png',
-    'webp',
-    'mp3',
-    'wav',
-    'ogg',
-    'pdf',
-  };
-=======
   static const filePreviewExtensions = {'jpg', 'gif', 'png', 'webp', 'mp3', 'wav', 'ogg', 'pdf'};
->>>>>>> 9866f9c8f053813fb7b22f5c0fb8edcefbc6746c
 
   static const textFiles = {'txt', 'csv', 'json', 'xml'};
 
@@ -1102,15 +882,9 @@ class JoinMeetingButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return ShadButton.outline(
       leading: Icon(LucideIcons.mic),
-      enabled:
-          controller.livekitRoom.connectionState ==
-          livekit.ConnectionState.disconnected,
+      enabled: controller.livekitRoom.connectionState == livekit.ConnectionState.disconnected,
       onPressed: () async {
-        await controller.connect(
-          livekit.FastConnectOptions(
-            microphone: livekit.TrackOption(enabled: true),
-          ),
-        );
+        await controller.connect(livekit.FastConnectOptions(microphone: livekit.TrackOption(enabled: true)));
       },
       child: Text("Voice"),
     );
