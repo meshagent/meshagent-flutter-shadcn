@@ -60,6 +60,7 @@ dependencies:
   livekit_client: ^2.4.3
   webrtc_interface: ^1.2.0
   flutter_webrtc: ^0.13.1+hotfix.1
+  mime: ^2.0.0
 
 dev_dependencies:
   flutter_lints: ^5.0.0
