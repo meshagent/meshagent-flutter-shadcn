@@ -60,6 +60,9 @@ dependencies:
   livekit_client: ^2.4.3
   webrtc_interface: ^1.2.0
   flutter_webrtc: ^0.13.1+hotfix.1
+  super_drag_and_drop: ^0.9.0-dev.6
+  super_clipboard: ^0.9.0-dev.6
+  collection: ^1.19.1
 
 dev_dependencies:
   flutter_lints: ^5.0.0
