@@ -1,5 +1,6 @@
 import 'dart:async';
-import 'dart:typed_data';
+
+import 'package:collection/collection.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,6 +10,8 @@ import 'package:markdown_widget/markdown_widget.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:uuid/uuid.dart';
 import "package:url_launcher/url_launcher.dart";
+import 'package:super_drag_and_drop/super_drag_and_drop.dart';
+import 'package:super_clipboard/super_clipboard.dart';
 
 import 'package:meshagent/document.dart';
 import 'package:meshagent/room_server_client.dart';
@@ -19,6 +22,76 @@ import 'package:meshagent_flutter_shadcn/file_preview/file_preview.dart';
 import 'package:meshagent_flutter_shadcn/file_preview/image.dart';
 
 import 'package:livekit_client/livekit_client.dart' as livekit;
+
+const webPDFFormat = SimpleFileFormat(uniformTypeIdentifiers: ['com.adobe.pdf'], mimeTypes: ['web application/pdf']);
+
+abstract class FileUpload extends ChangeNotifier {
+  FileUpload({required this.path});
+
+  final String path;
+
+  int get bytesUploaded;
+
+  Future get done;
+
+  String get filename {
+    return path.split("/").last;
+  }
+}
+
+class MeshagentFileUpload extends FileUpload {
+  MeshagentFileUpload({required this.room, required super.path, required this.dataStream}) {
+    _upload();
+  }
+
+  final RoomClient room;
+
+  final Stream<List<int>> dataStream;
+
+  final _completer = Completer();
+
+  int _bytesUploaded = 0;
+
+  @override
+  int get bytesUploaded => _bytesUploaded;
+
+  @override
+  Future get done {
+    return _completer.future;
+  }
+
+  final _downloadUrlCompleter = Completer<Uri>();
+
+  Future<Uri> get downloadUrl {
+    return _downloadUrlCompleter.future;
+  }
+
+  void _upload() async {
+    try {
+      final handle = await room.storage.open(path, overwrite: true);
+
+      try {
+        await for (final len in dataStream.asyncMap((item) async {
+          await room.storage.write(handle, Uint8List.fromList(item));
+
+          return item.length;
+        })) {
+          _bytesUploaded += len;
+          notifyListeners();
+        }
+      } finally {
+        await room.storage.close(handle);
+      }
+      _completer.complete();
+
+      final url = await room.storage.downloadUrl(path);
+      _downloadUrlCompleter.complete(Uri.parse(url));
+    } catch (err) {
+      _completer.completeError(err);
+      _downloadUrlCompleter.completeError(err);
+    }
+  }
+}
 
 // ignore: depend_on_referenced_packages
 typedef PreviousMeshElementMapper = (MeshElement element, MeshElement? previous) Function(MeshElement);
@@ -33,35 +106,51 @@ PreviousMeshElementMapper mapMeshElement() {
   };
 }
 
-class MeshagentFileAttachment {
-  MeshagentFileAttachment(this.path);
+class ChatThreadController extends ChangeNotifier {
+  ChatThreadController({required this.room});
 
-  final String path;
+  final RoomClient room;
+  final TextEditingController textFieldController = ShadTextEditingController();
+  final List<FileUpload> _attachmentUploads = [];
 
-  String get filename {
-    final lastSlashIndex = path.lastIndexOf('/');
+  List<FileUpload> get attachmentUploads => List<FileUpload>.unmodifiable(_attachmentUploads);
 
-    if (lastSlashIndex == -1) {
-      return path;
-    }
+  FileUpload uploadFile(String path, Stream<Uint8List> dataStream) {
+    final uploader = MeshagentFileUpload(room: room, path: path, dataStream: dataStream);
 
-    return path.substring(lastSlashIndex + 1);
-  }
-}
+    _attachmentUploads.add(uploader);
+    notifyListeners();
 
-class MeshagentFileAttachmentController extends ValueNotifier<List<MeshagentFileAttachment>> {
-  MeshagentFileAttachmentController() : super([]);
-
-  void add(MeshagentFileAttachment attachment) {
-    value = [...value, attachment];
+    return uploader;
   }
 
-  void remove(MeshagentFileAttachment attachment) {
-    value = value.where((x) => x != attachment).toList();
+  String get text {
+    return textFieldController.text;
+  }
+
+  void removeFileUpload(FileUpload upload) {
+    _attachmentUploads.remove(upload);
+
+    notifyListeners();
   }
 
   void clear() {
-    value = [];
+    textFieldController.clear();
+    _attachmentUploads.clear();
+
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+
+    textFieldController.dispose();
+
+    for (final upload in _attachmentUploads) {
+      upload.done.ignore();
+      upload.dispose();
+    }
   }
 }
 
@@ -79,10 +168,9 @@ class ChatThreadLoader extends StatefulWidget {
     this.initialMessageID,
     this.initialMessageText,
     this.initialMessageAttachments,
+    this.controller,
 
     this.onMessageSent,
-    this.attachmentController,
-    this.onSelectAttachment,
   });
 
   final List<Participant>? participants;
@@ -94,11 +182,10 @@ class ChatThreadLoader extends StatefulWidget {
 
   final String? initialMessageID;
   final String? initialMessageText;
-  final List<MeshagentFileAttachment>? initialMessageAttachments;
+  final List<FileUpload>? initialMessageAttachments;
+  final ChatThreadController? controller;
 
-  final MeshagentFileAttachmentController? attachmentController;
-  final void Function(String message, List<MeshagentFileAttachment> attachments)? onMessageSent;
-  final void Function(MeshagentFileAttachmentController controller)? onSelectAttachment;
+  final void Function(String message, List<FileUpload> attachments)? onMessageSent;
 
   @override
   State createState() => _ChatThreadLoader();
@@ -164,8 +251,7 @@ class _ChatThreadLoader extends State<ChatThreadLoader> {
           initialMessageAttachments: widget.initialMessageAttachments,
 
           onMessageSent: widget.onMessageSent,
-          attachmentController: widget.attachmentController,
-          onSelectAttachment: widget.onSelectAttachment,
+          controller: widget.controller,
         );
       },
     );
@@ -173,42 +259,29 @@ class _ChatThreadLoader extends State<ChatThreadLoader> {
 }
 
 class ChatThreadInput extends StatefulWidget {
-  const ChatThreadInput({
-    super.key,
-    required this.room,
-    required this.onSend,
-
-    this.onMessageSent,
-    this.onSelectAttachment,
-    this.attachmentController,
-
-    this.onChanged,
-  });
+  const ChatThreadInput({super.key, required this.room, required this.onSend, required this.controller, this.onChanged});
 
   final RoomClient room;
-  final void Function(String, List<MeshagentFileAttachment>) onSend;
-  final void Function(String, List<MeshagentFileAttachment>)? onChanged;
-
-  final MeshagentFileAttachmentController? attachmentController;
-  final void Function(MeshagentFileAttachmentController controller)? onSelectAttachment;
-  final void Function(String message, List<MeshagentFileAttachment> attachments)? onMessageSent;
+  final void Function(String, List<FileUpload>) onSend;
+  final void Function(String, List<FileUpload>)? onChanged;
+  final ChatThreadController controller;
 
   @override
   State createState() => _ChatThreadInput();
 }
 
 class _ChatThreadInput extends State<ChatThreadInput> {
-  final controller = ShadTextEditingController();
-  late final MeshagentFileAttachmentController attachmentController;
   bool showSendButton = false;
+
+  String text = "";
+  List<FileUpload> attachments = [];
 
   late final focusNode = FocusNode(
     onKeyEvent: (_, event) {
       if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.enter && !HardwareKeyboard.instance.isShiftPressed) {
-        widget.onSend(controller.text, attachmentController.value);
+        widget.onSend(widget.controller.text, widget.controller.attachmentUploads);
 
-        controller.text = "";
-        attachmentController.clear();
+        widget.controller.textFieldController.clear();
 
         return KeyEventResult.handled;
       }
@@ -218,13 +291,20 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   );
 
   void _onChanged() {
-    widget.onChanged?.call(controller.text, attachmentController.value);
+    final newText = widget.controller.text;
+    final newAttachments = widget.controller.attachmentUploads;
 
-    setShowSendButton();
+    if (newText != text || newAttachments != attachments) {
+      text = newText;
+      attachments = newAttachments;
+
+      widget.onChanged?.call(text, attachments);
+      setShowSendButton();
+    }
   }
 
   void setShowSendButton() {
-    final value = controller.text.isNotEmpty || attachmentController.value.isNotEmpty;
+    final value = text.isNotEmpty || attachments.isNotEmpty;
 
     if (showSendButton != value) {
       setState(() {
@@ -237,14 +317,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   void initState() {
     super.initState();
 
-    if (widget.attachmentController != null) {
-      attachmentController = widget.attachmentController!;
-    } else {
-      attachmentController = MeshagentFileAttachmentController();
-    }
-
-    attachmentController.addListener(_onChanged);
-    controller.addListener(_onChanged);
+    widget.controller.addListener(_onChanged);
   }
 
   @override
@@ -252,39 +325,17 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     super.dispose();
 
     focusNode.dispose();
-    controller.dispose();
-    attachmentController.dispose();
   }
 
   Future<void> _onSelectAttachment() async {
-    if (widget.onSelectAttachment != null) {
-      widget.onSelectAttachment!(attachmentController);
-      return;
-    }
-
     final picked = await FilePicker.platform.pickFiles(dialogTitle: "Select files", allowMultiple: true, withReadStream: true);
 
     if (picked == null) {
       return;
     }
 
-    for (final PlatformFile file in picked.files) {
-      final stream = file.readStream!.map((x) => Uint8List.fromList(x));
-      final builder = await stream.fold<BytesBuilder>(BytesBuilder(), (builder, chunk) {
-        builder.add(chunk);
-        return builder;
-      });
-
-      final data = builder.takeBytes();
-      final fileName = "/${file.name}";
-
-      final handle = await widget.room.storage.open(fileName);
-      await widget.room.storage.write(handle, data);
-      await widget.room.storage.close(handle);
-
-      if (mounted) {
-        attachmentController.add(MeshagentFileAttachment(fileName));
-      }
+    for (final file in picked.files) {
+      widget.controller.uploadFile(file.name, file.readStream!.map(Uint8List.fromList));
     }
   }
 
@@ -292,9 +343,9 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        ValueListenableBuilder<List<MeshagentFileAttachment>>(
-          valueListenable: attachmentController,
-          builder: (context, attachments, child) {
+        ListenableBuilder(
+          listenable: widget.controller,
+          builder: (context, child) {
             if (attachments.isEmpty) {
               return SizedBox.shrink();
             }
@@ -314,7 +365,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
                         icon: LucideIcons.file,
                         text: attachment.filename,
                         onClose: () {
-                          attachmentController.remove(attachment);
+                          widget.controller.removeFileUpload(attachment);
                         },
                       );
 
@@ -388,9 +439,8 @@ class _ChatThreadInput extends State<ChatThreadInput> {
                     child: ShadGestureDetector(
                       cursor: SystemMouseCursors.click,
                       onTap: () {
-                        widget.onSend(controller.text, attachmentController.value);
-                        controller.text = "";
-                        attachmentController.clear();
+                        widget.onSend(widget.controller.text, widget.controller.attachmentUploads);
+                        widget.controller.clear();
                       },
                       child: Container(
                         width: 22,
@@ -411,7 +461,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
           maxLines: null,
           placeholder: Text("Message"),
           focusNode: focusNode,
-          controller: controller,
+          controller: widget.controller.textFieldController,
         ),
       ],
     );
@@ -433,8 +483,7 @@ class ChatThread extends StatefulWidget {
     this.initialMessageAttachments,
 
     this.onMessageSent,
-    this.attachmentController,
-    this.onSelectAttachment,
+    this.controller,
   });
 
   final String path;
@@ -445,11 +494,9 @@ class ChatThread extends StatefulWidget {
 
   final String? initialMessageID;
   final String? initialMessageText;
-  final List<MeshagentFileAttachment>? initialMessageAttachments;
-  final void Function(String message, List<MeshagentFileAttachment> attachments)? onMessageSent;
-
-  final MeshagentFileAttachmentController? attachmentController;
-  final void Function(MeshagentFileAttachmentController controller)? onSelectAttachment;
+  final List<FileUpload>? initialMessageAttachments;
+  final void Function(String message, List<FileUpload> attachments)? onMessageSent;
+  final ChatThreadController? controller;
 
   @override
   State createState() => _ChatThread();
@@ -462,6 +509,8 @@ class _ChatThread extends State<ChatThread> {
   Set<String> thinking = {};
   Iterable<MeshElement> messages = [];
 
+  late final ChatThreadController controller;
+
   Iterable<MeshElement> _getMessages() {
     final threadMessages = widget.document.root.getChildren().whereType<MeshElement>().where((x) => x.tagName == "messages").firstOrNull;
 
@@ -471,6 +520,8 @@ class _ChatThread extends State<ChatThread> {
   @override
   void initState() {
     super.initState();
+
+    controller = widget.controller ?? ChatThreadController(room: widget.room);
 
     if (widget.initialMessageID != null) {
       final threadMessages = widget.document.root.getChildren().whereType<MeshElement>().where((x) => x.tagName == "messages").firstOrNull;
@@ -547,7 +598,7 @@ class _ChatThread extends State<ChatThread> {
     }
   }
 
-  void send(String value, List<MeshagentFileAttachment> attachments) async {
+  void send(String value, List<FileUpload> attachments) async {
     if (value.trim().isNotEmpty || attachments.isNotEmpty) {
       final messages = widget.document.root.getChildren().whereType<MeshElement>().firstWhere((x) => x.tagName == "messages");
 
@@ -665,54 +716,60 @@ class _ChatThread extends State<ChatThread> {
 
     final rendredMessages = messages.map(mapMeshElement()).map<Widget>((item) => buildMessage(context, item.$1, item.$2)).toList().reversed;
 
-    return Column(
-      mainAxisAlignment: bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
-      children: [
-        Expanded(child: ListView(reverse: true, padding: EdgeInsets.all(16), children: rendredMessages.toList())),
+    return FileDropArea(
+      onFileDrop: (name, dataStream) async {
+        widget.controller?.uploadFile(name, dataStream);
+      },
 
-        if (!bottomAlign)
-          if (getOnlineParticipants().firstOrNull != null)
-            Padding(
-              padding: EdgeInsets.symmetric(vertical: 20, horizontal: 50),
-              child: Text(
-                getOnlineParticipants().first.getAttribute("empty_state_title") ?? "How can I help you?",
-                style: ShadTheme.of(context).textTheme.h3,
+      child: Column(
+        mainAxisAlignment: bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
+        children: [
+          Expanded(child: ListView(reverse: true, padding: EdgeInsets.all(16), children: rendredMessages.toList())),
+
+          if (!bottomAlign)
+            if (getOnlineParticipants().firstOrNull != null)
+              Padding(
+                padding: EdgeInsets.symmetric(vertical: 20, horizontal: 50),
+                child: Text(
+                  getOnlineParticipants().first.getAttribute("empty_state_title") ?? "How can I help you?",
+                  style: ShadTheme.of(context).textTheme.h3,
+                ),
+              ),
+
+          if ((typing.isNotEmpty || thinking.isNotEmpty))
+            Container(
+              width: double.infinity,
+              height: 30,
+              alignment: Alignment.centerLeft,
+              child: SizedBox(
+                width: 100,
+                child: JumpingDots(
+                  color: ShadTheme.of(context).colorScheme.foreground,
+                  radius: 8,
+                  verticalOffset: -15,
+                  numberOfDots: 3,
+                  animationDuration: const Duration(milliseconds: 200),
+                ),
               ),
             ),
 
-        if ((typing.isNotEmpty || thinking.isNotEmpty))
-          Container(
-            width: double.infinity,
-            height: 30,
-            alignment: Alignment.centerLeft,
-            child: SizedBox(
-              width: 100,
-              child: JumpingDots(
-                color: ShadTheme.of(context).colorScheme.foreground,
-                radius: 8,
-                verticalOffset: -15,
-                numberOfDots: 3,
-                animationDuration: const Duration(milliseconds: 200),
-              ),
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+            child: ChatThreadInput(
+              room: widget.room,
+              onSend: (value, attachments) {
+                send(value, attachments);
+              },
+              onChanged: (value, attachments) {
+                for (final part in getOnlineParticipants()) {
+                  widget.room.messaging.sendMessage(to: part, type: "typing", message: {"path": widget.path});
+                }
+              },
+              controller: controller,
             ),
           ),
-
-        Padding(
-          padding: EdgeInsets.symmetric(horizontal: 15, vertical: 8),
-          child: ChatThreadInput(
-            room: widget.room,
-            onSend: (value, attachments) {
-              send(value, attachments);
-            },
-            onChanged: (value, attachments) {
-              for (final part in getOnlineParticipants()) {
-                widget.room.messaging.sendMessage(to: part, type: "typing", message: {"path": widget.path});
-              }
-            },
-            onSelectAttachment: widget.onSelectAttachment,
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -720,83 +777,12 @@ class _ChatThread extends State<ChatThread> {
   void dispose() {
     super.dispose();
 
+    controller.dispose();
+
     sub.cancel();
     widget.document.removeListener(onDocumentChanged);
   }
 }
-
-/*
-class _AttachmentPreview extends StatelessWidget {
-  const _AttachmentPreview({required this.room, required this.path});
-
-  final RoomClient room;
-  final String path;
-
-  static const filePreviewExtensions = {'jpg', 'gif', 'png', 'webp', 'mp3', 'wav', 'ogg', 'pdf'};
-
-  static const textFiles = {'txt', 'csv', 'json', 'xml'};
-
-  static const documentFiles = {'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx'};
-
-  static const presentationFiles = {'ppt', 'pptx'};
-
-  static const audioFiles = {
-    'aac',
-    'm4a',
-    'ogg',
-    'opus',
-    'wma',
-    'amr',
-    'flac',
-    'alac',
-    'aiff',
-    'ape',
-    'wv',
-    'tta',
-    'caf',
-    'dff',
-    'dsf',
-    'mka',
-    'pcm',
-    'mod',
-    'xm',
-    's3m',
-    'it',
-    'mid',
-    'midi',
-  };
-
-  static const archiveFiles = {'zip', 'tar', 'gz', 'bz2', 'xz', '7z', 'rar', 'iso', 'dmg'};
-
-  static const videoFiles = {'mp4', 'avi', 'mov', 'mkv', 'flv', 'wmv', 'webm', 'mpeg', 'mpg', '3gp', '3g2', 'rmvb', 'rm'};
-
-  @override
-  Widget build(BuildContext context) {
-    final ext = path.split(".").last.toLowerCase();
-    IconData icon = LucideIcons.file;
-
-    if (filePreviewExtensions.contains(ext)) {
-      return FilePreview(room: room, path: path, fit: BoxFit.cover);
-    }
-
-    if (audioFiles.contains(ext)) {
-      icon = LucideIcons.fileAudio;
-    } else if (textFiles.contains(ext)) {
-      icon = LucideIcons.fileText;
-    } else if (documentFiles.contains(ext)) {
-      icon = LucideIcons.fileText;
-    } else if (archiveFiles.contains(ext)) {
-      icon = LucideIcons.fileArchive;
-    } else if (presentationFiles.contains(ext)) {
-      icon = LucideIcons.fileChartPie;
-    } else if (videoFiles.contains(ext)) {
-      icon = LucideIcons.fileVideo;
-    }
-
-    return Icon(icon, size: 100, color: ShadTheme.of(context).colorScheme.foreground);
-  }
-}
-*/
 
 class ChatThreadPreview extends StatelessWidget {
   const ChatThreadPreview({super.key, required this.room, required this.path});
@@ -855,5 +841,83 @@ class JoinMeetingButton extends StatelessWidget {
       },
       child: Text("Voice"),
     );
+  }
+}
+
+typedef FileDropCallback = Future<void> Function(String name, Stream<Uint8List> dataStream);
+
+class FileDropArea extends StatefulWidget {
+  final FileDropCallback onFileDrop;
+  final Widget child;
+
+  const FileDropArea({super.key, required this.onFileDrop, required this.child});
+
+  @override
+  FileDropAreaState createState() => FileDropAreaState();
+}
+
+class FileDropAreaState extends State<FileDropArea> {
+  bool _dragging = false;
+
+  static const _preferredFormats = [
+    Formats.mp4,
+    Formats.mov,
+    Formats.mkv,
+    Formats.pdf,
+    webPDFFormat,
+    Formats.png,
+    Formats.jpeg,
+    Formats.heic,
+    Formats.tiff,
+  ];
+
+  Future<Stream<Uint8List>> _getStream(DataReader reader, SimpleFileFormat? format) {
+    final completer = Completer<Stream<Uint8List>>();
+
+    reader.getFile(format, (file) => completer.complete(file.getStream()), onError: (e) => completer.completeError(e));
+
+    return completer.future;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DropRegion(
+      formats: const [...Formats.standardFormats, Formats.fileUri],
+      hitTestBehavior: HitTestBehavior.opaque,
+      onDropOver: _onDragOver,
+      onDropLeave: _onDragLeave,
+      onPerformDrop: _onDrop,
+      child: Stack(children: [widget.child, if (_dragging) Positioned.fill(child: Container(color: Colors.blue.withValues(alpha: 0.1)))]),
+    );
+  }
+
+  DropOperation _onDragOver(DropOverEvent event) {
+    setState(() => _dragging = true);
+
+    return event.session.allowedOperations.contains(DropOperation.copy) ? DropOperation.copy : DropOperation.none;
+  }
+
+  void _onDragLeave(DropEvent event) {
+    setState(() => _dragging = false);
+  }
+
+  Future<void> _onDrop(PerformDropEvent event) async {
+    setState(() => _dragging = false);
+
+    final readers = event.session.items.map((m) => m.dataReader).toList();
+
+    for (final reader in readers) {
+      if (reader == null) continue;
+
+      try {
+        final name = (await reader.getSuggestedName())!;
+        final fmt = _preferredFormats.firstWhereOrNull((f) => reader.canProvide(f));
+        final stream = await _getStream(reader, fmt);
+
+        await widget.onFileDrop(name, stream);
+      } catch (err, st) {
+        debugPrint('Error dropping file: $err\n$st');
+      }
+    }
   }
 }
