@@ -175,6 +175,8 @@ class ChatThreadLoader extends StatefulWidget {
     this.includeLocalParticipant = true,
 
     this.waitingForParticipantsBuilder,
+    this.attachmentBuilder,
+    this.fileInThreadBuilder,
   });
 
   final List<Participant>? participants;
@@ -193,6 +195,8 @@ class ChatThreadLoader extends StatefulWidget {
   final ChatThreadController? controller;
 
   final void Function(String message, List<FileUpload> attachments)? onMessageSent;
+  final Widget Function(BuildContext context, FileUpload upload)? attachmentBuilder;
+  final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
 
   @override
   State createState() => _ChatThreadLoader();
@@ -263,6 +267,8 @@ class _ChatThreadLoader extends State<ChatThreadLoader> {
 
           onMessageSent: widget.onMessageSent,
           controller: widget.controller,
+          attachmentBuilder: widget.attachmentBuilder,
+          fileInThreadBuilder: widget.fileInThreadBuilder,
         );
       },
     );
@@ -270,12 +276,20 @@ class _ChatThreadLoader extends State<ChatThreadLoader> {
 }
 
 class ChatThreadInput extends StatefulWidget {
-  const ChatThreadInput({super.key, required this.room, required this.onSend, required this.controller, this.onChanged});
+  const ChatThreadInput({
+    super.key,
+    required this.room,
+    required this.onSend,
+    required this.controller,
+    this.onChanged,
+    this.attachmentBuilder,
+  });
 
   final RoomClient room;
   final void Function(String, List<FileUpload>) onSend;
   final void Function(String, List<FileUpload>)? onChanged;
   final ChatThreadController controller;
+  final Widget Function(BuildContext context, FileUpload upload)? attachmentBuilder;
 
   @override
   State createState() => _ChatThreadInput();
@@ -372,6 +386,11 @@ class _ChatThreadInput extends State<ChatThreadInput> {
                     scrollDirection: Axis.horizontal,
                     itemBuilder: (context, index) {
                       final attachment = attachments[index];
+
+                      if (widget.attachmentBuilder != null) {
+                        return widget.attachmentBuilder!(context, attachment);
+                      }
+
                       return FilePreviewCard(
                         icon: LucideIcons.file,
                         text: attachment.filename,
@@ -496,6 +515,8 @@ class ChatThread extends StatefulWidget {
     this.onMessageSent,
     this.controller,
     this.waitingForParticipantsBuilder,
+    this.attachmentBuilder,
+    this.fileInThreadBuilder,
   });
 
   final Widget Function(BuildContext, List<String>)? waitingForParticipantsBuilder;
@@ -511,6 +532,8 @@ class ChatThread extends StatefulWidget {
   final List<FileUpload>? initialMessageAttachments;
   final void Function(String message, List<FileUpload> attachments)? onMessageSent;
   final ChatThreadController? controller;
+  final Widget Function(BuildContext context, FileUpload upload)? attachmentBuilder;
+  final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
 
   @override
   State createState() => _ChatThread();
@@ -681,6 +704,14 @@ class _ChatThread extends State<ChatThread> {
     }
   }
 
+  Widget buildFileInThread(BuildContext context, String path) {
+    if (widget.fileInThreadBuilder != null) {
+      return widget.fileInThreadBuilder!(context, path);
+    }
+
+    return ChatThreadPreview(room: widget.room, path: path);
+  }
+
   Widget buildMessage(BuildContext context, MeshElement message, MeshElement? previous) {
     final isSameAuthor = message.attributes["author_name"] == previous?.attributes["author_name"];
     final mine = message.attributes["author_name"] == widget.room.localParticipant!.getAttribute("name");
@@ -754,7 +785,7 @@ class _ChatThread extends State<ChatThread> {
             margin: EdgeInsets.only(top: 8),
             child: Align(
               alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-              child: ChatThreadPreview(room: widget.room, path: (attachment as MeshElement).getAttribute("path")),
+              child: buildFileInThread(context, (attachment as MeshElement).getAttribute("path")),
             ),
           ),
       ],
@@ -820,6 +851,7 @@ class _ChatThread extends State<ChatThread> {
                 }
               },
               controller: controller,
+              attachmentBuilder: widget.attachmentBuilder,
             ),
           ),
         ],
