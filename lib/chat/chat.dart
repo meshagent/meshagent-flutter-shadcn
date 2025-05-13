@@ -116,7 +116,7 @@ class ChatThreadController extends ChangeNotifier {
 
   List<FileUpload> get attachmentUploads => List<FileUpload>.unmodifiable(_attachmentUploads);
 
-  FileUpload uploadFile(String path, Stream<Uint8List> dataStream) {
+  Future<FileUpload> uploadFile(String path, Stream<Uint8List> dataStream) async {
     final uploader = MeshagentFileUpload(room: room, path: path, dataStream: dataStream);
 
     _attachmentUploads.add(uploader);
@@ -391,7 +391,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
                         return widget.attachmentBuilder!(context, attachment);
                       }
 
-                      return FilePreviewCard(
+                      return FileDefaultPreviewCard(
                         icon: LucideIcons.file,
                         text: attachment.filename,
                         onClose: () {
@@ -705,11 +705,34 @@ class _ChatThread extends State<ChatThread> {
   }
 
   Widget buildFileInThread(BuildContext context, String path) {
-    if (widget.fileInThreadBuilder != null) {
-      return widget.fileInThreadBuilder!(context, path);
-    }
+    return ShadGestureDetector(
+      onTap: () {
+        showShadDialog(
+          context: context,
+          builder: (context) {
+            return ShadDialog(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              title: Text("File: $path"),
+              actions: [
+                ShadButton(
+                  onPressed: () async {
+                    final url = await widget.room.storage.downloadUrl(path);
 
-    return ChatThreadPreview(room: widget.room, path: path);
+                    launchUrl(Uri.parse(url));
+                  },
+                  child: Text("Download"),
+                ),
+              ],
+              child: FilePreview(room: widget.room, path: path, fit: BoxFit.cover),
+            );
+          },
+        );
+      },
+      child:
+          widget.fileInThreadBuilder != null
+              ? widget.fileInThreadBuilder!(context, path)
+              : ChatThreadPreview(room: widget.room, path: path),
+    );
   }
 
   Widget buildMessage(BuildContext context, MeshElement message, MeshElement? previous) {
@@ -900,7 +923,7 @@ class ChatThreadPreview extends StatelessWidget {
       );
     }
 
-    return FilePreviewCard(
+    return FileDefaultPreviewCard(
       icon: LucideIcons.file,
       text: path.split("/").last,
       onDownload: () async {
@@ -955,6 +978,7 @@ class FileDropAreaState extends State<FileDropArea> {
     Formats.jpeg,
     Formats.heic,
     Formats.tiff,
+    Formats.webp,
   ];
 
   Future<Stream<Uint8List>> _getStream(DataReader reader, SimpleFileFormat? format) {
@@ -963,6 +987,31 @@ class FileDropAreaState extends State<FileDropArea> {
     reader.getFile(format, (file) => completer.complete(file.getStream()), onError: (e) => completer.completeError(e));
 
     return completer.future;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+
+    final events = ClipboardEvents.instance;
+    events?.registerPasteEventListener(onPasteEvent);
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+
+    final events = ClipboardEvents.instance;
+    events?.unregisterPasteEventListener(onPasteEvent);
+  }
+
+  void onPasteEvent(ClipboardReadEvent event) async {
+    final reader = await event.getClipboardReader();
+    final name = (await reader.getSuggestedName())!;
+    final fmt = _preferredFormats.firstWhereOrNull((f) => reader.canProvide(f));
+    final stream = await _getStream(reader, fmt);
+
+    await widget.onFileDrop(name, stream);
   }
 
   @override
