@@ -745,73 +745,81 @@ class _ChatThread extends State<ChatThread> {
 
     final text = message.getAttribute("text");
 
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (!isSameAuthor && widget.participantNameBuilder != null)
-          widget.participantNameBuilder!(message.attributes["author_name"], DateTime.parse(message.attributes["created_at"])),
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: 912),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (!isSameAuthor && widget.participantNameBuilder != null)
+              widget.participantNameBuilder!(message.attributes["author_name"], DateTime.parse(message.attributes["created_at"])),
 
-        if (text.isNotEmpty)
-          Container(
-            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            margin: EdgeInsets.only(top: 8, right: mine ? 0 : 50, left: mine ? 50 : 0),
-            decoration: BoxDecoration(
-              color: ShadTheme.of(context).ghostButtonTheme.hoverBackgroundColor,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: MediaQuery(
-              data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
-              child: MarkdownWidget(
-                padding: const EdgeInsets.all(0),
-                config: MarkdownConfig(
-                  configs: [
-                    HrConfig(color: mdColor),
-                    H1Config(style: TextStyle(fontSize: baseFontSize * 2, color: mdColor, fontWeight: FontWeight.bold)),
-                    H2Config(style: TextStyle(fontSize: baseFontSize * 1.8, color: mdColor, inherit: false)),
-                    H3Config(style: TextStyle(fontSize: baseFontSize * 1.6, color: mdColor, inherit: false)),
-                    H4Config(style: TextStyle(fontSize: baseFontSize * 1.4, color: mdColor, inherit: false)),
-                    H5Config(style: TextStyle(fontSize: baseFontSize * 1.2, color: mdColor, inherit: false)),
-                    H6Config(style: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false)),
-                    PreConfig(
-                      decoration: BoxDecoration(color: ShadTheme.of(context).cardTheme.backgroundColor),
-                      textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
-                    ),
-                    PConfig(textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false)),
-                    CodeConfig(style: GoogleFonts.sourceCodePro(fontSize: baseFontSize * 1.0, color: mdColor)),
-                    BlockquoteConfig(textColor: mdColor),
-                    LinkConfig(
-                      style: TextStyle(color: ShadTheme.of(context).linkButtonTheme.foregroundColor, decoration: TextDecoration.underline),
-                    ),
-                    ListConfig(
-                      marker: (isOrdered, depth, index) {
-                        return Padding(padding: EdgeInsets.only(right: 5), child: Text("${index + 1}.", textAlign: TextAlign.right));
-                      },
-                    ),
-                  ],
+            if (text.isNotEmpty)
+              Container(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                margin: EdgeInsets.only(top: 8, right: mine ? 0 : 50, left: mine ? 50 : 0),
+                decoration: BoxDecoration(
+                  color: ShadTheme.of(context).ghostButtonTheme.hoverBackgroundColor,
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                shrinkWrap: true,
-                selectable: true,
+                child: MediaQuery(
+                  data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
+                  child: MarkdownWidget(
+                    padding: const EdgeInsets.all(0),
+                    config: MarkdownConfig(
+                      configs: [
+                        HrConfig(color: mdColor),
+                        H1Config(style: TextStyle(fontSize: baseFontSize * 2, color: mdColor, fontWeight: FontWeight.bold)),
+                        H2Config(style: TextStyle(fontSize: baseFontSize * 1.8, color: mdColor, inherit: false)),
+                        H3Config(style: TextStyle(fontSize: baseFontSize * 1.6, color: mdColor, inherit: false)),
+                        H4Config(style: TextStyle(fontSize: baseFontSize * 1.4, color: mdColor, inherit: false)),
+                        H5Config(style: TextStyle(fontSize: baseFontSize * 1.2, color: mdColor, inherit: false)),
+                        H6Config(style: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false)),
+                        PreConfig(
+                          decoration: BoxDecoration(color: ShadTheme.of(context).cardTheme.backgroundColor),
+                          textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
+                        ),
+                        PConfig(textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false)),
+                        CodeConfig(style: GoogleFonts.sourceCodePro(fontSize: baseFontSize * 1.0, color: mdColor)),
+                        BlockquoteConfig(textColor: mdColor),
+                        LinkConfig(
+                          style: TextStyle(
+                            color: ShadTheme.of(context).linkButtonTheme.foregroundColor,
+                            decoration: TextDecoration.underline,
+                          ),
+                        ),
+                        ListConfig(
+                          marker: (isOrdered, depth, index) {
+                            return Padding(padding: EdgeInsets.only(right: 5), child: Text("${index + 1}.", textAlign: TextAlign.right));
+                          },
+                        ),
+                      ],
+                    ),
+                    shrinkWrap: true,
+                    selectable: true,
 
-                /*builders: {
+                    /*builders: {
               "code": CodeElementBuilder(
                   document: ChatDocumentProvider.of(context).document,
                   api: TimuApiProvider.of(context).api,
                   layer: layer),
             },*/
-                data: message.getAttribute("text"),
+                    data: message.getAttribute("text"),
+                  ),
+                ),
               ),
-            ),
-          ),
-        for (final attachment in message.getChildren())
-          Container(
-            margin: EdgeInsets.only(top: 8),
-            child: Align(
-              alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-              child: buildFileInThread(context, (attachment as MeshElement).getAttribute("path")),
-            ),
-          ),
-      ],
+            for (final attachment in message.getChildren())
+              Container(
+                margin: EdgeInsets.only(top: 8),
+                child: Align(
+                  alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+                  child: buildFileInThread(context, (attachment as MeshElement).getAttribute("path")),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -863,18 +871,23 @@ class _ChatThread extends State<ChatThread> {
 
           Padding(
             padding: EdgeInsets.symmetric(horizontal: 15, vertical: 8),
-            child: ChatThreadInput(
-              room: widget.room,
-              onSend: (value, attachments) {
-                send(value, attachments);
-              },
-              onChanged: (value, attachments) {
-                for (final part in getOnlineParticipants()) {
-                  widget.room.messaging.sendMessage(to: part, type: "typing", message: {"path": widget.path});
-                }
-              },
-              controller: controller,
-              attachmentBuilder: widget.attachmentBuilder,
+            child: Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: 912),
+                child: ChatThreadInput(
+                  room: widget.room,
+                  onSend: (value, attachments) {
+                    send(value, attachments);
+                  },
+                  onChanged: (value, attachments) {
+                    for (final part in getOnlineParticipants()) {
+                      widget.room.messaging.sendMessage(to: part, type: "typing", message: {"path": widget.path});
+                    }
+                  },
+                  controller: controller,
+                  attachmentBuilder: widget.attachmentBuilder,
+                ),
+              ),
             ),
           ),
         ],
