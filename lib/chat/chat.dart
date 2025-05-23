@@ -108,7 +108,11 @@ PreviousMeshElementMapper mapMeshElement() {
 }
 
 class ChatThreadController extends ChangeNotifier {
-  ChatThreadController({required this.room});
+  ChatThreadController({required this.room}) {
+    textFieldController.addListener(() {
+      notifyListeners();
+    });
+  }
 
   final RoomClient room;
   final TextEditingController textFieldController = ShadTextEditingController();
