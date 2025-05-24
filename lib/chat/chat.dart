@@ -857,18 +857,21 @@ class _ChatThread extends State<ChatThread> {
               ),
 
           if ((typing.isNotEmpty || thinking.isNotEmpty))
-            Container(
-              width: double.infinity,
-              height: 30,
-              alignment: Alignment.centerLeft,
-              child: SizedBox(
-                width: 100,
-                child: JumpingDots(
-                  color: ShadTheme.of(context).colorScheme.foreground,
-                  radius: 8,
-                  verticalOffset: -15,
-                  numberOfDots: 3,
-                  animationDuration: const Duration(milliseconds: 200),
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: 912),
+              child: Container(
+                width: double.infinity,
+                height: 30,
+                alignment: Alignment.centerLeft,
+                child: SizedBox(
+                  width: 100,
+                  child: JumpingDots(
+                    color: ShadTheme.of(context).colorScheme.foreground,
+                    radius: 8,
+                    verticalOffset: -15,
+                    numberOfDots: 3,
+                    animationDuration: const Duration(milliseconds: 200),
+                  ),
                 ),
               ),
             ),
