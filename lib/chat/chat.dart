@@ -885,7 +885,9 @@ class _ChatThread extends State<ChatThread> {
                   },
                   onChanged: (value, attachments) {
                     for (final part in getOnlineParticipants()) {
-                      widget.room.messaging.sendMessage(to: part, type: "typing", message: {"path": widget.path});
+                      if (part.id != widget.room.localParticipant?.id) {
+                        widget.room.messaging.sendMessage(to: part, type: "typing", message: {"path": widget.path});
+                      }
                     }
                   },
                   controller: controller,
