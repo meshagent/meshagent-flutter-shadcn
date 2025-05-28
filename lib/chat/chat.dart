@@ -603,6 +603,10 @@ class _ChatThread extends State<ChatThread> {
         checkParticipants();
       }
 
+      if (event.message.fromParticipantId == widget.room.localParticipant!.id) {
+        return;
+      }
+
       if (event.message.type == "typing" && event.message.message["path"] == widget.path) {
         // TODO: verify thread_id matches
         typing[event.message.fromParticipantId]?.cancel();
