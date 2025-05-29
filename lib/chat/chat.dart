@@ -146,6 +146,78 @@ class ChatThreadController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Iterable<String> getParticipantNames(MeshDocument document) sync* {
+    for (final child in document.root.getChildren().whereType<MeshElement>()) {
+      if (child.tagName == "members") {
+        for (final member in child.getChildren().whereType<MeshElement>()) {
+          yield member.attributes["name"];
+        }
+      }
+    }
+  }
+
+  Iterable<String> getOfflineParticipants(MeshDocument document) sync* {
+    for (final participantName in getParticipantNames(document)) {
+      bool found = false;
+      if (room.messaging.remoteParticipants.where((x) => x.getAttribute("name") == participantName).isNotEmpty ||
+          participantName == room.localParticipant?.getAttribute("name")) {
+        found = true;
+      }
+      if (!found) {
+        yield participantName;
+      }
+    }
+  }
+
+  Iterable<Participant> getOnlineParticipants(MeshDocument document) sync* {
+    for (final participantName in getParticipantNames(document)) {
+      if (participantName == room.localParticipant?.getAttribute("name")) {
+        yield room.localParticipant!;
+      }
+      for (final part in room.messaging.remoteParticipants.where((x) => x.getAttribute("name") == participantName)) {
+        yield part;
+      }
+    }
+  }
+
+  void send(
+    MeshDocument document,
+    String path,
+    String value,
+    List<FileUpload> attachments,
+    Function(String message, List<FileUpload> attachments)? onMessageSent,
+  ) async {
+    if (value.trim().isNotEmpty || attachments.isNotEmpty) {
+      final messages = document.root.getChildren().whereType<MeshElement>().firstWhere((x) => x.tagName == "messages");
+
+      final message = messages.createChildElement("message", {
+        "id": const Uuid().v4().toString(),
+        "text": value,
+        "created_at": DateTime.now().toUtc().toIso8601String(),
+        "author_name": room.localParticipant!.getAttribute("name"),
+        "author_ref": null,
+      });
+
+      for (final attachment in attachments) {
+        message.createChildElement("file", {"path": attachment.path});
+      }
+
+      for (final participant in getOnlineParticipants(document)) {
+        room.messaging.sendMessage(
+          to: participant,
+          type: "chat",
+          message: {
+            "path": path,
+            "text": value,
+            "attachments": attachments.map((a) => {"path": a.path}).toList(),
+          },
+        );
+      }
+
+      onMessageSent?.call(value, attachments);
+    }
+  }
+
   @override
   void dispose() {
     super.dispose();
@@ -570,7 +642,13 @@ class _ChatThread extends State<ChatThread> {
           threadMessages?.getChildren().whereType<MeshElement>().where((x) => x.attributes["id"] == widget.initialMessageID).firstOrNull;
 
       if (initialMessage == null) {
-        send(widget.initialMessageText ?? "", widget.initialMessageAttachments ?? []);
+        controller.send(
+          widget.document,
+          widget.path,
+          widget.initialMessageText ?? "",
+          widget.initialMessageAttachments ?? [],
+          widget.onMessageSent,
+        );
       }
     }
 
@@ -636,79 +714,13 @@ class _ChatThread extends State<ChatThread> {
   Set<String> offlineParticipants = {};
 
   void checkParticipants() {
-    final parts = getOfflineParticipants().toSet();
+    final parts = controller.getOfflineParticipants(widget.document).toSet();
     if (!setEquals(parts, offlineParticipants)) {
       offlineParticipants = parts;
       if (!mounted) {
         return;
       }
       setState(() {});
-    }
-  }
-
-  Iterable<String> getParticipantNames() sync* {
-    for (final child in widget.document.root.getChildren().whereType<MeshElement>()) {
-      if (child.tagName == "members") {
-        for (final member in child.getChildren().whereType<MeshElement>()) {
-          yield member.attributes["name"];
-        }
-      }
-    }
-  }
-
-  Iterable<String> getOfflineParticipants() sync* {
-    for (final participantName in getParticipantNames()) {
-      bool found = false;
-      if (widget.room.messaging.remoteParticipants.where((x) => x.getAttribute("name") == participantName).isNotEmpty ||
-          participantName == widget.room.localParticipant?.getAttribute("name")) {
-        found = true;
-      }
-      if (!found) {
-        yield participantName;
-      }
-    }
-  }
-
-  Iterable<Participant> getOnlineParticipants() sync* {
-    for (final participantName in getParticipantNames()) {
-      if (participantName == widget.room.localParticipant?.getAttribute("name")) {
-        yield widget.room.localParticipant!;
-      }
-      for (final part in widget.room.messaging.remoteParticipants.where((x) => x.getAttribute("name") == participantName)) {
-        yield part;
-      }
-    }
-  }
-
-  void send(String value, List<FileUpload> attachments) async {
-    if (value.trim().isNotEmpty || attachments.isNotEmpty) {
-      final messages = widget.document.root.getChildren().whereType<MeshElement>().firstWhere((x) => x.tagName == "messages");
-
-      final message = messages.createChildElement("message", {
-        "id": const Uuid().v4().toString(),
-        "text": value,
-        "created_at": DateTime.now().toUtc().toIso8601String(),
-        "author_name": widget.room.localParticipant!.getAttribute("name"),
-        "author_ref": null,
-      });
-
-      for (final attachment in attachments) {
-        message.createChildElement("file", {"path": attachment.path});
-      }
-
-      for (final participant in getOnlineParticipants()) {
-        widget.room.messaging.sendMessage(
-          to: participant,
-          type: "chat",
-          message: {
-            "path": widget.path,
-            "text": value,
-            "attachments": attachments.map((a) => {"path": a.path}).toList(),
-          },
-        );
-      }
-
-      widget.onMessageSent?.call(value, attachments);
     }
   }
 
@@ -851,11 +863,11 @@ class _ChatThread extends State<ChatThread> {
           Expanded(child: ListView(reverse: true, padding: EdgeInsets.all(16), children: rendredMessages.toList())),
 
           if (!bottomAlign)
-            if (getOnlineParticipants().firstOrNull != null)
+            if (controller.getOnlineParticipants(widget.document).firstOrNull != null)
               Padding(
                 padding: EdgeInsets.symmetric(vertical: 20, horizontal: 50),
                 child: Text(
-                  getOnlineParticipants().first.getAttribute("empty_state_title") ?? "How can I help you?",
+                  controller.getOnlineParticipants(widget.document).first.getAttribute("empty_state_title") ?? "How can I help you?",
                   style: ShadTheme.of(context).textTheme.h3,
                 ),
               ),
@@ -885,10 +897,10 @@ class _ChatThread extends State<ChatThread> {
                 child: ChatThreadInput(
                   room: widget.room,
                   onSend: (value, attachments) {
-                    send(value, attachments);
+                    controller.send(widget.document, widget.path, value, attachments, widget.onMessageSent);
                   },
                   onChanged: (value, attachments) {
-                    for (final part in getOnlineParticipants()) {
+                    for (final part in controller.getOnlineParticipants(widget.document)) {
                       if (part.id != widget.room.localParticipant?.id) {
                         widget.room.messaging.sendMessage(to: part, type: "typing", message: {"path": widget.path});
                       }
