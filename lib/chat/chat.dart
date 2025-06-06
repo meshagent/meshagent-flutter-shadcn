@@ -26,24 +26,41 @@ import 'package:livekit_client/livekit_client.dart' as livekit;
 
 const webPDFFormat = SimpleFileFormat(uniformTypeIdentifiers: ['com.adobe.pdf'], mimeTypes: ['web application/pdf']);
 
+enum UploadStatus { initial, uploading, completed, failed }
+
 abstract class FileUpload extends ChangeNotifier {
   FileUpload({required this.path});
 
-  final String path;
+  UploadStatus _status = UploadStatus.initial;
+
+  UploadStatus get status => _status;
+
+  @protected
+  set status(UploadStatus value) {
+    if (_status != value) {
+      _status = value;
+      notifyListeners();
+    }
+  }
+
+  String path;
 
   int get bytesUploaded;
 
   Future get done;
 
-  String get filename {
-    return path.split("/").last;
-  }
+  String get filename => path.split("/").last;
+
+  void startUpload();
 }
 
 class MeshagentFileUpload extends FileUpload {
   MeshagentFileUpload({required this.room, required super.path, required this.dataStream}) {
     _upload();
   }
+
+  // Requires to manually call startUpload()
+  MeshagentFileUpload.deffered({required this.room, required super.path, required this.dataStream});
 
   final RoomClient room;
 
@@ -57,21 +74,29 @@ class MeshagentFileUpload extends FileUpload {
   int get bytesUploaded => _bytesUploaded;
 
   @override
-  Future get done {
-    return _completer.future;
-  }
+  Future get done => _completer.future;
 
   final _downloadUrlCompleter = Completer<Uri>();
 
-  Future<Uri> get downloadUrl {
-    return _downloadUrlCompleter.future;
+  Future<Uri> get downloadUrl => _downloadUrlCompleter.future;
+
+  @override
+  void startUpload() {
+    _upload();
   }
 
   void _upload() async {
+    if (status != UploadStatus.initial) {
+      throw StateError("upload already started or completed");
+    }
+
     try {
       final handle = await room.storage.open(path, overwrite: true);
 
       try {
+        status = UploadStatus.uploading;
+        notifyListeners();
+
         await for (final len in dataStream.asyncMap((item) async {
           await room.storage.write(handle, Uint8List.fromList(item));
 
@@ -83,11 +108,18 @@ class MeshagentFileUpload extends FileUpload {
       } finally {
         await room.storage.close(handle);
       }
+
       _completer.complete();
+
+      status = UploadStatus.completed;
+      notifyListeners();
 
       final url = await room.storage.downloadUrl(path);
       _downloadUrlCompleter.complete(Uri.parse(url));
     } catch (err) {
+      status = UploadStatus.failed;
+      notifyListeners();
+
       _completer.completeError(err);
       _downloadUrlCompleter.completeError(err);
     }
@@ -122,6 +154,15 @@ class ChatThreadController extends ChangeNotifier {
 
   Future<FileUpload> uploadFile(String path, Stream<Uint8List> dataStream) async {
     final uploader = MeshagentFileUpload(room: room, path: path, dataStream: dataStream);
+
+    _attachmentUploads.add(uploader);
+    notifyListeners();
+
+    return uploader;
+  }
+
+  Future<FileUpload> uploadFileDeferred(String path, Stream<Uint8List> dataStream) async {
+    final uploader = MeshagentFileUpload.deffered(room: room, path: path, dataStream: dataStream);
 
     _attachmentUploads.add(uploader);
     notifyListeners();
@@ -317,6 +358,7 @@ class _ChatThreadLoader extends State<ChatThreadLoader> {
   @override
   Widget build(BuildContext context) {
     return DocumentConnectionScope(
+      key: ValueKey(widget.path),
       path: widget.path,
       room: widget.room,
       builder: (context, document, error) {
@@ -924,7 +966,9 @@ class _ChatThread extends State<ChatThread> {
   void dispose() {
     super.dispose();
 
-    controller.dispose();
+    if (widget.controller == null) {
+      controller.dispose();
+    }
 
     sub.cancel();
     widget.document.removeListener(onDocumentChanged);
