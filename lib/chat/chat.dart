@@ -103,8 +103,6 @@ class MeshagentFileUpload extends FileUpload {
 
           return item.length;
         })) {
-          print("jkkkk uploading tick $len bytes");
-
           _bytesUploaded += len;
           notifyListeners();
         }
