@@ -29,7 +29,7 @@ const webPDFFormat = SimpleFileFormat(uniformTypeIdentifiers: ['com.adobe.pdf'],
 enum UploadStatus { initial, uploading, completed, failed }
 
 abstract class FileUpload extends ChangeNotifier {
-  FileUpload({required this.path});
+  FileUpload({required this.path, this.size = 0});
 
   UploadStatus _status = UploadStatus.initial;
 
@@ -44,6 +44,7 @@ abstract class FileUpload extends ChangeNotifier {
   }
 
   String path;
+  int size;
 
   int get bytesUploaded;
 
@@ -55,12 +56,12 @@ abstract class FileUpload extends ChangeNotifier {
 }
 
 class MeshagentFileUpload extends FileUpload {
-  MeshagentFileUpload({required this.room, required super.path, required this.dataStream}) {
+  MeshagentFileUpload({required this.room, required super.path, required this.dataStream, super.size = 0}) {
     _upload();
   }
 
   // Requires to manually call startUpload()
-  MeshagentFileUpload.deffered({required this.room, required super.path, required this.dataStream});
+  MeshagentFileUpload.deffered({required this.room, required super.path, required this.dataStream, super.size = 0});
 
   final RoomClient room;
 
@@ -102,6 +103,8 @@ class MeshagentFileUpload extends FileUpload {
 
           return item.length;
         })) {
+          print("jkkkk uploading tick $len bytes");
+
           _bytesUploaded += len;
           notifyListeners();
         }
@@ -152,8 +155,9 @@ class ChatThreadController extends ChangeNotifier {
 
   List<FileUpload> get attachmentUploads => List<FileUpload>.unmodifiable(_attachmentUploads);
 
-  Future<FileUpload> uploadFile(String path, Stream<Uint8List> dataStream) async {
-    final uploader = MeshagentFileUpload(room: room, path: path, dataStream: dataStream);
+  Future<FileUpload> uploadFile(String path, Stream<Uint8List> dataStream, int size) async {
+    final uploader = MeshagentFileUpload(room: room, path: path, dataStream: dataStream, size: size);
+    uploader.addListener(notifyListeners);
 
     _attachmentUploads.add(uploader);
     notifyListeners();
@@ -161,8 +165,10 @@ class ChatThreadController extends ChangeNotifier {
     return uploader;
   }
 
-  Future<FileUpload> uploadFileDeferred(String path, Stream<Uint8List> dataStream) async {
-    final uploader = MeshagentFileUpload.deffered(room: room, path: path, dataStream: dataStream);
+  Future<FileUpload> uploadFileDeferred(String path, Stream<Uint8List> dataStream, int size) async {
+    final uploader = MeshagentFileUpload.deffered(room: room, path: path, dataStream: dataStream, size: size);
+
+    uploader.addListener(notifyListeners);
 
     _attachmentUploads.add(uploader);
     notifyListeners();
@@ -175,12 +181,18 @@ class ChatThreadController extends ChangeNotifier {
   }
 
   void removeFileUpload(FileUpload upload) {
+    upload.removeListener(notifyListeners);
+
     _attachmentUploads.remove(upload);
 
     notifyListeners();
   }
 
   void clear() {
+    for (final upload in _attachmentUploads) {
+      upload.removeListener(notifyListeners);
+    }
+
     textFieldController.clear();
     _attachmentUploads.clear();
 
@@ -266,6 +278,7 @@ class ChatThreadController extends ChangeNotifier {
     textFieldController.dispose();
 
     for (final upload in _attachmentUploads) {
+      upload.removeListener(notifyListeners);
       upload.done.ignore();
       upload.dispose();
     }
@@ -415,6 +428,7 @@ class ChatThreadInput extends StatefulWidget {
 
 class _ChatThreadInput extends State<ChatThreadInput> {
   bool showSendButton = false;
+  bool allAttachmentsUploaded = true;
 
   String text = "";
   List<FileUpload> attachments = [];
@@ -442,7 +456,18 @@ class _ChatThreadInput extends State<ChatThreadInput> {
       attachments = newAttachments;
 
       widget.onChanged?.call(text, attachments);
-      setShowSendButton();
+    }
+
+    setShowSendButton();
+
+    bool allCompleted = true;
+    if (attachments.isNotEmpty) {
+      allCompleted = attachments.every((upload) => (upload.status == UploadStatus.completed));
+    }
+    if (allCompleted != allAttachmentsUploaded) {
+      setState(() {
+        allAttachmentsUploaded = allCompleted;
+      });
     }
   }
 
@@ -478,7 +503,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     }
 
     for (final file in picked.files) {
-      widget.controller.uploadFile(file.name, file.readStream!.map(Uint8List.fromList));
+      widget.controller.uploadFile(file.name, file.readStream!.map(Uint8List.fromList), file.size);
     }
   }
 
@@ -509,52 +534,12 @@ class _ChatThreadInput extends State<ChatThreadInput> {
                         return widget.attachmentBuilder!(context, attachment);
                       }
 
-                      return FileDefaultPreviewCard(
-                        icon: LucideIcons.file,
-                        text: attachment.filename,
-                        onClose: () {
+                      return FileDefaultAttachmentPreview(
+                        attachment: attachment,
+                        onRemove: () {
                           widget.controller.removeFileUpload(attachment);
                         },
                       );
-
-                      //                  return Container(
-                      //                    key: ValueKey(attachment.path),
-                      //                    width: 200.0,
-                      //                    height: 250.0,
-                      //                    decoration: BoxDecoration(
-                      //                      border: Border.all(color: ShadTheme.of(context).colorScheme.border),
-                      //                      borderRadius: BorderRadius.circular(8),
-                      //                    ),
-                      //                    child: Column(
-                      //                      crossAxisAlignment: CrossAxisAlignment.end,
-                      //                      children: [
-                      //                        Container(
-                      //                          padding: EdgeInsets.only(left: 15),
-                      //                          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: ShadTheme.of(context).colorScheme.border))),
-                      //                          child: Row(
-                      //                            mainAxisAlignment: MainAxisAlignment.center,
-                      //                            children: [
-                      //                              Expanded(
-                      //                                child: Text(
-                      //                                  attachment.filename,
-                      //                                  overflow: TextOverflow.ellipsis,
-                      //                                  style: ShadTheme.of(context).textTheme.small,
-                      //                                ),
-                      //                              ),
-                      //
-                      //                              ShadIconButton.ghost(
-                      //                                onPressed: () {
-                      //                                  attachmentController.remove(attachment);
-                      //                                },
-                      //                                icon: Icon(LucideIcons.x),
-                      //                              ),
-                      //                            ],
-                      //                          ),
-                      //                        ),
-                      //                        Expanded(child: SizedBox(width: 200, child: _AttachmentPreview(room: widget.room, path: attachment.path))),
-                      //                      ],
-                      //                    ),
-                      //                  );
                     },
                   ),
                 ),
@@ -580,7 +565,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
             ),
           ),
           trailing:
-              showSendButton
+              showSendButton && allAttachmentsUploaded
                   ? ShadTooltip(
                     waitDuration: Duration(seconds: 1),
                     builder: (context) => Text("Send"),
@@ -866,7 +851,7 @@ class _ChatThread extends State<ChatThread> {
                   document: ChatDocumentProvider.of(context).document,
                   api: TimuApiProvider.of(context).api,
                   layer: layer),
-            },*/
+},*/
                     data: message.getAttribute("text"),
                   ),
                 ),
@@ -896,7 +881,7 @@ class _ChatThread extends State<ChatThread> {
 
     return FileDropArea(
       onFileDrop: (name, dataStream) async {
-        widget.controller?.uploadFile(name, dataStream);
+        widget.controller?.uploadFile(name, dataStream, 0);
       },
 
       child: Column(
