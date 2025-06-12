@@ -878,8 +878,8 @@ class _ChatThread extends State<ChatThread> {
     final rendredMessages = messages.map(mapMeshElement()).map<Widget>((item) => buildMessage(context, item.$1, item.$2)).toList().reversed;
 
     return FileDropArea(
-      onFileDrop: (name, dataStream) async {
-        widget.controller?.uploadFile(name, dataStream, 0);
+      onFileDrop: (name, dataStream, size) async {
+        widget.controller?.uploadFile(name, dataStream, size ?? 0);
       },
 
       child: Column(
@@ -1018,7 +1018,7 @@ class JoinMeetingButton extends StatelessWidget {
   }
 }
 
-typedef FileDropCallback = Future<void> Function(String name, Stream<Uint8List> dataStream);
+typedef FileDropCallback = Future<void> Function(String name, Stream<Uint8List> dataStream, int? fileSize);
 
 class FileDropArea extends StatefulWidget {
   final FileDropCallback onFileDrop;
@@ -1046,10 +1046,10 @@ class FileDropAreaState extends State<FileDropArea> {
     Formats.webp,
   ];
 
-  Future<Stream<Uint8List>> _getStream(DataReader reader, SimpleFileFormat? format) {
-    final completer = Completer<Stream<Uint8List>>();
+  Future<DataReaderFile> _getFile(DataReader reader, SimpleFileFormat? format) {
+    final completer = Completer<DataReaderFile>();
 
-    reader.getFile(format, (file) => completer.complete(file.getStream()), onError: (e) => completer.completeError(e));
+    reader.getFile(format, completer.complete, onError: completer.completeError);
 
     return completer.future;
   }
@@ -1058,25 +1058,23 @@ class FileDropAreaState extends State<FileDropArea> {
   void initState() {
     super.initState();
 
-    final events = ClipboardEvents.instance;
-    events?.registerPasteEventListener(onPasteEvent);
+    ClipboardEvents.instance?.registerPasteEventListener(onPasteEvent);
   }
 
   @override
   void dispose() {
     super.dispose();
 
-    final events = ClipboardEvents.instance;
-    events?.unregisterPasteEventListener(onPasteEvent);
+    ClipboardEvents.instance?.unregisterPasteEventListener(onPasteEvent);
   }
 
   void onPasteEvent(ClipboardReadEvent event) async {
     final reader = await event.getClipboardReader();
     final name = (await reader.getSuggestedName())!;
-    final fmt = _preferredFormats.firstWhereOrNull((f) => reader.canProvide(f));
-    final stream = await _getStream(reader, fmt);
+    final fmt = _preferredFormats.firstWhereOrNull(reader.canProvide);
+    final file = await _getFile(reader, fmt);
 
-    await widget.onFileDrop(name, stream);
+    await widget.onFileDrop(name, file.getStream(), file.fileSize);
   }
 
   @override
@@ -1111,10 +1109,10 @@ class FileDropAreaState extends State<FileDropArea> {
 
       try {
         final name = (await reader.getSuggestedName())!;
-        final fmt = _preferredFormats.firstWhereOrNull((f) => reader.canProvide(f));
-        final stream = await _getStream(reader, fmt);
+        final fmt = _preferredFormats.firstWhereOrNull(reader.canProvide);
+        final file = await _getFile(reader, fmt);
 
-        await widget.onFileDrop(name, stream);
+        await widget.onFileDrop(name, file.getStream(), file.fileSize);
       } catch (err, st) {
         debugPrint('Error dropping file: $err\n$st');
       }
