@@ -1,11 +1,12 @@
-import "package:meshagent/room_server_client.dart";
-import 'package:flutter/widgets.dart';
+import "package:flutter/material.dart";
 import "package:shadcn_ui/shadcn_ui.dart";
 import "package:url_launcher/url_launcher.dart";
+import "package:meshagent/room_server_client.dart";
 
 import "image.dart";
 import "pdf.dart";
 import "video.dart";
+import "../chat/chat.dart";
 
 final imageExtensions = <String>{"png", "jpeg", "jfif", "jpg", "heic", "webp", "tif", "tiff", "gif", "svg"};
 final pdfExtensions = <String>{"pdf"};
@@ -73,6 +74,106 @@ class _FilePreviewState extends State<FilePreview> {
   }
 }
 
+class FileDefaultAttachmentPreview extends StatefulWidget {
+  const FileDefaultAttachmentPreview({super.key, required this.attachment, required this.onRemove});
+
+  final FileUpload attachment;
+  final VoidCallback onRemove;
+
+  @override
+  State<FileDefaultAttachmentPreview> createState() => _FileDefaultAttachmentPreviewState();
+}
+
+class _FileDefaultAttachmentPreviewState extends State<FileDefaultAttachmentPreview> {
+  static const double _itemWidth = 200.0;
+
+  double progress = 0.0;
+  UploadStatus status = UploadStatus.initial;
+
+  void onAttachmentUpdate() {
+    if (mounted) {
+      setState(() {
+        status = widget.attachment.status;
+
+        if (widget.attachment.size > 0) {
+          progress = (widget.attachment.bytesUploaded / widget.attachment.size) * _itemWidth;
+        } else {
+          progress = 0.0;
+        }
+      });
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+
+    status = widget.attachment.status;
+
+    widget.attachment.addListener(onAttachmentUpdate);
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+
+    widget.attachment.removeListener(onAttachmentUpdate);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ShadTooltip(
+      waitDuration: const Duration(seconds: 1),
+      builder: (context) {
+        return Text(widget.attachment.filename, style: ShadTheme.of(context).textTheme.small);
+      },
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Stack(
+          children: [
+            AnimatedPositioned(
+              duration: const Duration(milliseconds: 500),
+              left: 0,
+              top: 0,
+              bottom: 0,
+              width: progress,
+              curve: Curves.easeInOut,
+              child: ColoredBox(color: ShadTheme.of(context).colorScheme.secondary),
+            ),
+
+            ShadCard(
+              width: _itemWidth,
+              backgroundColor: Colors.transparent,
+              radius: BorderRadius.circular(16),
+              padding: EdgeInsets.only(left: 8, top: 8, bottom: 8, right: 8),
+              rowCrossAxisAlignment: CrossAxisAlignment.center,
+              trailing: ShadGestureDetector(cursor: SystemMouseCursors.click, onTap: widget.onRemove, child: Icon(LucideIcons.x, size: 20)),
+
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 24,
+                    height: 24,
+                    child:
+                        (status == UploadStatus.initial || status == UploadStatus.uploading)
+                            ? CircularProgressIndicator(color: ShadTheme.of(context).colorScheme.primary, strokeWidth: 2.0)
+                            : Center(child: Icon(LucideIcons.file, size: 20)),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(widget.attachment.filename, style: ShadTheme.of(context).textTheme.small, overflow: TextOverflow.ellipsis),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class FileDefaultPreviewCard extends StatelessWidget {
   const FileDefaultPreviewCard({super.key, required this.icon, required this.text, this.onClose, this.onDownload});
 
@@ -84,6 +185,7 @@ class FileDefaultPreviewCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ShadCard(
+      backgroundColor: Colors.transparent,
       radius: BorderRadius.circular(16),
       padding: EdgeInsets.only(left: 8, top: 8, bottom: 8, right: 8),
       rowCrossAxisAlignment: CrossAxisAlignment.center,
