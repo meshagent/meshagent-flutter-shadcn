@@ -266,6 +266,8 @@ class ChatThreadController extends ChangeNotifier {
       }
 
       onMessageSent?.call(value, attachments);
+
+      clear();
     }
   }
 
@@ -571,7 +573,6 @@ class _ChatThreadInput extends State<ChatThreadInput> {
                       cursor: SystemMouseCursors.click,
                       onTap: () {
                         widget.onSend(widget.controller.text, widget.controller.attachmentUploads);
-                        widget.controller.clear();
                       },
                       child: Container(
                         width: 22,
