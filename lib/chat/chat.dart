@@ -451,12 +451,12 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     final newText = widget.controller.text;
     final newAttachments = widget.controller.attachmentUploads;
 
-    if (newText != text || newAttachments != attachments) {
+    setState(() {
       text = newText;
       attachments = newAttachments;
+    });
 
-      widget.onChanged?.call(text, attachments);
-    }
+    widget.onChanged?.call(text, attachments);
 
     setShowSendButton();
 
