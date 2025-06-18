@@ -453,9 +453,9 @@ class _ChatThreadInput extends State<ChatThreadInput> {
       text = newText;
       attachments = newAttachments;
     });
-    
+
     widget.onChanged?.call(text, attachments);
- 
+
     setShowSendButton();
 
     bool allCompleted = true;
