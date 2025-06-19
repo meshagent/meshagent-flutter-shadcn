@@ -132,9 +132,9 @@ class AskUser extends Tool {
   }
 
   @override
-  Future<Response> execute(Map<String, dynamic> arguments) async {
+  Future<Response> execute(ToolContext context, Map<String, dynamic> arguments) async {
     final result = await showShadDialog<Map<String, dynamic>>(
-      context: context,
+      context: this.context,
       builder: (context) {
         return ControlledForm(
           builder:
@@ -200,8 +200,8 @@ class ShowToast extends Tool {
   final BuildContext context;
 
   @override
-  Future<Response> execute(Map<String, dynamic> arguments) async {
-    ShadToaster.of(context).show(ShadToast(title: Text(arguments["title"]), description: Text(arguments["description"])));
+  Future<Response> execute(ToolContext context, Map<String, dynamic> arguments) async {
+    ShadToaster.of(this.context).show(ShadToast(title: Text(arguments["title"]), description: Text(arguments["description"])));
     return EmptyResponse();
   }
 }
@@ -228,7 +228,7 @@ class DisplayDocument extends Tool {
   final void Function(String path) opener;
 
   @override
-  Future<Response> execute(Map<String, dynamic> arguments) async {
+  Future<Response> execute(ToolContext context, Map<String, dynamic> arguments) async {
     opener(arguments["path"]);
     return EmptyResponse();
   }
@@ -258,9 +258,9 @@ class AskUserForFile extends Tool {
   final BuildContext context;
 
   @override
-  Future<FileResponse> execute(Map<String, dynamic> arguments) async {
+  Future<FileResponse> execute(ToolContext context, Map<String, dynamic> arguments) async {
     final result = await showShadDialog<FilePickerResult>(
-      context: context,
+      context: this.context,
       builder: (context) {
         return ControlledForm(
           builder:

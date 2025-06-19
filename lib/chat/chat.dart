@@ -221,41 +221,40 @@ class ChatThreadController extends ChangeNotifier {
     }
   }
 
-  void send(
-    MeshDocument document,
-    String path,
-    String value,
-    List<FileUpload> attachments,
-    Function(String message, List<FileUpload> attachments)? onMessageSent,
-  ) async {
-    if (value.trim().isNotEmpty || attachments.isNotEmpty) {
-      final messages = document.root.getChildren().whereType<MeshElement>().firstWhere((x) => x.tagName == "messages");
+  void send({
+    required MeshDocument thread,
+    required String path,
+    required ChatMessage message,
+    void Function(ChatMessage)? onMessageSent,
+  }) async {
+    if (message.text.trim().isNotEmpty || message.attachments.isNotEmpty) {
+      final messages = thread.root.getChildren().whereType<MeshElement>().firstWhere((x) => x.tagName == "messages");
 
-      final message = messages.createChildElement("message", {
+      final m = messages.createChildElement("message", {
         "id": const Uuid().v4().toString(),
-        "text": value,
+        "text": message.text,
         "created_at": DateTime.now().toUtc().toIso8601String(),
         "author_name": room.localParticipant!.getAttribute("name"),
         "author_ref": null,
       });
 
-      for (final attachment in attachments) {
-        message.createChildElement("file", {"path": attachment.path});
+      for (final path in message.attachments) {
+        m.createChildElement("file", {"path": path});
       }
 
-      for (final participant in getOnlineParticipants(document)) {
+      for (final participant in getOnlineParticipants(thread)) {
         room.messaging.sendMessage(
           to: participant,
           type: "chat",
           message: {
             "path": path,
-            "text": value,
-            "attachments": attachments.map((a) => {"path": a.path}).toList(),
+            "text": message.text,
+            "attachments": message.attachments.map((a) => {"path": a}).toList(),
           },
         );
       }
 
-      onMessageSent?.call(value, attachments);
+      onMessageSent?.call(message);
     }
   }
 
@@ -283,9 +282,7 @@ class ChatThreadLoader extends StatefulWidget {
     this.participantNames,
     this.participantNameBuilder,
 
-    this.initialMessageID,
-    this.initialMessageText,
-    this.initialMessageAttachments,
+    this.initialMessage,
     this.controller,
 
     this.onMessageSent,
@@ -306,12 +303,11 @@ class ChatThreadLoader extends StatefulWidget {
   final Widget Function(String, DateTime)? participantNameBuilder;
   final Widget Function(BuildContext, List<String>)? waitingForParticipantsBuilder;
 
-  final String? initialMessageID;
-  final String? initialMessageText;
-  final List<FileUpload>? initialMessageAttachments;
+  final ChatMessage? initialMessage;
+
   final ChatThreadController? controller;
 
-  final void Function(String message, List<FileUpload> attachments)? onMessageSent;
+  final void Function(ChatMessage)? onMessageSent;
   final Widget Function(BuildContext context, FileUpload upload)? attachmentBuilder;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
 
@@ -379,9 +375,7 @@ class _ChatThreadLoader extends State<ChatThreadLoader> {
           participantNameBuilder: widget.participantNameBuilder,
           waitingForParticipantsBuilder: widget.waitingForParticipantsBuilder,
 
-          initialMessageID: widget.initialMessageID,
-          initialMessageText: widget.initialMessageText,
-          initialMessageAttachments: widget.initialMessageAttachments,
+          initialMessage: widget.initialMessage,
 
           onMessageSent: widget.onMessageSent,
           controller: widget.controller,
@@ -389,6 +383,42 @@ class _ChatThreadLoader extends State<ChatThreadLoader> {
           fileInThreadBuilder: widget.fileInThreadBuilder,
         );
       },
+    );
+  }
+}
+
+class ChatThreadAttachButton extends StatelessWidget {
+  const ChatThreadAttachButton({required this.controller, super.key});
+
+  final ChatThreadController controller;
+
+  Future<void> _onSelectAttachment() async {
+    final picked = await FilePicker.platform.pickFiles(dialogTitle: "Select files", allowMultiple: true, withReadStream: true);
+
+    if (picked == null) {
+      return;
+    }
+
+    for (final file in picked.files) {
+      controller.uploadFile(file.name, file.readStream!.map(Uint8List.fromList));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ShadTooltip(
+      waitDuration: Duration(seconds: 1),
+      builder: (context) => Text("Attach"),
+      child: ShadGestureDetector(
+        cursor: SystemMouseCursors.click,
+        onTap: _onSelectAttachment,
+        child: Container(
+          width: 22,
+          height: 22,
+          decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
+          child: Icon(LucideIcons.paperclip, color: ShadTheme.of(context).colorScheme.background),
+        ),
+      ),
     );
   }
 }
@@ -401,6 +431,7 @@ class ChatThreadInput extends StatefulWidget {
     required this.controller,
     this.onChanged,
     this.attachmentBuilder,
+    this.leading,
   });
 
   final RoomClient room;
@@ -408,7 +439,7 @@ class ChatThreadInput extends StatefulWidget {
   final void Function(String, List<FileUpload>)? onChanged;
   final ChatThreadController controller;
   final Widget Function(BuildContext context, FileUpload upload)? attachmentBuilder;
-
+  final Widget? leading;
   @override
   State createState() => _ChatThreadInput();
 }
@@ -468,18 +499,6 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     super.dispose();
 
     focusNode.dispose();
-  }
-
-  Future<void> _onSelectAttachment() async {
-    final picked = await FilePicker.platform.pickFiles(dialogTitle: "Select files", allowMultiple: true, withReadStream: true);
-
-    if (picked == null) {
-      return;
-    }
-
-    for (final file in picked.files) {
-      widget.controller.uploadFile(file.name, file.readStream!.map(Uint8List.fromList));
-    }
   }
 
   @override
@@ -565,20 +584,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
 
         ShadInput(
           inputPadding: EdgeInsets.all(2),
-          leading: ShadTooltip(
-            waitDuration: Duration(seconds: 1),
-            builder: (context) => Text("Attach"),
-            child: ShadGestureDetector(
-              cursor: SystemMouseCursors.click,
-              onTap: _onSelectAttachment,
-              child: Container(
-                width: 22,
-                height: 22,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
-                child: Icon(LucideIcons.paperclip, color: ShadTheme.of(context).colorScheme.background),
-              ),
-            ),
-          ),
+          leading: widget.leading,
           trailing:
               showSendButton
                   ? ShadTooltip(
@@ -626,9 +632,7 @@ class ChatThread extends StatefulWidget {
     this.startChatCentered = false,
     this.participantNameBuilder,
 
-    this.initialMessageID,
-    this.initialMessageText,
-    this.initialMessageAttachments,
+    this.initialMessage,
 
     this.onMessageSent,
     this.controller,
@@ -645,16 +649,22 @@ class ChatThread extends StatefulWidget {
   final bool startChatCentered;
   final Widget Function(String, DateTime)? participantNameBuilder;
 
-  final String? initialMessageID;
-  final String? initialMessageText;
-  final List<FileUpload>? initialMessageAttachments;
-  final void Function(String message, List<FileUpload> attachments)? onMessageSent;
+  final ChatMessage? initialMessage;
+  final void Function(ChatMessage message)? onMessageSent;
   final ChatThreadController? controller;
   final Widget Function(BuildContext context, FileUpload upload)? attachmentBuilder;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
 
   @override
   State createState() => _ChatThread();
+}
+
+class ChatMessage {
+  const ChatMessage({required this.id, required this.text, this.attachments = const []});
+
+  final String id;
+  final String text;
+  final List<String> attachments;
 }
 
 class _ChatThread extends State<ChatThread> {
@@ -678,19 +688,13 @@ class _ChatThread extends State<ChatThread> {
 
     controller = widget.controller ?? ChatThreadController(room: widget.room);
 
-    if (widget.initialMessageID != null) {
+    if (widget.initialMessage != null) {
       final threadMessages = widget.document.root.getChildren().whereType<MeshElement>().where((x) => x.tagName == "messages").firstOrNull;
       final initialMessage =
-          threadMessages?.getChildren().whereType<MeshElement>().where((x) => x.attributes["id"] == widget.initialMessageID).firstOrNull;
+          threadMessages?.getChildren().whereType<MeshElement>().where((x) => x.attributes["id"] == widget.initialMessage?.id).firstOrNull;
 
-      if (initialMessage == null) {
-        controller.send(
-          widget.document,
-          widget.path,
-          widget.initialMessageText ?? "",
-          widget.initialMessageAttachments ?? [],
-          widget.onMessageSent,
-        );
+      if (initialMessage != null) {
+        controller.send(thread: widget.document, path: widget.path, message: widget.initialMessage!, onMessageSent: widget.onMessageSent);
       }
     }
 
@@ -895,6 +899,24 @@ class _ChatThread extends State<ChatThread> {
     final rendredMessages = messages.map(mapMeshElement()).map<Widget>((item) => buildMessage(context, item.$1, item.$2)).toList().reversed;
 
     return FileDropArea(
+      onTextPaste: (text) async {
+        // Assume you have a TextEditingController named _controller
+        final currentText = text;
+        final selection = controller.textFieldController.selection;
+
+        // Get the text before and after the selection
+        final textBefore = currentText.substring(0, selection.start);
+        final textAfter = currentText.substring(selection.end);
+
+        // Construct the new text
+        final newText = textBefore + text + textAfter;
+
+        // Calculate the new selection (cursor at the end of the inserted text)
+        final newSelection = TextSelection.collapsed(offset: textBefore.length + text.length);
+
+        // Update the controller's value
+        controller.textFieldController.value = TextEditingValue(text: newText, selection: newSelection);
+      },
       onFileDrop: (name, dataStream) async {
         widget.controller?.uploadFile(name, dataStream);
       },
@@ -940,9 +962,15 @@ class _ChatThread extends State<ChatThread> {
               child: ConstrainedBox(
                 constraints: BoxConstraints(maxWidth: 912),
                 child: ChatThreadInput(
+                  leading: ChatThreadAttachButton(controller: controller),
                   room: widget.room,
                   onSend: (value, attachments) {
-                    controller.send(widget.document, widget.path, value, attachments, widget.onMessageSent);
+                    controller.send(
+                      thread: widget.document,
+                      path: widget.path,
+                      message: ChatMessage(id: const Uuid().v4(), text: value, attachments: attachments.map((x) => x.path).toList()),
+                      onMessageSent: widget.onMessageSent,
+                    );
                   },
                   onChanged: (value, attachments) {
                     for (final part in controller.getOnlineParticipants(widget.document)) {
@@ -1036,12 +1064,15 @@ class JoinMeetingButton extends StatelessWidget {
 }
 
 typedef FileDropCallback = Future<void> Function(String name, Stream<Uint8List> dataStream);
+typedef TextPasteCallback = Future<void> Function(String text);
 
 class FileDropArea extends StatefulWidget {
   final FileDropCallback onFileDrop;
+  final TextPasteCallback? onTextPaste;
+
   final Widget child;
 
-  const FileDropArea({super.key, required this.onFileDrop, required this.child});
+  const FileDropArea({super.key, required this.onFileDrop, this.onTextPaste, required this.child});
 
   @override
   FileDropAreaState createState() => FileDropAreaState();
@@ -1089,11 +1120,22 @@ class FileDropAreaState extends State<FileDropArea> {
 
   void onPasteEvent(ClipboardReadEvent event) async {
     final reader = await event.getClipboardReader();
-    final name = (await reader.getSuggestedName())!;
-    final fmt = _preferredFormats.firstWhereOrNull((f) => reader.canProvide(f));
-    final stream = await _getStream(reader, fmt);
 
-    await widget.onFileDrop(name, stream);
+    final name = (await reader.getSuggestedName());
+    if (name != null) {
+      final fmt = _preferredFormats.firstWhereOrNull((f) => reader.canProvide(f));
+      final stream = await _getStream(reader, fmt);
+
+      await widget.onFileDrop(name, stream);
+    } else {
+      if (reader.canProvide(Formats.plainText)) {
+        final text = await reader.readValue(Formats.plainText);
+        if (widget.onTextPaste != null) {
+          widget.onTextPaste!(text!);
+        }
+        // Do something with the plain text
+      }
+    }
   }
 
   @override
