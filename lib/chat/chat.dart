@@ -1013,7 +1013,7 @@ class ChatThreadPreview extends StatelessWidget {
             );
           }
 
-          return ColoredBox(color: ShadTheme.of(context).colorScheme.background);
+          return SizedBox(width: 300, height: 300, child: ColoredBox(color: ShadTheme.of(context).colorScheme.background));
         },
       );
     }
