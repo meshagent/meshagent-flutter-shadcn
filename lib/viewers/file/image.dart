@@ -31,11 +31,7 @@ class _ImageViewerState extends State<ImageViewer> {
       child: Center(
         child: Container(
           padding: EdgeInsets.all(20),
-          child: FilePreview(
-            room: widget.room,
-            path: widget.path,
-            fit: BoxFit.contain,
-          ),
+          child: FilePreview(room: widget.room, path: widget.path, fit: BoxFit.contain),
         ),
       ),
     );
