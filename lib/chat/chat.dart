@@ -568,7 +568,8 @@ class _ChatThreadInput extends State<ChatThreadInput> {
         ),
 
         ShadInput(
-          constraints: BoxConstraints(maxHeight: 400),
+          crossAxisAlignment: CrossAxisAlignment.end,
+          constraints: BoxConstraints(maxHeight: 200),
           inputPadding: EdgeInsets.all(2),
           leading: widget.leading,
           trailing:
@@ -595,7 +596,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
             secondaryFocusedBorder: ShadBorder.none,
             secondaryBorder: ShadBorder.none,
             color: ShadTheme.of(context).ghostButtonTheme.hoverBackgroundColor,
-            border: ShadBorder.all(radius: BorderRadius.circular(30)),
+            border: ShadBorder.all(radius: BorderRadius.circular(15)),
           ),
           maxLines: null,
           placeholder: Text("Message"),
