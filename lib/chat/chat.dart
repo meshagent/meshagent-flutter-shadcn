@@ -568,6 +568,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
         ),
 
         ShadInput(
+          constraints: BoxConstraints(maxHeight: 400),
           inputPadding: EdgeInsets.all(2),
           leading: widget.leading,
           trailing:
