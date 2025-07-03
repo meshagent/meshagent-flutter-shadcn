@@ -643,6 +643,68 @@ class ChatThread extends StatefulWidget {
   State createState() => _ChatThread();
 }
 
+class ChatBubble extends StatelessWidget {
+  const ChatBubble({super.key, required this.mine, required this.text});
+
+  final bool mine;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final mdColor =
+        ShadTheme.of(context).textTheme.p.color ?? DefaultTextStyle.of(context).style.color ?? ShadTheme.of(context).colorScheme.foreground;
+    final baseFontSize = MediaQuery.of(context).textScaler.scale((DefaultTextStyle.of(context).style.fontSize ?? 14));
+
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      margin: EdgeInsets.only(top: 8, right: mine ? 0 : 50, left: mine ? 50 : 0),
+      decoration: BoxDecoration(color: ShadTheme.of(context).ghostButtonTheme.hoverBackgroundColor, borderRadius: BorderRadius.circular(8)),
+      child: MediaQuery(
+        data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
+        child: MarkdownWidget(
+          padding: const EdgeInsets.all(0),
+          config: MarkdownConfig(
+            configs: [
+              HrConfig(color: mdColor),
+              H1Config(style: TextStyle(fontSize: baseFontSize * 2, color: mdColor, fontWeight: FontWeight.bold)),
+              H2Config(style: TextStyle(fontSize: baseFontSize * 1.8, color: mdColor, inherit: false)),
+              H3Config(style: TextStyle(fontSize: baseFontSize * 1.6, color: mdColor, inherit: false)),
+              H4Config(style: TextStyle(fontSize: baseFontSize * 1.4, color: mdColor, inherit: false)),
+              H5Config(style: TextStyle(fontSize: baseFontSize * 1.2, color: mdColor, inherit: false)),
+              H6Config(style: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false)),
+              PreConfig(
+                decoration: BoxDecoration(color: ShadTheme.of(context).cardTheme.backgroundColor),
+                textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
+              ),
+              PConfig(textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false)),
+              CodeConfig(style: GoogleFonts.sourceCodePro(fontSize: baseFontSize * 1.0, color: mdColor)),
+              BlockquoteConfig(textColor: mdColor),
+              LinkConfig(
+                style: TextStyle(color: ShadTheme.of(context).linkButtonTheme.foregroundColor, decoration: TextDecoration.underline),
+              ),
+              ListConfig(
+                marker: (isOrdered, depth, index) {
+                  return Padding(padding: EdgeInsets.only(right: 5), child: Text("${index + 1}.", textAlign: TextAlign.right));
+                },
+              ),
+            ],
+          ),
+          shrinkWrap: true,
+          selectable: true,
+
+          /*builders: {
+      "code": CodeElementBuilder(
+          document: ChatDocumentProvider.of(context).document,
+          api: TimuApiProvider.of(context).api,
+          layer: layer),
+},*/
+          data: text,
+        ),
+      ),
+    );
+  }
+}
+
 class ChatMessage {
   const ChatMessage({required this.id, required this.text, this.attachments = const []});
 
@@ -789,10 +851,6 @@ class _ChatThread extends State<ChatThread> {
     final isSameAuthor = message.attributes["author_name"] == previous?.attributes["author_name"];
     final mine = message.attributes["author_name"] == widget.room.localParticipant!.getAttribute("name");
 
-    final mdColor =
-        ShadTheme.of(context).textTheme.p.color ?? DefaultTextStyle.of(context).style.color ?? ShadTheme.of(context).colorScheme.foreground;
-    final baseFontSize = MediaQuery.of(context).textScaler.scale((DefaultTextStyle.of(context).style.fontSize ?? 14));
-
     final text = message.getAttribute("text");
 
     return Center(
@@ -805,60 +863,7 @@ class _ChatThread extends State<ChatThread> {
             if (!isSameAuthor && widget.participantNameBuilder != null)
               widget.participantNameBuilder!(message.attributes["author_name"], DateTime.parse(message.attributes["created_at"])),
 
-            if (text.isNotEmpty)
-              Container(
-                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                margin: EdgeInsets.only(top: 8, right: mine ? 0 : 50, left: mine ? 50 : 0),
-                decoration: BoxDecoration(
-                  color: ShadTheme.of(context).ghostButtonTheme.hoverBackgroundColor,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: MediaQuery(
-                  data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
-                  child: MarkdownWidget(
-                    padding: const EdgeInsets.all(0),
-                    config: MarkdownConfig(
-                      configs: [
-                        HrConfig(color: mdColor),
-                        H1Config(style: TextStyle(fontSize: baseFontSize * 2, color: mdColor, fontWeight: FontWeight.bold)),
-                        H2Config(style: TextStyle(fontSize: baseFontSize * 1.8, color: mdColor, inherit: false)),
-                        H3Config(style: TextStyle(fontSize: baseFontSize * 1.6, color: mdColor, inherit: false)),
-                        H4Config(style: TextStyle(fontSize: baseFontSize * 1.4, color: mdColor, inherit: false)),
-                        H5Config(style: TextStyle(fontSize: baseFontSize * 1.2, color: mdColor, inherit: false)),
-                        H6Config(style: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false)),
-                        PreConfig(
-                          decoration: BoxDecoration(color: ShadTheme.of(context).cardTheme.backgroundColor),
-                          textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
-                        ),
-                        PConfig(textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false)),
-                        CodeConfig(style: GoogleFonts.sourceCodePro(fontSize: baseFontSize * 1.0, color: mdColor)),
-                        BlockquoteConfig(textColor: mdColor),
-                        LinkConfig(
-                          style: TextStyle(
-                            color: ShadTheme.of(context).linkButtonTheme.foregroundColor,
-                            decoration: TextDecoration.underline,
-                          ),
-                        ),
-                        ListConfig(
-                          marker: (isOrdered, depth, index) {
-                            return Padding(padding: EdgeInsets.only(right: 5), child: Text("${index + 1}.", textAlign: TextAlign.right));
-                          },
-                        ),
-                      ],
-                    ),
-                    shrinkWrap: true,
-                    selectable: true,
-
-                    /*builders: {
-              "code": CodeElementBuilder(
-                  document: ChatDocumentProvider.of(context).document,
-                  api: TimuApiProvider.of(context).api,
-                  layer: layer),
-},*/
-                    data: message.getAttribute("text"),
-                  ),
-                ),
-              ),
+            if (text.isNotEmpty) ChatBubble(mine: mine, text: message.getAttribute("text")),
             for (final attachment in message.getChildren())
               Container(
                 margin: EdgeInsets.only(top: 8),
@@ -885,7 +890,7 @@ class _ChatThread extends State<ChatThread> {
     return FileDropArea(
       onTextPaste: (text) async {
         // Assume you have a TextEditingController named _controller
-        final currentText = text;
+        final currentText = controller.textFieldController.text;
         final selection = controller.textFieldController.selection;
 
         // Get the text before and after the selection
