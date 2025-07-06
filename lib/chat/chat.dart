@@ -517,6 +517,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     super.initState();
 
     widget.controller.addListener(_onChanged);
+    ClipboardEvents.instance?.registerPasteEventListener(onPasteEvent);
   }
 
   @override
@@ -524,6 +525,60 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     super.dispose();
 
     focusNode.dispose();
+    ClipboardEvents.instance?.unregisterPasteEventListener(onPasteEvent);
+  }
+
+  Future<DataReaderFile> _getFile(DataReader reader, SimpleFileFormat? format) {
+    final completer = Completer<DataReaderFile>();
+
+    reader.getFile(format, completer.complete, onError: completer.completeError);
+
+    return completer.future;
+  }
+
+  Future<void> onFileDrop(name, dataStream, size) async {
+    widget.controller.uploadFile(name, dataStream, size ?? 0);
+  }
+
+  void onPasteEvent(ClipboardReadEvent event) async {
+    if (focusNode.hasFocus) {
+      final reader = await event.getClipboardReader();
+
+      final name = (await reader.getSuggestedName());
+      if (name != null) {
+        final fmt = _preferredFormats.firstWhereOrNull((f) => reader.canProvide(f));
+        final file = await _getFile(reader, fmt);
+
+        await onFileDrop(name, file.getStream(), file.fileSize);
+      } else {
+        if (reader.canProvide(Formats.plainText)) {
+          final text = await reader.readValue(Formats.plainText);
+          if (text != null) {
+            onTextPaste(text);
+          }
+        }
+      }
+    }
+  }
+
+  void onTextPaste(String text) async {
+    final controller = widget.controller;
+
+    final currentText = controller.textFieldController.text;
+    final selection = controller.textFieldController.selection;
+
+    // Get the text before and after the selection
+    final textBefore = currentText.substring(0, selection.start);
+    final textAfter = currentText.substring(selection.end);
+
+    // Construct the new text
+    final newText = textBefore + text + textAfter;
+
+    // Calculate the new selection (cursor at the end of the inserted text)
+    final newSelection = TextSelection.collapsed(offset: textBefore.length + text.length);
+
+    // Update the controller's value
+    controller.textFieldController.value = TextEditingValue(text: newText, selection: newSelection);
   }
 
   @override
@@ -820,6 +875,7 @@ class _ChatThread extends State<ChatThread> {
 
   Widget buildFileInThread(BuildContext context, String path) {
     return ShadGestureDetector(
+      cursor: SystemMouseCursors.click,
       onTap: () {
         showShadDialog(
           context: context,
@@ -890,25 +946,6 @@ class _ChatThread extends State<ChatThread> {
     final rendredMessages = messages.map(mapMeshElement()).map<Widget>((item) => buildMessage(context, item.$1, item.$2)).toList().reversed;
 
     return FileDropArea(
-      onTextPaste: (text) async {
-        // Assume you have a TextEditingController named _controller
-        final currentText = controller.textFieldController.text;
-        final selection = controller.textFieldController.selection;
-
-        // Get the text before and after the selection
-        final textBefore = currentText.substring(0, selection.start);
-        final textAfter = currentText.substring(selection.end);
-
-        // Construct the new text
-        final newText = textBefore + text + textAfter;
-
-        // Calculate the new selection (cursor at the end of the inserted text)
-        final newSelection = TextSelection.collapsed(offset: textBefore.length + text.length);
-
-        // Update the controller's value
-        controller.textFieldController.value = TextEditingValue(text: newText, selection: newSelection);
-      },
-
       onFileDrop: (name, dataStream, size) async {
         widget.controller?.uploadFile(name, dataStream, size ?? 0);
       },
@@ -1060,31 +1097,30 @@ typedef TextPasteCallback = Future<void> Function(String text);
 
 class FileDropArea extends StatefulWidget {
   final FileDropCallback onFileDrop;
-  final TextPasteCallback? onTextPaste;
 
   final Widget child;
 
-  const FileDropArea({super.key, required this.onFileDrop, this.onTextPaste, required this.child});
+  const FileDropArea({super.key, required this.onFileDrop, required this.child});
 
   @override
   FileDropAreaState createState() => FileDropAreaState();
 }
 
+const _preferredFormats = [
+  Formats.mp4,
+  Formats.mov,
+  Formats.mkv,
+  Formats.pdf,
+  webPDFFormat,
+  Formats.png,
+  Formats.jpeg,
+  Formats.heic,
+  Formats.tiff,
+  Formats.webp,
+];
+
 class FileDropAreaState extends State<FileDropArea> {
   bool _dragging = false;
-
-  static const _preferredFormats = [
-    Formats.mp4,
-    Formats.mov,
-    Formats.mkv,
-    Formats.pdf,
-    webPDFFormat,
-    Formats.png,
-    Formats.jpeg,
-    Formats.heic,
-    Formats.tiff,
-    Formats.webp,
-  ];
 
   Future<DataReaderFile> _getFile(DataReader reader, SimpleFileFormat? format) {
     final completer = Completer<DataReaderFile>();
@@ -1092,40 +1128,6 @@ class FileDropAreaState extends State<FileDropArea> {
     reader.getFile(format, completer.complete, onError: completer.completeError);
 
     return completer.future;
-  }
-
-  @override
-  void initState() {
-    super.initState();
-
-    ClipboardEvents.instance?.registerPasteEventListener(onPasteEvent);
-  }
-
-  @override
-  void dispose() {
-    super.dispose();
-
-    ClipboardEvents.instance?.unregisterPasteEventListener(onPasteEvent);
-  }
-
-  void onPasteEvent(ClipboardReadEvent event) async {
-    final reader = await event.getClipboardReader();
-
-    final name = (await reader.getSuggestedName());
-    if (name != null) {
-      final fmt = _preferredFormats.firstWhereOrNull((f) => reader.canProvide(f));
-      final file = await _getFile(reader, fmt);
-
-      await widget.onFileDrop(name, file.getStream(), file.fileSize);
-    } else {
-      if (reader.canProvide(Formats.plainText)) {
-        final text = await reader.readValue(Formats.plainText);
-        if (widget.onTextPaste != null) {
-          widget.onTextPaste!(text!);
-        }
-        // Do something with the plain text
-      }
-    }
   }
 
   @override

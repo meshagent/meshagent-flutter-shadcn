@@ -196,7 +196,7 @@ class FileDefaultPreviewCard extends StatelessWidget {
         children: [
           SizedBox(width: 24, height: 24, child: Center(child: Icon(icon, size: 20))),
           const SizedBox(width: 12),
-          Text(text, style: ShadTheme.of(context).textTheme.small),
+          Expanded(child: Text(text, style: ShadTheme.of(context).textTheme.small, maxLines: 1, overflow: TextOverflow.ellipsis)),
         ],
       ),
     );
