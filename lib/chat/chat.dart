@@ -800,7 +800,7 @@ class _ChatThread extends State<ChatThread> {
       final initialMessage =
           threadMessages?.getChildren().whereType<MeshElement>().where((x) => x.attributes["id"] == widget.initialMessage?.id).firstOrNull;
 
-      if (initialMessage != null) {
+      if (initialMessage == null) {
         controller.send(thread: widget.document, path: widget.path, message: widget.initialMessage!, onMessageSent: widget.onMessageSent);
       }
     }
