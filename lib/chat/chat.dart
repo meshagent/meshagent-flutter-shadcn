@@ -594,29 +594,33 @@ class _ChatThreadInput extends State<ChatThreadInput> {
 
             return Padding(
               padding: EdgeInsets.only(bottom: 5),
-              child: SizedBox(
-                height: 40,
-                child: Center(
-                  child: ListView.separated(
-                    itemCount: attachments.length,
-                    separatorBuilder: (context, index) => const SizedBox(width: 10),
-                    scrollDirection: Axis.horizontal,
-                    itemBuilder: (context, index) {
-                      final attachment = attachments[index];
+              child: LayoutBuilder(
+                builder:
+                    (context, constraints) => SizedBox(
+                      height: 40,
+                      child: Center(
+                        child: ListView.separated(
+                          itemCount: attachments.length,
+                          separatorBuilder: (context, index) => const SizedBox(width: 10),
+                          scrollDirection: Axis.horizontal,
+                          itemBuilder: (context, index) {
+                            final attachment = attachments[index];
 
-                      if (widget.attachmentBuilder != null) {
-                        return widget.attachmentBuilder!(context, attachment);
-                      }
+                            if (widget.attachmentBuilder != null) {
+                              return widget.attachmentBuilder!(context, attachment);
+                            }
 
-                      return FileDefaultAttachmentPreview(
-                        attachment: attachment,
-                        onRemove: () {
-                          widget.controller.removeFileUpload(attachment);
-                        },
-                      );
-                    },
-                  ),
-                ),
+                            return FileDefaultAttachmentPreview(
+                              attachment: attachment,
+                              maxWidth: constraints.maxWidth - 50,
+                              onRemove: () {
+                                widget.controller.removeFileUpload(attachment);
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                    ),
               ),
             );
           },

@@ -75,18 +75,18 @@ class _FilePreviewState extends State<FilePreview> {
 }
 
 class FileDefaultAttachmentPreview extends StatefulWidget {
-  const FileDefaultAttachmentPreview({super.key, required this.attachment, required this.onRemove});
+  const FileDefaultAttachmentPreview({super.key, required this.attachment, required this.onRemove, this.maxWidth = 200});
 
   final FileUpload attachment;
   final VoidCallback onRemove;
+
+  final double maxWidth;
 
   @override
   State<FileDefaultAttachmentPreview> createState() => _FileDefaultAttachmentPreviewState();
 }
 
 class _FileDefaultAttachmentPreviewState extends State<FileDefaultAttachmentPreview> {
-  static const double _itemWidth = 200.0;
-
   double progress = 0.0;
   UploadStatus status = UploadStatus.initial;
 
@@ -96,7 +96,7 @@ class _FileDefaultAttachmentPreviewState extends State<FileDefaultAttachmentPrev
         status = widget.attachment.status;
 
         if (widget.attachment.size > 0) {
-          progress = (widget.attachment.bytesUploaded / widget.attachment.size) * _itemWidth;
+          progress = (widget.attachment.bytesUploaded / widget.attachment.size);
         } else {
           progress = 0.0;
         }
@@ -127,30 +127,19 @@ class _FileDefaultAttachmentPreviewState extends State<FileDefaultAttachmentPrev
       builder: (context) {
         return Text(widget.attachment.filename, style: ShadTheme.of(context).textTheme.small);
       },
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: Stack(
-          children: [
-            AnimatedPositioned(
-              duration: const Duration(milliseconds: 500),
-              left: 0,
-              top: 0,
-              bottom: 0,
-              width: progress,
-              curve: Curves.easeInOut,
-              child: ColoredBox(color: ShadTheme.of(context).colorScheme.secondary),
-            ),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: widget.maxWidth),
+        child: ShadCard(
+          backgroundColor: Colors.transparent,
+          radius: BorderRadius.circular(16),
+          padding: EdgeInsets.only(left: 8, top: 8, bottom: 8, right: 8),
+          rowCrossAxisAlignment: CrossAxisAlignment.center,
+          trailing: ShadGestureDetector(cursor: SystemMouseCursors.click, onTap: widget.onRemove, child: Icon(LucideIcons.x, size: 20)),
 
-            ShadCard(
-              width: _itemWidth,
-              backgroundColor: Colors.transparent,
-              radius: BorderRadius.circular(16),
-              padding: EdgeInsets.only(left: 8, top: 8, bottom: 8, right: 8),
-              rowCrossAxisAlignment: CrossAxisAlignment.center,
-              trailing: ShadGestureDetector(cursor: SystemMouseCursors.click, onTap: widget.onRemove, child: Icon(LucideIcons.x, size: 20)),
-
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Stack(
                 children: [
                   SizedBox(
                     width: 24,
@@ -160,14 +149,14 @@ class _FileDefaultAttachmentPreviewState extends State<FileDefaultAttachmentPrev
                             ? CircularProgressIndicator(color: ShadTheme.of(context).colorScheme.primary, strokeWidth: 2.0)
                             : Center(child: Icon(LucideIcons.file, size: 20)),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(widget.attachment.filename, style: ShadTheme.of(context).textTheme.small, overflow: TextOverflow.ellipsis),
-                  ),
                 ],
               ),
-            ),
-          ],
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(widget.attachment.filename, style: ShadTheme.of(context).textTheme.small, overflow: TextOverflow.ellipsis),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -184,21 +173,29 @@ class FileDefaultPreviewCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ShadCard(
-      backgroundColor: Colors.transparent,
-      radius: BorderRadius.circular(16),
-      padding: EdgeInsets.only(left: 8, top: 8, bottom: 8, right: 8),
-      rowCrossAxisAlignment: CrossAxisAlignment.center,
-      trailing:
-          onClose != null ? ShadIconButton.ghost(width: 24, height: 24, icon: Icon(LucideIcons.x, size: 16), onPressed: onClose) : null,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          SizedBox(width: 24, height: 24, child: Center(child: Icon(icon, size: 20))),
-          const SizedBox(width: 12),
-          Expanded(child: Text(text, style: ShadTheme.of(context).textTheme.small, maxLines: 1, overflow: TextOverflow.ellipsis)),
-        ],
-      ),
+    return LayoutBuilder(
+      builder:
+          (context, constraints) => ShadCard(
+            backgroundColor: Colors.transparent,
+            radius: BorderRadius.circular(16),
+            padding: EdgeInsets.only(left: 8, top: 8, bottom: 8, right: 8),
+            rowCrossAxisAlignment: CrossAxisAlignment.center,
+            trailing:
+                onClose != null
+                    ? ShadIconButton.ghost(width: 24, height: 24, icon: Icon(LucideIcons.x, size: 16), onPressed: onClose)
+                    : null,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(width: 24, height: 24, child: Center(child: Icon(icon, size: 20))),
+                const SizedBox(width: 8),
+                ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: constraints.maxWidth - (24 + 16 + 16)),
+                  child: Text(text, style: ShadTheme.of(context).textTheme.small, maxLines: 1, overflow: TextOverflow.ellipsis),
+                ),
+              ],
+            ),
+          ),
     );
   }
 }
