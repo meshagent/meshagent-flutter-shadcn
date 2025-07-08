@@ -796,13 +796,7 @@ class _ChatThread extends State<ChatThread> {
     controller = widget.controller ?? ChatThreadController(room: widget.room);
 
     if (widget.initialMessage != null) {
-      final threadMessages = widget.document.root.getChildren().whereType<MeshElement>().where((x) => x.tagName == "messages").firstOrNull;
-      final initialMessage =
-          threadMessages?.getChildren().whereType<MeshElement>().where((x) => x.attributes["id"] == widget.initialMessage?.id).firstOrNull;
-
-      if (initialMessage == null) {
-        controller.send(thread: widget.document, path: widget.path, message: widget.initialMessage!, onMessageSent: widget.onMessageSent);
-      }
+      controller.send(thread: widget.document, path: widget.path, message: widget.initialMessage!, onMessageSent: widget.onMessageSent);
     }
 
     sub = widget.room.listen(onRoomMessage);
