@@ -127,19 +127,6 @@ class MeshagentFileUpload extends FileUpload {
   }
 }
 
-// ignore: depend_on_referenced_packages
-typedef PreviousMeshElementMapper = (MeshElement element, MeshElement? previous) Function(MeshElement);
-PreviousMeshElementMapper mapMeshElement() {
-  MeshElement? previous;
-
-  return (element) {
-    final result = (element, previous);
-
-    previous = element;
-    return result;
-  };
-}
-
 class ChatThreadController extends ChangeNotifier {
   ChatThreadController({required this.room}) {
     textFieldController.addListener(() {
@@ -779,14 +766,14 @@ class _ChatThread extends State<ChatThread> {
 
   Map<String, Timer> typing = {};
   Set<String> thinking = {};
-  Iterable<MeshElement> messages = [];
+  List<MeshElement> messages = [];
 
   late final ChatThreadController controller;
 
-  Iterable<MeshElement> _getMessages() {
+  List<MeshElement> _getMessages() {
     final threadMessages = widget.document.root.getChildren().whereType<MeshElement>().where((x) => x.tagName == "messages").firstOrNull;
 
-    return (threadMessages?.getChildren() ?? []).whereType<MeshElement>();
+    return (threadMessages?.getChildren() ?? []).whereType<MeshElement>().toList();
   }
 
   @override
@@ -818,6 +805,8 @@ class _ChatThread extends State<ChatThread> {
     checkParticipants();
   }
 
+  RoomMessage? shellMessage;
+
   void onRoomMessage(RoomEvent event) {
     if (!mounted) {
       return;
@@ -826,10 +815,6 @@ class _ChatThread extends State<ChatThread> {
     if (event is RoomMessageEvent) {
       if (event.message.type.startsWith("participant")) {
         checkParticipants();
-      }
-
-      if (event.message.fromParticipantId == widget.room.localParticipant!.id) {
-        return;
       }
 
       if (event.message.type == "typing" && event.message.message["path"] == widget.path) {
@@ -903,11 +888,15 @@ class _ChatThread extends State<ChatThread> {
     );
   }
 
-  Widget buildMessage(BuildContext context, MeshElement message, MeshElement? previous) {
+  Widget buildMessage(BuildContext context, MeshElement? previous, MeshElement message, MeshElement? next) {
     final isSameAuthor = message.attributes["author_name"] == previous?.attributes["author_name"];
     final mine = message.attributes["author_name"] == widget.room.localParticipant!.getAttribute("name");
 
     final text = message.getAttribute("text");
+
+    if (message.tagName == "exec") {
+      return ShellLine(previous: previous, message: message, next: next);
+    }
 
     return Center(
       child: ConstrainedBox(
@@ -941,8 +930,13 @@ class _ChatThread extends State<ChatThread> {
     }
     bool bottomAlign = !widget.startChatCentered || messages.isNotEmpty;
 
-    final rendredMessages = messages.map(mapMeshElement()).map<Widget>((item) => buildMessage(context, item.$1, item.$2)).toList().reversed;
+    final messageWidgets = <Widget>[];
+    for (var message in messages.indexed) {
+      final previous = message.$1 > 0 ? messages[message.$1 - 1] : null;
+      final next = message.$1 < messages.length - 1 ? messages[message.$1 + 1] : null;
 
+      messageWidgets.insert(0, buildMessage(context, previous, message.$2, next));
+    }
     return FileDropArea(
       onFileDrop: (name, dataStream, size) async {
         widget.controller?.uploadFile(name, dataStream, size ?? 0);
@@ -951,7 +945,7 @@ class _ChatThread extends State<ChatThread> {
       child: Column(
         mainAxisAlignment: bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
         children: [
-          Expanded(child: ListView(reverse: true, padding: EdgeInsets.all(16), children: rendredMessages.toList())),
+          Expanded(child: ListView(reverse: true, padding: EdgeInsets.all(16), children: messageWidgets)),
 
           if (!bottomAlign)
             if (controller.getOnlineParticipants(widget.document).firstOrNull != null)
@@ -1027,6 +1021,96 @@ class _ChatThread extends State<ChatThread> {
 
     sub.cancel();
     widget.document.removeListener(onDocumentChanged);
+  }
+}
+
+class ShellLine extends StatefulWidget {
+  const ShellLine({super.key, required this.previous, required this.message, required this.next});
+
+  final MeshElement? previous;
+  final MeshElement message;
+  final MeshElement? next;
+
+  @override
+  State<ShellLine> createState() => _ShellLineState();
+}
+
+class _ShellLineState extends State<ShellLine> {
+  bool expanded = false;
+  @override
+  Widget build(BuildContext context) {
+    final border = BorderSide(color: ShadTheme.of(context).cardTheme.border!.bottom.color);
+    return Container(
+      margin: EdgeInsets.only(
+        top: widget.previous?.tagName != widget.message.tagName ? 16 : 0,
+        bottom: widget.next?.tagName != widget.message.tagName ? 8 : 0,
+        right: 50,
+      ),
+      decoration: BoxDecoration(
+        color: ShadTheme.of(context).colorScheme.background,
+        border: Border(
+          left: border,
+          right: border,
+          top: widget.previous?.tagName != widget.message.tagName ? border : BorderSide.none,
+          bottom: border,
+        ),
+        borderRadius: BorderRadius.only(
+          topLeft: widget.previous?.tagName != widget.message.tagName ? Radius.circular(10) : Radius.zero,
+          topRight: widget.previous?.tagName != widget.message.tagName ? Radius.circular(10) : Radius.zero,
+          bottomRight: widget.next?.tagName == widget.message.tagName ? Radius.zero : Radius.circular(10),
+          bottomLeft: widget.next?.tagName == widget.message.tagName ? Radius.zero : Radius.circular(10),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (widget.previous?.tagName != widget.message.tagName)
+            Container(
+              decoration: BoxDecoration(border: Border(bottom: border), color: ShadTheme.of(context).colorScheme.secondary),
+              padding: EdgeInsets.only(top: 14, bottom: 14, left: 16, right: 16),
+              child: Row(
+                children: [
+                  Icon(LucideIcons.terminal),
+                  SizedBox(width: 10),
+                  Expanded(child: Text("Terminal", style: ShadTheme.of(context).textTheme.p)),
+                ],
+              ),
+            ),
+          Padding(
+            padding: EdgeInsets.only(top: 16, bottom: 16, right: 16, left: 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ShadGestureDetector(
+                  cursor: SystemMouseCursors.click,
+                  onTap: () {
+                    setState(() {
+                      expanded = !expanded;
+                    });
+                  },
+                  child: Padding(padding: EdgeInsets.all(3), child: Icon(expanded ? LucideIcons.chevronDown : LucideIcons.chevronRight)),
+                ),
+                Expanded(
+                  child: SelectableText.rich(
+                    maxLines: expanded ? null : 1,
+                    TextSpan(
+                      children: [
+                        TextSpan(text: widget.message.attributes["command"], style: GoogleFonts.sourceCodePro()),
+                        TextSpan(text: " "),
+                        if (widget.message.attributes["result"] != null) ...[
+                          TextSpan(text: "\n"),
+                          TextSpan(text: widget.message.attributes["result"].trim(), style: GoogleFonts.sourceCodePro()),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
