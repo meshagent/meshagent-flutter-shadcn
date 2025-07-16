@@ -225,8 +225,7 @@ class ChatThreadController extends ChangeNotifier {
     void Function(ChatMessage)? onMessageSent,
   }) async {
     if (message.text.trim().isNotEmpty || message.attachments.isNotEmpty) {
-      var messages = thread.root.getChildren().whereType<MeshElement>().where((x) => x.tagName == "messages").firstOrNull;
-      messages ??= thread.root.createChildElement("messages", {});
+      final messages = thread.root.getChildren().whereType<MeshElement>().firstWhere((x) => x.tagName == "messages");
 
       final m = messages.createChildElement("message", {
         "id": const Uuid().v4().toString(),
