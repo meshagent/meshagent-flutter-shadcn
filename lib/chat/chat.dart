@@ -908,7 +908,7 @@ class _ChatThread extends State<ChatThread> {
             if (!isSameAuthor && widget.participantNameBuilder != null)
               widget.participantNameBuilder!(message.attributes["author_name"], DateTime.parse(message.attributes["created_at"])),
 
-            if (text.isNotEmpty) ChatBubble(mine: mine, text: message.getAttribute("text")),
+            if (text is String && text.isNotEmpty) ChatBubble(mine: mine, text: message.getAttribute("text")),
             for (final attachment in message.getChildren())
               Container(
                 margin: EdgeInsets.only(top: 8),
