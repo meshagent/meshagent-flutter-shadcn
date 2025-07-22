@@ -291,6 +291,7 @@ class ChatThreadLoader extends StatefulWidget {
     this.waitingForParticipantsBuilder,
     this.attachmentBuilder,
     this.fileInThreadBuilder,
+    this.inputLeadingBuilder,
   });
 
   final List<Participant>? participants;
@@ -302,6 +303,7 @@ class ChatThreadLoader extends StatefulWidget {
 
   final Widget Function(String, DateTime)? participantNameBuilder;
   final Widget Function(BuildContext, List<String>)? waitingForParticipantsBuilder;
+  final Widget Function(BuildContext, ChatThreadController)? inputLeadingBuilder;
 
   final ChatMessage? initialMessage;
 
@@ -381,6 +383,7 @@ class _ChatThreadLoader extends State<ChatThreadLoader> {
           controller: widget.controller,
           attachmentBuilder: widget.attachmentBuilder,
           fileInThreadBuilder: widget.fileInThreadBuilder,
+          inputLeadingBuilder: widget.inputLeadingBuilder,
         );
       },
     );
@@ -671,10 +674,12 @@ class ChatThread extends StatefulWidget {
     this.waitingForParticipantsBuilder,
     this.attachmentBuilder,
     this.fileInThreadBuilder,
+    this.inputLeadingBuilder,
   });
 
   final Widget Function(BuildContext, List<String>)? waitingForParticipantsBuilder;
 
+  final Widget Function(BuildContext, ChatThreadController)? inputLeadingBuilder;
   final String path;
   final MeshDocument document;
   final RoomClient room;
@@ -983,7 +988,7 @@ class _ChatThread extends State<ChatThread> {
               child: ConstrainedBox(
                 constraints: BoxConstraints(maxWidth: 912),
                 child: ChatThreadInput(
-                  leading: ChatThreadAttachButton(controller: controller),
+                  leading: widget.inputLeadingBuilder == null ? null : widget.inputLeadingBuilder!(context, controller),
                   room: widget.room,
                   onSend: (value, attachments) {
                     controller.send(
