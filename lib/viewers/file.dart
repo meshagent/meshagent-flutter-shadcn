@@ -10,8 +10,8 @@ import "file/pdf.dart";
 import "file/parquet.dart";
 
 Widget? fileViewer(RoomClient client, String path) {
-  final ext = extension(path).toLowerCase();
-  if (customViewers[ext.split(".").last] != null) {
+  final ext = basename(path).split(".").last.toLowerCase();
+  if (customViewers[ext] != null) {
     return FilePreview(room: client, path: path);
   }
   return switch (extension(path).toLowerCase()) {
