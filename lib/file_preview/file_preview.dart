@@ -1,4 +1,5 @@
 import "package:flutter/material.dart";
+import "package:path/path.dart";
 import "package:shadcn_ui/shadcn_ui.dart";
 import "package:url_launcher/url_launcher.dart";
 import "package:meshagent/room_server_client.dart";
@@ -18,7 +19,7 @@ final Map<String, Widget Function({Key? key, required RoomClient room, required 
 
 Widget filePreview({Key? key, required RoomClient room, required String filename, required Uri url, BoxFit fit = BoxFit.cover}) {
   // assuming URL has extension, which is generally bad
-  final extension = filename.split(".").last.toLowerCase();
+  final extension = basename(filename).split(".").last.toLowerCase();
   if (imageExtensions.contains(extension)) {
     return ImagePreview(url: url, key: key, fit: fit);
   } else if (videoExtensions.contains(extension)) {
