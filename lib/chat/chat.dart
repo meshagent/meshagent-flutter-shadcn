@@ -61,7 +61,7 @@ class MeshagentFileUpload extends FileUpload {
   }
 
   // Requires to manually call startUpload()
-  MeshagentFileUpload.deffered({required this.room, required super.path, required this.dataStream, super.size = 0});
+  MeshagentFileUpload.deferred({required this.room, required super.path, required this.dataStream, super.size = 0});
 
   final RoomClient room;
 
@@ -140,6 +140,14 @@ class ChatThreadController extends ChangeNotifier {
 
   List<FileUpload> get attachmentUploads => List<FileUpload>.unmodifiable(_attachmentUploads);
 
+  Future<void> cancel(String path, MeshDocument thread) async {
+    for (final participant in getOnlineParticipants(thread)) {
+      if (participant is RemoteParticipant && participant.role == "agent") {
+        await room.messaging.sendMessage(to: participant, type: "cancel", message: {"path": path});
+      }
+    }
+  }
+
   Future<FileUpload> uploadFile(String path, Stream<Uint8List> dataStream, int size) async {
     final uploader = MeshagentFileUpload(room: room, path: path, dataStream: dataStream, size: size);
     uploader.addListener(notifyListeners);
@@ -151,7 +159,7 @@ class ChatThreadController extends ChangeNotifier {
   }
 
   Future<FileUpload> uploadFileDeferred(String path, Stream<Uint8List> dataStream, int size) async {
-    final uploader = MeshagentFileUpload.deffered(room: room, path: path, dataStream: dataStream, size: size);
+    final uploader = MeshagentFileUpload.deferred(room: room, path: path, dataStream: dataStream, size: size);
 
     uploader.addListener(notifyListeners);
 
@@ -435,6 +443,7 @@ class ChatThreadInput extends StatefulWidget {
     this.onChanged,
     this.attachmentBuilder,
     this.leading,
+    this.trailing,
   });
 
   final RoomClient room;
@@ -443,6 +452,7 @@ class ChatThreadInput extends StatefulWidget {
   final ChatThreadController controller;
   final Widget Function(BuildContext context, FileUpload upload)? attachmentBuilder;
   final Widget? leading;
+  final Widget? trailing;
   @override
   State createState() => _ChatThreadInput();
 }
@@ -621,8 +631,10 @@ class _ChatThreadInput extends State<ChatThreadInput> {
           constraints: BoxConstraints(maxHeight: 200),
           inputPadding: EdgeInsets.all(2),
           leading: widget.leading,
+
           trailing:
-              showSendButton && allAttachmentsUploaded
+              widget.trailing ??
+              (showSendButton && allAttachmentsUploaded
                   ? ShadTooltip(
                     waitDuration: Duration(seconds: 1),
                     builder: (context) => Text("Send"),
@@ -639,7 +651,8 @@ class _ChatThreadInput extends State<ChatThreadInput> {
                       ),
                     ),
                   )
-                  : null,
+                  : null),
+
           padding: EdgeInsets.only(left: 5, right: 5, top: 5, bottom: 5),
           decoration: ShadDecoration(
             secondaryFocusedBorder: ShadBorder.none,
@@ -989,6 +1002,24 @@ class _ChatThread extends State<ChatThread> {
                 constraints: BoxConstraints(maxWidth: 912),
                 child: ChatThreadInput(
                   leading: widget.inputLeadingBuilder == null ? null : widget.inputLeadingBuilder!(context, controller),
+                  trailing:
+                      thinking.isNotEmpty
+                          ? ShadGestureDetector(
+                            cursor: SystemMouseCursors.click,
+                            onTapDown: (_) {
+                              controller.cancel(widget.path, widget.document);
+                            },
+                            child: ShadTooltip(
+                              builder: (context) => Text("Stop"),
+                              child: Container(
+                                width: 22,
+                                height: 22,
+                                decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
+                                child: Icon(LucideIcons.x, color: ShadTheme.of(context).colorScheme.background),
+                              ),
+                            ),
+                          )
+                          : null,
                   room: widget.room,
                   onSend: (value, attachments) {
                     controller.send(
