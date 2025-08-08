@@ -279,60 +279,28 @@ class ChatThreadController extends ChangeNotifier {
   }
 }
 
-class ChatThreadLoader extends StatefulWidget {
+class ChatThreadLoader extends StatelessWidget {
   const ChatThreadLoader({
     super.key,
-    this.participants,
     required this.path,
     required this.room,
-
-    this.startChatCentered = false,
+    this.participants,
     this.participantNames,
-    this.participantNameBuilder,
-
-    this.initialMessage,
-    this.controller,
-
-    this.onMessageSent,
     this.includeLocalParticipant = true,
-
-    this.waitingForParticipantsBuilder,
-    this.attachmentBuilder,
-    this.fileInThreadBuilder,
-    this.inputLeadingBuilder,
+    this.builder,
   });
 
-  final List<Participant>? participants;
-  final List<String>? participantNames;
   final String path;
   final RoomClient room;
-  final bool startChatCentered;
+  final List<Participant>? participants;
+  final List<String>? participantNames;
   final bool includeLocalParticipant;
+  final Widget Function(BuildContext, MeshDocument)? builder;
 
-  final Widget Function(String, DateTime)? participantNameBuilder;
-  final Widget Function(BuildContext, List<String>)? waitingForParticipantsBuilder;
-  final Widget Function(BuildContext, ChatThreadController)? inputLeadingBuilder;
+  void _ensureParticipants(MeshDocument document) {
+    final participantsList = <Participant>[if (participants != null) ...participants!, if (includeLocalParticipant) room.localParticipant!];
 
-  final ChatMessage? initialMessage;
-
-  final ChatThreadController? controller;
-
-  final void Function(ChatMessage)? onMessageSent;
-  final Widget Function(BuildContext context, FileUpload upload)? attachmentBuilder;
-  final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
-
-  @override
-  State createState() => _ChatThreadLoader();
-}
-
-class _ChatThreadLoader extends State<ChatThreadLoader> {
-  void ensureParticipants(MeshDocument document) {
-    final participants = <Participant>[
-      if (widget.participants != null) ...widget.participants!,
-      if (widget.includeLocalParticipant) widget.room.localParticipant!,
-    ];
-
-    if (widget.participants != null || widget.participantNames != null) {
+    if (participants != null || participantNames != null) {
       Set<String> existing = {};
 
       for (final child in document.root.getChildren().whereType<MeshElement>()) {
@@ -341,15 +309,15 @@ class _ChatThreadLoader extends State<ChatThreadLoader> {
             existing.add(member.getAttribute("name"));
           }
 
-          for (final part in participants) {
+          for (final part in participantsList) {
             if (!existing.contains(part.getAttribute("name"))) {
               child.createChildElement("member", {"name": part.getAttribute("name")});
               existing.add(part.getAttribute("name"));
             }
           }
 
-          if (widget.participantNames != null) {
-            for (final part in widget.participantNames!) {
+          if (participantNames != null) {
+            for (final part in participantNames!) {
               if (!existing.contains(part)) {
                 child.createChildElement("member", {"name": part});
                 existing.add(part);
@@ -364,35 +332,21 @@ class _ChatThreadLoader extends State<ChatThreadLoader> {
   @override
   Widget build(BuildContext context) {
     return DocumentConnectionScope(
-      key: ValueKey(widget.path),
-      path: widget.path,
-      room: widget.room,
+      key: ValueKey(path),
+      path: path,
+      room: room,
       builder: (context, document, error) {
         if (error != null) {
           return Center(child: Text("Unable to load thread", style: ShadTheme.of(context).textTheme.p));
         }
 
         if (document == null) {
-          return Center(child: CircularProgressIndicator());
+          return const Center(child: CircularProgressIndicator());
         }
 
-        ensureParticipants(document);
+        _ensureParticipants(document);
 
-        return ChatThread(
-          path: widget.path,
-          document: document,
-          room: widget.room,
-          participantNameBuilder: widget.participantNameBuilder,
-          waitingForParticipantsBuilder: widget.waitingForParticipantsBuilder,
-
-          initialMessage: widget.initialMessage,
-
-          onMessageSent: widget.onMessageSent,
-          controller: widget.controller,
-          attachmentBuilder: widget.attachmentBuilder,
-          fileInThreadBuilder: widget.fileInThreadBuilder,
-          inputLeadingBuilder: widget.inputLeadingBuilder,
-        );
+        return builder?.call(context, document) ?? ChatThread(path: path, document: document, room: room);
       },
     );
   }
@@ -678,32 +632,30 @@ class ChatThread extends StatefulWidget {
     required this.room,
 
     this.startChatCentered = false,
-    this.participantNameBuilder,
-
     this.initialMessage,
-
     this.onMessageSent,
     this.controller,
+
+    this.participantNameBuilder,
     this.waitingForParticipantsBuilder,
     this.attachmentBuilder,
     this.fileInThreadBuilder,
     this.inputLeadingBuilder,
   });
 
-  final Widget Function(BuildContext, List<String>)? waitingForParticipantsBuilder;
-
-  final Widget Function(BuildContext, ChatThreadController)? inputLeadingBuilder;
   final String path;
   final MeshDocument document;
   final RoomClient room;
   final bool startChatCentered;
-  final Widget Function(String, DateTime)? participantNameBuilder;
-
   final ChatMessage? initialMessage;
   final void Function(ChatMessage message)? onMessageSent;
   final ChatThreadController? controller;
+
+  final Widget Function(String, DateTime)? participantNameBuilder;
+  final Widget Function(BuildContext, List<String>)? waitingForParticipantsBuilder;
   final Widget Function(BuildContext context, FileUpload upload)? attachmentBuilder;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
+  final Widget Function(BuildContext, ChatThreadController)? inputLeadingBuilder;
 
   @override
   State createState() => _ChatThread();
@@ -780,19 +732,7 @@ class ChatMessage {
 }
 
 class _ChatThread extends State<ChatThread> {
-  late StreamSubscription<RoomEvent> sub;
-
-  Map<String, Timer> typing = {};
-  Set<String> thinking = {};
-  List<MeshElement> messages = [];
-
   late final ChatThreadController controller;
-
-  List<MeshElement> _getMessages() {
-    final threadMessages = widget.document.root.getChildren().whereType<MeshElement>().where((x) => x.tagName == "messages").firstOrNull;
-
-    return (threadMessages?.getChildren() ?? []).whereType<MeshElement>().toList();
-  }
 
   @override
   void initState() {
@@ -803,36 +743,320 @@ class _ChatThread extends State<ChatThread> {
     if (widget.initialMessage != null) {
       controller.send(thread: widget.document, path: widget.path, message: widget.initialMessage!, onMessageSent: widget.onMessageSent);
     }
-
-    sub = widget.room.listen(onRoomMessage);
-    widget.document.addListener(onDocumentChanged);
-    messages = _getMessages();
-
-    checkParticipants();
   }
 
-  void onDocumentChanged() {
+  @override
+  void dispose() {
+    super.dispose();
+
+    if (widget.controller == null) {
+      controller.dispose();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ChatThreadBuilder(
+      path: widget.path,
+      document: widget.document,
+      room: widget.room,
+      controller: controller,
+      builder: (context, messages, online, offline, typing, thinking) {
+        if (offline.isNotEmpty && widget.waitingForParticipantsBuilder != null) {
+          return widget.waitingForParticipantsBuilder!(context, offline.toList());
+        }
+
+        bool bottomAlign = !widget.startChatCentered || messages.isNotEmpty;
+
+        return FileDropArea(
+          onFileDrop: (name, dataStream, size) async {
+            widget.controller?.uploadFile(name, dataStream, size ?? 0);
+          },
+
+          child: Column(
+            mainAxisAlignment: bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
+            children: [
+              ChatThreadMessages(
+                room: widget.room,
+                startChatCentered: widget.startChatCentered,
+                messages: messages,
+                online: online,
+                showTyping: typing.isNotEmpty || thinking.isNotEmpty,
+                participantNameBuilder: widget.participantNameBuilder,
+                fileInThreadBuilder: widget.fileInThreadBuilder,
+              ),
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: 912),
+                    child: ChatThreadInput(
+                      leading: widget.inputLeadingBuilder == null ? null : widget.inputLeadingBuilder!(context, controller),
+                      trailing:
+                          thinking.isNotEmpty
+                              ? ShadGestureDetector(
+                                cursor: SystemMouseCursors.click,
+                                onTapDown: (_) {
+                                  controller.cancel(widget.path, widget.document);
+                                },
+                                child: ShadTooltip(
+                                  builder: (context) => Text("Stop"),
+                                  child: Container(
+                                    width: 22,
+                                    height: 22,
+                                    decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
+                                    child: Icon(LucideIcons.x, color: ShadTheme.of(context).colorScheme.background),
+                                  ),
+                                ),
+                              )
+                              : null,
+                      room: widget.room,
+                      onSend: (value, attachments) {
+                        controller.send(
+                          thread: widget.document,
+                          path: widget.path,
+                          message: ChatMessage(id: const Uuid().v4(), text: value, attachments: attachments.map((x) => x.path).toList()),
+                          onMessageSent: widget.onMessageSent,
+                        );
+                      },
+                      onChanged: (value, attachments) {
+                        for (final part in controller.getOnlineParticipants(widget.document)) {
+                          if (part.id != widget.room.localParticipant?.id) {
+                            widget.room.messaging.sendMessage(to: part, type: "typing", message: {"path": widget.path});
+                          }
+                        }
+                      },
+                      controller: controller,
+                      attachmentBuilder: widget.attachmentBuilder,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class ChatThreadMessages extends StatelessWidget {
+  const ChatThreadMessages({
+    super.key,
+    required this.room,
+    required this.messages,
+    required this.online,
+
+    this.startChatCentered = false,
+    this.showTyping = false,
+    this.participantNameBuilder,
+    this.fileInThreadBuilder,
+  });
+
+  final RoomClient room;
+  final bool startChatCentered;
+  final bool showTyping;
+  final List<MeshElement> messages;
+  final List<Participant> online;
+
+  final Widget Function(String, DateTime)? participantNameBuilder;
+  final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
+
+  String _sanitizePath(String path) {
+    return path.replaceFirst(RegExp(r'^/'), '');
+  }
+
+  Widget _buildFileInThread(BuildContext context, String path) {
+    path = _sanitizePath(path);
+
+    return ShadGestureDetector(
+      cursor: SystemMouseCursors.click,
+      onTap: () {
+        showShadDialog(
+          context: context,
+          builder: (context) {
+            return ShadDialog(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              title: Text("File: $path"),
+              actions: [
+                ShadButton(
+                  onPressed: () async {
+                    final url = await room.storage.downloadUrl(path);
+
+                    launchUrl(Uri.parse(url));
+                  },
+                  child: Text("Download"),
+                ),
+              ],
+              child: FilePreview(room: room, path: path, fit: BoxFit.cover),
+            );
+          },
+        );
+      },
+      child: fileInThreadBuilder != null ? fileInThreadBuilder!(context, path) : ChatThreadPreview(room: room, path: path),
+    );
+  }
+
+  Widget _buildMessage(BuildContext context, MeshElement? previous, MeshElement message, MeshElement? next) {
+    final isSameAuthor = message.attributes["author_name"] == previous?.attributes["author_name"];
+    final mine = message.attributes["author_name"] == room.localParticipant!.getAttribute("name");
+
+    final text = message.getAttribute("text");
+
+    if (message.tagName == "exec") {
+      return ShellLine(previous: previous, message: message, next: next);
+    }
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: 912),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (!isSameAuthor && participantNameBuilder != null)
+              participantNameBuilder!(message.attributes["author_name"], DateTime.parse(message.attributes["created_at"])),
+
+            if (text is String && text.isNotEmpty) ChatBubble(mine: mine, text: message.getAttribute("text")),
+            for (final attachment in message.getChildren())
+              Container(
+                margin: EdgeInsets.only(top: 8),
+                child: Align(
+                  alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+                  child: _buildFileInThread(context, (attachment as MeshElement).getAttribute("path")),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    bool bottomAlign = !startChatCentered || messages.isNotEmpty;
+
+    final messageWidgets = <Widget>[];
+    for (var message in messages.indexed) {
+      final previous = message.$1 > 0 ? messages[message.$1 - 1] : null;
+      final next = message.$1 < messages.length - 1 ? messages[message.$1 + 1] : null;
+
+      messageWidgets.insert(0, _buildMessage(context, previous, message.$2, next));
+    }
+    return Expanded(
+      child: Column(
+        mainAxisAlignment: bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
+        children: [
+          Expanded(child: ListView(reverse: true, padding: EdgeInsets.all(16), children: messageWidgets)),
+
+          if (!bottomAlign)
+            if (online.firstOrNull != null)
+              Padding(
+                padding: EdgeInsets.symmetric(vertical: 20, horizontal: 50),
+                child: Text(
+                  online.first.getAttribute("empty_state_title") ?? "How can I help you?",
+                  style: ShadTheme.of(context).textTheme.h3,
+                ),
+              ),
+
+          if (showTyping)
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: 912),
+              child: Container(
+                width: double.infinity,
+                height: 30,
+                alignment: Alignment.centerLeft,
+                child: SizedBox(
+                  width: 100,
+                  child: JumpingDots(
+                    color: ShadTheme.of(context).colorScheme.foreground,
+                    radius: 8,
+                    verticalOffset: -15,
+                    numberOfDots: 3,
+                    animationDuration: const Duration(milliseconds: 200),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class ChatThreadBuilder extends StatefulWidget {
+  const ChatThreadBuilder({
+    super.key,
+    required this.path,
+    required this.document,
+    required this.room,
+    required this.controller,
+    required this.builder,
+  });
+
+  final String path;
+  final MeshDocument document;
+  final RoomClient room;
+  final ChatThreadController controller;
+  final Widget Function(
+    BuildContext,
+    List<MeshElement> messages,
+    List<Participant> online,
+    List<String> offline,
+    List<String> typing,
+    List<String> thinking,
+  )
+  builder;
+
+  @override
+  State createState() => _ChatThreadBuilder();
+}
+
+class _ChatThreadBuilder extends State<ChatThreadBuilder> {
+  late StreamSubscription<RoomEvent> sub;
+
+  Set<Participant> onlineParticipants = {};
+  Set<String> offlineParticipants = {};
+  Map<String, Timer> typing = {};
+  Set<String> thinking = {};
+  List<MeshElement> messages = [];
+
+  @override
+  void initState() {
+    super.initState();
+
+    sub = widget.room.listen(_onRoomMessage);
+    widget.document.addListener(_onDocumentChanged);
+
+    _getParticipants();
+    _getMessages();
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+
+    sub.cancel();
+    widget.document.removeListener(_onDocumentChanged);
+  }
+
+  void _onDocumentChanged() {
     if (!mounted) {
       return;
     }
 
-    setState(() {
-      messages = _getMessages();
-    });
-
-    checkParticipants();
+    _getParticipants();
+    _getMessages();
   }
 
-  RoomMessage? shellMessage;
-
-  void onRoomMessage(RoomEvent event) {
+  void _onRoomMessage(RoomEvent event) {
     if (!mounted) {
       return;
     }
 
     if (event is RoomMessageEvent) {
       if (event.message.type.startsWith("participant")) {
-        checkParticipants();
+        _getParticipants();
       }
 
       if (event.message.type == "typing" && event.message.message["path"] == widget.path) {
@@ -861,12 +1085,19 @@ class _ChatThread extends State<ChatThread> {
     }
   }
 
-  Set<String> offlineParticipants = {};
+  void _getParticipants() {
+    final online = widget.controller.getOnlineParticipants(widget.document).toSet();
+    if (!setEquals(online, onlineParticipants)) {
+      onlineParticipants = online;
+      if (!mounted) {
+        return;
+      }
+      setState(() {});
+    }
 
-  void checkParticipants() {
-    final parts = controller.getOfflineParticipants(widget.document).toSet();
-    if (!setEquals(parts, offlineParticipants)) {
-      offlineParticipants = parts;
+    final offline = widget.controller.getOfflineParticipants(widget.document).toSet();
+    if (!setEquals(offline, offlineParticipants)) {
+      offlineParticipants = offline;
       if (!mounted) {
         return;
       }
@@ -874,189 +1105,22 @@ class _ChatThread extends State<ChatThread> {
     }
   }
 
-  Widget buildFileInThread(BuildContext context, String path) {
-    return ShadGestureDetector(
-      cursor: SystemMouseCursors.click,
-      onTap: () {
-        showShadDialog(
-          context: context,
-          builder: (context) {
-            return ShadDialog(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              title: Text("File: $path"),
-              actions: [
-                ShadButton(
-                  onPressed: () async {
-                    final url = await widget.room.storage.downloadUrl(path);
-
-                    launchUrl(Uri.parse(url));
-                  },
-                  child: Text("Download"),
-                ),
-              ],
-              child: FilePreview(room: widget.room, path: path, fit: BoxFit.cover),
-            );
-          },
-        );
-      },
-      child:
-          widget.fileInThreadBuilder != null
-              ? widget.fileInThreadBuilder!(context, path)
-              : ChatThreadPreview(room: widget.room, path: path),
-    );
-  }
-
-  Widget buildMessage(BuildContext context, MeshElement? previous, MeshElement message, MeshElement? next) {
-    final isSameAuthor = message.attributes["author_name"] == previous?.attributes["author_name"];
-    final mine = message.attributes["author_name"] == widget.room.localParticipant!.getAttribute("name");
-
-    final text = message.getAttribute("text");
-
-    if (message.tagName == "exec") {
-      return ShellLine(previous: previous, message: message, next: next);
-    }
-
-    return Center(
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: 912),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (!isSameAuthor && widget.participantNameBuilder != null)
-              widget.participantNameBuilder!(message.attributes["author_name"], DateTime.parse(message.attributes["created_at"])),
-
-            if (text is String && text.isNotEmpty) ChatBubble(mine: mine, text: message.getAttribute("text")),
-            for (final attachment in message.getChildren())
-              Container(
-                margin: EdgeInsets.only(top: 8),
-                child: Align(
-                  alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-                  child: buildFileInThread(context, (attachment as MeshElement).getAttribute("path")),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
+  void _getMessages() {
+    final threadMessages = widget.document.root.getChildren().whereType<MeshElement>().where((x) => x.tagName == "messages").firstOrNull;
+    messages = (threadMessages?.getChildren() ?? []).whereType<MeshElement>().toList();
+    setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
-    if (offlineParticipants.isNotEmpty && widget.waitingForParticipantsBuilder != null) {
-      return widget.waitingForParticipantsBuilder!(context, offlineParticipants.toList());
-    }
-    bool bottomAlign = !widget.startChatCentered || messages.isNotEmpty;
-
-    final messageWidgets = <Widget>[];
-    for (var message in messages.indexed) {
-      final previous = message.$1 > 0 ? messages[message.$1 - 1] : null;
-      final next = message.$1 < messages.length - 1 ? messages[message.$1 + 1] : null;
-
-      messageWidgets.insert(0, buildMessage(context, previous, message.$2, next));
-    }
-    return FileDropArea(
-      onFileDrop: (name, dataStream, size) async {
-        widget.controller?.uploadFile(name, dataStream, size ?? 0);
-      },
-
-      child: Column(
-        mainAxisAlignment: bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
-        children: [
-          Expanded(child: ListView(reverse: true, padding: EdgeInsets.all(16), children: messageWidgets)),
-
-          if (!bottomAlign)
-            if (controller.getOnlineParticipants(widget.document).firstOrNull != null)
-              Padding(
-                padding: EdgeInsets.symmetric(vertical: 20, horizontal: 50),
-                child: Text(
-                  controller.getOnlineParticipants(widget.document).first.getAttribute("empty_state_title") ?? "How can I help you?",
-                  style: ShadTheme.of(context).textTheme.h3,
-                ),
-              ),
-
-          if ((typing.isNotEmpty || thinking.isNotEmpty))
-            ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: 912),
-              child: Container(
-                width: double.infinity,
-                height: 30,
-                alignment: Alignment.centerLeft,
-                child: SizedBox(
-                  width: 100,
-                  child: JumpingDots(
-                    color: ShadTheme.of(context).colorScheme.foreground,
-                    radius: 8,
-                    verticalOffset: -15,
-                    numberOfDots: 3,
-                    animationDuration: const Duration(milliseconds: 200),
-                  ),
-                ),
-              ),
-            ),
-
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: 15, vertical: 8),
-            child: Center(
-              child: ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: 912),
-                child: ChatThreadInput(
-                  leading: widget.inputLeadingBuilder == null ? null : widget.inputLeadingBuilder!(context, controller),
-                  trailing:
-                      thinking.isNotEmpty
-                          ? ShadGestureDetector(
-                            cursor: SystemMouseCursors.click,
-                            onTapDown: (_) {
-                              controller.cancel(widget.path, widget.document);
-                            },
-                            child: ShadTooltip(
-                              builder: (context) => Text("Stop"),
-                              child: Container(
-                                width: 22,
-                                height: 22,
-                                decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
-                                child: Icon(LucideIcons.x, color: ShadTheme.of(context).colorScheme.background),
-                              ),
-                            ),
-                          )
-                          : null,
-                  room: widget.room,
-                  onSend: (value, attachments) {
-                    controller.send(
-                      thread: widget.document,
-                      path: widget.path,
-                      message: ChatMessage(id: const Uuid().v4(), text: value, attachments: attachments.map((x) => x.path).toList()),
-                      onMessageSent: widget.onMessageSent,
-                    );
-                  },
-                  onChanged: (value, attachments) {
-                    for (final part in controller.getOnlineParticipants(widget.document)) {
-                      if (part.id != widget.room.localParticipant?.id) {
-                        widget.room.messaging.sendMessage(to: part, type: "typing", message: {"path": widget.path});
-                      }
-                    }
-                  },
-                  controller: controller,
-                  attachmentBuilder: widget.attachmentBuilder,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
+    return widget.builder(
+      context,
+      messages,
+      onlineParticipants.toList(),
+      offlineParticipants.toList(),
+      typing.keys.toList(),
+      thinking.toList(),
     );
-  }
-
-  @override
-  void dispose() {
-    super.dispose();
-
-    if (widget.controller == null) {
-      controller.dispose();
-    }
-
-    sub.cancel();
-    widget.document.removeListener(onDocumentChanged);
   }
 }
 
