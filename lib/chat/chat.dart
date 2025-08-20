@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:collection/collection.dart';
 
@@ -8,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:markdown_widget/markdown_widget.dart';
+import 'package:rfw/formats.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:uuid/uuid.dart';
 import "package:url_launcher/url_launcher.dart";
@@ -23,6 +25,7 @@ import 'package:meshagent_flutter_shadcn/file_preview/file_preview.dart';
 import 'package:meshagent_flutter_shadcn/file_preview/image.dart';
 
 import 'package:livekit_client/livekit_client.dart' as livekit;
+import 'package:rfw/rfw.dart';
 
 const webPDFFormat = SimpleFileFormat(uniformTypeIdentifiers: ['com.adobe.pdf'], mimeTypes: ['web application/pdf']);
 
@@ -906,6 +909,9 @@ class ChatThreadMessages extends StatelessWidget {
     if (message.tagName == "exec") {
       return ShellLine(previous: previous, message: message, next: next);
     }
+    if (message.tagName == "ui") {
+      return DynamicUI(room: room, previous: previous, message: message, next: next);
+    }
 
     return Center(
       child: ConstrainedBox(
@@ -1121,6 +1127,96 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
       typing.keys.toList(),
       thinking.toList(),
     );
+  }
+}
+
+class DynamicUI extends StatefulWidget {
+  const DynamicUI({super.key, required this.room, required this.previous, required this.message, required this.next});
+
+  final RoomClient room;
+  final MeshElement? previous;
+  final MeshElement message;
+  final MeshElement? next;
+
+  @override
+  State createState() => _DynamicUI();
+}
+
+class _DynamicUI extends State<DynamicUI> {
+  final _runtime = Runtime();
+  final _data = DynamicContent();
+
+  static const LibraryName coreName = LibraryName(<String>['core', 'widgets']);
+  static const LibraryName mainName = LibraryName(<String>['main']);
+
+  @override
+  void initState() {
+    super.initState();
+    // Local widget library:
+    _runtime.update(coreName, createCoreWidgets());
+    // Remote widget library:
+
+    updateData();
+    updateWidget();
+  }
+
+  RemoteWidgetLibrary? _remoteWidgets;
+  Exception? error;
+
+  void updateWidget() async {
+    final renderer = widget.message.getAttribute("renderer");
+    final widgetName = widget.message.getAttribute("widget");
+    final data = widget.message.getAttribute("data");
+
+    if (renderer is String && widget is String) {
+      try {
+        setState(() {
+          error = null;
+        });
+
+        final response = await widget.room.agents.invokeTool(
+          toolkit: renderer,
+          tool: widgetName,
+          arguments: {"platform": "flutter", "target": "rfw", "data": data},
+        );
+
+        if (response is TextResponse) {
+          if (!mounted) return;
+          setState(() {
+            _remoteWidgets = parseLibraryFile(response.text);
+            _runtime.update(mainName, _remoteWidgets!);
+          });
+        } else {
+          throw Exception("Expected text response from server");
+        }
+      } on RoomServerException catch (e) {
+        if (!mounted) return;
+        setState(() {
+          error = e;
+        });
+      }
+    } else {
+      _remoteWidgets = null;
+    }
+  }
+
+  void updateData() {
+    try {
+      final data = jsonDecode(widget.message.getAttribute("data"));
+
+      // Configuration data:
+      _data.update('data', data);
+    } catch (e) {
+      _data.update('error', e.toString());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (error != null) {
+      return Text("$error", style: ShadTheme.of(context).textTheme.p);
+    }
+    return RemoteWidget(runtime: _runtime, data: _data, widget: const FullyQualifiedWidgetName(mainName, 'root'));
   }
 }
 
