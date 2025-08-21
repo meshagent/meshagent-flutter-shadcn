@@ -137,6 +137,17 @@ class ChatThreadController extends ChangeNotifier {
     });
   }
 
+  bool toggleToolkit(RequiredToolkit toolkit) {
+    if (toolkits.contains(toolkit)) {
+      toolkits.remove(toolkit);
+      return false;
+    } else {
+      toolkits.add(toolkit);
+      return true;
+    }
+  }
+
+  final List<RequiredToolkit> toolkits = [];
   final RoomClient room;
   final TextEditingController textFieldController = ShadTextEditingController();
   final List<FileUpload> _attachmentUploads = [];
@@ -255,6 +266,7 @@ class ChatThreadController extends ChangeNotifier {
           to: participant,
           type: "chat",
           message: {
+            "toolkits": [for (final tk in toolkits) tk.toJson()],
             "path": path,
             "text": message.text,
             "attachments": message.attachments.map((a) => {"path": a}).toList(),
@@ -355,11 +367,18 @@ class ChatThreadLoader extends StatelessWidget {
   }
 }
 
-class ChatThreadAttachButton extends StatelessWidget {
-  const ChatThreadAttachButton({required this.controller, super.key});
+class ChatThreadAttachButton extends StatefulWidget {
+  const ChatThreadAttachButton({required this.controller, super.key, this.optionalToolkits = const []});
+
+  final List<OptionalToolkit> optionalToolkits;
 
   final ChatThreadController controller;
 
+  @override
+  State createState() => _ChatThreadAttachButton();
+}
+
+class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
   Future<void> _onSelectAttachment() async {
     final picked = await FilePicker.platform.pickFiles(dialogTitle: "Select files", allowMultiple: true, withReadStream: true);
 
@@ -368,27 +387,62 @@ class ChatThreadAttachButton extends StatelessWidget {
     }
 
     for (final file in picked.files) {
-      controller.uploadFile(file.name, file.readStream!.map(Uint8List.fromList), file.size);
+      widget.controller.uploadFile(file.name, file.readStream!.map(Uint8List.fromList), file.size);
     }
+  }
+
+  ShadPopoverController popoverController = ShadPopoverController();
+
+  @override
+  void dispose() {
+    super.dispose();
+    popoverController.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return ShadTooltip(
-      waitDuration: Duration(seconds: 1),
-      builder: (context) => Text("Attach"),
-      child: ShadGestureDetector(
-        cursor: SystemMouseCursors.click,
-        onTap: _onSelectAttachment,
-        child: Container(
-          width: 22,
-          height: 22,
-          decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
-          child: Icon(LucideIcons.paperclip, color: ShadTheme.of(context).colorScheme.background),
-        ),
+    return ShadContextMenu(
+      constraints: BoxConstraints(minWidth: 175),
+      anchor: ShadAnchorAuto(followerAnchor: Alignment.topRight, targetAnchor: Alignment.topLeft),
+      items: [
+        ShadContextMenuItem(leading: Icon(LucideIcons.paperclip), onPressed: _onSelectAttachment, child: Text("Attach a file...")),
+
+        for (final tk in widget.optionalToolkits)
+          Builder(
+            builder:
+                (context) => ShadContextMenuItem(
+                  textStyle:
+                      widget.controller.toolkits.contains(tk.toolkit)
+                          ? ShadTheme.of(context).contextMenuTheme.textStyle!.copyWith(color: Colors.blue)
+                          : null,
+                  leading: Icon(tk.icon, color: widget.controller.toolkits.contains(tk.toolkit) ? Colors.blue : null),
+                  onPressed: () => widget.controller.toggleToolkit(tk.toolkit),
+
+                  trailing:
+                      widget.controller.toolkits.contains(tk.toolkit)
+                          ? Icon(LucideIcons.check, color: widget.controller.toolkits.contains(tk.toolkit) ? Colors.blue : null)
+                          : null,
+                  child: Text(tk.text),
+                ),
+          ),
+      ],
+      controller: popoverController,
+      child: GestureDetector(
+        onTap: () {
+          popoverController.toggle();
+        },
+        child: Container(width: 22, height: 22, child: Icon(LucideIcons.plus)),
       ),
     );
   }
+}
+
+class OptionalToolkit {
+  OptionalToolkit({required this.icon, required this.toolkit, required this.text});
+
+  final String text;
+  final IconData icon;
+  final RequiredToolkit toolkit;
 }
 
 class ChatThreadInput extends StatefulWidget {
