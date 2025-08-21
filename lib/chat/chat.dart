@@ -1168,7 +1168,7 @@ class _DynamicUI extends State<DynamicUI> {
     final widgetName = widget.message.getAttribute("widget");
     final data = widget.message.getAttribute("data");
 
-    if (renderer is String && widget is String) {
+    if (renderer is String && widgetName is String) {
       try {
         setState(() {
           error = null;
@@ -1177,7 +1177,7 @@ class _DynamicUI extends State<DynamicUI> {
         final response = await widget.room.agents.invokeTool(
           toolkit: renderer,
           tool: widgetName,
-          arguments: {"platform": "flutter", "target": "rfw", "data": data},
+          arguments: {"platform": "flutter", "output": "rfw", "data": data},
         );
 
         if (response is TextResponse) {
@@ -1215,6 +1215,9 @@ class _DynamicUI extends State<DynamicUI> {
   Widget build(BuildContext context) {
     if (error != null) {
       return Text("$error", style: ShadTheme.of(context).textTheme.p);
+    }
+    if (_remoteWidgets == null) {
+      return Container();
     }
     return RemoteWidget(runtime: _runtime, data: _data, widget: const FullyQualifiedWidgetName(mainName, 'root'));
   }
