@@ -431,7 +431,7 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
         onTap: () {
           popoverController.toggle();
         },
-        child: Container(width: 22, height: 22, child: Icon(LucideIcons.plus)),
+        child: SizedBox(width: 22, height: 22, child: Icon(LucideIcons.plus)),
       ),
     );
   }
