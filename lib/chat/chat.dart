@@ -1212,6 +1212,20 @@ class _DynamicUI extends State<DynamicUI> {
 
     updateData();
     updateWidget();
+
+    widget.message.addListener(onUpdated);
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+    widget.message.removeListener(onUpdated);
+  }
+
+  void onUpdated() {
+    error = null;
+    updateData();
+    updateWidget();
   }
 
   RemoteWidgetLibrary? _remoteWidgets;
@@ -1228,7 +1242,9 @@ class _DynamicUI extends State<DynamicUI> {
         setState(() {
           error = null;
         });
-
+        if (data == null) {
+          return;
+        }
         response = await widget.room.agents.invokeTool(
           toolkit: renderer,
           tool: widgetName,
@@ -1264,10 +1280,15 @@ class _DynamicUI extends State<DynamicUI> {
 
   void updateData() {
     try {
-      final data = jsonDecode(widget.message.getAttribute("data"));
+      final json = widget.message.getAttribute("data");
+      if (json != null) {
+        final data = jsonDecode(json);
 
-      // Configuration data:
-      _data.update('data', data);
+        // Configuration data:
+        _data.update('data', data);
+      } else {
+        _data.update('data', {});
+      }
     } catch (e) {
       _data.update('error', e.toString());
     }
