@@ -1007,7 +1007,7 @@ class ChatThreadMessages extends StatelessWidget {
       final previous = message.$1 > 0 ? messages[message.$1 - 1] : null;
       final next = message.$1 < messages.length - 1 ? messages[message.$1 + 1] : null;
 
-      messageWidgets.insert(0, _buildMessage(context, previous, message.$2, next));
+      messageWidgets.insert(0, Container(key: ValueKey(message.$2.id), child: _buildMessage(context, previous, message.$2, next)));
     }
     return Expanded(
       child: Column(
@@ -1218,6 +1218,20 @@ class _DynamicUI extends State<DynamicUI> {
 
     updateData();
     updateWidget();
+
+    widget.message.addListener(onUpdated);
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+    widget.message.removeListener(onUpdated);
+  }
+
+  void onUpdated() {
+    error = null;
+    updateData();
+    updateWidget();
   }
 
   RemoteWidgetLibrary? _remoteWidgets;
@@ -1228,13 +1242,16 @@ class _DynamicUI extends State<DynamicUI> {
     final widgetName = widget.message.getAttribute("widget");
     final data = widget.message.getAttribute("data");
 
+    Response? response;
     if (renderer is String && widgetName is String) {
       try {
         setState(() {
           error = null;
         });
-
-        final response = await widget.room.agents.invokeTool(
+        if (data == null) {
+          return;
+        }
+        response = await widget.room.agents.invokeTool(
           toolkit: renderer,
           tool: widgetName,
           arguments: {"platform": "flutter", "output": "rfw", "data": data},
@@ -1243,7 +1260,7 @@ class _DynamicUI extends State<DynamicUI> {
         if (response is TextResponse) {
           if (!mounted) return;
           setState(() {
-            _remoteWidgets = parseLibraryFile(response.text);
+            _remoteWidgets = parseLibraryFile((response as TextResponse).text);
             _runtime.update(mainName, _remoteWidgets!);
           });
         } else {
@@ -1254,6 +1271,13 @@ class _DynamicUI extends State<DynamicUI> {
         setState(() {
           error = e;
         });
+      } on ParserException catch (e) {
+        if (!mounted) return;
+        setState(() {
+          error = Exception(
+            "${e.message} at ${e.line}, ${e.column}:\n${(response as TextResponse).text.split("\n").mapIndexed((i, s) => "${i + 1}: $s").join("\n")}",
+          );
+        });
       }
     } else {
       _remoteWidgets = null;
@@ -1262,10 +1286,15 @@ class _DynamicUI extends State<DynamicUI> {
 
   void updateData() {
     try {
-      final data = jsonDecode(widget.message.getAttribute("data"));
+      final json = widget.message.getAttribute("data");
+      if (json != null) {
+        final data = jsonDecode(json);
 
-      // Configuration data:
-      _data.update('data', data);
+        // Configuration data:
+        _data.update('data', data);
+      } else {
+        _data.update('data', {});
+      }
     } catch (e) {
       _data.update('error', e.toString());
     }
@@ -1274,7 +1303,7 @@ class _DynamicUI extends State<DynamicUI> {
   @override
   Widget build(BuildContext context) {
     if (error != null) {
-      return Text("$error", style: ShadTheme.of(context).textTheme.p);
+      return SelectableText("$error", style: ShadTheme.of(context).textTheme.p);
     }
     if (_remoteWidgets == null) {
       return Container();
