@@ -240,7 +240,22 @@ class ChatThreadController extends ChangeNotifier {
     }
   }
 
-  void send({
+  Future<void> sendMessageToParticipant({required Participant participant, required String path, required ChatMessage message}) async {
+    if (message.text.trim().isNotEmpty || message.attachments.isNotEmpty) {
+      await room.messaging.sendMessage(
+        to: participant,
+        type: "chat",
+        message: {
+          "toolkits": [for (final tk in toolkits) tk.toJson()],
+          "path": path,
+          "text": message.text,
+          "attachments": message.attachments.map((a) => {"path": a}).toList(),
+        },
+      );
+    }
+  }
+
+  Future<void> send({
     required MeshDocument thread,
     required String path,
     required ChatMessage message,
@@ -262,16 +277,7 @@ class ChatThreadController extends ChangeNotifier {
       }
 
       for (final participant in getOnlineParticipants(thread)) {
-        room.messaging.sendMessage(
-          to: participant,
-          type: "chat",
-          message: {
-            "toolkits": [for (final tk in toolkits) tk.toJson()],
-            "path": path,
-            "text": message.text,
-            "attachments": message.attachments.map((a) => {"path": a}).toList(),
-          },
-        );
+        sendMessageToParticipant(participant: participant, path: path, message: message);
       }
 
       onMessageSent?.call(message);
