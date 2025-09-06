@@ -3,29 +3,31 @@ import 'dart:convert';
 
 import 'package:collection/collection.dart';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:markdown_widget/markdown_widget.dart';
 import 'package:rfw/formats.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
-import 'package:uuid/uuid.dart';
-import "package:url_launcher/url_launcher.dart";
-import 'package:super_drag_and_drop/super_drag_and_drop.dart';
 import 'package:super_clipboard/super_clipboard.dart';
+import 'package:super_drag_and_drop/super_drag_and_drop.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:uuid/uuid.dart';
 
 import 'package:meshagent/document.dart';
 import 'package:meshagent/room_server_client.dart';
 import 'package:meshagent_flutter/meshagent_flutter.dart';
-import 'package:meshagent_flutter_shadcn/chat/jumping_dots.dart';
-import 'package:meshagent_flutter_shadcn/meetings/meetings.dart';
 import 'package:meshagent_flutter_shadcn/file_preview/file_preview.dart';
 import 'package:meshagent_flutter_shadcn/file_preview/image.dart';
+import 'package:meshagent_flutter_shadcn/meetings/meetings.dart';
 
 import 'package:livekit_client/livekit_client.dart' as livekit;
 import 'package:rfw/rfw.dart';
+
+import 'jumping_dots.dart';
+import 'outbound_delivery_status.dart';
 
 const webPDFFormat = SimpleFileFormat(uniformTypeIdentifiers: ['com.adobe.pdf'], mimeTypes: ['web application/pdf']);
 
@@ -132,10 +134,16 @@ class MeshagentFileUpload extends FileUpload {
 
 class ChatThreadController extends ChangeNotifier {
   ChatThreadController({required this.room}) {
-    textFieldController.addListener(() {
-      notifyListeners();
-    });
+    textFieldController.addListener(notifyListeners);
   }
+
+  final List<RequiredToolkit> toolkits = [];
+  final RoomClient room;
+  final TextEditingController textFieldController = ShadTextEditingController();
+  final List<FileUpload> _attachmentUploads = [];
+  final OutboundMessageStatusQueue outboundStatus = OutboundMessageStatusQueue();
+
+  List<FileUpload> get attachmentUploads => List<FileUpload>.unmodifiable(_attachmentUploads);
 
   bool toggleToolkit(RequiredToolkit toolkit) {
     if (toolkits.contains(toolkit)) {
@@ -146,13 +154,6 @@ class ChatThreadController extends ChangeNotifier {
       return true;
     }
   }
-
-  final List<RequiredToolkit> toolkits = [];
-  final RoomClient room;
-  final TextEditingController textFieldController = ShadTextEditingController();
-  final List<FileUpload> _attachmentUploads = [];
-
-  List<FileUpload> get attachmentUploads => List<FileUpload>.unmodifiable(_attachmentUploads);
 
   Future<void> cancel(String path, MeshDocument thread) async {
     for (final participant in getOnlineParticipants(thread)) {
@@ -263,9 +264,10 @@ class ChatThreadController extends ChangeNotifier {
   }) async {
     if (message.text.trim().isNotEmpty || message.attachments.isNotEmpty) {
       final messages = thread.root.getChildren().whereType<MeshElement>().firstWhere((x) => x.tagName == "messages");
+      final List<Future<void>> sentMessages = [];
 
       final m = messages.createChildElement("message", {
-        "id": const Uuid().v4().toString(),
+        "id": message.id,
         "text": message.text,
         "created_at": DateTime.now().toUtc().toIso8601String(),
         "author_name": room.localParticipant!.getAttribute("name"),
@@ -277,8 +279,14 @@ class ChatThreadController extends ChangeNotifier {
       }
 
       for (final participant in getOnlineParticipants(thread)) {
-        sendMessageToParticipant(participant: participant, path: path, message: message);
+        sentMessages.add(sendMessageToParticipant(participant: participant, path: path, message: message));
       }
+
+      final sendFuture = Future.wait(sentMessages);
+
+      outboundStatus.setSending(messageId: message.id, sendFuture: sendFuture);
+
+      await sendFuture;
 
       onMessageSent?.call(message);
 
@@ -291,6 +299,7 @@ class ChatThreadController extends ChangeNotifier {
     super.dispose();
 
     textFieldController.dispose();
+    outboundStatus.dispose();
 
     for (final upload in _attachmentUploads) {
       upload.removeListener(notifyListeners);
@@ -721,7 +730,7 @@ class ChatThread extends StatefulWidget {
   final Widget Function(BuildContext, ChatThreadController)? inputLeadingBuilder;
 
   @override
-  State createState() => _ChatThread();
+  State createState() => _ChatThreadState();
 }
 
 class ChatBubble extends StatelessWidget {
@@ -794,8 +803,9 @@ class ChatMessage {
   final List<String> attachments;
 }
 
-class _ChatThread extends State<ChatThread> {
+class _ChatThreadState extends State<ChatThread> {
   late final ChatThreadController controller;
+  OutboundEntry? _currentStatusEntry;
 
   @override
   void initState() {
@@ -806,6 +816,12 @@ class _ChatThread extends State<ChatThread> {
     if (widget.initialMessage != null) {
       controller.send(thread: widget.document, path: widget.path, message: widget.initialMessage!, onMessageSent: widget.onMessageSent);
     }
+
+    controller.outboundStatus.addListener(() {
+      setState(() {
+        _currentStatusEntry = controller.outboundStatus.currentEntry();
+      });
+    });
   }
 
   @override
@@ -847,6 +863,7 @@ class _ChatThread extends State<ChatThread> {
                 showTyping: typing.isNotEmpty || thinking.isNotEmpty,
                 participantNameBuilder: widget.participantNameBuilder,
                 fileInThreadBuilder: widget.fileInThreadBuilder,
+                currentStatusEntry: _currentStatusEntry,
               ),
               Padding(
                 padding: EdgeInsets.symmetric(horizontal: 15, vertical: 8),
@@ -914,6 +931,7 @@ class ChatThreadMessages extends StatelessWidget {
     this.showTyping = false,
     this.participantNameBuilder,
     this.fileInThreadBuilder,
+    this.currentStatusEntry,
   });
 
   final RoomClient room;
@@ -921,6 +939,7 @@ class ChatThreadMessages extends StatelessWidget {
   final bool showTyping;
   final List<MeshElement> messages;
   final List<Participant> online;
+  final OutboundEntry? currentStatusEntry;
 
   final Widget Function(String, DateTime)? participantNameBuilder;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
@@ -965,6 +984,7 @@ class ChatThreadMessages extends StatelessWidget {
     final mine = message.attributes["author_name"] == room.localParticipant!.getAttribute("name");
 
     final text = message.getAttribute("text");
+    final id = message.getAttribute("id");
 
     if (message.tagName == "exec") {
       return ShellLine(previous: previous, message: message, next: next);
@@ -974,6 +994,7 @@ class ChatThreadMessages extends StatelessWidget {
     }
 
     return Center(
+      key: ValueKey(id),
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: 912),
         child: Column(
@@ -984,12 +1005,27 @@ class ChatThreadMessages extends StatelessWidget {
               participantNameBuilder!(message.attributes["author_name"], DateTime.parse(message.attributes["created_at"])),
 
             if (text is String && text.isNotEmpty) ChatBubble(mine: mine, text: message.getAttribute("text")),
+
             for (final attachment in message.getChildren())
               Container(
                 margin: EdgeInsets.only(top: 8),
                 child: Align(
                   alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
                   child: _buildFileInThread(context, (attachment as MeshElement).getAttribute("path")),
+                ),
+              ),
+
+            if (currentStatusEntry != null && currentStatusEntry?.messageId == id)
+              Padding(
+                padding: EdgeInsets.only(top: 5),
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    currentStatusEntry!.status.name,
+                    style: ShadTheme.of(
+                      context,
+                    ).textTheme.p.copyWith(fontSize: 12, fontWeight: FontWeight.w700, color: currentStatusEntry!.status.color),
+                  ),
                 ),
               ),
           ],
