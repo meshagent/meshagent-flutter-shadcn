@@ -256,6 +256,22 @@ class ChatThreadController extends ChangeNotifier {
     }
   }
 
+  void insertMessage({required MeshDocument thread, required ChatMessage message}) {
+    final messages = thread.root.getChildren().whereType<MeshElement>().firstWhere((x) => x.tagName == "messages");
+
+    final m = messages.createChildElement("message", {
+      "id": message.id,
+      "text": message.text,
+      "created_at": DateTime.now().toUtc().toIso8601String(),
+      "author_name": room.localParticipant!.getAttribute("name"),
+      "author_ref": null,
+    });
+
+    for (final path in message.attachments) {
+      m.createChildElement("file", {"path": path});
+    }
+  }
+
   Future<void> send({
     required MeshDocument thread,
     required String path,
@@ -263,30 +279,18 @@ class ChatThreadController extends ChangeNotifier {
     void Function(ChatMessage)? onMessageSent,
   }) async {
     if (message.text.trim().isNotEmpty || message.attachments.isNotEmpty) {
-      final messages = thread.root.getChildren().whereType<MeshElement>().firstWhere((x) => x.tagName == "messages");
+      insertMessage(thread: thread, message: message);
+
       final List<Future<void>> sentMessages = [];
-
-      final m = messages.createChildElement("message", {
-        "id": message.id,
-        "text": message.text,
-        "created_at": DateTime.now().toUtc().toIso8601String(),
-        "author_name": room.localParticipant!.getAttribute("name"),
-        "author_ref": null,
-      });
-
-      for (final path in message.attachments) {
-        m.createChildElement("file", {"path": path});
-      }
-
       for (final participant in getOnlineParticipants(thread)) {
         sentMessages.add(sendMessageToParticipant(participant: participant, path: path, message: message));
       }
 
-      final sendFuture = Future.wait(sentMessages);
+      outboundStatus.markSending(message.id);
 
-      outboundStatus.setSending(messageId: message.id, sendFuture: sendFuture);
+      await Future.wait(sentMessages);
 
-      await sendFuture;
+      outboundStatus.markDelivered(message.id);
 
       onMessageSent?.call(message);
 
@@ -1021,10 +1025,12 @@ class ChatThreadMessages extends StatelessWidget {
                 child: Align(
                   alignment: Alignment.centerRight,
                   child: Text(
-                    currentStatusEntry!.status.name,
-                    style: ShadTheme.of(
-                      context,
-                    ).textTheme.p.copyWith(fontSize: 12, fontWeight: FontWeight.w700, color: currentStatusEntry!.status.color),
+                    currentStatusEntry!.state.status.name,
+                    style: ShadTheme.of(context).textTheme.p.copyWith(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: Color(currentStatusEntry!.state.status.colorValue),
+                    ),
                   ),
                 ),
               ),

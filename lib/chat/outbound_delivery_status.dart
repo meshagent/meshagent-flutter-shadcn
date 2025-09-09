@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+import 'dart:collection';
+import 'package:flutter/foundation.dart';
 
 enum OutboundStatus {
   sending,
@@ -16,37 +17,66 @@ enum OutboundStatus {
     }
   }
 
-  Color get color {
+  int get colorValue {
     switch (this) {
       case OutboundStatus.sending:
-        return const Color(0xFF929292);
+        return 0xFF929292;
       case OutboundStatus.sent:
-        return const Color(0xFF929292);
+        return 0xFF929292;
       case OutboundStatus.failed:
-        return const Color(0xFFFF4A4A);
+        return 0xFFFF4A4A;
     }
   }
 }
 
-class OutboundEntry {
-  OutboundEntry({required this.messageId, required this.startedAt, required this.future, this.status = OutboundStatus.sending, this.error});
+abstract class OutboundState {
+  const OutboundState({required this.status});
 
-  final String messageId;
-  final DateTime startedAt;
-  final Future<void> future;
-
-  OutboundStatus status;
-  Object? error;
+  final OutboundStatus status;
 }
 
-class OutboundMessageStatusQueue extends ChangeNotifier {
+class Sending extends OutboundState {
+  const Sending({required this.startedAt}) : super(status: OutboundStatus.sending);
+
+  final DateTime startedAt;
+}
+
+class Delivered extends OutboundState {
+  const Delivered({required this.completedAt}) : super(status: OutboundStatus.sent);
+
+  final DateTime completedAt;
+}
+
+class Failed extends OutboundState {
+  const Failed({required this.error, this.stackTrace}) : super(status: OutboundStatus.failed);
+
+  final Object error;
+  final StackTrace? stackTrace;
+}
+
+class OutboundEntry {
+  OutboundEntry({required this.messageId, required this.state});
+
+  final String messageId;
+  OutboundState state;
+
+  OutboundEntry copyWith({OutboundState? state}) {
+    return OutboundEntry(messageId: messageId, state: state ?? this.state);
+  }
+}
+
+abstract class OutboundStatusSink {
+  void markSending(String id);
+  void markDelivered(String id);
+  void markFailed(String id, Object error, [StackTrace? stackTrace]);
+}
+
+class OutboundMessageStatusQueue extends ChangeNotifier implements OutboundStatusSink {
   OutboundMessageStatusQueue();
 
   bool _disposed = false;
 
-  final List<String> _order = <String>[];
-
-  final Map<String, OutboundEntry> _entries = <String, OutboundEntry>{};
+  final LinkedHashMap<String, OutboundEntry> _entries = LinkedHashMap();
 
   OutboundEntry? _lastSentEntry;
 
@@ -57,75 +87,24 @@ class OutboundMessageStatusQueue extends ChangeNotifier {
   }
 
   List<OutboundEntry> get entries {
-    return List.unmodifiable(_order.map((id) => _entries[id]!).toList());
+    return List.unmodifiable(_entries.values.toList());
   }
 
   String? get statusOwnerId {
-    if (_order.isEmpty) return null;
+    if (_entries.isEmpty) return null;
 
-    for (final id in _order) {
-      final e = _entries[id]!;
-
-      if (e.status == OutboundStatus.sending) return id;
+    for (final e in _entries.values) {
+      if (e.state.status == OutboundStatus.sending) return e.messageId;
     }
 
-    return _order.last;
+    return _entries.values.last.messageId;
   }
 
-  void setSending({required String messageId, required Future<void> sendFuture}) {
-    if (_entries.containsKey(messageId)) return;
+  @override
+  void markSending(String id) {
+    if (_entries.containsKey(id)) return;
 
-    final entry = OutboundEntry(messageId: messageId, startedAt: DateTime.now(), future: sendFuture, status: OutboundStatus.sending);
-
-    _entries[messageId] = entry;
-    _order.add(messageId);
-    _lastSentEntry = entry;
-
-    if (!_disposed) {
-      notifyListeners();
-    }
-
-    sendFuture
-        .then((_) {
-          if (!_disposed) {
-            _setDelivered(messageId);
-          }
-        })
-        .catchError((Object e, StackTrace st) {
-          if (!_disposed) {
-            _setFailed(messageId, e);
-          }
-        });
-  }
-
-  bool get hasPending {
-    return _entries.values.any((e) => e.status == OutboundStatus.sending);
-  }
-
-  OutboundStatus statusFor(String messageId) {
-    return _entries[messageId]?.status ?? OutboundStatus.sent;
-  }
-
-  void _setDelivered(String messageId) {
-    _entries.remove(messageId);
-    _order.remove(messageId);
-
-    if (_lastSentEntry != null && _lastSentEntry?.messageId == messageId) {
-      _lastSentEntry!.status = OutboundStatus.sent;
-    }
-
-    if (!_disposed) {
-      notifyListeners();
-    }
-  }
-
-  void _setFailed(String messageId, Object error) {
-    final e = _entries[messageId];
-
-    if (e == null) return;
-
-    e.status = OutboundStatus.failed;
-    e.error = error;
+    _entries[id] = OutboundEntry(messageId: id, state: Sending(startedAt: DateTime.now()));
 
     if (!_disposed) {
       notifyListeners();
@@ -133,9 +112,31 @@ class OutboundMessageStatusQueue extends ChangeNotifier {
   }
 
   @override
+  void markDelivered(String id) {
+    final e = _entries[id];
+
+    if (e == null) return;
+
+    _entries[id] = e.copyWith(state: Delivered(completedAt: DateTime.now()));
+
+    if (!_disposed) {
+      notifyListeners();
+    }
+  }
+
+  @override
+  void markFailed(String id, Object error, [StackTrace? stackTrace]) {
+    final e = _entries[id];
+
+    if (e == null) return;
+
+    _entries[id] = e.copyWith(state: Failed(error: error, stackTrace: stackTrace));
+    notifyListeners();
+  }
+
+  @override
   void dispose() {
     _disposed = true;
-    _order.clear();
     _entries.clear();
 
     super.dispose();
