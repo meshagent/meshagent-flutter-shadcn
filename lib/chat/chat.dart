@@ -1220,6 +1220,8 @@ class _DynamicUI extends State<DynamicUI> {
   void dispose() {
     super.dispose();
     widget.message.removeListener(onUpdated);
+
+    _runtime.dispose();
   }
 
   void onUpdated() {
@@ -1251,10 +1253,25 @@ class _DynamicUI extends State<DynamicUI> {
           arguments: {"platform": "flutter", "output": "rfw", "data": data},
         );
 
-        if (response is TextResponse) {
+        final resp = response;
+        if (resp is TextResponse) {
           if (!mounted) return;
           setState(() {
-            _remoteWidgets = parseLibraryFile((response as TextResponse).text);
+            _remoteWidgets = parseLibraryFile(resp.text);
+            _runtime.update(mainName, _remoteWidgets!);
+          });
+        } else if (resp is JsonResponse) {
+          if (!mounted) return;
+
+          setState(() {
+            final markup = resp.json["markup"];
+            final data = resp.json["data"];
+
+            if (data != null) {
+              _data.update("data", data);
+            }
+
+            _remoteWidgets = parseLibraryFile(markup);
             _runtime.update(mainName, _remoteWidgets!);
           });
         } else {
@@ -1294,6 +1311,18 @@ class _DynamicUI extends State<DynamicUI> {
     }
   }
 
+  void onEvent(String name, DynamicMap? data) {
+    if (name == "invoke") {
+      widget.room.agents.invokeTool(
+        toolkit: data!["toolkit"] as String,
+        tool: data["tool"] as String,
+        arguments: data["arguments"] as Map<String, Object>,
+      );
+    } else if (name == "open") {
+      launchUrl(Uri.parse(data!["url"] as String), webOnlyWindowName: data["target"] as String?);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (error != null) {
@@ -1302,7 +1331,7 @@ class _DynamicUI extends State<DynamicUI> {
     if (_remoteWidgets == null) {
       return Container();
     }
-    return RemoteWidget(runtime: _runtime, data: _data, widget: const FullyQualifiedWidgetName(mainName, 'root'));
+    return RemoteWidget(runtime: _runtime, data: _data, widget: const FullyQualifiedWidgetName(mainName, 'root'), onEvent: onEvent);
   }
 }
 
