@@ -1268,7 +1268,7 @@ class _DynamicUI extends State<DynamicUI> {
             final data = resp.json["data"];
 
             if (data != null) {
-              _data.update("data", data);
+              _data.update("serverData", data);
             }
 
             _remoteWidgets = parseLibraryFile(markup);
