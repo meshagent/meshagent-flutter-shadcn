@@ -1354,14 +1354,23 @@ class _DynamicUI extends State<DynamicUI> {
   }
 
   void onEvent(String name, DynamicMap? data) {
-    if (name == "invoke") {
-      widget.room.agents.invokeTool(
-        toolkit: data!["toolkit"] as String,
-        tool: data["tool"] as String,
-        arguments: data["arguments"] as Map<String, Object>,
+    try {
+      if (name == "invoke") {
+        widget.room.agents.invokeTool(
+          toolkit: data!["toolkit"] as String,
+          tool: data["tool"] as String,
+          arguments: data["arguments"] as Map<String, Object>,
+        );
+      } else if (name == "open") {
+        launchUrl(Uri.parse(data!["url"] as String), webOnlyWindowName: data["target"] as String?);
+      } else {
+        showShadDialog(context: context, builder: (context) => ShadDialog.alert(title: Text("Unknown event received $name")));
+      }
+    } on Exception catch (ex) {
+      showShadDialog(
+        context: context,
+        builder: (context) => ShadDialog.alert(title: Text("Unable to process event $name, data: $data, error: $ex")),
       );
-    } else if (name == "open") {
-      launchUrl(Uri.parse(data!["url"] as String), webOnlyWindowName: data["target"] as String?);
     }
   }
 
