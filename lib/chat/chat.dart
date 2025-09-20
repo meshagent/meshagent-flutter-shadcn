@@ -1353,16 +1353,16 @@ class _DynamicUI extends State<DynamicUI> {
     }
   }
 
-  void onEvent(String name, DynamicMap? data) {
+  void onEvent(String name, DynamicMap? data) async {
     try {
       if (name == "invoke") {
-        widget.room.agents.invokeTool(
+        await widget.room.agents.invokeTool(
           toolkit: data!["toolkit"] as String,
           tool: data["tool"] as String,
           arguments: data["arguments"] as Map<String, Object>,
         );
       } else if (name == "open") {
-        launchUrl(Uri.parse(data!["url"] as String), webOnlyWindowName: data["target"] as String?);
+        await launchUrl(Uri.parse(data!["url"] as String), webOnlyWindowName: data["target"] as String?);
       } else {
         showShadDialog(context: context, builder: (context) => ShadDialog.alert(title: Text("Unknown event received $name")));
       }
