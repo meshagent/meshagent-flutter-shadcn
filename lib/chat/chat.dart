@@ -1359,7 +1359,7 @@ class _DynamicUI extends State<DynamicUI> {
         await widget.room.agents.invokeTool(
           toolkit: data!["toolkit"] as String,
           tool: data["tool"] as String,
-          arguments: data["arguments"] as Map<String, Object>,
+          arguments: data["arguments"] as Map<String, dynamic>,
         );
       } else if (name == "open") {
         await launchUrl(Uri.parse(data!["url"] as String), webOnlyWindowName: data["target"] as String?);
