@@ -1367,6 +1367,9 @@ class _DynamicUI extends State<DynamicUI> {
         showShadDialog(context: context, builder: (context) => ShadDialog.alert(title: Text("Unknown event received $name")));
       }
     } on Exception catch (ex) {
+      if (!mounted) {
+        return;
+      }
       showShadDialog(
         context: context,
         builder: (context) => ShadDialog.alert(title: Text("Unable to process event $name, data: $data, error: $ex")),
