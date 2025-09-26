@@ -39,7 +39,7 @@ dependencies:
   rfw: ^1.0.31
   shadcn_ui: ^0.28.7
   markdown_widget: ^2.3.2+6
-  lucide_icons_flutter: ^3.0.0
+  lucide_icons_flutter: ^3.1.1
   google_fonts: ^6.2.1
   interactive_viewer_2: ^0.0.10
   just_audio: ^0.9.43
