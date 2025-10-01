@@ -844,12 +844,12 @@ class _ChatThreadState extends State<ChatThread> {
       document: widget.document,
       room: widget.room,
       controller: controller,
-      builder: (context, messages, online, offline, typing, thinking) {
-        if (offline.isNotEmpty && widget.waitingForParticipantsBuilder != null) {
-          return widget.waitingForParticipantsBuilder!(context, offline.toList());
+      builder: (context, state) {
+        if (state.offline.isNotEmpty && widget.waitingForParticipantsBuilder != null) {
+          return widget.waitingForParticipantsBuilder!(context, state.offline.toList());
         }
 
-        bool bottomAlign = !widget.startChatCentered || messages.isNotEmpty;
+        bool bottomAlign = !widget.startChatCentered || state.messages.isNotEmpty;
 
         return FileDropArea(
           onFileDrop: (name, dataStream, size) async {
@@ -862,9 +862,9 @@ class _ChatThreadState extends State<ChatThread> {
               ChatThreadMessages(
                 room: widget.room,
                 startChatCentered: widget.startChatCentered,
-                messages: messages,
-                online: online,
-                showTyping: typing.isNotEmpty || thinking.isNotEmpty,
+                messages: state.messages,
+                online: state.online,
+                showTyping: state.typing.isNotEmpty || state.thinking.isNotEmpty,
                 participantNameBuilder: widget.participantNameBuilder,
                 fileInThreadBuilder: widget.fileInThreadBuilder,
                 currentStatusEntry: _currentStatusEntry,
@@ -877,7 +877,7 @@ class _ChatThreadState extends State<ChatThread> {
                     child: ChatThreadInput(
                       leading: widget.inputLeadingBuilder == null ? null : widget.inputLeadingBuilder!(context, controller),
                       trailing:
-                          thinking.isNotEmpty
+                          state.thinking.isNotEmpty
                               ? ShadGestureDetector(
                                 cursor: SystemMouseCursors.click,
                                 onTapDown: (_) {
@@ -916,6 +916,8 @@ class _ChatThreadState extends State<ChatThread> {
                   ),
                 ),
               ),
+              if (state.reasoning != null)
+                ShadCard(title: Text("${state.reasoning!.type} ${state.reasoning!.status}"), description: Text(state.reasoning!.summary)),
             ],
           ),
         );
@@ -1092,6 +1094,24 @@ class ChatThreadMessages extends StatelessWidget {
   }
 }
 
+class ChatThreadSnapshot {
+  ChatThreadSnapshot({
+    this.reasoning,
+    required this.messages,
+    required this.online,
+    required this.offline,
+    required this.typing,
+    required this.thinking,
+  });
+
+  final ReasoningSummary? reasoning;
+  final List<MeshElement> messages;
+  final List<Participant> online;
+  final List<String> offline;
+  final List<String> typing;
+  final List<String> thinking;
+}
+
 class ChatThreadBuilder extends StatefulWidget {
   const ChatThreadBuilder({
     super.key,
@@ -1106,18 +1126,18 @@ class ChatThreadBuilder extends StatefulWidget {
   final MeshDocument document;
   final RoomClient room;
   final ChatThreadController controller;
-  final Widget Function(
-    BuildContext,
-    List<MeshElement> messages,
-    List<Participant> online,
-    List<String> offline,
-    List<String> typing,
-    List<String> thinking,
-  )
-  builder;
+  final Widget Function(BuildContext, ChatThreadSnapshot state) builder;
 
   @override
   State createState() => _ChatThreadBuilder();
+}
+
+class ReasoningSummary {
+  ReasoningSummary({required this.type, required this.status, required this.summary});
+
+  final String type;
+  final String status;
+  final String summary;
 }
 
 class _ChatThreadBuilder extends State<ChatThreadBuilder> {
@@ -1185,13 +1205,16 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         } else {
           thinking.remove(event.message.fromParticipantId);
         }
-
+      } else if (event.message.type == "reasoning" && event.message.message["path"] == widget.path) {
         if (mounted) {
+          reasoning = ReasoningSummary(type: event.message.message["type"], status: event.message.message["status"], summary: "summary");
           setState(() {});
         }
       }
     }
   }
+
+  ReasoningSummary? reasoning;
 
   void _getParticipants() {
     final online = widget.controller.getOnlineParticipants(widget.document).toSet();
@@ -1223,11 +1246,14 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
   Widget build(BuildContext context) {
     return widget.builder(
       context,
-      messages,
-      onlineParticipants.toList(),
-      offlineParticipants.toList(),
-      typing.keys.toList(),
-      thinking.toList(),
+      ChatThreadSnapshot(
+        messages: messages,
+        online: onlineParticipants.toList(),
+        offline: offlineParticipants.toList(),
+        typing: typing.keys.toList(),
+        thinking: thinking.toList(),
+        reasoning: reasoning,
+      ),
     );
   }
 }
