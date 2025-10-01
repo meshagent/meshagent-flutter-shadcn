@@ -916,8 +916,6 @@ class _ChatThreadState extends State<ChatThread> {
                   ),
                 ),
               ),
-              if (state.reasoning != null)
-                ShadCard(title: Text("${state.reasoning!.type} ${state.reasoning!.status}"), description: Text(state.reasoning!.summary)),
             ],
           ),
         );
@@ -992,6 +990,9 @@ class ChatThreadMessages extends StatelessWidget {
     final text = message.getAttribute("text");
     final id = message.getAttribute("id");
 
+    if (message.tagName == "reasoning") {
+      return ReasoningTrace(previous: previous, message: message, next: next);
+    }
     if (message.tagName == "exec") {
       return ShellLine(previous: previous, message: message, next: next);
     }
@@ -1095,16 +1096,8 @@ class ChatThreadMessages extends StatelessWidget {
 }
 
 class ChatThreadSnapshot {
-  ChatThreadSnapshot({
-    this.reasoning,
-    required this.messages,
-    required this.online,
-    required this.offline,
-    required this.typing,
-    required this.thinking,
-  });
+  ChatThreadSnapshot({required this.messages, required this.online, required this.offline, required this.typing, required this.thinking});
 
-  final ReasoningSummary? reasoning;
   final List<MeshElement> messages;
   final List<Participant> online;
   final List<String> offline;
@@ -1130,14 +1123,6 @@ class ChatThreadBuilder extends StatefulWidget {
 
   @override
   State createState() => _ChatThreadBuilder();
-}
-
-class ReasoningSummary {
-  ReasoningSummary({required this.type, required this.status, required this.summary});
-
-  final String type;
-  final String status;
-  final String summary;
 }
 
 class _ChatThreadBuilder extends State<ChatThreadBuilder> {
@@ -1205,16 +1190,9 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         } else {
           thinking.remove(event.message.fromParticipantId);
         }
-      } else if (event.message.type == "reasoning" && event.message.message["path"] == widget.path) {
-        if (mounted) {
-          reasoning = ReasoningSummary(type: event.message.message["type"], status: event.message.message["status"], summary: "summary");
-          setState(() {});
-        }
       }
     }
   }
-
-  ReasoningSummary? reasoning;
 
   void _getParticipants() {
     final online = widget.controller.getOnlineParticipants(widget.document).toSet();
@@ -1252,7 +1230,6 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         offline: offlineParticipants.toList(),
         typing: typing.keys.toList(),
         thinking: thinking.toList(),
-        reasoning: reasoning,
       ),
     );
   }
@@ -1418,6 +1395,110 @@ class _DynamicUI extends State<DynamicUI> {
       return Container();
     }
     return RemoteWidget(runtime: _runtime, data: _data, widget: const FullyQualifiedWidgetName(mainName, 'root'), onEvent: onEvent);
+  }
+}
+
+class ReasoningTrace extends StatefulWidget {
+  const ReasoningTrace({super.key, required this.previous, required this.message, required this.next});
+
+  final MeshElement? previous;
+  final MeshElement message;
+  final MeshElement? next;
+
+  @override
+  State<ReasoningTrace> createState() => _ReasoningTrace();
+}
+
+class _ReasoningTrace extends State<ReasoningTrace> {
+  bool expanded = false;
+  @override
+  Widget build(BuildContext context) {
+    final mdColor = (ShadTheme.of(context).textTheme.p.color ??
+            DefaultTextStyle.of(context).style.color ??
+            ShadTheme.of(context).colorScheme.foreground)
+        .withAlpha(180);
+    final baseFontSize = MediaQuery.of(context).textScaler.scale((DefaultTextStyle.of(context).style.fontSize ?? 14));
+
+    final border = BorderSide(color: ShadTheme.of(context).cardTheme.border!.bottom.color);
+    return Container(
+      margin: EdgeInsets.only(
+        top: widget.previous?.tagName != widget.message.tagName ? 16 : 0,
+        bottom: widget.next?.tagName != widget.message.tagName ? 8 : 0,
+        right: 50,
+      ),
+      decoration: BoxDecoration(
+        color: ShadTheme.of(context).colorScheme.background,
+        border: Border(
+          left: border,
+          right: border,
+          top: widget.previous?.tagName != widget.message.tagName ? border : BorderSide.none,
+          bottom: border,
+        ),
+        borderRadius: BorderRadius.only(
+          topLeft: widget.previous?.tagName != widget.message.tagName ? Radius.circular(10) : Radius.zero,
+          topRight: widget.previous?.tagName != widget.message.tagName ? Radius.circular(10) : Radius.zero,
+          bottomRight: widget.next?.tagName == widget.message.tagName ? Radius.zero : Radius.circular(10),
+          bottomLeft: widget.next?.tagName == widget.message.tagName ? Radius.zero : Radius.circular(10),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: EdgeInsets.only(top: 16, bottom: 16, right: 16, left: 16),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: MarkdownWidget(
+                    padding: const EdgeInsets.all(0),
+                    config: MarkdownConfig(
+                      configs: [
+                        HrConfig(color: mdColor),
+                        H1Config(style: TextStyle(fontSize: baseFontSize * 2, color: mdColor, fontWeight: FontWeight.bold)),
+                        H2Config(style: TextStyle(fontSize: baseFontSize * 1.8, color: mdColor, inherit: false)),
+                        H3Config(style: TextStyle(fontSize: baseFontSize * 1.6, color: mdColor, inherit: false)),
+                        H4Config(style: TextStyle(fontSize: baseFontSize * 1.4, color: mdColor, inherit: false)),
+                        H5Config(style: TextStyle(fontSize: baseFontSize * 1.2, color: mdColor, inherit: false)),
+                        H6Config(style: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false)),
+                        PreConfig(
+                          decoration: BoxDecoration(color: ShadTheme.of(context).cardTheme.backgroundColor),
+                          textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
+                        ),
+                        PConfig(textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false)),
+                        CodeConfig(style: GoogleFonts.sourceCodePro(fontSize: baseFontSize * 1.0, color: mdColor)),
+                        BlockquoteConfig(textColor: mdColor),
+                        LinkConfig(
+                          style: TextStyle(
+                            color: ShadTheme.of(context).linkButtonTheme.foregroundColor,
+                            decoration: TextDecoration.underline,
+                          ),
+                        ),
+                        ListConfig(
+                          marker: (isOrdered, depth, index) {
+                            return Padding(padding: EdgeInsets.only(right: 5), child: Text("${index + 1}.", textAlign: TextAlign.right));
+                          },
+                        ),
+                      ],
+                    ),
+                    shrinkWrap: true,
+                    selectable: true,
+
+                    /*builders: {
+      "code": CodeElementBuilder(
+          document: ChatDocumentProvider.of(context).document,
+          api: TimuApiProvider.of(context).api,
+          layer: layer),
+},*/
+                    data: widget.message.attributes["summary"] ?? "",
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
