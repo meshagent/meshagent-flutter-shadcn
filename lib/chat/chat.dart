@@ -1190,6 +1190,9 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         } else {
           thinking.remove(event.message.fromParticipantId);
         }
+        if (mounted) {
+          setState(() {});
+        }
       }
     }
   }
