@@ -614,6 +614,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   @override
   Widget build(BuildContext context) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
         ListenableBuilder(
           listenable: widget.controller,
@@ -658,7 +659,6 @@ class _ChatThreadInput extends State<ChatThreadInput> {
 
         ShadInput(
           crossAxisAlignment: CrossAxisAlignment.end,
-          constraints: BoxConstraints(maxHeight: 200),
           inputPadding: EdgeInsets.all(2),
           leading: widget.leading,
 
@@ -690,7 +690,8 @@ class _ChatThreadInput extends State<ChatThreadInput> {
             color: ShadTheme.of(context).ghostButtonTheme.hoverBackgroundColor,
             border: ShadBorder.all(radius: BorderRadius.circular(15)),
           ),
-          maxLines: null,
+          maxLines: 8,
+          minLines: 1,
           placeholder: Text("Message"),
           focusNode: focusNode,
           controller: widget.controller.textFieldController,
@@ -1422,7 +1423,7 @@ class _ReasoningTrace extends State<ReasoningTrace> {
         .withAlpha(180);
     final baseFontSize = MediaQuery.of(context).textScaler.scale((DefaultTextStyle.of(context).style.fontSize ?? 14));
 
-    final border = BorderSide(color: ShadTheme.of(context).cardTheme.border!.bottom.color);
+    final border = BorderSide(color: ShadTheme.of(context).cardTheme.border!.bottom!.color!);
     return Container(
       margin: EdgeInsets.only(
         top: widget.previous?.tagName != widget.message.tagName ? 16 : 0,
@@ -1520,7 +1521,7 @@ class _ShellLineState extends State<ShellLine> {
   bool expanded = false;
   @override
   Widget build(BuildContext context) {
-    final border = BorderSide(color: ShadTheme.of(context).cardTheme.border!.bottom.color);
+    final border = BorderSide(color: ShadTheme.of(context).cardTheme.border!.bottom!.color!);
     return Container(
       margin: EdgeInsets.only(
         top: widget.previous?.tagName != widget.message.tagName ? 16 : 0,
