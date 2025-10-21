@@ -137,7 +137,7 @@ class ChatThreadController extends ChangeNotifier {
     textFieldController.addListener(notifyListeners);
   }
 
-  final List<RequiredToolkit> toolkits = [];
+  final List<MessageToolkit> toolkits = [];
   final RoomClient room;
   final TextEditingController textFieldController = ShadTextEditingController();
   final List<FileUpload> _attachmentUploads = [];
@@ -145,7 +145,7 @@ class ChatThreadController extends ChangeNotifier {
 
   List<FileUpload> get attachmentUploads => List<FileUpload>.unmodifiable(_attachmentUploads);
 
-  bool toggleToolkit(RequiredToolkit toolkit) {
+  bool toggleToolkit(MessageToolkit toolkit) {
     if (toolkits.contains(toolkit)) {
       toolkits.remove(toolkit);
       return false;
@@ -389,7 +389,7 @@ class ChatThreadLoader extends StatelessWidget {
 class ChatThreadAttachButton extends StatefulWidget {
   const ChatThreadAttachButton({required this.controller, super.key, this.optionalToolkits = const []});
 
-  final List<OptionalToolkit> optionalToolkits;
+  final List<MessageToolkit> optionalToolkits;
 
   final ChatThreadController controller;
 
@@ -431,15 +431,15 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
             builder:
                 (context) => ShadContextMenuItem(
                   textStyle:
-                      widget.controller.toolkits.contains(tk.toolkit)
+                      widget.controller.toolkits.contains(tk)
                           ? ShadTheme.of(context).contextMenuTheme.textStyle!.copyWith(color: Colors.blue)
                           : null,
-                  leading: Icon(tk.icon, color: widget.controller.toolkits.contains(tk.toolkit) ? Colors.blue : null),
-                  onPressed: () => widget.controller.toggleToolkit(tk.toolkit),
+                  leading: Icon(tk.icon, color: widget.controller.toolkits.contains(tk) ? Colors.blue : null),
+                  onPressed: () => widget.controller.toggleToolkit(tk),
 
                   trailing:
-                      widget.controller.toolkits.contains(tk.toolkit)
-                          ? Icon(LucideIcons.check, color: widget.controller.toolkits.contains(tk.toolkit) ? Colors.blue : null)
+                      widget.controller.toolkits.contains(tk)
+                          ? Icon(LucideIcons.check, color: widget.controller.toolkits.contains(tk) ? Colors.blue : null)
                           : null,
                   child: Text(tk.text),
                 ),
@@ -456,12 +456,35 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
   }
 }
 
-class OptionalToolkit {
-  OptionalToolkit({required this.icon, required this.toolkit, required this.text});
+abstract class MessageToolkit {
+  MessageToolkit({required this.icon, required this.text});
 
   final String text;
   final IconData icon;
+
+  Map<String, dynamic> toJson();
+}
+
+class MessageRequiredToolkit extends MessageToolkit {
+  MessageRequiredToolkit({required super.icon, required this.toolkit, required super.text});
+
   final RequiredToolkit toolkit;
+
+  @override
+  Map<String, dynamic> toJson() {
+    return {"required_toolkit": toolkit.toJson()};
+  }
+}
+
+class MessageLLMToolkit extends MessageToolkit {
+  MessageLLMToolkit({required super.icon, required this.config, required super.text});
+
+  final Map<String, dynamic> config;
+
+  @override
+  Map<String, dynamic> toJson() {
+    return {"llm": config};
+  }
 }
 
 class ChatThreadInput extends StatefulWidget {
