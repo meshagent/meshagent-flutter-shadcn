@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:markdown_widget/markdown_widget.dart';
 import 'package:meshagent/meshagent.dart';
+import 'package:meshagent_flutter_shadcn/viewers/viewers.dart';
 import 'package:rfw/formats.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:super_clipboard/super_clipboard.dart';
@@ -147,9 +148,11 @@ class ChatThreadController extends ChangeNotifier {
   bool toggleToolkit(ToolkitBuilderOption toolkit) {
     if (toolkits.contains(toolkit)) {
       toolkits.remove(toolkit);
+      notifyListeners();
       return false;
     } else {
       toolkits.add(toolkit);
+      notifyListeners();
       return true;
     }
   }
@@ -464,16 +467,27 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
         onTap: () {
           popoverController.toggle();
         },
-        child: SizedBox(width: 22, height: 22, child: Icon(LucideIcons.plus)),
+        child: Container(
+          alignment: Alignment.centerLeft,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            spacing: 8,
+            children: [
+              SizedBox(width: 22, height: 22, child: Icon(LucideIcons.plus)),
+              for (final tool in widget.controller.toolkits) ShadBadge.outline(child: Text(tool.selectedText)),
+            ],
+          ),
+        ),
       ),
     );
   }
 }
 
 class ToolkitBuilderOption {
-  ToolkitBuilderOption({required this.icon, required this.text, required this.config});
+  ToolkitBuilderOption({required this.icon, required this.text, required this.selectedText, required this.config});
 
   final String text;
+  final String selectedText;
   final IconData icon;
   final ToolkitConfig config;
 
@@ -492,6 +506,8 @@ class ChatThreadInput extends StatefulWidget {
     this.attachmentBuilder,
     this.leading,
     this.trailing,
+    this.header,
+    this.footer,
   });
 
   final RoomClient room;
@@ -501,6 +517,8 @@ class ChatThreadInput extends StatefulWidget {
   final Widget Function(BuildContext context, FileUpload upload)? attachmentBuilder;
   final Widget? leading;
   final Widget? trailing;
+  final Widget? header;
+  final Widget? footer;
   @override
   State createState() => _ChatThreadInput();
 }
@@ -632,6 +650,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   @override
   Widget build(BuildContext context) {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
         ListenableBuilder(
@@ -675,11 +694,11 @@ class _ChatThreadInput extends State<ChatThreadInput> {
           },
         ),
 
+        if (widget.header != null) widget.header!,
         ShadInput(
           crossAxisAlignment: CrossAxisAlignment.end,
           inputPadding: EdgeInsets.all(2),
-          leading: widget.leading,
-
+          leading: widget.leading ?? SizedBox(width: 3),
           trailing:
               widget.trailing ??
               (showSendButton && allAttachmentsUploaded
@@ -700,7 +719,6 @@ class _ChatThreadInput extends State<ChatThreadInput> {
                     ),
                   )
                   : null),
-
           padding: EdgeInsets.only(left: 5, right: 5, top: 5, bottom: 5),
           decoration: ShadDecoration(
             secondaryFocusedBorder: ShadBorder.none,
@@ -714,6 +732,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
           focusNode: focusNode,
           controller: widget.controller.textFieldController,
         ),
+        if (widget.footer != null) widget.footer!,
       ],
     );
   }
@@ -735,7 +754,7 @@ class ChatThread extends StatefulWidget {
     this.waitingForParticipantsBuilder,
     this.attachmentBuilder,
     this.fileInThreadBuilder,
-    this.inputLeadingBuilder,
+    this.toolsBuilder,
 
     this.agentName,
   });
@@ -754,7 +773,7 @@ class ChatThread extends StatefulWidget {
   final Widget Function(BuildContext, List<String>)? waitingForParticipantsBuilder;
   final Widget Function(BuildContext context, FileUpload upload)? attachmentBuilder;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
-  final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? inputLeadingBuilder;
+  final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
 
   @override
   State createState() => _ChatThreadState();
@@ -893,52 +912,74 @@ class _ChatThreadState extends State<ChatThread> {
                 fileInThreadBuilder: widget.fileInThreadBuilder,
                 currentStatusEntry: _currentStatusEntry,
               ),
-              Padding(
-                padding: EdgeInsets.symmetric(horizontal: 15, vertical: 8),
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: 912),
-                    child: ChatThreadInput(
-                      leading: widget.inputLeadingBuilder == null ? null : widget.inputLeadingBuilder!(context, controller, state),
-                      trailing:
-                          state.thinking.isNotEmpty
-                              ? ShadGestureDetector(
-                                cursor: SystemMouseCursors.click,
-                                onTapDown: (_) {
-                                  controller.cancel(widget.path, widget.document);
-                                },
-                                child: ShadTooltip(
-                                  builder: (context) => Text("Stop"),
-                                  child: Container(
-                                    width: 22,
-                                    height: 22,
-                                    decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
-                                    child: Icon(LucideIcons.x, color: ShadTheme.of(context).colorScheme.background),
-                                  ),
+              ListenableBuilder(
+                listenable: controller,
+                builder:
+                    (context, _) => Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(maxWidth: 912),
+                          child: ChatThreadInput(
+                            leading:
+                                controller.toolkits.isNotEmpty
+                                    ? null
+                                    : widget.toolsBuilder == null
+                                    ? null
+                                    : widget.toolsBuilder!(context, controller, state),
+                            footer:
+                                controller.toolkits.isEmpty
+                                    ? null
+                                    : widget.toolsBuilder == null
+                                    ? null
+                                    : Padding(padding: EdgeInsets.only(top: 8), child: widget.toolsBuilder!(context, controller, state)),
+                            trailing:
+                                state.thinking.isNotEmpty
+                                    ? ShadGestureDetector(
+                                      cursor: SystemMouseCursors.click,
+                                      onTapDown: (_) {
+                                        controller.cancel(widget.path, widget.document);
+                                      },
+                                      child: ShadTooltip(
+                                        builder: (context) => Text("Stop"),
+                                        child: Container(
+                                          width: 22,
+                                          height: 22,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: ShadTheme.of(context).colorScheme.foreground,
+                                          ),
+                                          child: Icon(LucideIcons.x, color: ShadTheme.of(context).colorScheme.background),
+                                        ),
+                                      ),
+                                    )
+                                    : null,
+                            room: widget.room,
+                            onSend: (value, attachments) {
+                              controller.send(
+                                thread: widget.document,
+                                path: widget.path,
+                                message: ChatMessage(
+                                  id: const Uuid().v4(),
+                                  text: value,
+                                  attachments: attachments.map((x) => x.path).toList(),
                                 ),
-                              )
-                              : null,
-                      room: widget.room,
-                      onSend: (value, attachments) {
-                        controller.send(
-                          thread: widget.document,
-                          path: widget.path,
-                          message: ChatMessage(id: const Uuid().v4(), text: value, attachments: attachments.map((x) => x.path).toList()),
-                          onMessageSent: widget.onMessageSent,
-                        );
-                      },
-                      onChanged: (value, attachments) {
-                        for (final part in controller.getOnlineParticipants(widget.document)) {
-                          if (part.id != widget.room.localParticipant?.id) {
-                            widget.room.messaging.sendMessage(to: part, type: "typing", message: {"path": widget.path});
-                          }
-                        }
-                      },
-                      controller: controller,
-                      attachmentBuilder: widget.attachmentBuilder,
+                                onMessageSent: widget.onMessageSent,
+                              );
+                            },
+                            onChanged: (value, attachments) {
+                              for (final part in controller.getOnlineParticipants(widget.document)) {
+                                if (part.id != widget.room.localParticipant?.id) {
+                                  widget.room.messaging.sendMessage(to: part, type: "typing", message: {"path": widget.path});
+                                }
+                              }
+                            },
+                            controller: controller,
+                            attachmentBuilder: widget.attachmentBuilder,
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-                ),
               ),
             ],
           ),
