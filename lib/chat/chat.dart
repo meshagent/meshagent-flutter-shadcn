@@ -386,7 +386,9 @@ class ChatThreadLoader extends StatelessWidget {
 }
 
 class ChatThreadAttachButton extends StatefulWidget {
-  const ChatThreadAttachButton({required this.controller, super.key, this.toolkits = const []});
+  const ChatThreadAttachButton({required this.controller, super.key, this.toolkits = const [], this.alwaysShowAttachFiles});
+
+  final bool? alwaysShowAttachFiles;
 
   final List<ToolkitBuilderOption> toolkits;
 
@@ -431,7 +433,7 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
       constraints: BoxConstraints(minWidth: 175),
       anchor: ShadAnchorAuto(followerAnchor: Alignment.topRight, targetAnchor: Alignment.topLeft),
       items: [
-        if (widget.toolkits.where((x) => x.config is StorageConfig).isNotEmpty)
+        if (widget.alwaysShowAttachFiles == true || widget.toolkits.where((x) => x.config is StorageConfig).isNotEmpty)
           ShadContextMenuItem(
             leading: Icon(LucideIcons.paperclip),
             onPressed: () => _onSelectAttachment(widget.toolkits.where((x) => x.config is StorageConfig).first),
