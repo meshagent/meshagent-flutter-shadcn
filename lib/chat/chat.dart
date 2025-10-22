@@ -247,7 +247,7 @@ class ChatThreadController extends ChangeNotifier {
         to: participant,
         type: "chat",
         message: {
-          "toolkits": [for (final tk in toolkits) tk.toJson()],
+          "tools": [for (final tk in toolkits) tk.toJson()],
           "path": path,
           "text": message.text,
           "attachments": message.attachments.map((a) => {"path": a}).toList(),
@@ -456,34 +456,15 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
   }
 }
 
-abstract class MessageToolkit {
-  MessageToolkit({required this.icon, required this.text});
+class MessageToolkit {
+  MessageToolkit({required this.icon, required this.text, required this.data});
 
   final String text;
   final IconData icon;
+  final Map<String, dynamic> data;
 
-  Map<String, dynamic> toJson();
-}
-
-class MessageRequiredToolkit extends MessageToolkit {
-  MessageRequiredToolkit({required super.icon, required this.toolkit, required super.text});
-
-  final RequiredToolkit toolkit;
-
-  @override
   Map<String, dynamic> toJson() {
-    return {"required_toolkit": toolkit.toJson()};
-  }
-}
-
-class MessageLLMToolkit extends MessageToolkit {
-  MessageLLMToolkit({required super.icon, required this.config, required super.text});
-
-  final Map<String, dynamic> config;
-
-  @override
-  Map<String, dynamic> toJson() {
-    return {"llm": config};
+    return data;
   }
 }
 
