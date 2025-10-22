@@ -136,7 +136,7 @@ class ChatThreadController extends ChangeNotifier {
     textFieldController.addListener(notifyListeners);
   }
 
-  final List<ToolProviderOption> toolkits = [];
+  final List<ToolkitBuilderOption> toolkits = [];
   final RoomClient room;
   final TextEditingController textFieldController = ShadTextEditingController();
   final List<FileUpload> _attachmentUploads = [];
@@ -144,7 +144,7 @@ class ChatThreadController extends ChangeNotifier {
 
   List<FileUpload> get attachmentUploads => List<FileUpload>.unmodifiable(_attachmentUploads);
 
-  bool toggleToolkit(ToolProviderOption toolkit) {
+  bool toggleToolkit(ToolkitBuilderOption toolkit) {
     if (toolkits.contains(toolkit)) {
       toolkits.remove(toolkit);
       return false;
@@ -386,9 +386,9 @@ class ChatThreadLoader extends StatelessWidget {
 }
 
 class ChatThreadAttachButton extends StatefulWidget {
-  const ChatThreadAttachButton({required this.controller, super.key, this.toolProviders = const []});
+  const ChatThreadAttachButton({required this.controller, super.key, this.ToolkitBuilders = const []});
 
-  final List<ToolProviderOption> toolProviders;
+  final List<ToolkitBuilderOption> ToolkitBuilders;
 
   final ChatThreadController controller;
 
@@ -425,7 +425,7 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
       items: [
         ShadContextMenuItem(leading: Icon(LucideIcons.paperclip), onPressed: _onSelectAttachment, child: Text("Attach a file...")),
 
-        for (final tk in widget.toolProviders)
+        for (final tk in widget.ToolkitBuilders)
           Builder(
             builder:
                 (context) => ShadContextMenuItem(
@@ -455,12 +455,12 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
   }
 }
 
-class ToolProviderOption {
-  ToolProviderOption({required this.icon, required this.text, required this.config});
+class ToolkitBuilderOption {
+  ToolkitBuilderOption({required this.icon, required this.text, required this.config});
 
   final String text;
   final IconData icon;
-  final ToolConfig config;
+  final ToolkitConfig config;
 
   Map<String, dynamic> toJson() {
     return config.toJson();
@@ -1104,8 +1104,8 @@ class ChatThreadMessages extends StatelessWidget {
   }
 }
 
-class ThreadToolProvider {
-  ThreadToolProvider({required this.name});
+class ThreadToolkitBuilder {
+  ThreadToolkitBuilder({required this.name});
 
   final String name;
 }
@@ -1127,7 +1127,7 @@ class ChatThreadSnapshot {
   final List<String> offline;
   final List<String> typing;
   final List<String> thinking;
-  final List<ThreadToolProvider> availableTools;
+  final List<ThreadToolkitBuilder> availableTools;
 }
 
 class ChatThreadBuilder extends StatefulWidget {
@@ -1219,7 +1219,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
       if (event.message.type == "set_thread_tool_providers") {
         if (mounted) {
           setState(() {
-            availableTools = [for (final json in event.message.message["tool_providers"] as List) ThreadToolProvider(name: json["name"])];
+            availableTools = [for (final json in event.message.message["tool_providers"] as List) ThreadToolkitBuilder(name: json["name"])];
           });
         }
       }
@@ -1280,7 +1280,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
     setState(() {});
   }
 
-  List<ThreadToolProvider> availableTools = [];
+  List<ThreadToolkitBuilder> availableTools = [];
 
   @override
   Widget build(BuildContext context) {
