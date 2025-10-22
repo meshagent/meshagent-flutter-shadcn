@@ -386,9 +386,9 @@ class ChatThreadLoader extends StatelessWidget {
 }
 
 class ChatThreadAttachButton extends StatefulWidget {
-  const ChatThreadAttachButton({required this.controller, super.key, this.ToolkitBuilders = const []});
+  const ChatThreadAttachButton({required this.controller, super.key, this.toolkits = const []});
 
-  final List<ToolkitBuilderOption> ToolkitBuilders;
+  final List<ToolkitBuilderOption> toolkits;
 
   final ChatThreadController controller;
 
@@ -397,7 +397,7 @@ class ChatThreadAttachButton extends StatefulWidget {
 }
 
 class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
-  Future<void> _onSelectAttachment() async {
+  Future<void> _onSelectAttachment(ToolkitBuilderOption storage) async {
     final picked = await FilePicker.platform.pickFiles(dialogTitle: "Select files", allowMultiple: true, withReadStream: true);
 
     if (picked == null) {
@@ -406,6 +406,11 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
 
     for (final file in picked.files) {
       widget.controller.uploadFile(file.name, file.readStream!.map(Uint8List.fromList), file.size);
+    }
+
+    if (!widget.controller.toolkits.contains(storage)) {
+      widget.controller.toggleToolkit(storage);
+      setState(() {});
     }
   }
 
@@ -419,13 +424,21 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.toolkits.isEmpty) {
+      return SizedBox(width: 0, height: 22);
+    }
     return ShadContextMenu(
       constraints: BoxConstraints(minWidth: 175),
       anchor: ShadAnchorAuto(followerAnchor: Alignment.topRight, targetAnchor: Alignment.topLeft),
       items: [
-        ShadContextMenuItem(leading: Icon(LucideIcons.paperclip), onPressed: _onSelectAttachment, child: Text("Attach a file...")),
+        if (widget.toolkits.where((x) => x.config is StorageConfig).isNotEmpty)
+          ShadContextMenuItem(
+            leading: Icon(LucideIcons.paperclip),
+            onPressed: () => _onSelectAttachment(widget.toolkits.where((x) => x.config is StorageConfig).first),
+            child: Text("Attach a file..."),
+          ),
 
-        for (final tk in widget.ToolkitBuilders)
+        for (final tk in widget.toolkits)
           Builder(
             builder:
                 (context) => ShadContextMenuItem(
