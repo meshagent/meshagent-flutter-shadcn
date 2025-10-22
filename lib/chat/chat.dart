@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:markdown_widget/markdown_widget.dart';
+import 'package:meshagent/meshagent.dart';
 import 'package:rfw/formats.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:super_clipboard/super_clipboard.dart';
@@ -137,7 +138,7 @@ class ChatThreadController extends ChangeNotifier {
     textFieldController.addListener(notifyListeners);
   }
 
-  final List<MessageToolkit> toolkits = [];
+  final List<ToolProviderOption> toolkits = [];
   final RoomClient room;
   final TextEditingController textFieldController = ShadTextEditingController();
   final List<FileUpload> _attachmentUploads = [];
@@ -145,7 +146,7 @@ class ChatThreadController extends ChangeNotifier {
 
   List<FileUpload> get attachmentUploads => List<FileUpload>.unmodifiable(_attachmentUploads);
 
-  bool toggleToolkit(MessageToolkit toolkit) {
+  bool toggleToolkit(ToolProviderOption toolkit) {
     if (toolkits.contains(toolkit)) {
       toolkits.remove(toolkit);
       return false;
@@ -247,7 +248,7 @@ class ChatThreadController extends ChangeNotifier {
         to: participant,
         type: "chat",
         message: {
-          "tools": [for (final tk in toolkits) tk.toJson()],
+          "tools": [for (final tk in toolkits) tk.config.toJson()],
           "path": path,
           "text": message.text,
           "attachments": message.attachments.map((a) => {"path": a}).toList(),
@@ -387,9 +388,9 @@ class ChatThreadLoader extends StatelessWidget {
 }
 
 class ChatThreadAttachButton extends StatefulWidget {
-  const ChatThreadAttachButton({required this.controller, super.key, this.optionalToolkits = const []});
+  const ChatThreadAttachButton({required this.controller, super.key, this.toolProviders = const []});
 
-  final List<MessageToolkit> optionalToolkits;
+  final List<ToolProviderOption> toolProviders;
 
   final ChatThreadController controller;
 
@@ -426,7 +427,7 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
       items: [
         ShadContextMenuItem(leading: Icon(LucideIcons.paperclip), onPressed: _onSelectAttachment, child: Text("Attach a file...")),
 
-        for (final tk in widget.optionalToolkits)
+        for (final tk in widget.toolProviders)
           Builder(
             builder:
                 (context) => ShadContextMenuItem(
@@ -456,15 +457,15 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
   }
 }
 
-class MessageToolkit {
-  MessageToolkit({required this.icon, required this.text, required this.data});
+class ToolProviderOption {
+  ToolProviderOption({required this.icon, required this.text, required this.config});
 
   final String text;
   final IconData icon;
-  final Map<String, dynamic> data;
+  final ToolConfig config;
 
   Map<String, dynamic> toJson() {
-    return data;
+    return config.toJson();
   }
 }
 
@@ -722,7 +723,11 @@ class ChatThread extends StatefulWidget {
     this.attachmentBuilder,
     this.fileInThreadBuilder,
     this.inputLeadingBuilder,
+
+    this.agentName,
   });
+
+  final String? agentName;
 
   final String path;
   final MeshDocument document;
@@ -736,7 +741,7 @@ class ChatThread extends StatefulWidget {
   final Widget Function(BuildContext, List<String>)? waitingForParticipantsBuilder;
   final Widget Function(BuildContext context, FileUpload upload)? attachmentBuilder;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
-  final Widget Function(BuildContext, ChatThreadController)? inputLeadingBuilder;
+  final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? inputLeadingBuilder;
 
   @override
   State createState() => _ChatThreadState();
@@ -849,6 +854,7 @@ class _ChatThreadState extends State<ChatThread> {
       document: widget.document,
       room: widget.room,
       controller: controller,
+      agentName: widget.agentName,
       builder: (context, state) {
         if (state.offline.isNotEmpty && widget.waitingForParticipantsBuilder != null) {
           return widget.waitingForParticipantsBuilder!(context, state.offline.toList());
@@ -880,7 +886,7 @@ class _ChatThreadState extends State<ChatThread> {
                   child: ConstrainedBox(
                     constraints: BoxConstraints(maxWidth: 912),
                     child: ChatThreadInput(
-                      leading: widget.inputLeadingBuilder == null ? null : widget.inputLeadingBuilder!(context, controller),
+                      leading: widget.inputLeadingBuilder == null ? null : widget.inputLeadingBuilder!(context, controller, state),
                       trailing:
                           state.thinking.isNotEmpty
                               ? ShadGestureDetector(
@@ -1100,14 +1106,30 @@ class ChatThreadMessages extends StatelessWidget {
   }
 }
 
-class ChatThreadSnapshot {
-  ChatThreadSnapshot({required this.messages, required this.online, required this.offline, required this.typing, required this.thinking});
+class ThreadToolProvider {
+  ThreadToolProvider({required this.name});
 
+  final String name;
+}
+
+class ChatThreadSnapshot {
+  ChatThreadSnapshot({
+    required this.messages,
+    required this.online,
+    required this.offline,
+    required this.typing,
+    required this.thinking,
+    required this.availableTools,
+    required this.agentOnline,
+  });
+
+  final bool agentOnline;
   final List<MeshElement> messages;
   final List<Participant> online;
   final List<String> offline;
   final List<String> typing;
   final List<String> thinking;
+  final List<ThreadToolProvider> availableTools;
 }
 
 class ChatThreadBuilder extends StatefulWidget {
@@ -1118,8 +1140,10 @@ class ChatThreadBuilder extends StatefulWidget {
     required this.room,
     required this.controller,
     required this.builder,
+    this.agentName,
   });
 
+  final String? agentName;
   final String path;
   final MeshDocument document;
   final RoomClient room;
@@ -1148,6 +1172,27 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
 
     _getParticipants();
     _getMessages();
+
+    _checkAgent();
+  }
+
+  bool agentOnline = false;
+  void _checkAgent() {
+    final agent = widget.room.messaging.remoteParticipants.firstWhereOrNull((x) => x.getAttribute("name") == widget.agentName);
+    final online = agent != null;
+    if (online != agentOnline) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        agentOnline = online;
+      });
+
+      if (online) {
+        widget.room.messaging.sendMessage(to: agent, type: "opened", message: {"path": widget.path});
+        widget.room.messaging.sendMessage(to: agent, type: "get_thread_tool_providers", message: {"path": widget.path});
+      }
+    }
   }
 
   @override
@@ -1173,8 +1218,17 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
     }
 
     if (event is RoomMessageEvent) {
+      if (event.message.type == "set_thread_tool_providers") {
+        if (mounted) {
+          setState(() {
+            availableTools = [for (final json in event.message.message["tool_providers"] as List) ThreadToolProvider(name: json["name"])];
+          });
+        }
+      }
+
       if (event.message.type.startsWith("participant")) {
         _getParticipants();
+        _checkAgent();
       }
 
       if (event.message.type == "typing" && event.message.message["path"] == widget.path) {
@@ -1228,16 +1282,20 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
     setState(() {});
   }
 
+  List<ThreadToolProvider> availableTools = [];
+
   @override
   Widget build(BuildContext context) {
     return widget.builder(
       context,
       ChatThreadSnapshot(
         messages: messages,
+        agentOnline: agentOnline,
         online: onlineParticipants.toList(),
         offline: offlineParticipants.toList(),
         typing: typing.keys.toList(),
         thinking: thinking.toList(),
+        availableTools: availableTools.toList(),
       ),
     );
   }
