@@ -10,7 +10,6 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:markdown_widget/markdown_widget.dart';
 import 'package:meshagent/meshagent.dart';
-import 'package:meshagent_flutter_shadcn/viewers/viewers.dart';
 import 'package:rfw/formats.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:super_clipboard/super_clipboard.dart';
