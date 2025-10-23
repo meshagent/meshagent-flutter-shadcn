@@ -244,11 +244,12 @@ class ChatThreadController extends ChangeNotifier {
 
   Future<void> sendMessageToParticipant({required Participant participant, required String path, required ChatMessage message}) async {
     if (message.text.trim().isNotEmpty || message.attachments.isNotEmpty) {
+      final tools = [for (final tk in toolkits) (await tk.build(room)).toJson()];
       await room.messaging.sendMessage(
         to: participant,
         type: "chat",
         message: {
-          "tools": [for (final tk in toolkits) tk.config.toJson()],
+          "tools": tools,
           "path": path,
           "text": message.text,
           "attachments": message.attachments.map((a) => {"path": a}).toList(),
@@ -388,13 +389,24 @@ class ChatThreadLoader extends StatelessWidget {
 }
 
 class ChatThreadAttachButton extends StatefulWidget {
-  const ChatThreadAttachButton({required this.controller, super.key, this.toolkits = const [], this.alwaysShowAttachFiles});
+  const ChatThreadAttachButton({
+    required this.controller,
+    super.key,
+    this.toolkits = const [],
+    this.alwaysShowAttachFiles,
+    this.connectors = const [],
+    this.onConnectorSetup,
+  });
 
   final bool? alwaysShowAttachFiles;
 
   final List<ToolkitBuilderOption> toolkits;
 
   final ChatThreadController controller;
+
+  final List<Connector> connectors;
+
+  final Future<void> Function(Connector connector)? onConnectorSetup;
 
   @override
   State createState() => _ChatThreadAttachButton();
@@ -419,6 +431,7 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
   }
 
   ShadPopoverController popoverController = ShadPopoverController();
+  ShadPopoverController addMcpController = ShadPopoverController();
 
   @override
   void dispose() {
@@ -435,10 +448,12 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
       constraints: BoxConstraints(minWidth: 175),
       anchor: ShadAnchorAuto(followerAnchor: Alignment.topRight, targetAnchor: Alignment.topLeft),
       items: [
-        if (widget.alwaysShowAttachFiles == true || widget.toolkits.where((x) => x.config is StorageConfig).isNotEmpty)
+        if (widget.alwaysShowAttachFiles == true ||
+            widget.toolkits.where((x) => x is StaticToolkitBuilderOption && x.config is StorageConfig).isNotEmpty)
           ShadContextMenuItem(
             leading: Icon(LucideIcons.paperclip),
-            onPressed: () => _onSelectAttachment(widget.toolkits.where((x) => x.config is StorageConfig).first),
+            onPressed:
+                () => _onSelectAttachment(widget.toolkits.where((x) => x is StaticToolkitBuilderOption && x.config is StorageConfig).first),
             child: Text("Attach a file..."),
           ),
 
@@ -451,8 +466,9 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
                           ? ShadTheme.of(context).contextMenuTheme.textStyle!.copyWith(color: Colors.blue)
                           : null,
                   leading: Icon(tk.icon, color: widget.controller.toolkits.contains(tk) ? Colors.blue : null),
-                  onPressed: () => widget.controller.toggleToolkit(tk),
-
+                  onPressed: () {
+                    widget.controller.toggleToolkit(tk);
+                  },
                   trailing:
                       widget.controller.toolkits.contains(tk)
                           ? Icon(LucideIcons.check, color: widget.controller.toolkits.contains(tk) ? Colors.blue : null)
@@ -473,7 +489,33 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
             spacing: 8,
             children: [
               SizedBox(width: 22, height: 22, child: Icon(LucideIcons.plus)),
-              for (final tool in widget.controller.toolkits) ShadBadge.outline(child: Text(tool.selectedText)),
+              for (final tool in widget.controller.toolkits) ...[
+                ShadBadge.outline(child: Text(tool.selectedText)),
+                if (tool is ConnectorToolkitBuilderOption) ...[
+                  for (final connector in tool.connectors) ShadBadge(child: Text(connector.server.serverLabel)),
+
+                  ShadContextMenu(
+                    controller: addMcpController,
+                    constraints: BoxConstraints(minWidth: 175),
+                    anchor: ShadAnchorAuto(followerAnchor: Alignment.topRight, targetAnchor: Alignment.topLeft),
+                    items: [
+                      for (final connector in widget.connectors)
+                        ShadContextMenuItem(
+                          onPressed: () {
+                            widget.onConnectorSetup!(connector);
+                          },
+                          child: Text(connector.server.serverLabel),
+                        ),
+                    ],
+                    child: ShadGestureDetector(
+                      onTap: () {
+                        addMcpController.setOpen(true);
+                      },
+                      child: Text("Add"),
+                    ),
+                  ),
+                ],
+              ],
             ],
           ),
         ),
@@ -482,16 +524,35 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
   }
 }
 
-class ToolkitBuilderOption {
-  ToolkitBuilderOption({required this.icon, required this.text, required this.selectedText, required this.config});
+abstract class ToolkitBuilderOption {
+  ToolkitBuilderOption({required this.icon, required this.text, required this.selectedText});
 
   final String text;
   final String selectedText;
   final IconData icon;
-  final ToolkitConfig config;
 
-  Map<String, dynamic> toJson() {
-    return config.toJson();
+  Future<ToolkitConfig> build(RoomClient room);
+}
+
+class StaticToolkitBuilderOption extends ToolkitBuilderOption {
+  StaticToolkitBuilderOption({required super.icon, required super.text, required super.selectedText, required this.config});
+
+  final ToolkitConfig config;
+  @override
+  Future<ToolkitConfig> build(RoomClient room) async {
+    return config;
+  }
+}
+
+class ConnectorToolkitBuilderOption extends ToolkitBuilderOption {
+  ConnectorToolkitBuilderOption({required super.icon, required super.text, required super.selectedText, required this.connectors});
+
+  final List<Connector> connectors;
+
+  @override
+  Future<ToolkitConfig> build(RoomClient room) async {
+    final servers = [for (final connector in connectors) connector.server.copyWith(authorization: await connector.authenticate(room))];
+    return MCPConfig(servers: servers);
   }
 }
 
