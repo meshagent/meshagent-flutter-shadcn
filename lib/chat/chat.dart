@@ -394,7 +394,7 @@ class ChatThreadAttachButton extends StatefulWidget {
     super.key,
     this.toolkits = const [],
     this.alwaysShowAttachFiles,
-    this.connectors = const [],
+    this.availableConnectors = const [],
     this.onConnectorSetup,
   });
 
@@ -404,7 +404,7 @@ class ChatThreadAttachButton extends StatefulWidget {
 
   final ChatThreadController controller;
 
-  final List<Connector> connectors;
+  final List<Connector> availableConnectors;
 
   final Future<void> Function(Connector connector)? onConnectorSetup;
 
@@ -438,6 +438,8 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
     super.dispose();
     popoverController.dispose();
   }
+
+  Set<Connector> setup = {};
 
   @override
   Widget build(BuildContext context) {
@@ -482,42 +484,53 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
         onTap: () {
           popoverController.toggle();
         },
-        child: Container(
-          alignment: Alignment.centerLeft,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            spacing: 8,
-            children: [
-              SizedBox(width: 22, height: 22, child: Icon(LucideIcons.plus)),
-              for (final tool in widget.controller.toolkits) ...[
-                ShadBadge.outline(child: Text(tool.selectedText)),
-                if (tool is ConnectorToolkitBuilderOption) ...[
-                  for (final connector in tool.connectors) ShadBadge(child: Text(connector.server.serverLabel)),
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          alignment: WrapAlignment.start,
 
-                  ShadContextMenu(
-                    controller: addMcpController,
-                    constraints: BoxConstraints(minWidth: 175),
-                    anchor: ShadAnchorAuto(followerAnchor: Alignment.topRight, targetAnchor: Alignment.topLeft),
-                    items: [
-                      for (final connector in widget.connectors)
-                        ShadContextMenuItem(
-                          onPressed: () {
-                            widget.onConnectorSetup!(connector);
-                          },
-                          child: Text(connector.server.serverLabel),
-                        ),
-                    ],
-                    child: ShadGestureDetector(
-                      onTap: () {
-                        addMcpController.setOpen(true);
-                      },
-                      child: Text("Add"),
-                    ),
+          children: [
+            SizedBox(width: 22, height: 22, child: Icon(LucideIcons.plus)),
+            for (final tool in widget.controller.toolkits) ...[
+              ShadBadge.outline(child: Text(tool.selectedText)),
+              if (tool is ConnectorToolkitBuilderOption) ...[
+                for (final connector in tool.connectors) ShadBadge(child: Text(connector.name)),
+
+                ShadContextMenu(
+                  controller: addMcpController,
+                  constraints: BoxConstraints(minWidth: 175),
+                  anchor: ShadAnchorAuto(followerAnchor: Alignment.topRight, targetAnchor: Alignment.topLeft),
+                  items: [
+                    for (final connector in widget.availableConnectors)
+                      ShadContextMenuItem(
+                        trailing: setup.contains(connector) ? Center(child: CircularProgressIndicator()) : null,
+                        onPressed: () async {
+                          try {
+                            setState(() {
+                              setup.add(connector);
+                            });
+                            await widget.onConnectorSetup!(connector);
+                          } finally {
+                            if (mounted) {
+                              setState(() {
+                                setup.remove(connector);
+                              });
+                            }
+                          }
+                        },
+                        child: Text(connector.name),
+                      ),
+                  ],
+                  child: ShadGestureDetector(
+                    onTap: () {
+                      addMcpController.setOpen(true);
+                    },
+                    child: Text("Add"),
                   ),
-                ],
+                ),
               ],
             ],
-          ),
+          ],
         ),
       ),
     );
