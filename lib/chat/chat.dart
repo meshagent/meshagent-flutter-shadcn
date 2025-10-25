@@ -396,8 +396,10 @@ class ChatThreadAttachButton extends StatefulWidget {
     this.alwaysShowAttachFiles,
     this.availableConnectors = const [],
     this.onConnectorSetup,
+    this.agentName,
   });
 
+  final String? agentName;
   final bool? alwaysShowAttachFiles;
 
   final List<ToolkitBuilderOption> toolkits;
@@ -496,43 +498,93 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
               if (tool is ConnectorToolkitBuilderOption) ...[
                 for (final connector in tool.connectors) ShadBadge(child: Text(connector.name)),
 
-                ShadContextMenu(
-                  controller: addMcpController,
-                  constraints: BoxConstraints(minWidth: 175),
-                  anchor: ShadAnchorAuto(followerAnchor: Alignment.topRight, targetAnchor: Alignment.topLeft),
-                  items: [
-                    for (final connector in widget.availableConnectors)
-                      ShadContextMenuItem(
-                        trailing: setup.contains(connector) ? Center(child: CircularProgressIndicator()) : null,
-                        onPressed: () async {
-                          try {
-                            setState(() {
-                              setup.add(connector);
-                            });
-                            await widget.onConnectorSetup!(connector);
-                          } finally {
-                            if (mounted) {
-                              setState(() {
-                                setup.remove(connector);
-                              });
-                            }
-                          }
-                        },
-                        child: Text(connector.name),
-                      ),
-                  ],
-                  child: ShadGestureDetector(
-                    onTap: () {
-                      addMcpController.setOpen(true);
-                    },
-                    child: Text("Add"),
+                if (widget.agentName != null)
+                  ShadContextMenu(
+                    controller: addMcpController,
+                    constraints: BoxConstraints(minWidth: 175),
+                    anchor: ShadAnchorAuto(followerAnchor: Alignment.topRight, targetAnchor: Alignment.topLeft),
+                    items: [
+                      for (final connector in widget.availableConnectors)
+                        ConnectorContextMenuItem(
+                          agentName: widget.agentName!,
+                          room: widget.controller.room,
+                          connector: connector,
+                          onConnectorSetup: widget.onConnectorSetup,
+                        ),
+                    ],
+                    child: ShadGestureDetector(
+                      onTap: () {
+                        addMcpController.setOpen(true);
+                      },
+                      child: Text("Add"),
+                    ),
                   ),
-                ),
               ],
             ],
           ],
         ),
       ),
+    );
+  }
+}
+
+class ConnectorContextMenuItem extends StatefulWidget {
+  const ConnectorContextMenuItem({
+    required this.room,
+    required this.agentName,
+    required this.connector,
+    super.key,
+    required this.onConnectorSetup,
+  });
+
+  final RoomClient room;
+  final Connector connector;
+  final String agentName;
+
+  final Future<void> Function(Connector connector)? onConnectorSetup;
+
+  @override
+  State createState() => _ConnectorContextMenuItem();
+}
+
+class _ConnectorContextMenuItem extends State<ConnectorContextMenuItem> {
+  bool? connected;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.room.secrets
+        .getOfflineOAuthToken(
+          connector:
+              widget.connector.server.openaiConnectorId != null
+                  ? ConnectorRef(openaiConnectorId: widget.connector.server.openaiConnectorId)
+                  : null,
+          oauth: widget.connector.oauth,
+          delegatedTo: widget.agentName,
+        )
+        .then((token) {
+          if (mounted) {
+            setState(() {
+              connected = token != null;
+            });
+          }
+        });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ShadContextMenuItem(
+      trailing: Visibility(
+        maintainSize: true,
+        maintainState: true,
+        maintainAnimation: true,
+        visible: connected != null,
+        child: ShadSwitch(value: connected ?? false),
+      ),
+      onPressed: () async {
+        await widget.onConnectorSetup!(widget.connector);
+      },
+      child: Text(widget.connector.name),
     );
   }
 }
