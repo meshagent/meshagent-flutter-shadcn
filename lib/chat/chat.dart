@@ -564,11 +564,11 @@ class ConnectorToolkitBuilderOption extends ToolkitBuilderOption {
 
   @override
   Future<ToolkitConfig> build(RoomClient room) async {
-    for (final connector in connectors) {
-      //await connector.authenticate(room);
+    //for (final connector in connectors) {
+    //await connector.authenticate(room);
 
-      // TODO: connector.server.copyWith(authorization: await connector.authenticate(room))
-    }
+    // TODO: connector.server.copyWith(authorization: await connector.authenticate(room))
+    //}
     final servers = [for (final connector in connectors) connector.server];
     return MCPConfig(servers: servers);
   }
