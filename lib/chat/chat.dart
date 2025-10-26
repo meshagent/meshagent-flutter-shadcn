@@ -494,10 +494,8 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
           children: [
             SizedBox(width: 22, height: 22, child: Icon(LucideIcons.plus)),
             for (final tool in widget.controller.toolkits) ...[
-              ShadBadge.outline(child: Text(tool.selectedText)),
+              if (tool is! ConnectorToolkitBuilderOption) ShadBadge.outline(child: Text(tool.selectedText)),
               if (tool is ConnectorToolkitBuilderOption) ...[
-                for (final connector in tool.connectors) ShadBadge(child: Text(connector.name)),
-
                 if (widget.agentName != null)
                   ShadContextMenu(
                     controller: addMcpController,
@@ -506,9 +504,34 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
                     items: [
                       for (final connector in widget.availableConnectors)
                         ConnectorContextMenuItem(
+                          selected:
+                              widget.controller.toolkits.whereType<ConnectorToolkitBuilderOption>().firstOrNull?.connectors.contains(
+                                connector,
+                              ) ??
+                              false,
                           agentName: widget.agentName!,
                           room: widget.controller.room,
                           connector: connector,
+                          onSelectedChanged: (selected) async {
+                            if (!selected) {
+                              widget.controller.toolkits.whereType<ConnectorToolkitBuilderOption>().firstOrNull?.connectors.remove(
+                                connector,
+                              );
+                              setState(() {});
+                            } else {
+                              await widget.onConnectorSetup!(connector);
+                              var mcp =
+                                  widget.controller.toolkits.firstWhereOrNull((c) => c is ConnectorToolkitBuilderOption)
+                                      as ConnectorToolkitBuilderOption?;
+                              if (mounted) {
+                                if (!mcp!.connectors.contains(connector)) {
+                                  setState(() {
+                                    mcp.connectors.add(connector);
+                                  });
+                                }
+                              }
+                            }
+                          },
                           onConnectorSetup: widget.onConnectorSetup,
                         ),
                     ],
@@ -516,9 +539,14 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
                       onTap: () {
                         addMcpController.setOpen(true);
                       },
-                      child: Text("Add"),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [Text(tool.selectedText), SizedBox(width: 8), Icon(LucideIcons.chevronDown)],
+                      ),
                     ),
                   ),
+
+                for (final connector in tool.connectors) ShadBadge(child: Text(connector.name)),
               ],
             ],
           ],
@@ -535,11 +563,16 @@ class ConnectorContextMenuItem extends StatefulWidget {
     required this.connector,
     super.key,
     required this.onConnectorSetup,
+    required this.selected,
+    required this.onSelectedChanged,
   });
 
   final RoomClient room;
   final Connector connector;
   final String agentName;
+  final bool selected;
+
+  final void Function(bool selected)? onSelectedChanged;
 
   final Future<void> Function(Connector connector)? onConnectorSetup;
 
@@ -579,10 +612,22 @@ class _ConnectorContextMenuItem extends State<ConnectorContextMenuItem> {
         maintainState: true,
         maintainAnimation: true,
         visible: connected != null,
-        child: ShadSwitch(value: connected ?? false),
+        child:
+            connected == false
+                ? Text("Connect", style: TextStyle(color: ShadTheme.of(context).colorScheme.mutedForeground))
+                : ShadSwitch(
+                  onChanged: (value) {
+                    if (widget.onSelectedChanged != null) {
+                      widget.onSelectedChanged!(value);
+                    }
+                  },
+                  value: widget.selected,
+                ),
       ),
       onPressed: () async {
-        await widget.onConnectorSetup!(widget.connector);
+        if (widget.onSelectedChanged != null) {
+          widget.onSelectedChanged!(!widget.selected);
+        }
       },
       child: Text(widget.connector.name),
     );
