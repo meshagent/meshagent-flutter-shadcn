@@ -451,122 +451,138 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
     return ListenableBuilder(
       listenable: popoverController,
       builder:
-          (context, _) => ShadContextMenu(
-            constraints: BoxConstraints(minWidth: 175),
-            anchor: ShadAnchorAuto(followerAnchor: Alignment.topRight, targetAnchor: Alignment.topLeft),
-            items: [
-              if (widget.alwaysShowAttachFiles == true ||
-                  widget.toolkits.where((x) => x is StaticToolkitBuilderOption && x.config is StorageConfig).isNotEmpty)
-                ShadContextMenuItem(
-                  leading: Icon(LucideIcons.paperclip),
-                  onPressed:
-                      () => _onSelectAttachment(
-                        widget.toolkits.where((x) => x is StaticToolkitBuilderOption && x.config is StorageConfig).first,
-                      ),
-                  child: Text("Attach a file..."),
-                ),
-
-              for (final tk in widget.toolkits)
-                Builder(
-                  builder:
-                      (context) => ShadContextMenuItem(
-                        textStyle:
-                            widget.controller.toolkits.contains(tk)
-                                ? ShadTheme.of(context).contextMenuTheme.textStyle!.copyWith(color: Colors.blue)
-                                : null,
-                        leading: Icon(tk.icon, color: widget.controller.toolkits.contains(tk) ? Colors.blue : null),
-                        onPressed: () {
-                          widget.controller.toggleToolkit(tk);
-                        },
-                        trailing:
-                            widget.controller.toolkits.contains(tk)
-                                ? Icon(LucideIcons.check, color: widget.controller.toolkits.contains(tk) ? Colors.blue : null)
-                                : null,
-                        child: Text(tk.text),
-                      ),
-                ),
-            ],
-            controller: popoverController,
-            child: GestureDetector(
-              onTap:
-                  popoverController.isOpen
-                      ? null
-                      : () {
-                        popoverController.toggle();
-                      },
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                alignment: WrapAlignment.start,
-
-                children: [
-                  SizedBox(width: 22, height: 22, child: Icon(LucideIcons.plus)),
-                  for (final tool in widget.controller.toolkits) ...[
-                    if (tool is! ConnectorToolkitBuilderOption) ShadBadge.outline(child: Text(tool.selectedText)),
-                    if (tool is ConnectorToolkitBuilderOption) ...[
-                      if (widget.agentName != null)
-                        ShadContextMenu(
-                          controller: addMcpController,
-                          constraints: BoxConstraints(minWidth: 175),
-                          anchor: ShadAnchorAuto(followerAnchor: Alignment.topRight, targetAnchor: Alignment.topLeft),
-                          items: [
-                            for (final connector in widget.availableConnectors)
-                              ConnectorContextMenuItem(
-                                selected:
-                                    widget.controller.toolkits.whereType<ConnectorToolkitBuilderOption>().firstOrNull?.connectors.contains(
-                                      connector,
-                                    ) ??
-                                    false,
-                                agentName: widget.agentName!,
-                                room: widget.controller.room,
-                                connector: connector,
-                                onSelectedChanged: (selected) async {
-                                  if (!selected) {
-                                    widget.controller.toolkits.whereType<ConnectorToolkitBuilderOption>().firstOrNull?.connectors.remove(
-                                      connector,
-                                    );
-                                    setState(() {});
-                                  } else {
-                                    await widget.onConnectorSetup!(connector);
-                                    var mcp =
-                                        widget.controller.toolkits.firstWhereOrNull((c) => c is ConnectorToolkitBuilderOption)
-                                            as ConnectorToolkitBuilderOption?;
-                                    if (mounted) {
-                                      if (!mcp!.connectors.contains(connector)) {
-                                        setState(() {
-                                          mcp.connectors.add(connector);
-                                        });
-                                      }
-                                    }
-                                  }
-                                },
-                                onConnectorSetup: widget.onConnectorSetup,
-                              ),
-                          ],
-                          child: ListenableBuilder(
-                            listenable: addMcpController,
-                            builder:
-                                (context, _) => ShadGestureDetector(
-                                  onTap:
-                                      addMcpController.isOpen
-                                          ? null
-                                          : () {
-                                            addMcpController.setOpen(true);
-                                          },
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [Text(tool.selectedText), SizedBox(width: 8), Icon(LucideIcons.chevronDown)],
-                                  ),
-                                ),
+          (context, _) => Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            alignment: WrapAlignment.start,
+            runAlignment: WrapAlignment.center,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              ShadContextMenu(
+                constraints: BoxConstraints(minWidth: 175),
+                anchor: ShadAnchorAuto(followerAnchor: Alignment.topRight, targetAnchor: Alignment.topLeft),
+                items: [
+                  if (widget.alwaysShowAttachFiles == true ||
+                      widget.toolkits.where((x) => x is StaticToolkitBuilderOption && x.config is StorageConfig).isNotEmpty)
+                    ShadContextMenuItem(
+                      leading: Icon(LucideIcons.paperclip),
+                      onPressed:
+                          () => _onSelectAttachment(
+                            widget.toolkits.where((x) => x is StaticToolkitBuilderOption && x.config is StorageConfig).first,
                           ),
-                        ),
+                      child: Text("Attach a file..."),
+                    ),
 
-                      for (final connector in tool.connectors) ShadBadge(child: Text(connector.name)),
-                    ],
-                  ],
+                  for (final tk in widget.toolkits)
+                    Builder(
+                      builder:
+                          (context) => ShadContextMenuItem(
+                            textStyle:
+                                widget.controller.toolkits.contains(tk)
+                                    ? ShadTheme.of(context).contextMenuTheme.textStyle!.copyWith(color: Colors.blue)
+                                    : null,
+                            leading: Icon(tk.icon, color: widget.controller.toolkits.contains(tk) ? Colors.blue : null),
+                            onPressed: () {
+                              widget.controller.toggleToolkit(tk);
+                            },
+                            trailing:
+                                widget.controller.toolkits.contains(tk)
+                                    ? Icon(LucideIcons.check, color: widget.controller.toolkits.contains(tk) ? Colors.blue : null)
+                                    : null,
+                            child: Text(tk.text),
+                          ),
+                    ),
                 ],
+                controller: popoverController,
+                child: ShadButton.ghost(
+                  width: 22,
+                  height: 22,
+                  padding: EdgeInsets.all(0),
+                  onPressed:
+                      popoverController.isOpen
+                          ? null
+                          : () {
+                            popoverController.toggle();
+                          },
+                  child: Icon(LucideIcons.plus),
+                ),
               ),
-            ),
+              for (final tool in widget.controller.toolkits) ...[
+                ShadButton.outline(
+                  trailing: Icon(LucideIcons.x),
+                  decoration: ShadDecoration(border: ShadBorder.all(radius: BorderRadius.circular(30))),
+                  child: Text(tool.selectedText),
+                  onPressed: () {
+                    setState(() {
+                      widget.controller.toolkits.remove(tool);
+                    });
+                  },
+                ),
+                if (tool is ConnectorToolkitBuilderOption) ...[
+                  if (widget.agentName != null)
+                    ShadContextMenu(
+                      controller: addMcpController,
+                      constraints: BoxConstraints(minWidth: 175),
+                      anchor: ShadAnchorAuto(followerAnchor: Alignment.topRight, targetAnchor: Alignment.topLeft),
+                      items: [
+                        for (final connector in widget.availableConnectors)
+                          ConnectorContextMenuItem(
+                            selected:
+                                widget.controller.toolkits
+                                    .whereType<ConnectorToolkitBuilderOption>()
+                                    .firstOrNull
+                                    ?.connectors
+                                    .firstWhereOrNull((c) => c.name == connector.name) !=
+                                null,
+                            agentName: widget.agentName!,
+                            room: widget.controller.room,
+                            connector: connector,
+                            onSelectedChanged: (selected) async {
+                              if (!selected) {
+                                widget.controller.toolkits.whereType<ConnectorToolkitBuilderOption>().firstOrNull?.connectors.removeWhere(
+                                  (c) => c.name == connector.name,
+                                );
+                                setState(() {});
+                              } else {
+                                await widget.onConnectorSetup!(connector);
+                                var mcp =
+                                    widget.controller.toolkits.firstWhereOrNull((c) => c is ConnectorToolkitBuilderOption)
+                                        as ConnectorToolkitBuilderOption?;
+                                if (mounted) {
+                                  if (mcp!.connectors.firstWhereOrNull((c) => c.name == connector.name) == null) {
+                                    setState(() {
+                                      mcp.connectors.add(connector);
+                                    });
+                                  }
+                                }
+                              }
+                            },
+                            onConnectorSetup: widget.onConnectorSetup,
+                          ),
+                      ],
+                      child: ListenableBuilder(
+                        listenable: addMcpController,
+                        builder:
+                            (context, _) => ShadButton.ghost(
+                              decoration: ShadDecoration(border: ShadBorder.all(radius: BorderRadius.circular(30))),
+
+                              onPressed:
+                                  addMcpController.isOpen
+                                      ? null
+                                      : () {
+                                        addMcpController.setOpen(true);
+                                      },
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                spacing: 8,
+                                children: [Icon(LucideIcons.cable), Text("${tool.connectors.length}"), Icon(LucideIcons.chevronDown)],
+                              ),
+                            ),
+                      ),
+                    ),
+                ],
+              ],
+            ],
           ),
     );
   }
