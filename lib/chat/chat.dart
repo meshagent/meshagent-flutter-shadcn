@@ -602,22 +602,13 @@ class _ConnectorContextMenuItem extends State<ConnectorContextMenuItem> {
   @override
   void initState() {
     super.initState();
-    widget.room.secrets
-        .getOfflineOAuthToken(
-          connector:
-              widget.connector.server.openaiConnectorId != null
-                  ? ConnectorRef(openaiConnectorId: widget.connector.server.openaiConnectorId)
-                  : null,
-          oauth: widget.connector.oauth,
-          delegatedTo: widget.agentName,
-        )
-        .then((token) {
-          if (mounted) {
-            setState(() {
-              connected = token != null;
-            });
-          }
+    widget.connector.isConnected(widget.room, widget.agentName).then((value) {
+      if (mounted) {
+        setState(() {
+          connected = value;
         });
+      }
+    });
   }
 
   @override
