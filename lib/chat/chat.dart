@@ -245,7 +245,6 @@ class ChatThreadController extends ChangeNotifier {
   Future<void> sendMessageToParticipant({required Participant participant, required String path, required ChatMessage message}) async {
     if (message.text.trim().isNotEmpty || message.attachments.isNotEmpty) {
       final tools = [for (final tk in toolkits) (await tk.build(room)).toJson()];
-      debugPrint("${tools}");
       await room.messaging.sendMessage(
         to: participant,
         type: "chat",
