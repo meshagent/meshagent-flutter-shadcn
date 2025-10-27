@@ -141,6 +141,18 @@ class ChatThreadController extends ChangeNotifier {
   final TextEditingController textFieldController = ShadTextEditingController();
   final List<FileUpload> _attachmentUploads = [];
   final OutboundMessageStatusQueue outboundStatus = OutboundMessageStatusQueue();
+  bool _thinking = false;
+
+  bool get thinking {
+    return _thinking;
+  }
+
+  set thinking(bool value) {
+    if (value != _thinking) {
+      _thinking = value;
+      notifyListeners();
+    }
+  }
 
   List<FileUpload> get attachmentUploads => List<FileUpload>.unmodifiable(_attachmentUploads);
 
@@ -731,9 +743,11 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   late final focusNode = FocusNode(
     onKeyEvent: (_, event) {
       if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.enter && !HardwareKeyboard.instance.isShiftPressed) {
-        widget.onSend(widget.controller.text, widget.controller.attachmentUploads);
+        if (!widget.controller.thinking) {
+          widget.onSend(widget.controller.text, widget.controller.attachmentUploads);
 
-        widget.controller.textFieldController.clear();
+          widget.controller.textFieldController.clear();
+        }
 
         return KeyEventResult.handled;
       }
@@ -1504,6 +1518,8 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         } else {
           thinking.remove(event.message.fromParticipantId);
         }
+
+        widget.controller.thinking = thinking.isNotEmpty;
         if (mounted) {
           setState(() {});
         }
