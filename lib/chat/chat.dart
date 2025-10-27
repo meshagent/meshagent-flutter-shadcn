@@ -1272,7 +1272,10 @@ class ChatThreadMessages extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (!isSameAuthor && participantNameBuilder != null)
-              participantNameBuilder!(message.attributes["author_name"], DateTime.parse(message.attributes["created_at"])),
+              participantNameBuilder!(
+                message.attributes["author_name"] ?? "",
+                message.attributes["created_at"] == null ? DateTime.now() : DateTime.parse(message.attributes["created_at"]),
+              ),
 
             if (text is String && text.isNotEmpty) ChatBubble(mine: mine, text: message.getAttribute("text")),
 
