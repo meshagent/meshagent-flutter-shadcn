@@ -445,7 +445,7 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.toolkits.isEmpty) {
+    if (widget.toolkits.isEmpty && widget.alwaysShowAttachFiles != true) {
       return SizedBox(width: 0, height: 22);
     }
     return ListenableBuilder(
