@@ -154,6 +154,19 @@ class ChatThreadController extends ChangeNotifier {
     }
   }
 
+  bool _listening = false;
+
+  bool get listening {
+    return _listening;
+  }
+
+  set listening(bool value) {
+    if (value != _listening) {
+      _listening = value;
+      notifyListeners();
+    }
+  }
+
   List<FileUpload> get attachmentUploads => List<FileUpload>.unmodifiable(_attachmentUploads);
 
   bool toggleToolkit(ToolkitBuilderOption toolkit) {
@@ -1120,6 +1133,7 @@ class _ChatThreadState extends State<ChatThread> {
                 messages: state.messages,
                 online: state.online,
                 showTyping: state.typing.isNotEmpty || state.thinking.isNotEmpty,
+                showListening: state.listening.isNotEmpty || state.listening.isNotEmpty,
                 participantNameBuilder: widget.participantNameBuilder,
                 fileInThreadBuilder: widget.fileInThreadBuilder,
                 currentStatusEntry: _currentStatusEntry,
@@ -1210,6 +1224,7 @@ class ChatThreadMessages extends StatelessWidget {
 
     this.startChatCentered = false,
     this.showTyping = false,
+    this.showListening = false,
     this.participantNameBuilder,
     this.fileInThreadBuilder,
     this.currentStatusEntry,
@@ -1218,6 +1233,7 @@ class ChatThreadMessages extends StatelessWidget {
   final RoomClient room;
   final bool startChatCentered;
   final bool showTyping;
+  final bool showListening;
   final List<MeshElement> messages;
   final List<Participant> online;
   final OutboundEntry? currentStatusEntry;
@@ -1335,39 +1351,56 @@ class ChatThreadMessages extends StatelessWidget {
       messageWidgets.insert(0, Container(key: ValueKey(message.$2.id), child: _buildMessage(context, previous, message.$2, next)));
     }
     return Expanded(
-      child: Column(
-        mainAxisAlignment: bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
+      child: Stack(
         children: [
-          Expanded(child: ListView(reverse: true, padding: EdgeInsets.all(16), children: messageWidgets)),
+          Positioned.fill(
+            child: Column(
+              mainAxisAlignment: bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
+              children: [
+                Expanded(child: ListView(reverse: true, padding: EdgeInsets.all(16), children: messageWidgets)),
 
-          if (!bottomAlign)
-            if (online.firstOrNull != null)
-              Padding(
-                padding: EdgeInsets.symmetric(vertical: 20, horizontal: 50),
-                child: Text(
-                  online.first.getAttribute("empty_state_title") ?? "How can I help you?",
-                  style: ShadTheme.of(context).textTheme.h3,
-                ),
-              ),
-
+                if (!bottomAlign)
+                  if (online.firstOrNull != null)
+                    Padding(
+                      padding: EdgeInsets.symmetric(vertical: 20, horizontal: 50),
+                      child: Text(
+                        online.first.getAttribute("empty_state_title") ?? "How can I help you?",
+                        style: ShadTheme.of(context).textTheme.h3,
+                      ),
+                    ),
+                if (showTyping) SizedBox(height: 20),
+              ],
+            ),
+          ),
           if (showTyping)
-            ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: 912),
-              child: Container(
-                width: double.infinity,
-                height: 30,
-                alignment: Alignment.centerLeft,
-                child: SizedBox(
-                  width: 100,
-                  child: JumpingDots(
-                    color: ShadTheme.of(context).colorScheme.foreground,
-                    radius: 8,
-                    verticalOffset: -15,
-                    numberOfDots: 3,
-                    animationDuration: const Duration(milliseconds: 200),
+            Positioned(
+              left: 0,
+              bottom: 0,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: 912),
+                child: Container(
+                  width: double.infinity,
+                  height: 15,
+                  alignment: Alignment.centerLeft,
+                  child: SizedBox(
+                    width: 100,
+                    child: JumpingDots(
+                      color: ShadTheme.of(context).colorScheme.foreground,
+                      radius: 8,
+                      verticalOffset: -15,
+                      numberOfDots: 3,
+                      animationDuration: const Duration(milliseconds: 200),
+                    ),
                   ),
                 ),
               ),
+            ),
+          if (showListening)
+            Positioned(
+              left: 0,
+              bottom: 0,
+              right: 0,
+              child: SizedBox(height: 1, child: LinearProgressIndicator(color: ShadTheme.of(context).colorScheme.mutedForeground)),
             ),
         ],
       ),
@@ -1388,6 +1421,7 @@ class ChatThreadSnapshot {
     required this.offline,
     required this.typing,
     required this.thinking,
+    required this.listening,
     required this.availableTools,
     required this.agentOnline,
   });
@@ -1398,6 +1432,7 @@ class ChatThreadSnapshot {
   final List<String> offline;
   final List<String> typing;
   final List<String> thinking;
+  final List<String> listening;
   final List<ThreadToolkitBuilder> availableTools;
 }
 
@@ -1430,6 +1465,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
   Set<String> offlineParticipants = {};
   Map<String, Timer> typing = {};
   Set<String> thinking = {};
+  Set<String> listening = {};
   List<MeshElement> messages = [];
 
   @override
@@ -1512,6 +1548,17 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         if (mounted) {
           setState(() {});
         }
+      } else if (event.message.type == "listening" && event.message.message["path"] == widget.path) {
+        if (event.message.message["listening"] == true) {
+          listening.add(event.message.fromParticipantId);
+        } else {
+          listening.remove(event.message.fromParticipantId);
+        }
+
+        widget.controller.listening = listening.isNotEmpty;
+        if (mounted) {
+          setState(() {});
+        }
       } else if (event.message.type == "thinking" && event.message.message["path"] == widget.path) {
         if (event.message.message["thinking"] == true) {
           thinking.add(event.message.fromParticipantId);
@@ -1566,6 +1613,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         offline: offlineParticipants.toList(),
         typing: typing.keys.toList(),
         thinking: thinking.toList(),
+        listening: listening.toList(),
         availableTools: availableTools.toList(),
       ),
     );
