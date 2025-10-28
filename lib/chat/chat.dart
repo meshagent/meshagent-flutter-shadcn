@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:markdown_widget/markdown_widget.dart';
 import 'package:meshagent/meshagent.dart';
+import 'package:meshagent_flutter_shadcn/ui/ui.dart';
 import 'package:rfw/formats.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:super_clipboard/super_clipboard.dart';
@@ -979,7 +980,7 @@ class ChatThread extends StatefulWidget {
     this.onMessageSent,
     this.controller,
 
-    this.participantNameBuilder,
+    this.messageHeaderBuilder,
     this.waitingForParticipantsBuilder,
     this.attachmentBuilder,
     this.fileInThreadBuilder,
@@ -998,7 +999,7 @@ class ChatThread extends StatefulWidget {
   final void Function(ChatMessage message)? onMessageSent;
   final ChatThreadController? controller;
 
-  final Widget Function(String, DateTime)? participantNameBuilder;
+  final Widget Function(BuildContext, MeshDocument, MeshElement)? messageHeaderBuilder;
   final Widget Function(BuildContext, List<String>)? waitingForParticipantsBuilder;
   final Widget Function(BuildContext context, FileUpload upload)? attachmentBuilder;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
@@ -1138,7 +1139,7 @@ class _ChatThreadState extends State<ChatThread> {
                 online: state.online,
                 showTyping: state.typing.isNotEmpty || state.thinking.isNotEmpty,
                 showListening: state.listening.isNotEmpty || state.listening.isNotEmpty,
-                participantNameBuilder: widget.participantNameBuilder,
+                messageHeaderBuilder: widget.messageHeaderBuilder,
                 fileInThreadBuilder: widget.fileInThreadBuilder,
                 currentStatusEntry: _currentStatusEntry,
               ),
@@ -1229,7 +1230,7 @@ class ChatThreadMessages extends StatelessWidget {
     this.startChatCentered = false,
     this.showTyping = false,
     this.showListening = false,
-    this.participantNameBuilder,
+    this.messageHeaderBuilder,
     this.fileInThreadBuilder,
     this.currentStatusEntry,
   });
@@ -1242,7 +1243,7 @@ class ChatThreadMessages extends StatelessWidget {
   final List<Participant> online;
   final OutboundEntry? currentStatusEntry;
 
-  final Widget Function(String, DateTime)? participantNameBuilder;
+  final Widget Function(BuildContext, MeshDocument, MeshElement)? messageHeaderBuilder;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
 
   String _sanitizePath(String path) {
@@ -1303,13 +1304,16 @@ class ChatThreadMessages extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (!isSameAuthor && participantNameBuilder != null)
-            participantNameBuilder!(
-              message.attributes["author_name"] ?? "",
-              message.attributes["created_at"] == null ? DateTime.now() : DateTime.parse(message.attributes["created_at"]),
+          if (!isSameAuthor)
+            Container(
+              margin: EdgeInsets.only(top: 8, right: mine ? 0 : 50, left: mine ? 50 : 0),
+              child: Align(
+                alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+                child: (messageHeaderBuilder ?? defaultMessageHeaderBuilder)(context, message.doc as MeshDocument, message),
+              ),
             ),
 
-          if (text is String && text.isNotEmpty) ChatBubble(mine: mine, text: message.getAttribute("text")),
+          if (text is String && text.isNotEmpty) ...[ChatBubble(mine: mine, text: message.getAttribute("text"))],
 
           for (final attachment in message.getChildren())
             Container(
@@ -1425,6 +1429,33 @@ class ChatThreadMessages extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+Widget defaultMessageHeaderBuilder(BuildContext context, MeshDocument thread, MeshElement message) {
+  final name = message.attributes["author_name"] ?? "";
+  final createdAt = message.attributes["created_at"] == null ? DateTime.now() : DateTime.parse(message.attributes["created_at"]);
+  final members = thread.root.getElementsByTagName("members").firstOrNull?.getElementsByTagName("member") ?? [];
+  if (members.length > 2) {
+    return Container(
+      padding: EdgeInsets.only(top: 16, left: 8, right: 8),
+      width: ((message.getAttribute("text") as String?)?.isEmpty ?? true) ? 250 : double.infinity,
+      child: Row(
+        children: [
+          Text(
+            name.split("@").first,
+            style: ShadTheme.of(context).textTheme.small.copyWith(color: ShadTheme.of(context).colorScheme.foreground),
+          ),
+          Spacer(),
+          Text(
+            timeAgo(createdAt),
+            style: ShadTheme.of(context).textTheme.small.copyWith(color: ShadTheme.of(context).colorScheme.mutedForeground),
+          ),
+        ],
+      ),
+    );
+  } else {
+    return SizedBox(height: 0);
   }
 }
 
@@ -2013,8 +2044,8 @@ class ChatThreadPreview extends StatelessWidget {
         builder: (context, snapshot) {
           if (snapshot.hasData) {
             return SizedBox(
-              width: 300,
-              height: 300,
+              width: 250,
+              height: 250,
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(16),
                 child: ImagePreview(key: ValueKey(path), url: Uri.parse(snapshot.data!), fit: BoxFit.cover),
@@ -2022,7 +2053,7 @@ class ChatThreadPreview extends StatelessWidget {
             );
           }
 
-          return SizedBox(width: 300, height: 300, child: ColoredBox(color: ShadTheme.of(context).colorScheme.background));
+          return SizedBox(width: 250, height: 250, child: ColoredBox(color: ShadTheme.of(context).colorScheme.background));
         },
       );
     }
