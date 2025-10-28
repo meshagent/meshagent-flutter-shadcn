@@ -812,13 +812,15 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   void initState() {
     super.initState();
 
-    widget.controller.addListener(_onChanged);
+    widget.controller.textFieldController.addListener(_onChanged);
     ClipboardEvents.instance?.registerPasteEventListener(onPasteEvent);
   }
 
   @override
   void dispose() {
     super.dispose();
+
+    widget.controller.textFieldController.removeListener(_onChanged);
 
     focusNode.dispose();
     ClipboardEvents.instance?.unregisterPasteEventListener(onPasteEvent);
