@@ -1349,33 +1349,42 @@ class ChatThreadMessages extends StatelessWidget {
     }
     return Expanded(
       child: Center(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: 912),
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: Column(
-                  mainAxisAlignment: bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
-                  children: [
-                    Expanded(child: ListView(reverse: true, padding: EdgeInsets.all(16), children: messageWidgets)),
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: Column(
+                mainAxisAlignment: bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
+                children: [
+                  Expanded(
+                    child: ListView(
+                      reverse: true,
+                      padding: EdgeInsets.all(16),
+                      children:
+                          messageWidgets
+                              .map((x) => Center(child: ConstrainedBox(constraints: BoxConstraints(maxWidth: 912), child: x)))
+                              .toList(),
+                    ),
+                  ),
 
-                    if (!bottomAlign)
-                      if (online.firstOrNull != null)
-                        Padding(
-                          padding: EdgeInsets.symmetric(vertical: 20, horizontal: 50),
-                          child: Text(
-                            online.first.getAttribute("empty_state_title") ?? "How can I help you?",
-                            style: ShadTheme.of(context).textTheme.h3,
-                          ),
+                  if (!bottomAlign)
+                    if (online.firstOrNull != null)
+                      Padding(
+                        padding: EdgeInsets.symmetric(vertical: 20, horizontal: 50),
+                        child: Text(
+                          online.first.getAttribute("empty_state_title") ?? "How can I help you?",
+                          style: ShadTheme.of(context).textTheme.h3,
                         ),
-                    if (showTyping) SizedBox(height: 20),
-                  ],
-                ),
+                      ),
+                  if (showTyping) SizedBox(height: 20),
+                ],
               ),
-              if (showTyping)
-                Positioned(
-                  left: 0,
-                  bottom: 0,
+            ),
+            if (showTyping)
+              Positioned(
+                left: 0,
+                bottom: 0,
+                right: 0,
+                child: Center(
                   child: ConstrainedBox(
                     constraints: BoxConstraints(maxWidth: 912),
                     child: Container(
@@ -1395,15 +1404,20 @@ class ChatThreadMessages extends StatelessWidget {
                     ),
                   ),
                 ),
-              if (showListening)
-                Positioned(
-                  left: 0,
-                  bottom: 0,
-                  right: 0,
-                  child: SizedBox(height: 1, child: LinearProgressIndicator(color: ShadTheme.of(context).colorScheme.mutedForeground)),
+              ),
+            if (showListening)
+              Positioned(
+                left: 0,
+                bottom: 0,
+                right: 0,
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: 912),
+                    child: SizedBox(height: 1, child: LinearProgressIndicator(color: ShadTheme.of(context).colorScheme.mutedForeground)),
+                  ),
                 ),
-            ],
-          ),
+              ),
+          ],
         ),
       ),
     );
