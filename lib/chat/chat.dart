@@ -237,7 +237,9 @@ class ChatThreadController extends ChangeNotifier {
     for (final child in document.root.getChildren().whereType<MeshElement>()) {
       if (child.tagName == "members") {
         for (final member in child.getChildren().whereType<MeshElement>()) {
-          yield member.attributes["name"];
+          if (member.attributes["name"] != null) {
+            yield member.attributes["name"];
+          }
         }
       }
     }
@@ -367,7 +369,9 @@ class ChatThreadLoader extends StatelessWidget {
       for (final child in document.root.getChildren().whereType<MeshElement>()) {
         if (child.tagName == "members") {
           for (final member in child.getChildren().whereType<MeshElement>()) {
-            existing.add(member.getAttribute("name"));
+            if (member.getAttribute("name") != null) {
+              existing.add(member.getAttribute("name"));
+            }
           }
 
           for (final part in participantsList) {
