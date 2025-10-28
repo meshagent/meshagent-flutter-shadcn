@@ -1440,18 +1440,22 @@ Widget defaultMessageHeaderBuilder(BuildContext context, MeshDocument thread, Me
     return Container(
       padding: EdgeInsets.only(top: 16, left: 8, right: 8),
       width: ((message.getAttribute("text") as String?)?.isEmpty ?? true) ? 250 : double.infinity,
-      child: Row(
-        children: [
-          Text(
-            name.split("@").first,
-            style: ShadTheme.of(context).textTheme.small.copyWith(color: ShadTheme.of(context).colorScheme.foreground),
-          ),
-          Spacer(),
-          Text(
-            timeAgo(createdAt),
-            style: ShadTheme.of(context).textTheme.small.copyWith(color: ShadTheme.of(context).colorScheme.mutedForeground),
-          ),
-        ],
+      child: SelectionArea(
+        child: Row(
+          children: [
+            Text(
+              name.split("@").first,
+              style: ShadTheme.of(context).textTheme.small.copyWith(color: ShadTheme.of(context).colorScheme.foreground),
+              overflow: TextOverflow.ellipsis,
+            ),
+            Spacer(),
+            Text(
+              timeAgo(createdAt),
+              style: ShadTheme.of(context).textTheme.small.copyWith(color: ShadTheme.of(context).colorScheme.mutedForeground),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
       ),
     );
   } else {
