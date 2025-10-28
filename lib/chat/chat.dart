@@ -1293,48 +1293,45 @@ class ChatThreadMessages extends StatelessWidget {
       return DynamicUI(room: room, previous: previous, message: message, next: next);
     }
 
-    return Center(
+    return SizedBox(
       key: ValueKey(id),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: 912),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (!isSameAuthor && participantNameBuilder != null)
-              participantNameBuilder!(
-                message.attributes["author_name"] ?? "",
-                message.attributes["created_at"] == null ? DateTime.now() : DateTime.parse(message.attributes["created_at"]),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (!isSameAuthor && participantNameBuilder != null)
+            participantNameBuilder!(
+              message.attributes["author_name"] ?? "",
+              message.attributes["created_at"] == null ? DateTime.now() : DateTime.parse(message.attributes["created_at"]),
+            ),
+
+          if (text is String && text.isNotEmpty) ChatBubble(mine: mine, text: message.getAttribute("text")),
+
+          for (final attachment in message.getChildren())
+            Container(
+              margin: EdgeInsets.only(top: 8),
+              child: Align(
+                alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+                child: _buildFileInThread(context, (attachment as MeshElement).getAttribute("path")),
               ),
+            ),
 
-            if (text is String && text.isNotEmpty) ChatBubble(mine: mine, text: message.getAttribute("text")),
-
-            for (final attachment in message.getChildren())
-              Container(
-                margin: EdgeInsets.only(top: 8),
-                child: Align(
-                  alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-                  child: _buildFileInThread(context, (attachment as MeshElement).getAttribute("path")),
-                ),
-              ),
-
-            if (currentStatusEntry != null && currentStatusEntry?.messageId == id)
-              Padding(
-                padding: EdgeInsets.only(top: 5),
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: Text(
-                    currentStatusEntry!.state.status.name,
-                    style: ShadTheme.of(context).textTheme.p.copyWith(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: Color(currentStatusEntry!.state.status.colorValue),
-                    ),
+          if (currentStatusEntry != null && currentStatusEntry?.messageId == id)
+            Padding(
+              padding: EdgeInsets.only(top: 5),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: Text(
+                  currentStatusEntry!.state.status.name,
+                  style: ShadTheme.of(context).textTheme.p.copyWith(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: Color(currentStatusEntry!.state.status.colorValue),
                   ),
                 ),
               ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
@@ -1351,58 +1348,63 @@ class ChatThreadMessages extends StatelessWidget {
       messageWidgets.insert(0, Container(key: ValueKey(message.$2.id), child: _buildMessage(context, previous, message.$2, next)));
     }
     return Expanded(
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: Column(
-              mainAxisAlignment: bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
-              children: [
-                Expanded(child: ListView(reverse: true, padding: EdgeInsets.all(16), children: messageWidgets)),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: 912),
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: Column(
+                  mainAxisAlignment: bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
+                  children: [
+                    Expanded(child: ListView(reverse: true, padding: EdgeInsets.all(16), children: messageWidgets)),
 
-                if (!bottomAlign)
-                  if (online.firstOrNull != null)
-                    Padding(
-                      padding: EdgeInsets.symmetric(vertical: 20, horizontal: 50),
-                      child: Text(
-                        online.first.getAttribute("empty_state_title") ?? "How can I help you?",
-                        style: ShadTheme.of(context).textTheme.h3,
+                    if (!bottomAlign)
+                      if (online.firstOrNull != null)
+                        Padding(
+                          padding: EdgeInsets.symmetric(vertical: 20, horizontal: 50),
+                          child: Text(
+                            online.first.getAttribute("empty_state_title") ?? "How can I help you?",
+                            style: ShadTheme.of(context).textTheme.h3,
+                          ),
+                        ),
+                    if (showTyping) SizedBox(height: 20),
+                  ],
+                ),
+              ),
+              if (showTyping)
+                Positioned(
+                  left: 0,
+                  bottom: 0,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: 912),
+                    child: Container(
+                      width: double.infinity,
+                      height: 15,
+                      alignment: Alignment.centerLeft,
+                      child: SizedBox(
+                        width: 100,
+                        child: JumpingDots(
+                          color: ShadTheme.of(context).colorScheme.foreground,
+                          radius: 8,
+                          verticalOffset: -15,
+                          numberOfDots: 3,
+                          animationDuration: const Duration(milliseconds: 200),
+                        ),
                       ),
-                    ),
-                if (showTyping) SizedBox(height: 20),
-              ],
-            ),
-          ),
-          if (showTyping)
-            Positioned(
-              left: 0,
-              bottom: 0,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: 912),
-                child: Container(
-                  width: double.infinity,
-                  height: 15,
-                  alignment: Alignment.centerLeft,
-                  child: SizedBox(
-                    width: 100,
-                    child: JumpingDots(
-                      color: ShadTheme.of(context).colorScheme.foreground,
-                      radius: 8,
-                      verticalOffset: -15,
-                      numberOfDots: 3,
-                      animationDuration: const Duration(milliseconds: 200),
                     ),
                   ),
                 ),
-              ),
-            ),
-          if (showListening)
-            Positioned(
-              left: 0,
-              bottom: 0,
-              right: 0,
-              child: SizedBox(height: 1, child: LinearProgressIndicator(color: ShadTheme.of(context).colorScheme.mutedForeground)),
-            ),
-        ],
+              if (showListening)
+                Positioned(
+                  left: 0,
+                  bottom: 0,
+                  right: 0,
+                  child: SizedBox(height: 1, child: LinearProgressIndicator(color: ShadTheme.of(context).colorScheme.mutedForeground)),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }
