@@ -3,7 +3,6 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import '../meetings/audio_visualization.dart';
 import 'package:flutter/material.dart';
 import 'package:livekit_client/livekit_client.dart';
-import 'package:webrtc_interface/webrtc_interface.dart';
 import './meetings.dart';
 
 class ParticipantCamerasList extends StatefulWidget {
@@ -63,7 +62,7 @@ class ParticipantTile extends StatelessWidget {
             muted: participant.isMuted,
             camera:
                 track != null
-                    ? VideoTrackRenderer(track, fit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover)
+                    ? VideoTrackRenderer(track, fit: VideoViewFit.cover)
                     : (participant.kind == ParticipantKind.AGENT
                         ? AudioWave(
                           room: room,
