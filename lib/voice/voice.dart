@@ -7,10 +7,12 @@ import 'package:uuid/uuid.dart';
 import 'package:livekit_client/livekit_client.dart' as livekit;
 
 class VoiceAgentCaller extends StatelessWidget {
-  const VoiceAgentCaller({super.key, required this.meeting, required this.participant});
+  const VoiceAgentCaller({super.key, required this.meeting, required this.participant, this.getBreakoutRoom});
 
   final RemoteParticipant participant;
   final MeetingController meeting;
+
+  final Future<String?> Function(BuildContext)? getBreakoutRoom;
 
   @override
   Widget build(BuildContext context) {
@@ -24,7 +26,10 @@ class VoiceAgentCaller extends StatelessWidget {
                 if (meeting.livekitRoom.connectionState == livekit.ConnectionState.disconnected)
                   ShadButton.outline(
                     onPressed: () async {
-                      final breakout = const Uuid().v4();
+                      final breakout = getBreakoutRoom != null ? await getBreakoutRoom!(context) : const Uuid().v4();
+                      if (breakout == null) {
+                        return;
+                      }
                       await meeting.configure(breakoutRoom: breakout);
                       await meeting.connect(livekit.FastConnectOptions(microphone: livekit.TrackOption(enabled: true)));
                       await meeting.room.messaging.sendMessage(to: participant, type: "voice_call", message: {"breakout_room": breakout});

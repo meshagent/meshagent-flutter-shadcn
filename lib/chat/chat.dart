@@ -1423,7 +1423,13 @@ class ChatThreadMessages extends StatelessWidget {
                 child: Center(
                   child: ConstrainedBox(
                     constraints: BoxConstraints(maxWidth: 912),
-                    child: SizedBox(height: 1, child: LinearProgressIndicator(color: ShadTheme.of(context).colorScheme.mutedForeground)),
+                    child: SizedBox(
+                      height: 1,
+                      child: LinearProgressIndicator(
+                        backgroundColor: ShadTheme.of(context).colorScheme.background,
+                        color: ShadTheme.of(context).colorScheme.mutedForeground,
+                      ),
+                    ),
                   ),
                 ),
               ),
