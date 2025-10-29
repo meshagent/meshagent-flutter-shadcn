@@ -445,7 +445,7 @@ class ChatThreadAttachButton extends StatefulWidget {
 }
 
 class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
-  Future<void> _onSelectAttachment(ToolkitBuilderOption storage) async {
+  Future<void> _onSelectAttachment(ToolkitBuilderOption? storage) async {
     final picked = await FilePicker.platform.pickFiles(dialogTitle: "Select files", allowMultiple: true, withReadStream: true);
 
     if (picked == null) {
@@ -456,9 +456,11 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
       widget.controller.uploadFile(file.name, file.readStream!.map(Uint8List.fromList), file.size);
     }
 
-    if (!widget.controller.toolkits.contains(storage)) {
-      widget.controller.toggleToolkit(storage);
-      setState(() {});
+    if (storage != null) {
+      if (!widget.controller.toolkits.contains(storage)) {
+        widget.controller.toggleToolkit(storage);
+        setState(() {});
+      }
     }
   }
 
