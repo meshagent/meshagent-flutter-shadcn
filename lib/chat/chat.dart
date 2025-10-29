@@ -1558,7 +1558,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
 
       if (online) {
         widget.room.messaging.sendMessage(to: agent, type: "opened", message: {"path": widget.path});
-        widget.room.messaging.sendMessage(to: agent, type: "get_thread_tool_providers", message: {"path": widget.path});
+        widget.room.messaging.sendMessage(to: agent, type: "get_thread_toolkit_builders", message: {"path": widget.path});
       }
     }
   }
