@@ -500,7 +500,7 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
                       leading: Icon(LucideIcons.paperclip),
                       onPressed:
                           () => _onSelectAttachment(
-                            widget.toolkits.where((x) => x is StaticToolkitBuilderOption && x.config is StorageConfig).first,
+                            widget.toolkits.where((x) => x is StaticToolkitBuilderOption && x.config is StorageConfig).firstOrNull,
                           ),
                       child: Text("Attach a file..."),
                     ),
