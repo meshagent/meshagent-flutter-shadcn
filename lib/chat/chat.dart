@@ -352,6 +352,7 @@ class ChatThreadLoader extends StatelessWidget {
     this.participantNames,
     this.includeLocalParticipant = true,
     this.builder,
+    this.loadingBuilder,
   });
 
   final String path;
@@ -360,6 +361,7 @@ class ChatThreadLoader extends StatelessWidget {
   final List<String>? participantNames;
   final bool includeLocalParticipant;
   final Widget Function(BuildContext, MeshDocument)? builder;
+  final Widget Function(BuildContext)? loadingBuilder;
 
   void _ensureParticipants(MeshDocument document) {
     final participantsList = <Participant>[if (participants != null) ...participants!, if (includeLocalParticipant) room.localParticipant!];
@@ -407,9 +409,8 @@ class ChatThreadLoader extends StatelessWidget {
         }
 
         if (document == null) {
-          return const Center(child: CircularProgressIndicator());
+          return loadingBuilder == null ? const Center(child: CircularProgressIndicator()) : loadingBuilder!(context);
         }
-
         _ensureParticipants(document);
 
         return builder?.call(context, document) ?? ChatThread(path: path, document: document, room: room);
