@@ -558,6 +558,8 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
                       constraints: BoxConstraints(minWidth: 175),
                       anchor: ShadAnchorAuto(followerAnchor: Alignment.topRight, targetAnchor: Alignment.topLeft),
                       items: [
+                        if (widget.availableConnectors.isEmpty)
+                          ShadContextMenuItem(child: Text("No connectors are configured for this room")),
                         for (final connector in widget.availableConnectors)
                           ConnectorContextMenuItem(
                             selected:
