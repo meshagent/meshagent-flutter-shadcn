@@ -1,6 +1,7 @@
 export "builder.dart";
 export "document.dart";
 export "presentation.dart";
+export "transcript.dart";
 
 export "file/image.dart";
 export "file/video.dart";
