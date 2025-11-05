@@ -454,7 +454,7 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
     }
 
     for (final file in picked.files) {
-      widget.controller.uploadFile(file.name, file.readStream!.map(Uint8List.fromList), file.size);
+      await widget.controller.uploadFile(file.name, file.readStream!.map(Uint8List.fromList), file.size);
     }
 
     if (storage != null) {
@@ -779,12 +779,22 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     },
   );
 
-  void _onChanged() {
+  void _onTextChanged() {
     final newText = widget.controller.text;
-    final newAttachments = widget.controller.attachmentUploads;
 
     setState(() {
       text = newText;
+    });
+
+    widget.onChanged?.call(text, attachments);
+
+    setShowSendButton();
+  }
+
+  void _onChanged() {
+    final newAttachments = widget.controller.attachmentUploads;
+
+    setState(() {
       attachments = newAttachments;
     });
 
@@ -817,7 +827,8 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   void initState() {
     super.initState();
 
-    widget.controller.textFieldController.addListener(_onChanged);
+    widget.controller.textFieldController.addListener(_onTextChanged);
+    widget.controller.addListener(_onChanged);
     ClipboardEvents.instance?.registerPasteEventListener(onPasteEvent);
   }
 
@@ -825,7 +836,8 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   void dispose() {
     super.dispose();
 
-    widget.controller.textFieldController.removeListener(_onChanged);
+    widget.controller.removeListener(_onChanged);
+    widget.controller.textFieldController.removeListener(_onTextChanged);
 
     focusNode.dispose();
     ClipboardEvents.instance?.unregisterPasteEventListener(onPasteEvent);
