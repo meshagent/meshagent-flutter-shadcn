@@ -485,8 +485,6 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
       listenable: popoverController,
       builder:
           (context, _) => Wrap(
-            spacing: 8,
-            runSpacing: 8,
             alignment: WrapAlignment.start,
             runAlignment: WrapAlignment.center,
             crossAxisAlignment: WrapCrossAlignment.center,
@@ -527,27 +525,30 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
                     ),
                 ],
                 controller: popoverController,
-                child: ShadButton.ghost(
-                  width: 22,
-                  height: 22,
-                  padding: EdgeInsets.all(0),
+                child: ShadIconButton.ghost(
+                  hoverBackgroundColor: ShadTheme.of(context).colorScheme.background,
+                  decoration: ShadDecoration(shape: BoxShape.circle),
                   onPressed:
                       popoverController.isOpen
                           ? null
                           : () {
                             popoverController.toggle();
                           },
-                  child: Icon(LucideIcons.plus),
+                  iconSize: 16,
+                  width: 32,
+                  height: 32,
+                  icon: Icon(LucideIcons.plus),
                 ),
               ),
               for (final tool in widget.controller.toolkits) ...[
-                ShadButton.outline(
+                ShadButton.ghost(
                   trailing: Icon(LucideIcons.x),
+                  hoverBackgroundColor: ShadTheme.of(context).colorScheme.background,
                   decoration: ShadDecoration(border: ShadBorder.all(radius: BorderRadius.circular(30))),
                   child: Text(tool.selectedText),
                   onPressed: () {
                     setState(() {
-                      widget.controller.toolkits.remove(tool);
+                      widget.controller.toggleToolkit(tool);
                     });
                   },
                 ),
@@ -898,6 +899,25 @@ class _ChatThreadInput extends State<ChatThreadInput> {
 
   @override
   Widget build(BuildContext context) {
+    final trailer =
+        widget.trailing ??
+        (showSendButton && allAttachmentsUploaded
+            ? ShadTooltip(
+              waitDuration: Duration(seconds: 1),
+              builder: (context) => Text("Send"),
+              child: ShadIconButton(
+                cursor: SystemMouseCursors.click,
+                onPressed: () {
+                  widget.onSend(widget.controller.text, widget.controller.attachmentUploads);
+                },
+                width: 32,
+                height: 32,
+                iconSize: 16,
+                decoration: ShadDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
+                icon: Icon(LucideIcons.arrowUp, color: ShadTheme.of(context).colorScheme.background),
+              ),
+            )
+            : null);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
@@ -945,43 +965,30 @@ class _ChatThreadInput extends State<ChatThreadInput> {
 
         if (widget.header != null) widget.header!,
         ShadInput(
-          crossAxisAlignment: CrossAxisAlignment.end,
+          crossAxisAlignment: CrossAxisAlignment.center,
           inputPadding: EdgeInsets.all(2),
           leading: widget.leading ?? SizedBox(width: 3),
-          trailing:
-              widget.trailing ??
-              (showSendButton && allAttachmentsUploaded
-                  ? ShadTooltip(
-                    waitDuration: Duration(seconds: 1),
-                    builder: (context) => Text("Send"),
-                    child: ShadGestureDetector(
-                      cursor: SystemMouseCursors.click,
-                      onTap: () {
-                        widget.onSend(widget.controller.text, widget.controller.attachmentUploads);
-                      },
-                      child: Container(
-                        width: 22,
-                        height: 22,
-                        decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
-                        child: Icon(LucideIcons.arrowUp, color: ShadTheme.of(context).colorScheme.background),
-                      ),
-                    ),
-                  )
-                  : null),
+          trailing: widget.footer == null ? trailer : null,
           padding: EdgeInsets.only(left: 5, right: 5, top: 5, bottom: 5),
           decoration: ShadDecoration(
             secondaryFocusedBorder: ShadBorder.none,
             secondaryBorder: ShadBorder.none,
             color: ShadTheme.of(context).ghostButtonTheme.hoverBackgroundColor,
-            border: ShadBorder.all(radius: BorderRadius.circular(15)),
+            border: ShadBorder.all(radius: BorderRadius.circular(20)),
           ),
           maxLines: 8,
           minLines: 1,
           placeholder: Text("Message"),
           focusNode: focusNode,
           controller: widget.controller.textFieldController,
+          bottom:
+              widget.footer == null
+                  ? null
+                  : Padding(
+                    padding: EdgeInsets.only(left: 5, right: 5, top: 5, bottom: 0),
+                    child: Row(children: [Expanded(child: widget.footer!), if (trailer != null) trailer]),
+                  ),
         ),
-        if (widget.footer != null) widget.footer!,
       ],
     );
   }
@@ -1182,7 +1189,7 @@ class _ChatThreadState extends State<ChatThread> {
                                     ? null
                                     : widget.toolsBuilder == null
                                     ? null
-                                    : Padding(padding: EdgeInsets.only(top: 8), child: widget.toolsBuilder!(context, controller, state)),
+                                    : widget.toolsBuilder!(context, controller, state),
                             trailing:
                                 state.thinking.isNotEmpty
                                     ? ShadGestureDetector(
