@@ -969,7 +969,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
           inputPadding: EdgeInsets.all(2),
           leading: widget.leading ?? SizedBox(width: 3),
           trailing: widget.footer == null ? trailer : null,
-          padding: EdgeInsets.only(left: 5, right: 5, top: 5, bottom: 5),
+          padding: EdgeInsets.only(left: 5, right: 5, top: widget.footer == null ? 5 : 10, bottom: 5),
           decoration: ShadDecoration(
             secondaryFocusedBorder: ShadBorder.none,
             secondaryBorder: ShadBorder.none,
