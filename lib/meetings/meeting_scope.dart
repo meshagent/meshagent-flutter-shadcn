@@ -1,5 +1,6 @@
 import 'package:meshagent/livekit_client.dart';
 import 'package:meshagent/room_server_client.dart';
+import 'package:meshagent_flutter_shadcn/meetings/wake_lock.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/widgets.dart';
 import 'package:livekit_client/livekit_client.dart' as livekit;
@@ -55,7 +56,7 @@ class _MeetingScopeState extends State<MeetingScope> {
 
   @override
   Widget build(BuildContext context) {
-    return _MeetingControllerData(controller: controller, child: widget.builder(context, controller));
+    return WakeLocker(child: _MeetingControllerData(controller: controller, child: widget.builder(context, controller)));
   }
 }
 
@@ -120,6 +121,14 @@ class MeetingController extends ChangeNotifier {
 
   bool get isConnected {
     return livekitRoom.connectionState != livekit.ConnectionState.disconnected;
+  }
+
+  static MeetingController of(BuildContext context) {
+    return context.dependOnInheritedWidgetOfExactType<_MeetingControllerData>()!.controller;
+  }
+
+  static MeetingController? maybeOf(BuildContext context) {
+    return context.dependOnInheritedWidgetOfExactType<_MeetingControllerData>()?.controller;
   }
 }
 
