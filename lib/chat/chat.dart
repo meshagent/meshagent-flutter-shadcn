@@ -504,7 +504,7 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
                       child: Text("Attach a file..."),
                     ),
 
-                  if (widget.toolkits.isNotEmpty) ShadSeparator.horizontal(),
+                  if (widget.toolkits.isNotEmpty) ShadSeparator.horizontal(margin: EdgeInsets.symmetric(vertical: 3)),
 
                   for (final tk in widget.toolkits)
                     Builder(
