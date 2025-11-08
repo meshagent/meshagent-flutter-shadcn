@@ -7,15 +7,20 @@ import "package:meshagent/room_server_client.dart";
 import "image.dart";
 import "pdf.dart";
 import "video.dart";
+import "markdown.dart";
 import "../chat/chat.dart";
 
 final imageExtensions = <String>{"png", "jpeg", "jfif", "jpg", "heic", "webp", "tif", "tiff", "gif", "svg"};
 final pdfExtensions = <String>{"pdf"};
+final mdExtensions = <String>{"md"};
 final videoExtensions = <String>{"mp4", "mkv", "mov"};
 final audioExtensions = <String>{"mp3", "ogg", "wav"};
 final officeExtensions = <String>{"docx", "pptx", "xlsx"};
 
-final Map<String, Widget Function({Key? key, required RoomClient room, required String filename, required Uri url})> customViewers = {};
+final Map<String, Widget Function({Key? key, required RoomClient room, required String filename, required Uri url})> customViewers = {
+  "md":
+      ({Key? key, required RoomClient room, required String filename, required Uri url}) => MarkdownPreview(filename: filename, room: room),
+};
 
 Widget filePreview({Key? key, required RoomClient room, required String filename, required Uri url, BoxFit fit = BoxFit.cover}) {
   // assuming URL has extension, which is generally bad
