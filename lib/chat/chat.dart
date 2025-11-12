@@ -302,6 +302,17 @@ class ChatThreadController extends ChangeNotifier {
     }
   }
 
+  bool _notifyOnSend = true;
+
+  bool get notifyOnSend {
+    return _notifyOnSend;
+  }
+
+  set notifyOnSend(bool value) {
+    _notifyOnSend = value;
+    notifyListeners();
+  }
+
   Future<void> send({
     required MeshDocument thread,
     required String path,
@@ -312,8 +323,10 @@ class ChatThreadController extends ChangeNotifier {
       insertMessage(thread: thread, message: message);
 
       final List<Future<void>> sentMessages = [];
-      for (final participant in getOnlineParticipants(thread)) {
-        sentMessages.add(sendMessageToParticipant(participant: participant, path: path, message: message));
+      if (notifyOnSend) {
+        for (final participant in getOnlineParticipants(thread)) {
+          sentMessages.add(sendMessageToParticipant(participant: participant, path: path, message: message));
+        }
       }
 
       outboundStatus.markSending(message.id);
