@@ -751,6 +751,7 @@ class ChatThreadInput extends StatefulWidget {
     required this.room,
     required this.onSend,
     required this.controller,
+    this.placeholder,
     this.onChanged,
     this.attachmentBuilder,
     this.leading,
@@ -758,6 +759,8 @@ class ChatThreadInput extends StatefulWidget {
     this.header,
     this.footer,
   });
+
+  final Widget? placeholder;
 
   final RoomClient room;
   final void Function(String, List<FileUpload>) onSend;
@@ -993,7 +996,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
           ),
           maxLines: 8,
           minLines: 1,
-          placeholder: Text("Message"),
+          placeholder: widget.placeholder,
           focusNode: focusNode,
           controller: widget.controller.textFieldController,
           bottom:
