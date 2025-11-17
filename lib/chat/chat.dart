@@ -814,6 +814,7 @@ class ChatThreadInput extends StatefulWidget {
     this.trailing,
     this.header,
     this.footer,
+    this.onClear,
   });
 
   final Widget? placeholder;
@@ -821,6 +822,7 @@ class ChatThreadInput extends StatefulWidget {
   final RoomClient room;
   final void Function(String, List<FileAttachment>) onSend;
   final void Function(String, List<FileAttachment>)? onChanged;
+  final void Function()? onClear;
   final ChatThreadController controller;
   final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
   final Widget? leading;
@@ -848,6 +850,12 @@ class _ChatThreadInput extends State<ChatThreadInput> {
         }
 
         return KeyEventResult.handled;
+      }
+
+      if (event is KeyDownEvent && event.character == "l" && HardwareKeyboard.instance.isControlPressed) {
+        if (widget.onClear != null) {
+          widget.onClear!();
+        }
       }
 
       return KeyEventResult.ignored;
@@ -1252,6 +1260,14 @@ class _ChatThreadState extends State<ChatThread> {
                         child: ConstrainedBox(
                           constraints: BoxConstraints(maxWidth: 912),
                           child: ChatThreadInput(
+                            onClear: () {
+                              final participant = widget.room.messaging.remoteParticipants.firstWhereOrNull(
+                                (x) => x.getAttribute("name") == widget.agentName,
+                              );
+                              if (participant != null) {
+                                widget.room.messaging.sendMessage(to: participant, type: "clear", message: {"path": widget.path});
+                              }
+                            },
                             leading:
                                 controller.toolkits.isNotEmpty
                                     ? null
