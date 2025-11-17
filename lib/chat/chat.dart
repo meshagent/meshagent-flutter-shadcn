@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:markdown_widget/markdown_widget.dart';
 import 'package:meshagent/meshagent.dart';
+import 'package:meshagent_flutter_shadcn/storage/file_browser.dart';
 import 'package:meshagent_flutter_shadcn/ui/ui.dart';
 import 'package:rfw/formats.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
@@ -33,10 +34,10 @@ const webPDFFormat = SimpleFileFormat(uniformTypeIdentifiers: ['com.adobe.pdf'],
 
 enum UploadStatus { initial, uploading, completed, failed }
 
-abstract class FileUpload extends ChangeNotifier {
-  FileUpload({required this.path, this.size = 0});
+class FileAttachment extends ChangeNotifier {
+  FileAttachment({required this.path, UploadStatus initialStatus = UploadStatus.initial}) : _status = initialStatus;
 
-  UploadStatus _status = UploadStatus.initial;
+  UploadStatus _status;
 
   UploadStatus get status => _status;
 
@@ -49,24 +50,18 @@ abstract class FileUpload extends ChangeNotifier {
   }
 
   String path;
-  int size;
-
-  int get bytesUploaded;
-
-  Future get done;
-
   String get filename => path.split("/").last;
-
-  void startUpload();
 }
 
-class MeshagentFileUpload extends FileUpload {
-  MeshagentFileUpload({required this.room, required super.path, required this.dataStream, super.size = 0}) {
+class MeshagentFileUpload extends FileAttachment {
+  MeshagentFileUpload({required this.room, required super.path, required this.dataStream, this.size = 0}) {
     _upload();
   }
 
   // Requires to manually call startUpload()
-  MeshagentFileUpload.deferred({required this.room, required super.path, required this.dataStream, super.size = 0});
+  MeshagentFileUpload.deferred({required this.room, required super.path, required this.dataStream, this.size = 0});
+
+  int size;
 
   final RoomClient room;
 
@@ -76,17 +71,14 @@ class MeshagentFileUpload extends FileUpload {
 
   int _bytesUploaded = 0;
 
-  @override
   int get bytesUploaded => _bytesUploaded;
 
-  @override
   Future get done => _completer.future;
 
   final _downloadUrlCompleter = Completer<Uri>();
 
   Future<Uri> get downloadUrl => _downloadUrlCompleter.future;
 
-  @override
   void startUpload() {
     _upload();
   }
@@ -140,7 +132,7 @@ class ChatThreadController extends ChangeNotifier {
   final List<ToolkitBuilderOption> toolkits = [];
   final RoomClient room;
   final TextEditingController textFieldController = ShadTextEditingController();
-  final List<FileUpload> _attachmentUploads = [];
+  final List<FileAttachment> _attachmentUploads = [];
   final OutboundMessageStatusQueue outboundStatus = OutboundMessageStatusQueue();
   bool _thinking = false;
 
@@ -168,7 +160,7 @@ class ChatThreadController extends ChangeNotifier {
     }
   }
 
-  List<FileUpload> get attachmentUploads => List<FileUpload>.unmodifiable(_attachmentUploads);
+  List<FileAttachment> get attachmentUploads => List<FileAttachment>.unmodifiable(_attachmentUploads);
 
   bool toggleToolkit(ToolkitBuilderOption toolkit) {
     if (toolkits.contains(toolkit)) {
@@ -190,7 +182,7 @@ class ChatThreadController extends ChangeNotifier {
     }
   }
 
-  Future<FileUpload> uploadFile(String path, Stream<Uint8List> dataStream, int size) async {
+  Future<FileAttachment> uploadFile(String path, Stream<Uint8List> dataStream, int size) async {
     final uploader = MeshagentFileUpload(room: room, path: path, dataStream: dataStream, size: size);
     uploader.addListener(notifyListeners);
 
@@ -200,7 +192,7 @@ class ChatThreadController extends ChangeNotifier {
     return uploader;
   }
 
-  Future<FileUpload> uploadFileDeferred(String path, Stream<Uint8List> dataStream, int size) async {
+  Future<FileAttachment> uploadFileDeferred(String path, Stream<Uint8List> dataStream, int size) async {
     final uploader = MeshagentFileUpload.deferred(room: room, path: path, dataStream: dataStream, size: size);
 
     uploader.addListener(notifyListeners);
@@ -211,11 +203,19 @@ class ChatThreadController extends ChangeNotifier {
     return uploader;
   }
 
+  FileAttachment attachFile(String path) {
+    final attachment = FileAttachment(path: path, initialStatus: UploadStatus.completed);
+    attachment.addListener(notifyListeners);
+    _attachmentUploads.add(attachment);
+    notifyListeners();
+    return attachment;
+  }
+
   String get text {
     return textFieldController.text;
   }
 
-  void removeFileUpload(FileUpload upload) {
+  void removeFileUpload(FileAttachment upload) {
     upload.removeListener(notifyListeners);
 
     _attachmentUploads.remove(upload);
@@ -350,7 +350,9 @@ class ChatThreadController extends ChangeNotifier {
 
     for (final upload in _attachmentUploads) {
       upload.removeListener(notifyListeners);
-      upload.done.ignore();
+      if (upload is MeshagentFileUpload) {
+        upload.done.ignore();
+      }
       upload.dispose();
     }
   }
@@ -478,6 +480,52 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
     }
   }
 
+  Future<void> _onBrowseFiles(ToolkitBuilderOption? storage) async {
+    List<String> picked = [];
+    await showShadDialog(
+      context: context,
+
+      builder:
+          (context) => ShadDialog(
+            title: Text("Select files"),
+            scrollable: false,
+            description: Text("Attach files from this room"),
+            actions: [
+              ShadButton.secondary(
+                onPressed: () {
+                  picked.clear();
+                  Navigator.of(context).pop([]);
+                },
+                child: Text("Cancel"),
+              ),
+              ShadButton.secondary(
+                onPressed: () {
+                  Navigator.of(context).pop(picked);
+                },
+                child: Text("OK"),
+              ),
+            ],
+            child: SizedBox(
+              width: 500,
+              height: 400,
+              child: ShadCard(
+                child: FileBrowser(
+                  onSelectionChanged: (selection) {
+                    picked = selection;
+                  },
+                  room: widget.controller.room,
+                  multiple: true,
+                ),
+              ),
+            ),
+          ),
+    );
+
+    for (final f in picked) {
+      widget.controller.attachFile(f);
+    }
+  }
+
   ShadPopoverController popoverController = ShadPopoverController();
   ShadPopoverController addMcpController = ShadPopoverController();
 
@@ -509,13 +557,21 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
                   if (widget.alwaysShowAttachFiles == true ||
                       widget.toolkits.where((x) => x is StaticToolkitBuilderOption && x.config is StorageConfig).isNotEmpty)
                     ShadContextMenuItem(
-                      leading: Icon(LucideIcons.paperclip),
+                      leading: Icon(LucideIcons.upload),
                       onPressed:
                           () => _onSelectAttachment(
                             widget.toolkits.where((x) => x is StaticToolkitBuilderOption && x.config is StorageConfig).firstOrNull,
                           ),
-                      child: Text("Attach a file..."),
+                      child: Text("Upload a file..."),
                     ),
+                  ShadContextMenuItem(
+                    leading: Icon(LucideIcons.paperclip),
+                    onPressed:
+                        () => _onBrowseFiles(
+                          widget.toolkits.where((x) => x is StaticToolkitBuilderOption && x.config is StorageConfig).firstOrNull,
+                        ),
+                    child: Text("Attach files from room..."),
+                  ),
 
                   if (widget.toolkits.isNotEmpty) ShadSeparator.horizontal(margin: EdgeInsets.symmetric(vertical: 3)),
 
@@ -763,10 +819,10 @@ class ChatThreadInput extends StatefulWidget {
   final Widget? placeholder;
 
   final RoomClient room;
-  final void Function(String, List<FileUpload>) onSend;
-  final void Function(String, List<FileUpload>)? onChanged;
+  final void Function(String, List<FileAttachment>) onSend;
+  final void Function(String, List<FileAttachment>)? onChanged;
   final ChatThreadController controller;
-  final Widget Function(BuildContext context, FileUpload upload)? attachmentBuilder;
+  final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
   final Widget? leading;
   final Widget? trailing;
   final Widget? header;
@@ -780,7 +836,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   bool allAttachmentsUploaded = true;
 
   String text = "";
-  List<FileUpload> attachments = [];
+  List<FileAttachment> attachments = [];
 
   late final focusNode = FocusNode(
     onKeyEvent: (_, event) {
@@ -1045,7 +1101,7 @@ class ChatThread extends StatefulWidget {
 
   final Widget Function(BuildContext, MeshDocument, MeshElement)? messageHeaderBuilder;
   final Widget Function(BuildContext, List<String>)? waitingForParticipantsBuilder;
-  final Widget Function(BuildContext context, FileUpload upload)? attachmentBuilder;
+  final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
   final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
 

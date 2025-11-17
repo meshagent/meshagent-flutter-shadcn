@@ -83,7 +83,7 @@ class _FilePreviewState extends State<FilePreview> {
 class FileDefaultAttachmentPreview extends StatefulWidget {
   const FileDefaultAttachmentPreview({super.key, required this.attachment, required this.onRemove, this.maxWidth = 200});
 
-  final FileUpload attachment;
+  final FileAttachment attachment;
   final VoidCallback onRemove;
 
   final double maxWidth;
@@ -93,19 +93,12 @@ class FileDefaultAttachmentPreview extends StatefulWidget {
 }
 
 class _FileDefaultAttachmentPreviewState extends State<FileDefaultAttachmentPreview> {
-  double progress = 0.0;
   UploadStatus status = UploadStatus.initial;
 
   void onAttachmentUpdate() {
     if (mounted) {
       setState(() {
         status = widget.attachment.status;
-
-        if (widget.attachment.size > 0) {
-          progress = (widget.attachment.bytesUploaded / widget.attachment.size);
-        } else {
-          progress = 0.0;
-        }
       });
     }
   }
