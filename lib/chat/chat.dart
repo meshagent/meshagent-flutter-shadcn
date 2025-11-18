@@ -2143,6 +2143,14 @@ class _ShellLineState extends State<ShellLine> {
                           TextSpan(text: "\n"),
                           TextSpan(text: widget.message.attributes["result"].trim(), style: GoogleFonts.sourceCodePro()),
                         ],
+                        if (widget.message.attributes["stdout"] != null) ...[
+                          TextSpan(text: "\n"),
+                          TextSpan(text: widget.message.attributes["stdout"].trim(), style: GoogleFonts.sourceCodePro()),
+                        ],
+                        if (widget.message.attributes["stderr"] != null) ...[
+                          TextSpan(text: "\n"),
+                          TextSpan(text: widget.message.attributes["stderr"].trim(), style: GoogleFonts.sourceCodePro(color: Colors.red)),
+                        ],
                       ],
                     ),
                   ),
