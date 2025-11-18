@@ -570,7 +570,7 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
                         () => _onBrowseFiles(
                           widget.toolkits.where((x) => x is StaticToolkitBuilderOption && x.config is StorageConfig).firstOrNull,
                         ),
-                    child: Text("Attach files from room..."),
+                    child: Text("Attach files..."),
                   ),
 
                   if (widget.toolkits.isNotEmpty) ShadSeparator.horizontal(margin: EdgeInsets.symmetric(vertical: 3)),
