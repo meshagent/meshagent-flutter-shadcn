@@ -1004,49 +1004,48 @@ class _ChatThreadInput extends State<ChatThreadInput> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
-        ListenableBuilder(
-          listenable: widget.controller,
-          builder: (context, child) {
-            if (attachments.isEmpty) {
-              return SizedBox.shrink();
-            }
-
-            return Padding(
-              padding: EdgeInsets.only(bottom: 5),
-              child: LayoutBuilder(
-                builder:
-                    (context, constraints) => SizedBox(
-                      height: 40,
-                      child: Center(
-                        child: ListView.separated(
-                          itemCount: attachments.length,
-                          separatorBuilder: (context, index) => const SizedBox(width: 10),
-                          scrollDirection: Axis.horizontal,
-                          itemBuilder: (context, index) {
-                            final attachment = attachments[index];
-
-                            if (widget.attachmentBuilder != null) {
-                              return widget.attachmentBuilder!(context, attachment);
-                            }
-
-                            return FileDefaultAttachmentPreview(
-                              attachment: attachment,
-                              maxWidth: constraints.maxWidth - 50,
-                              onRemove: () {
-                                widget.controller.removeFileUpload(attachment);
-                              },
-                            );
-                          },
-                        ),
-                      ),
-                    ),
-              ),
-            );
-          },
-        ),
-
         if (widget.header != null) widget.header!,
         ShadInput(
+          top: ListenableBuilder(
+            listenable: widget.controller,
+            builder: (context, _) {
+              if (attachments.isEmpty) {
+                return SizedBox.shrink();
+              }
+
+              return Padding(
+                padding: EdgeInsets.all(8),
+                child: LayoutBuilder(
+                  builder:
+                      (context, constraints) => SizedBox(
+                        height: 40,
+                        child: Center(
+                          child: ListView.separated(
+                            itemCount: attachments.length,
+                            separatorBuilder: (context, index) => const SizedBox(width: 10),
+                            scrollDirection: Axis.horizontal,
+                            itemBuilder: (context, index) {
+                              final attachment = attachments[index];
+
+                              if (widget.attachmentBuilder != null) {
+                                return widget.attachmentBuilder!(context, attachment);
+                              }
+
+                              return FileDefaultAttachmentPreview(
+                                attachment: attachment,
+                                maxWidth: constraints.maxWidth - 50,
+                                onRemove: () {
+                                  widget.controller.removeFileUpload(attachment);
+                                },
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                ),
+              );
+            },
+          ),
           crossAxisAlignment: CrossAxisAlignment.center,
           inputPadding: EdgeInsets.all(2),
           leading: widget.leading ?? SizedBox(width: 3),
