@@ -2078,6 +2078,13 @@ class ShellLine extends StatefulWidget {
 }
 
 class _ShellLineState extends State<ShellLine> {
+  String trim(String l) {
+    if (l.length < 1024) {
+      return l;
+    }
+    return "${l.substring(0, 1024)}...";
+  }
+
   bool expanded = false;
   @override
   Widget build(BuildContext context) {
@@ -2132,24 +2139,27 @@ class _ShellLineState extends State<ShellLine> {
                   },
                   child: Padding(padding: EdgeInsets.all(3), child: Icon(expanded ? LucideIcons.chevronDown : LucideIcons.chevronRight)),
                 ),
+
                 Expanded(
                   child: SelectableText.rich(
                     maxLines: expanded ? null : 1,
                     TextSpan(
                       children: [
                         TextSpan(text: widget.message.attributes["command"], style: GoogleFonts.sourceCodePro()),
-                        TextSpan(text: " "),
-                        if (widget.message.attributes["result"] != null) ...[
+                        if (expanded) ...[
                           TextSpan(text: "\n"),
-                          TextSpan(text: widget.message.attributes["result"].trim(), style: GoogleFonts.sourceCodePro()),
-                        ],
-                        if (widget.message.attributes["stdout"] != null) ...[
-                          TextSpan(text: "\n"),
-                          TextSpan(text: widget.message.attributes["stdout"].trim(), style: GoogleFonts.sourceCodePro()),
-                        ],
-                        if (widget.message.attributes["stderr"] != null) ...[
-                          TextSpan(text: "\n"),
-                          TextSpan(text: widget.message.attributes["stderr"].trim(), style: GoogleFonts.sourceCodePro(color: Colors.red)),
+                          if (widget.message.attributes["result"] != null) ...[
+                            TextSpan(text: "\n"),
+                            TextSpan(text: trim(widget.message.attributes["result"]), style: GoogleFonts.sourceCodePro()),
+                          ],
+                          if (widget.message.attributes["stdout"] != null) ...[
+                            TextSpan(text: "\n"),
+                            TextSpan(text: trim(widget.message.attributes["stdout"]), style: GoogleFonts.sourceCodePro()),
+                          ],
+                          if (widget.message.attributes["stderr"] != null) ...[
+                            TextSpan(text: "\n"),
+                            TextSpan(text: trim(widget.message.attributes["stderr"]), style: GoogleFonts.sourceCodePro(color: Colors.red)),
+                          ],
                         ],
                       ],
                     ),
