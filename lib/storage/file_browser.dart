@@ -26,7 +26,7 @@ class _FileBrowser extends State<FileBrowser> {
   }
 
   void load() async {
-    files = await widget.room.storage.list(path);
+    files = (await widget.room.storage.list(path)).where((x) => !x.name.startsWith(".")).toList();
     if (mounted) {
       setState(() {});
     }
@@ -133,6 +133,7 @@ class _FileBrowser extends State<FileBrowser> {
                           selection.contains(join(path, file.name))
                               ? LucideIcons.check
                               : (file.isFolder ? LucideIcons.folder : LucideIcons.file),
+                          color: (file.isFolder ? Color.fromARGB(0xff, 0xe0, 0xa0, 0x30) : null),
                         ),
                         Text(file.name, overflow: TextOverflow.ellipsis),
                       ],

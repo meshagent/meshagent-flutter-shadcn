@@ -557,7 +557,7 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
                   if (widget.alwaysShowAttachFiles == true ||
                       widget.toolkits.where((x) => x is StaticToolkitBuilderOption && x.config is StorageConfig).isNotEmpty)
                     ShadContextMenuItem(
-                      leading: Icon(LucideIcons.upload),
+                      leading: Icon(LucideIcons.paperclip),
                       onPressed:
                           () => _onSelectAttachment(
                             widget.toolkits.where((x) => x is StaticToolkitBuilderOption && x.config is StorageConfig).firstOrNull,
@@ -565,12 +565,12 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
                       child: Text("Upload a file..."),
                     ),
                   ShadContextMenuItem(
-                    leading: Icon(LucideIcons.paperclip),
+                    leading: Icon(LucideIcons.download),
                     onPressed:
                         () => _onBrowseFiles(
                           widget.toolkits.where((x) => x is StaticToolkitBuilderOption && x.config is StorageConfig).firstOrNull,
                         ),
-                    child: Text("Attach files..."),
+                    child: Text("Add from Room..."),
                   ),
 
                   if (widget.toolkits.isNotEmpty) ShadSeparator.horizontal(margin: EdgeInsets.symmetric(vertical: 3)),
