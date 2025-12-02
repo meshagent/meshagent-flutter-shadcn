@@ -50,11 +50,10 @@ class _PdfPreviewState extends State<PdfPreview> {
     if (doc != null) {
       return ListView.builder(
         itemCount: doc!.pages.length,
-        itemBuilder:
-            (context, index) => Padding(
-              padding: EdgeInsets.all(30),
-              child: PdfPage(document: doc!, pageNumber: index, backgroundColor: widget.backgroundColor, fit: widget.fit),
-            ),
+        itemBuilder: (context, index) => Padding(
+          padding: EdgeInsets.all(30),
+          child: PdfPage(document: doc!, pageNumber: index, backgroundColor: widget.backgroundColor, fit: widget.fit),
+        ),
       );
     } else {
       return Container();

@@ -18,8 +18,8 @@ final audioExtensions = <String>{"mp3", "ogg", "wav"};
 final officeExtensions = <String>{"docx", "pptx", "xlsx"};
 
 final Map<String, Widget Function({Key? key, required RoomClient room, required String filename, required Uri url})> customViewers = {
-  "md":
-      ({Key? key, required RoomClient room, required String filename, required Uri url}) => MarkdownPreview(filename: filename, room: room),
+  "md": ({Key? key, required RoomClient room, required String filename, required Uri url}) =>
+      MarkdownPreview(filename: filename, room: room),
 };
 
 Widget filePreview({Key? key, required RoomClient room, required String filename, required Uri url, BoxFit fit = BoxFit.cover}) {
@@ -143,10 +143,9 @@ class _FileDefaultAttachmentPreviewState extends State<FileDefaultAttachmentPrev
                   SizedBox(
                     width: 24,
                     height: 24,
-                    child:
-                        (status == UploadStatus.initial || status == UploadStatus.uploading)
-                            ? CircularProgressIndicator(color: ShadTheme.of(context).colorScheme.primary, strokeWidth: 2.0)
-                            : Center(child: Icon(LucideIcons.file, size: 20)),
+                    child: (status == UploadStatus.initial || status == UploadStatus.uploading)
+                        ? CircularProgressIndicator(color: ShadTheme.of(context).colorScheme.primary, strokeWidth: 2.0)
+                        : Center(child: Icon(LucideIcons.file, size: 20)),
                   ),
                 ],
               ),
@@ -173,28 +172,26 @@ class FileDefaultPreviewCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
-      builder:
-          (context, constraints) => ShadCard(
-            backgroundColor: Colors.transparent,
-            radius: BorderRadius.circular(16),
-            padding: EdgeInsets.only(left: 8, top: 8, bottom: 8, right: 8),
-            rowCrossAxisAlignment: CrossAxisAlignment.center,
-            trailing:
-                onClose != null
-                    ? ShadIconButton.ghost(width: 24, height: 24, icon: Icon(LucideIcons.x, size: 16), onPressed: onClose)
-                    : null,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SizedBox(width: 24, height: 24, child: Center(child: Icon(icon, size: 20))),
-                const SizedBox(width: 8),
-                ConstrainedBox(
-                  constraints: BoxConstraints(maxWidth: constraints.maxWidth - (24 + 16 + 16)),
-                  child: Text(text, style: ShadTheme.of(context).textTheme.small, maxLines: 1, overflow: TextOverflow.ellipsis),
-                ),
-              ],
+      builder: (context, constraints) => ShadCard(
+        backgroundColor: Colors.transparent,
+        radius: BorderRadius.circular(16),
+        padding: EdgeInsets.only(left: 8, top: 8, bottom: 8, right: 8),
+        rowCrossAxisAlignment: CrossAxisAlignment.center,
+        trailing: onClose != null
+            ? ShadIconButton.ghost(width: 24, height: 24, icon: Icon(LucideIcons.x, size: 16), onPressed: onClose)
+            : null,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(width: 24, height: 24, child: Center(child: Icon(icon, size: 20))),
+            const SizedBox(width: 8),
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: constraints.maxWidth - (24 + 16 + 16)),
+              child: Text(text, style: ShadTheme.of(context).textTheme.small, maxLines: 1, overflow: TextOverflow.ellipsis),
             ),
-          ),
+          ],
+        ),
+      ),
     );
   }
 }

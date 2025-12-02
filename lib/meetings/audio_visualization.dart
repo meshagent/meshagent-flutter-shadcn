@@ -130,7 +130,10 @@ class _AudioWaveState extends State<AudioWave> {
         //    colors: [filledButtonColor, darken(filledButtonColor, 20)]),
         //borderRadius: BorderRadius.circular(10),
       ),
-      child: Opacity(opacity: hasReceivedLevels ? 1 : 0.1, child: SiriWaveform.ios7(controller: controller)),
+      child: Opacity(
+        opacity: hasReceivedLevels ? 1 : 0.1,
+        child: SiriWaveform.ios7(controller: controller),
+      ),
     );
   }
 }

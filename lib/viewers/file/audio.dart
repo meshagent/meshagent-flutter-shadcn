@@ -10,6 +10,8 @@ class AudioViewer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(child: FilePreview(room: room, path: path));
+    return Center(
+      child: FilePreview(room: room, path: path),
+    );
   }
 }

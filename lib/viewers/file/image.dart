@@ -29,7 +29,10 @@ class _ImageViewerState extends State<ImageViewer> {
   Widget build(BuildContext context) {
     return InteractiveViewer2(
       child: Center(
-        child: Container(padding: EdgeInsets.all(20), child: FilePreview(room: widget.room, path: widget.path, fit: BoxFit.contain)),
+        child: Container(
+          padding: EdgeInsets.all(20),
+          child: FilePreview(room: widget.room, path: widget.path, fit: BoxFit.contain),
+        ),
       ),
     );
   }

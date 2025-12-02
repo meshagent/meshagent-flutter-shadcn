@@ -56,7 +56,9 @@ class _MeetingScopeState extends State<MeetingScope> {
 
   @override
   Widget build(BuildContext context) {
-    return WakeLocker(child: _MeetingControllerData(controller: controller, child: widget.builder(context, controller)));
+    return WakeLocker(
+      child: _MeetingControllerData(controller: controller, child: widget.builder(context, controller)),
+    );
   }
 }
 

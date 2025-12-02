@@ -10,6 +10,8 @@ class VideoViewer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InteractiveViewer(child: FilePreview(room: room, path: path));
+    return InteractiveViewer(
+      child: FilePreview(room: room, path: path),
+    );
   }
 }

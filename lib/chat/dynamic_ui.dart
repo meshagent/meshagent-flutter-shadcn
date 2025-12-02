@@ -147,7 +147,10 @@ class _DynamicUI extends State<DynamicUI> {
       } else if (name == "open") {
         await launchUrl(Uri.parse(data!["url"] as String), webOnlyWindowName: data["target"] as String?);
       } else {
-        showShadDialog(context: context, builder: (context) => ShadDialog.alert(title: Text("Unknown event received $name")));
+        showShadDialog(
+          context: context,
+          builder: (context) => ShadDialog.alert(title: Text("Unknown event received $name")),
+        );
       }
     } on Exception catch (ex) {
       if (!mounted) {

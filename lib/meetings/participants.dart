@@ -22,22 +22,21 @@ class _ParticipantCamerasListState extends State<ParticipantCamerasList> {
     final controller = widget.controller;
     return ListenableBuilder(
       listenable: widget.controller.livekitRoom,
-      builder:
-          (context, _) => ListView(
-            padding: widget.padding,
-            scrollDirection: Axis.horizontal,
-            children: [
-              if (controller.livekitRoom.localParticipant != null)
-                ParticipantTile(room: controller.livekitRoom, participant: controller.livekitRoom.localParticipant!),
-              SizedBox(width: widget.spacing),
-              ...controller.livekitRoom.remoteParticipants.values.map(
-                (participant) => Padding(
-                  padding: EdgeInsets.only(right: widget.spacing),
-                  child: ParticipantTile(room: controller.livekitRoom, participant: participant),
-                ),
-              ),
-            ],
+      builder: (context, _) => ListView(
+        padding: widget.padding,
+        scrollDirection: Axis.horizontal,
+        children: [
+          if (controller.livekitRoom.localParticipant != null)
+            ParticipantTile(room: controller.livekitRoom, participant: controller.livekitRoom.localParticipant!),
+          SizedBox(width: widget.spacing),
+          ...controller.livekitRoom.remoteParticipants.values.map(
+            (participant) => Padding(
+              padding: EdgeInsets.only(right: widget.spacing),
+              child: ParticipantTile(room: controller.livekitRoom, participant: participant),
+            ),
           ),
+        ],
+      ),
     );
   }
 }
@@ -60,18 +59,17 @@ class ParticipantTile extends StatelessWidget {
             borderColor: Colors.transparent,
             borderWidth: 0,
             muted: participant.isMuted,
-            camera:
-                track != null
-                    ? VideoTrackRenderer(track, fit: VideoViewFit.cover)
-                    : (participant.kind == ParticipantKind.AGENT
-                        ? AudioWave(
+            camera: track != null
+                ? VideoTrackRenderer(track, fit: VideoViewFit.cover)
+                : (participant.kind == ParticipantKind.AGENT
+                      ? AudioWave(
                           room: room,
                           participant: participant,
                           backgroundColor: ShadTheme.of(context).colorScheme.background,
                           speakingColor: ShadTheme.of(context).colorScheme.foreground.withAlpha(50),
                           notSpeakingColor: ShadTheme.of(context).colorScheme.foreground.withAlpha(25),
                         )
-                        : ColoredBox(color: ShadTheme.of(context).colorScheme.foreground)),
+                      : ColoredBox(color: ShadTheme.of(context).colorScheme.foreground)),
             participantName: participant.name,
           ),
         );
@@ -147,7 +145,9 @@ class _ParticipantOverlayState extends State<_ParticipantOverlay> with SingleTic
                 return Flexible(
                   child: SizedBox(
                     height: audioIconSize,
-                    child: ClipRect(child: Align(alignment: Alignment.centerLeft, widthFactor: _animation.value, child: child)),
+                    child: ClipRect(
+                      child: Align(alignment: Alignment.centerLeft, widthFactor: _animation.value, child: child),
+                    ),
                   ),
                 );
               },
@@ -202,7 +202,9 @@ class _CameraBox extends StatelessWidget {
               alignment: overlayAlignment,
               child: Padding(
                 padding: const EdgeInsets.all(5),
-                child: IntrinsicWidth(child: _ParticipantOverlay(name: participantName, muted: muted, showName: showName)),
+                child: IntrinsicWidth(
+                  child: _ParticipantOverlay(name: participantName, muted: muted, showName: showName),
+                ),
               ),
             ),
           ],
