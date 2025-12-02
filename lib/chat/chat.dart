@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:collection/collection.dart';
 
@@ -12,7 +11,6 @@ import 'package:markdown_widget/markdown_widget.dart';
 import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_flutter_shadcn/storage/file_browser.dart';
 import 'package:meshagent_flutter_shadcn/ui/ui.dart';
-import 'package:rfw/formats.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:super_clipboard/super_clipboard.dart';
 import 'package:super_drag_and_drop/super_drag_and_drop.dart';
@@ -22,10 +20,6 @@ import 'package:uuid/uuid.dart';
 import 'package:meshagent_flutter/meshagent_flutter.dart';
 import 'package:meshagent_flutter_shadcn/file_preview/file_preview.dart';
 import 'package:meshagent_flutter_shadcn/file_preview/image.dart';
-import 'package:meshagent_flutter_shadcn/meetings/meetings.dart';
-
-import 'package:livekit_client/livekit_client.dart' as livekit;
-import 'package:rfw/rfw.dart';
 
 import 'jumping_dots.dart';
 import 'outbound_delivery_status.dart';
@@ -238,8 +232,8 @@ class ChatThreadController extends ChangeNotifier {
     for (final child in document.root.getChildren().whereType<MeshElement>()) {
       if (child.tagName == "members") {
         for (final member in child.getChildren().whereType<MeshElement>()) {
-          if (member.attributes["name"] != null) {
-            yield member.attributes["name"];
+          if (member.getAttribute("name") != null) {
+            yield member.getAttribute("name");
           }
         }
       }
@@ -485,40 +479,39 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
     await showShadDialog(
       context: context,
 
-      builder:
-          (context) => ShadDialog(
-            title: Text("Select files"),
-            scrollable: false,
-            description: Text("Attach files from this room"),
-            actions: [
-              ShadButton.secondary(
-                onPressed: () {
-                  picked.clear();
-                  Navigator.of(context).pop([]);
-                },
-                child: Text("Cancel"),
-              ),
-              ShadButton.secondary(
-                onPressed: () {
-                  Navigator.of(context).pop(picked);
-                },
-                child: Text("OK"),
-              ),
-            ],
-            child: SizedBox(
-              width: 500,
-              height: 400,
-              child: ShadCard(
-                child: FileBrowser(
-                  onSelectionChanged: (selection) {
-                    picked = selection;
-                  },
-                  room: widget.controller.room,
-                  multiple: true,
-                ),
-              ),
+      builder: (context) => ShadDialog(
+        title: Text("Select files"),
+        scrollable: false,
+        description: Text("Attach files from this room"),
+        actions: [
+          ShadButton.secondary(
+            onPressed: () {
+              picked.clear();
+              Navigator.of(context).pop([]);
+            },
+            child: Text("Cancel"),
+          ),
+          ShadButton.secondary(
+            onPressed: () {
+              Navigator.of(context).pop(picked);
+            },
+            child: Text("OK"),
+          ),
+        ],
+        child: SizedBox(
+          width: 500,
+          height: 400,
+          child: ShadCard(
+            child: FileBrowser(
+              onSelectionChanged: (selection) {
+                picked = selection;
+              },
+              room: widget.controller.room,
+              multiple: true,
             ),
           ),
+        ),
+      ),
     );
 
     for (final f in picked) {
@@ -544,153 +537,140 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
     }
     return ListenableBuilder(
       listenable: popoverController,
-      builder:
-          (context, _) => Wrap(
-            alignment: WrapAlignment.start,
-            runAlignment: WrapAlignment.center,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              ShadContextMenu(
-                constraints: BoxConstraints(minWidth: 175),
-                anchor: ShadAnchorAuto(followerAnchor: Alignment.topRight, targetAnchor: Alignment.topLeft),
-                items: [
-                  if (widget.alwaysShowAttachFiles == true ||
-                      widget.toolkits.where((x) => x is StaticToolkitBuilderOption && x.config is StorageConfig).isNotEmpty)
-                    ShadContextMenuItem(
-                      leading: Icon(LucideIcons.paperclip),
-                      onPressed:
-                          () => _onSelectAttachment(
-                            widget.toolkits.where((x) => x is StaticToolkitBuilderOption && x.config is StorageConfig).firstOrNull,
-                          ),
-                      child: Text("Upload a file..."),
-                    ),
-                  ShadContextMenuItem(
-                    leading: Icon(LucideIcons.download),
-                    onPressed:
-                        () => _onBrowseFiles(
-                          widget.toolkits.where((x) => x is StaticToolkitBuilderOption && x.config is StorageConfig).firstOrNull,
-                        ),
-                    child: Text("Add from room..."),
+      builder: (context, _) => Wrap(
+        alignment: WrapAlignment.start,
+        runAlignment: WrapAlignment.center,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          ShadContextMenu(
+            constraints: BoxConstraints(minWidth: 175),
+            anchor: ShadAnchorAuto(followerAnchor: Alignment.topRight, targetAnchor: Alignment.topLeft),
+            items: [
+              if (widget.alwaysShowAttachFiles == true ||
+                  widget.toolkits.where((x) => x is StaticToolkitBuilderOption && x.config is StorageConfig).isNotEmpty)
+                ShadContextMenuItem(
+                  leading: Icon(LucideIcons.paperclip),
+                  onPressed: () => _onSelectAttachment(
+                    widget.toolkits.where((x) => x is StaticToolkitBuilderOption && x.config is StorageConfig).firstOrNull,
                   ),
+                  child: Text("Upload a file..."),
+                ),
+              ShadContextMenuItem(
+                leading: Icon(LucideIcons.download),
+                onPressed: () =>
+                    _onBrowseFiles(widget.toolkits.where((x) => x is StaticToolkitBuilderOption && x.config is StorageConfig).firstOrNull),
+                child: Text("Add from room..."),
+              ),
 
-                  if (widget.toolkits.isNotEmpty) ShadSeparator.horizontal(margin: EdgeInsets.symmetric(vertical: 3)),
+              if (widget.toolkits.isNotEmpty) ShadSeparator.horizontal(margin: EdgeInsets.symmetric(vertical: 3)),
 
-                  for (final tk in widget.toolkits)
-                    Builder(
-                      builder:
-                          (context) => ShadContextMenuItem(
-                            textStyle:
-                                widget.controller.toolkits.contains(tk)
-                                    ? ShadTheme.of(context).contextMenuTheme.textStyle!.copyWith(color: Colors.blue)
-                                    : null,
-                            leading: Icon(tk.icon, color: widget.controller.toolkits.contains(tk) ? Colors.blue : null),
-                            onPressed: () {
-                              widget.controller.toggleToolkit(tk);
-                            },
-                            trailing:
-                                widget.controller.toolkits.contains(tk)
-                                    ? Icon(LucideIcons.check, color: widget.controller.toolkits.contains(tk) ? Colors.blue : null)
-                                    : null,
-                            child: Text(tk.text),
-                          ),
-                    ),
-                ],
-                controller: popoverController,
-                child: ShadIconButton.ghost(
-                  hoverBackgroundColor: ShadTheme.of(context).colorScheme.background,
-                  decoration: ShadDecoration(shape: BoxShape.circle),
-                  onPressed:
-                      popoverController.isOpen
+              for (final tk in widget.toolkits)
+                Builder(
+                  builder: (context) => ShadContextMenuItem(
+                    textStyle: widget.controller.toolkits.contains(tk)
+                        ? ShadTheme.of(context).contextMenuTheme.textStyle!.copyWith(color: Colors.blue)
+                        : null,
+                    leading: Icon(tk.icon, color: widget.controller.toolkits.contains(tk) ? Colors.blue : null),
+                    onPressed: () {
+                      widget.controller.toggleToolkit(tk);
+                    },
+                    trailing: widget.controller.toolkits.contains(tk)
+                        ? Icon(LucideIcons.check, color: widget.controller.toolkits.contains(tk) ? Colors.blue : null)
+                        : null,
+                    child: Text(tk.text),
+                  ),
+                ),
+            ],
+            controller: popoverController,
+            child: ShadIconButton.ghost(
+              hoverBackgroundColor: ShadTheme.of(context).colorScheme.background,
+              decoration: ShadDecoration(shape: BoxShape.circle),
+              onPressed: popoverController.isOpen
+                  ? null
+                  : () {
+                      popoverController.toggle();
+                    },
+              iconSize: 16,
+              width: 32,
+              height: 32,
+              icon: Icon(LucideIcons.plus),
+            ),
+          ),
+          for (final tool in widget.controller.toolkits) ...[
+            ShadButton.ghost(
+              trailing: Icon(LucideIcons.x),
+              hoverBackgroundColor: ShadTheme.of(context).colorScheme.background,
+              decoration: ShadDecoration(border: ShadBorder.all(radius: BorderRadius.circular(30))),
+              child: Text(tool.selectedText),
+              onPressed: () {
+                setState(() {
+                  widget.controller.toggleToolkit(tool);
+                });
+              },
+            ),
+            if (tool is ConnectorToolkitBuilderOption) ...[
+              if (widget.agentName != null)
+                ShadContextMenu(
+                  controller: addMcpController,
+                  constraints: BoxConstraints(minWidth: 175),
+                  anchor: ShadAnchorAuto(followerAnchor: Alignment.topRight, targetAnchor: Alignment.topLeft),
+                  items: [
+                    if (widget.availableConnectors.isEmpty) ShadContextMenuItem(child: Text("No connectors are configured for this room")),
+                    for (final connector in widget.availableConnectors)
+                      ConnectorContextMenuItem(
+                        selected:
+                            widget.controller.toolkits.whereType<ConnectorToolkitBuilderOption>().firstOrNull?.connectors.firstWhereOrNull(
+                              (c) => c.name == connector.name,
+                            ) !=
+                            null,
+                        agentName: widget.agentName!,
+                        room: widget.controller.room,
+                        connector: connector,
+                        onSelectedChanged: (selected) async {
+                          if (!selected) {
+                            widget.controller.toolkits.whereType<ConnectorToolkitBuilderOption>().firstOrNull?.connectors.removeWhere(
+                              (c) => c.name == connector.name,
+                            );
+                            setState(() {});
+                          } else {
+                            await widget.onConnectorSetup!(connector);
+                            var mcp =
+                                widget.controller.toolkits.firstWhereOrNull((c) => c is ConnectorToolkitBuilderOption)
+                                    as ConnectorToolkitBuilderOption?;
+                            if (mounted) {
+                              if (mcp!.connectors.firstWhereOrNull((c) => c.name == connector.name) == null) {
+                                setState(() {
+                                  mcp.connectors.add(connector);
+                                });
+                              }
+                            }
+                          }
+                        },
+                        onConnectorSetup: widget.onConnectorSetup,
+                      ),
+                  ],
+                  child: ListenableBuilder(
+                    listenable: addMcpController,
+                    builder: (context, _) => ShadButton.ghost(
+                      decoration: ShadDecoration(border: ShadBorder.all(radius: BorderRadius.circular(30))),
+
+                      onPressed: addMcpController.isOpen
                           ? null
                           : () {
-                            popoverController.toggle();
-                          },
-                  iconSize: 16,
-                  width: 32,
-                  height: 32,
-                  icon: Icon(LucideIcons.plus),
-                ),
-              ),
-              for (final tool in widget.controller.toolkits) ...[
-                ShadButton.ghost(
-                  trailing: Icon(LucideIcons.x),
-                  hoverBackgroundColor: ShadTheme.of(context).colorScheme.background,
-                  decoration: ShadDecoration(border: ShadBorder.all(radius: BorderRadius.circular(30))),
-                  child: Text(tool.selectedText),
-                  onPressed: () {
-                    setState(() {
-                      widget.controller.toggleToolkit(tool);
-                    });
-                  },
-                ),
-                if (tool is ConnectorToolkitBuilderOption) ...[
-                  if (widget.agentName != null)
-                    ShadContextMenu(
-                      controller: addMcpController,
-                      constraints: BoxConstraints(minWidth: 175),
-                      anchor: ShadAnchorAuto(followerAnchor: Alignment.topRight, targetAnchor: Alignment.topLeft),
-                      items: [
-                        if (widget.availableConnectors.isEmpty)
-                          ShadContextMenuItem(child: Text("No connectors are configured for this room")),
-                        for (final connector in widget.availableConnectors)
-                          ConnectorContextMenuItem(
-                            selected:
-                                widget.controller.toolkits
-                                    .whereType<ConnectorToolkitBuilderOption>()
-                                    .firstOrNull
-                                    ?.connectors
-                                    .firstWhereOrNull((c) => c.name == connector.name) !=
-                                null,
-                            agentName: widget.agentName!,
-                            room: widget.controller.room,
-                            connector: connector,
-                            onSelectedChanged: (selected) async {
-                              if (!selected) {
-                                widget.controller.toolkits.whereType<ConnectorToolkitBuilderOption>().firstOrNull?.connectors.removeWhere(
-                                  (c) => c.name == connector.name,
-                                );
-                                setState(() {});
-                              } else {
-                                await widget.onConnectorSetup!(connector);
-                                var mcp =
-                                    widget.controller.toolkits.firstWhereOrNull((c) => c is ConnectorToolkitBuilderOption)
-                                        as ConnectorToolkitBuilderOption?;
-                                if (mounted) {
-                                  if (mcp!.connectors.firstWhereOrNull((c) => c.name == connector.name) == null) {
-                                    setState(() {
-                                      mcp.connectors.add(connector);
-                                    });
-                                  }
-                                }
-                              }
+                              addMcpController.setOpen(true);
                             },
-                            onConnectorSetup: widget.onConnectorSetup,
-                          ),
-                      ],
-                      child: ListenableBuilder(
-                        listenable: addMcpController,
-                        builder:
-                            (context, _) => ShadButton.ghost(
-                              decoration: ShadDecoration(border: ShadBorder.all(radius: BorderRadius.circular(30))),
-
-                              onPressed:
-                                  addMcpController.isOpen
-                                      ? null
-                                      : () {
-                                        addMcpController.setOpen(true);
-                                      },
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                spacing: 8,
-                                children: [Icon(LucideIcons.cable), Text("${tool.connectors.length}"), Icon(LucideIcons.chevronDown)],
-                              ),
-                            ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        spacing: 8,
+                        children: [Icon(LucideIcons.cable), Text("${tool.connectors.length}"), Icon(LucideIcons.chevronDown)],
                       ),
                     ),
-                ],
-              ],
+                  ),
+                ),
             ],
-          ),
+          ],
+        ],
+      ),
     );
   }
 }
@@ -742,17 +722,16 @@ class _ConnectorContextMenuItem extends State<ConnectorContextMenuItem> {
         maintainState: true,
         maintainAnimation: true,
         visible: connected != null,
-        child:
-            connected != true
-                ? Text("Connect", style: TextStyle(color: ShadTheme.of(context).colorScheme.mutedForeground))
-                : ShadSwitch(
-                  onChanged: (value) {
-                    if (widget.onSelectedChanged != null) {
-                      widget.onSelectedChanged!(value);
-                    }
-                  },
-                  value: widget.selected,
-                ),
+        child: connected != true
+            ? Text("Connect", style: TextStyle(color: ShadTheme.of(context).colorScheme.mutedForeground))
+            : ShadSwitch(
+                onChanged: (value) {
+                  if (widget.onSelectedChanged != null) {
+                    widget.onSelectedChanged!(value);
+                  }
+                },
+                value: widget.selected,
+              ),
       ),
       onPressed: () async {
         if (widget.onSelectedChanged != null) {
@@ -985,20 +964,20 @@ class _ChatThreadInput extends State<ChatThreadInput> {
         widget.trailing ??
         (showSendButton && allAttachmentsUploaded
             ? ShadTooltip(
-              waitDuration: Duration(seconds: 1),
-              builder: (context) => Text("Send"),
-              child: ShadIconButton(
-                cursor: SystemMouseCursors.click,
-                onPressed: () {
-                  widget.onSend(widget.controller.text, widget.controller.attachmentUploads);
-                },
-                width: 32,
-                height: 32,
-                iconSize: 16,
-                decoration: ShadDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
-                icon: Icon(LucideIcons.arrowUp, color: ShadTheme.of(context).colorScheme.background),
-              ),
-            )
+                waitDuration: Duration(seconds: 1),
+                builder: (context) => Text("Send"),
+                child: ShadIconButton(
+                  cursor: SystemMouseCursors.click,
+                  onPressed: () {
+                    widget.onSend(widget.controller.text, widget.controller.attachmentUploads);
+                  },
+                  width: 32,
+                  height: 32,
+                  iconSize: 16,
+                  decoration: ShadDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
+                  icon: Icon(LucideIcons.arrowUp, color: ShadTheme.of(context).colorScheme.background),
+                ),
+              )
             : null);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1016,32 +995,31 @@ class _ChatThreadInput extends State<ChatThreadInput> {
               return Padding(
                 padding: EdgeInsets.all(8),
                 child: LayoutBuilder(
-                  builder:
-                      (context, constraints) => SizedBox(
-                        height: 40,
-                        child: Center(
-                          child: ListView.separated(
-                            itemCount: attachments.length,
-                            separatorBuilder: (context, index) => const SizedBox(width: 10),
-                            scrollDirection: Axis.horizontal,
-                            itemBuilder: (context, index) {
-                              final attachment = attachments[index];
+                  builder: (context, constraints) => SizedBox(
+                    height: 40,
+                    child: Center(
+                      child: ListView.separated(
+                        itemCount: attachments.length,
+                        separatorBuilder: (context, index) => const SizedBox(width: 10),
+                        scrollDirection: Axis.horizontal,
+                        itemBuilder: (context, index) {
+                          final attachment = attachments[index];
 
-                              if (widget.attachmentBuilder != null) {
-                                return widget.attachmentBuilder!(context, attachment);
-                              }
+                          if (widget.attachmentBuilder != null) {
+                            return widget.attachmentBuilder!(context, attachment);
+                          }
 
-                              return FileDefaultAttachmentPreview(
-                                attachment: attachment,
-                                maxWidth: constraints.maxWidth - 50,
-                                onRemove: () {
-                                  widget.controller.removeFileUpload(attachment);
-                                },
-                              );
+                          return FileDefaultAttachmentPreview(
+                            attachment: attachment,
+                            maxWidth: constraints.maxWidth - 50,
+                            onRemove: () {
+                              widget.controller.removeFileUpload(attachment);
                             },
-                          ),
-                        ),
+                          );
+                        },
                       ),
+                    ),
+                  ),
                 ),
               );
             },
@@ -1062,13 +1040,17 @@ class _ChatThreadInput extends State<ChatThreadInput> {
           placeholder: widget.placeholder,
           focusNode: focusNode,
           controller: widget.controller.textFieldController,
-          bottom:
-              widget.footer == null
-                  ? null
-                  : Padding(
-                    padding: EdgeInsets.only(left: 5, right: 5, top: 5, bottom: 0),
-                    child: Row(children: [Expanded(child: widget.footer!), if (trailer != null) trailer]),
+          bottom: widget.footer == null
+              ? null
+              : Padding(
+                  padding: EdgeInsets.only(left: 5, right: 5, top: 5, bottom: 0),
+                  child: Row(
+                    children: [
+                      Expanded(child: widget.footer!),
+                      if (trailer != null) trailer,
+                    ],
                   ),
+                ),
         ),
       ],
     );
@@ -1139,25 +1121,44 @@ class ChatBubble extends StatelessWidget {
           config: MarkdownConfig(
             configs: [
               HrConfig(color: mdColor),
-              H1Config(style: TextStyle(fontSize: baseFontSize * 2, color: mdColor, fontWeight: FontWeight.bold)),
-              H2Config(style: TextStyle(fontSize: baseFontSize * 1.8, color: mdColor, inherit: false)),
-              H3Config(style: TextStyle(fontSize: baseFontSize * 1.6, color: mdColor, inherit: false)),
-              H4Config(style: TextStyle(fontSize: baseFontSize * 1.4, color: mdColor, inherit: false)),
-              H5Config(style: TextStyle(fontSize: baseFontSize * 1.2, color: mdColor, inherit: false)),
-              H6Config(style: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false)),
+              H1Config(
+                style: TextStyle(fontSize: baseFontSize * 2, color: mdColor, fontWeight: FontWeight.bold),
+              ),
+              H2Config(
+                style: TextStyle(fontSize: baseFontSize * 1.8, color: mdColor, inherit: false),
+              ),
+              H3Config(
+                style: TextStyle(fontSize: baseFontSize * 1.6, color: mdColor, inherit: false),
+              ),
+              H4Config(
+                style: TextStyle(fontSize: baseFontSize * 1.4, color: mdColor, inherit: false),
+              ),
+              H5Config(
+                style: TextStyle(fontSize: baseFontSize * 1.2, color: mdColor, inherit: false),
+              ),
+              H6Config(
+                style: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
+              ),
               PreConfig(
                 decoration: BoxDecoration(color: ShadTheme.of(context).cardTheme.backgroundColor),
                 textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
               ),
-              PConfig(textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false)),
-              CodeConfig(style: GoogleFonts.sourceCodePro(fontSize: baseFontSize * 1.0, color: mdColor)),
+              PConfig(
+                textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
+              ),
+              CodeConfig(
+                style: GoogleFonts.sourceCodePro(fontSize: baseFontSize * 1.0, color: mdColor),
+              ),
               BlockquoteConfig(textColor: mdColor),
               LinkConfig(
                 style: TextStyle(color: ShadTheme.of(context).linkButtonTheme.foregroundColor, decoration: TextDecoration.underline),
               ),
               ListConfig(
                 marker: (isOrdered, depth, index) {
-                  return Padding(padding: EdgeInsets.only(right: 5), child: Text("${index + 1}.", textAlign: TextAlign.right));
+                  return Padding(
+                    padding: EdgeInsets.only(right: 5),
+                    child: Text("${index + 1}.", textAlign: TextAlign.right),
+                  );
                 },
               ),
             ],
@@ -1252,80 +1253,69 @@ class _ChatThreadState extends State<ChatThread> {
               ),
               ListenableBuilder(
                 listenable: controller,
-                builder:
-                    (context, _) => Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 15, vertical: 8),
-                      child: Center(
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(maxWidth: 912),
-                          child: ChatThreadInput(
-                            onClear: () {
-                              final participant = widget.room.messaging.remoteParticipants.firstWhereOrNull(
-                                (x) => x.getAttribute("name") == widget.agentName,
-                              );
-                              if (participant != null) {
-                                widget.room.messaging.sendMessage(to: participant, type: "clear", message: {"path": widget.path});
-                              }
-                            },
-                            leading:
-                                controller.toolkits.isNotEmpty
-                                    ? null
-                                    : widget.toolsBuilder == null
-                                    ? null
-                                    : widget.toolsBuilder!(context, controller, state),
-                            footer:
-                                controller.toolkits.isEmpty
-                                    ? null
-                                    : widget.toolsBuilder == null
-                                    ? null
-                                    : widget.toolsBuilder!(context, controller, state),
-                            trailing:
-                                state.thinking.isNotEmpty
-                                    ? ShadGestureDetector(
-                                      cursor: SystemMouseCursors.click,
-                                      onTapDown: (_) {
-                                        controller.cancel(widget.path, widget.document);
-                                      },
-                                      child: ShadTooltip(
-                                        builder: (context) => Text("Stop"),
-                                        child: Container(
-                                          width: 22,
-                                          height: 22,
-                                          decoration: BoxDecoration(
-                                            shape: BoxShape.circle,
-                                            color: ShadTheme.of(context).colorScheme.foreground,
-                                          ),
-                                          child: Icon(LucideIcons.x, color: ShadTheme.of(context).colorScheme.background),
-                                        ),
-                                      ),
-                                    )
-                                    : null,
-                            room: widget.room,
-                            onSend: (value, attachments) {
-                              controller.send(
-                                thread: widget.document,
-                                path: widget.path,
-                                message: ChatMessage(
-                                  id: const Uuid().v4(),
-                                  text: value,
-                                  attachments: attachments.map((x) => x.path).toList(),
+                builder: (context, _) => Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(maxWidth: 912),
+                      child: ChatThreadInput(
+                        onClear: () {
+                          final participant = widget.room.messaging.remoteParticipants.firstWhereOrNull(
+                            (x) => x.getAttribute("name") == widget.agentName,
+                          );
+                          if (participant != null) {
+                            widget.room.messaging.sendMessage(to: participant, type: "clear", message: {"path": widget.path});
+                          }
+                        },
+                        leading: controller.toolkits.isNotEmpty
+                            ? null
+                            : widget.toolsBuilder == null
+                            ? null
+                            : widget.toolsBuilder!(context, controller, state),
+                        footer: controller.toolkits.isEmpty
+                            ? null
+                            : widget.toolsBuilder == null
+                            ? null
+                            : widget.toolsBuilder!(context, controller, state),
+                        trailing: state.thinking.isNotEmpty
+                            ? ShadGestureDetector(
+                                cursor: SystemMouseCursors.click,
+                                onTapDown: (_) {
+                                  controller.cancel(widget.path, widget.document);
+                                },
+                                child: ShadTooltip(
+                                  builder: (context) => Text("Stop"),
+                                  child: Container(
+                                    width: 22,
+                                    height: 22,
+                                    decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
+                                    child: Icon(LucideIcons.x, color: ShadTheme.of(context).colorScheme.background),
+                                  ),
                                 ),
-                                onMessageSent: widget.onMessageSent,
-                              );
-                            },
-                            onChanged: (value, attachments) {
-                              for (final part in controller.getOnlineParticipants(widget.document)) {
-                                if (part.id != widget.room.localParticipant?.id) {
-                                  widget.room.messaging.sendMessage(to: part, type: "typing", message: {"path": widget.path});
-                                }
-                              }
-                            },
-                            controller: controller,
-                            attachmentBuilder: widget.attachmentBuilder,
-                          ),
-                        ),
+                              )
+                            : null,
+                        room: widget.room,
+                        onSend: (value, attachments) {
+                          controller.send(
+                            thread: widget.document,
+                            path: widget.path,
+                            message: ChatMessage(id: const Uuid().v4(), text: value, attachments: attachments.map((x) => x.path).toList()),
+                            onMessageSent: widget.onMessageSent,
+                          );
+                        },
+                        onChanged: (value, attachments) {
+                          for (final part in controller.getOnlineParticipants(widget.document)) {
+                            if (part.id != widget.room.localParticipant?.id) {
+                              widget.room.messaging.sendMessage(to: part, type: "typing", message: {"path": widget.path});
+                            }
+                          }
+                        },
+                        controller: controller,
+                        attachmentBuilder: widget.attachmentBuilder,
                       ),
                     ),
+                  ),
+                ),
               ),
             ],
           ),
@@ -1334,6 +1324,15 @@ class _ChatThreadState extends State<ChatThread> {
     );
   }
 }
+
+typedef MessageBuilder =
+    Widget Function({
+      Key? key,
+      required RoomClient room,
+      required MeshElement? previous,
+      required MeshElement message,
+      required MeshElement? next,
+    });
 
 class ChatThreadMessages extends StatelessWidget {
   const ChatThreadMessages({
@@ -1348,7 +1347,10 @@ class ChatThreadMessages extends StatelessWidget {
     this.messageHeaderBuilder,
     this.fileInThreadBuilder,
     this.currentStatusEntry,
+    this.messageBuilders,
   });
+
+  final Map<String, MessageBuilder>? messageBuilders;
 
   final RoomClient room;
   final bool startChatCentered;
@@ -1397,20 +1399,21 @@ class ChatThreadMessages extends StatelessWidget {
   }
 
   Widget _buildMessage(BuildContext context, MeshElement? previous, MeshElement message, MeshElement? next) {
-    final isSameAuthor = message.attributes["author_name"] == previous?.attributes["author_name"];
-    final mine = message.attributes["author_name"] == room.localParticipant!.getAttribute("name");
+    final isSameAuthor = message.getAttribute("author_name") == previous?.getAttribute("author_name");
+    final mine = message.getAttribute("author_name") == room.localParticipant!.getAttribute("name");
 
     final text = message.getAttribute("text");
     final id = message.getAttribute("id");
+
+    if (messageBuilders?[message.tagName] != null) {
+      return messageBuilders![message.tagName]!(room: room, previous: previous, message: message, next: next);
+    }
 
     if (message.tagName == "reasoning") {
       return ReasoningTrace(previous: previous, message: message, next: next);
     }
     if (message.tagName == "exec") {
       return ShellLine(previous: previous, message: message, next: next);
-    }
-    if (message.tagName == "ui") {
-      return DynamicUI(room: room, previous: previous, message: message, next: next);
     }
 
     return SizedBox(
@@ -1480,15 +1483,14 @@ class ChatThreadMessages extends StatelessWidget {
                 children: [
                   Expanded(
                     child: LayoutBuilder(
-                      builder:
-                          (context, constraints) => ListView(
-                            reverse: true,
-                            padding: EdgeInsets.symmetric(
-                              vertical: 16,
-                              horizontal: constraints.maxWidth > 912 ? (constraints.maxWidth - 912) / 2 : 16,
-                            ),
-                            children: messageWidgets,
-                          ),
+                      builder: (context, constraints) => ListView(
+                        reverse: true,
+                        padding: EdgeInsets.symmetric(
+                          vertical: 16,
+                          horizontal: constraints.maxWidth > 912 ? (constraints.maxWidth - 912) / 2 : 16,
+                        ),
+                        children: messageWidgets,
+                      ),
                     ),
                   ),
 
@@ -1557,8 +1559,8 @@ class ChatThreadMessages extends StatelessWidget {
 }
 
 Widget defaultMessageHeaderBuilder(BuildContext context, MeshDocument thread, MeshElement message) {
-  final name = message.attributes["author_name"] ?? "";
-  final createdAt = message.attributes["created_at"] == null ? DateTime.now() : DateTime.parse(message.attributes["created_at"]);
+  final name = message.getAttribute("author_name") ?? "";
+  final createdAt = message.getAttribute("created_at") == null ? DateTime.now() : DateTime.parse(message.getAttribute("created_at"));
   final members = thread.root.getElementsByTagName("members").firstOrNull?.getElementsByTagName("member") ?? [];
   if (members.length > 2) {
     return Container(
@@ -1799,169 +1801,6 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
   }
 }
 
-class DynamicUI extends StatefulWidget {
-  const DynamicUI({super.key, required this.room, required this.previous, required this.message, required this.next});
-
-  final RoomClient room;
-  final MeshElement? previous;
-  final MeshElement message;
-  final MeshElement? next;
-
-  @override
-  State createState() => _DynamicUI();
-}
-
-class _DynamicUI extends State<DynamicUI> {
-  final _runtime = Runtime();
-  final _data = DynamicContent();
-
-  static const LibraryName coreName = LibraryName(<String>['core', 'widgets']);
-  static const LibraryName mainName = LibraryName(<String>['main']);
-
-  @override
-  void initState() {
-    super.initState();
-    // Local widget library:
-    _runtime.update(coreName, createCoreWidgets());
-    // Remote widget library:
-
-    updateData();
-    updateWidget();
-
-    widget.message.addListener(onUpdated);
-  }
-
-  @override
-  void dispose() {
-    super.dispose();
-    widget.message.removeListener(onUpdated);
-
-    _runtime.dispose();
-  }
-
-  void onUpdated() {
-    error = null;
-    updateData();
-    updateWidget();
-  }
-
-  RemoteWidgetLibrary? _remoteWidgets;
-  Exception? error;
-
-  void updateWidget() async {
-    final renderer = widget.message.getAttribute("renderer");
-    final widgetName = widget.message.getAttribute("widget");
-    final data = widget.message.getAttribute("data");
-
-    Response? response;
-    if (renderer is String && widgetName is String) {
-      try {
-        setState(() {
-          error = null;
-        });
-        if (data == null) {
-          return;
-        }
-        response = await widget.room.agents.invokeTool(
-          toolkit: renderer,
-          tool: widgetName,
-          arguments: {"platform": "flutter", "output": "rfw", "data": data},
-        );
-
-        final resp = response;
-        if (resp is TextResponse) {
-          if (!mounted) return;
-          setState(() {
-            _remoteWidgets = parseLibraryFile(resp.text);
-            _runtime.update(mainName, _remoteWidgets!);
-          });
-        } else if (resp is JsonResponse) {
-          if (!mounted) return;
-
-          setState(() {
-            final markup = resp.json["markup"];
-            final data = resp.json["data"];
-
-            if (data != null) {
-              _data.update("serverData", data);
-            }
-
-            _remoteWidgets = parseLibraryFile(markup);
-            _runtime.update(mainName, _remoteWidgets!);
-          });
-        } else {
-          throw Exception("Expected text response from server");
-        }
-      } on RoomServerException catch (e) {
-        if (!mounted) return;
-        setState(() {
-          error = e;
-        });
-      } on ParserException catch (e) {
-        if (!mounted) return;
-        setState(() {
-          error = Exception(
-            "${e.message} at ${e.line}, ${e.column}:\n${(response as TextResponse).text.split("\n").mapIndexed((i, s) => "${i + 1}: $s").join("\n")}",
-          );
-        });
-      }
-    } else {
-      _remoteWidgets = null;
-    }
-  }
-
-  void updateData() {
-    try {
-      final json = widget.message.getAttribute("data");
-      if (json != null) {
-        final data = jsonDecode(json);
-
-        // Configuration data:
-        _data.update('data', data);
-      } else {
-        _data.update('data', {});
-      }
-    } catch (e) {
-      _data.update('error', e.toString());
-    }
-  }
-
-  void onEvent(String name, DynamicMap? data) async {
-    try {
-      if (name == "invoke") {
-        await widget.room.agents.invokeTool(
-          toolkit: data!["toolkit"] as String,
-          tool: data["tool"] as String,
-          arguments: data["arguments"] as Map<String, dynamic>,
-        );
-      } else if (name == "open") {
-        await launchUrl(Uri.parse(data!["url"] as String), webOnlyWindowName: data["target"] as String?);
-      } else {
-        showShadDialog(context: context, builder: (context) => ShadDialog.alert(title: Text("Unknown event received $name")));
-      }
-    } on Exception catch (ex) {
-      if (!mounted) {
-        return;
-      }
-      showShadDialog(
-        context: context,
-        builder: (context) => ShadDialog.alert(title: Text("Unable to process event $name, data: $data, error: $ex")),
-      );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (error != null) {
-      return SelectableText("$error", style: ShadTheme.of(context).textTheme.p);
-    }
-    if (_remoteWidgets == null) {
-      return Container();
-    }
-    return RemoteWidget(runtime: _runtime, data: _data, widget: const FullyQualifiedWidgetName(mainName, 'root'), onEvent: onEvent);
-  }
-}
-
 class ReasoningTrace extends StatefulWidget {
   const ReasoningTrace({super.key, required this.previous, required this.message, required this.next});
 
@@ -1977,10 +1816,11 @@ class _ReasoningTrace extends State<ReasoningTrace> {
   bool expanded = false;
   @override
   Widget build(BuildContext context) {
-    final mdColor = (ShadTheme.of(context).textTheme.p.color ??
-            DefaultTextStyle.of(context).style.color ??
-            ShadTheme.of(context).colorScheme.foreground)
-        .withAlpha(180);
+    final mdColor =
+        (ShadTheme.of(context).textTheme.p.color ??
+                DefaultTextStyle.of(context).style.color ??
+                ShadTheme.of(context).colorScheme.foreground)
+            .withAlpha(180);
     final baseFontSize = MediaQuery.of(context).textScaler.scale((DefaultTextStyle.of(context).style.fontSize ?? 14));
 
     final border = BorderSide(color: ShadTheme.of(context).cardTheme.border!.bottom!.color!);
@@ -2019,18 +1859,34 @@ class _ReasoningTrace extends State<ReasoningTrace> {
                     config: MarkdownConfig(
                       configs: [
                         HrConfig(color: mdColor),
-                        H1Config(style: TextStyle(fontSize: baseFontSize * 2, color: mdColor, fontWeight: FontWeight.bold)),
-                        H2Config(style: TextStyle(fontSize: baseFontSize * 1.8, color: mdColor, inherit: false)),
-                        H3Config(style: TextStyle(fontSize: baseFontSize * 1.6, color: mdColor, inherit: false)),
-                        H4Config(style: TextStyle(fontSize: baseFontSize * 1.4, color: mdColor, inherit: false)),
-                        H5Config(style: TextStyle(fontSize: baseFontSize * 1.2, color: mdColor, inherit: false)),
-                        H6Config(style: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false)),
+                        H1Config(
+                          style: TextStyle(fontSize: baseFontSize * 2, color: mdColor, fontWeight: FontWeight.bold),
+                        ),
+                        H2Config(
+                          style: TextStyle(fontSize: baseFontSize * 1.8, color: mdColor, inherit: false),
+                        ),
+                        H3Config(
+                          style: TextStyle(fontSize: baseFontSize * 1.6, color: mdColor, inherit: false),
+                        ),
+                        H4Config(
+                          style: TextStyle(fontSize: baseFontSize * 1.4, color: mdColor, inherit: false),
+                        ),
+                        H5Config(
+                          style: TextStyle(fontSize: baseFontSize * 1.2, color: mdColor, inherit: false),
+                        ),
+                        H6Config(
+                          style: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
+                        ),
                         PreConfig(
                           decoration: BoxDecoration(color: ShadTheme.of(context).cardTheme.backgroundColor),
                           textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
                         ),
-                        PConfig(textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false)),
-                        CodeConfig(style: GoogleFonts.sourceCodePro(fontSize: baseFontSize * 1.0, color: mdColor)),
+                        PConfig(
+                          textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
+                        ),
+                        CodeConfig(
+                          style: GoogleFonts.sourceCodePro(fontSize: baseFontSize * 1.0, color: mdColor),
+                        ),
                         BlockquoteConfig(textColor: mdColor),
                         LinkConfig(
                           style: TextStyle(
@@ -2040,7 +1896,10 @@ class _ReasoningTrace extends State<ReasoningTrace> {
                         ),
                         ListConfig(
                           marker: (isOrdered, depth, index) {
-                            return Padding(padding: EdgeInsets.only(right: 5), child: Text("${index + 1}.", textAlign: TextAlign.right));
+                            return Padding(
+                              padding: EdgeInsets.only(right: 5),
+                              child: Text("${index + 1}.", textAlign: TextAlign.right),
+                            );
                           },
                         ),
                       ],
@@ -2054,7 +1913,7 @@ class _ReasoningTrace extends State<ReasoningTrace> {
           api: TimuApiProvider.of(context).api,
           layer: layer),
 },*/
-                    data: widget.message.attributes["summary"] ?? "",
+                    data: widget.message.getAttribute("summary") ?? "",
                   ),
                 ),
               ],
@@ -2115,7 +1974,10 @@ class _ShellLineState extends State<ShellLine> {
         children: [
           if (widget.previous?.tagName != widget.message.tagName)
             Container(
-              decoration: BoxDecoration(border: Border(bottom: border), color: ShadTheme.of(context).colorScheme.secondary),
+              decoration: BoxDecoration(
+                border: Border(bottom: border),
+                color: ShadTheme.of(context).colorScheme.secondary,
+              ),
               padding: EdgeInsets.only(top: 14, bottom: 14, left: 16, right: 16),
               child: Row(
                 children: [
@@ -2145,20 +2007,23 @@ class _ShellLineState extends State<ShellLine> {
                     maxLines: expanded ? null : 1,
                     TextSpan(
                       children: [
-                        TextSpan(text: widget.message.attributes["command"], style: GoogleFonts.sourceCodePro()),
+                        TextSpan(text: widget.message.getAttribute("command"), style: GoogleFonts.sourceCodePro()),
                         if (expanded) ...[
                           TextSpan(text: "\n"),
-                          if (widget.message.attributes["result"] != null) ...[
+                          if (widget.message.getAttribute("result") != null) ...[
                             TextSpan(text: "\n"),
-                            TextSpan(text: trim(widget.message.attributes["result"]), style: GoogleFonts.sourceCodePro()),
+                            TextSpan(text: trim(widget.message.getAttribute("result")), style: GoogleFonts.sourceCodePro()),
                           ],
-                          if (widget.message.attributes["stdout"] != null) ...[
+                          if (widget.message.getAttribute("stdout") != null) ...[
                             TextSpan(text: "\n"),
-                            TextSpan(text: trim(widget.message.attributes["stdout"]), style: GoogleFonts.sourceCodePro()),
+                            TextSpan(text: trim(widget.message.getAttribute("stdout")), style: GoogleFonts.sourceCodePro()),
                           ],
-                          if (widget.message.attributes["stderr"] != null) ...[
+                          if (widget.message.getAttribute("stderr") != null) ...[
                             TextSpan(text: "\n"),
-                            TextSpan(text: trim(widget.message.attributes["stderr"]), style: GoogleFonts.sourceCodePro(color: Colors.red)),
+                            TextSpan(
+                              text: trim(widget.message.getAttribute("stderr")),
+                              style: GoogleFonts.sourceCodePro(color: Colors.red),
+                            ),
                           ],
                         ],
                       ],
@@ -2216,24 +2081,6 @@ class ChatThreadPreview extends StatelessWidget {
   }
 }
 
-class JoinMeetingButton extends StatelessWidget {
-  const JoinMeetingButton({super.key, required this.controller});
-
-  final MeetingController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    return ShadButton.outline(
-      leading: Icon(LucideIcons.mic),
-      enabled: controller.livekitRoom.connectionState == livekit.ConnectionState.disconnected,
-      onPressed: () async {
-        await controller.connect(livekit.FastConnectOptions(microphone: livekit.TrackOption(enabled: true)));
-      },
-      child: Text("Voice"),
-    );
-  }
-}
-
 typedef FileDropCallback = Future<void> Function(String name, Stream<Uint8List> dataStream, int? fileSize);
 typedef TextPasteCallback = Future<void> Function(String text);
 
@@ -2280,7 +2127,12 @@ class FileDropAreaState extends State<FileDropArea> {
       onDropOver: _onDragOver,
       onDropLeave: _onDragLeave,
       onPerformDrop: _onDrop,
-      child: Stack(children: [widget.child, if (_dragging) Positioned.fill(child: Container(color: Colors.blue.withValues(alpha: 0.1)))]),
+      child: Stack(
+        children: [
+          widget.child,
+          if (_dragging) Positioned.fill(child: Container(color: Colors.blue.withValues(alpha: 0.1))),
+        ],
+      ),
     );
   }
 
