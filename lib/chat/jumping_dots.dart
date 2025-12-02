@@ -4,7 +4,7 @@ class DotWidget extends StatelessWidget {
   final Color? color;
   final double? radius;
 
-  const DotWidget({super.key, @required this.color, @required this.radius});
+  const DotWidget({super.key, required this.color, required this.radius});
 
   @override
   Widget build(BuildContext context) {

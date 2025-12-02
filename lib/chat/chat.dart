@@ -913,8 +913,8 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     return completer.future;
   }
 
-  Future<void> onFileDrop(name, dataStream, size) async {
-    widget.controller.uploadFile(name, dataStream, size ?? 0);
+  Future<void> onFileDrop(String name, Stream<Uint8List> dataStream, int size) async {
+    widget.controller.uploadFile(name, dataStream, size);
   }
 
   void onPasteEvent(ClipboardReadEvent event) async {
@@ -926,7 +926,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
         final fmt = _preferredFormats.firstWhereOrNull((f) => reader.canProvide(f));
         final file = await _getFile(reader, fmt);
 
-        await onFileDrop(name, file.getStream(), file.fileSize);
+        await onFileDrop(name, file.getStream(), file.fileSize ?? 0);
       } else {
         if (reader.canProvide(Formats.plainText)) {
           final text = await reader.readValue(Formats.plainText);
