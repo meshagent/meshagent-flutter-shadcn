@@ -14,8 +14,10 @@ import 'package:meshagent_flutter_shadcn/ui/ui.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:super_clipboard/super_clipboard.dart';
 import 'package:super_drag_and_drop/super_drag_and_drop.dart';
+import 'package:super_native_extensions/raw_clipboard.dart' as raw;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
+import 'package:markdown/markdown.dart' as md;
 
 import 'package:meshagent_flutter/meshagent_flutter.dart';
 import 'package:meshagent_flutter_shadcn/file_preview/file_preview.dart';
@@ -1098,81 +1100,157 @@ class ChatThread extends StatefulWidget {
   State createState() => _ChatThreadState();
 }
 
-class ChatBubble extends StatelessWidget {
+class ChatBubble extends StatefulWidget {
   const ChatBubble({super.key, required this.mine, required this.text});
 
   final bool mine;
   final String text;
 
   @override
+  State createState() => _ChatBubble();
+}
+
+class _ChatBubble extends State<ChatBubble> {
+  bool hovering = false;
+  @override
   Widget build(BuildContext context) {
     final mdColor =
         ShadTheme.of(context).textTheme.p.color ?? DefaultTextStyle.of(context).style.color ?? ShadTheme.of(context).colorScheme.foreground;
     final baseFontSize = MediaQuery.of(context).textScaler.scale((DefaultTextStyle.of(context).style.fontSize ?? 14));
+    final text = widget.text;
+    final mine = widget.mine;
 
-    return Container(
-      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      margin: EdgeInsets.only(top: 8, right: mine ? 0 : 50, left: mine ? 50 : 0),
-      decoration: BoxDecoration(color: ShadTheme.of(context).ghostButtonTheme.hoverBackgroundColor, borderRadius: BorderRadius.circular(8)),
-      child: MediaQuery(
-        data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
-        child: MarkdownWidget(
-          padding: const EdgeInsets.all(0),
-          config: MarkdownConfig(
-            configs: [
-              HrConfig(color: mdColor),
-              H1Config(
-                style: TextStyle(fontSize: baseFontSize * 2, color: mdColor, fontWeight: FontWeight.bold),
-              ),
-              H2Config(
-                style: TextStyle(fontSize: baseFontSize * 1.8, color: mdColor, inherit: false),
-              ),
-              H3Config(
-                style: TextStyle(fontSize: baseFontSize * 1.6, color: mdColor, inherit: false),
-              ),
-              H4Config(
-                style: TextStyle(fontSize: baseFontSize * 1.4, color: mdColor, inherit: false),
-              ),
-              H5Config(
-                style: TextStyle(fontSize: baseFontSize * 1.2, color: mdColor, inherit: false),
-              ),
-              H6Config(
-                style: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
-              ),
-              PreConfig(
-                decoration: BoxDecoration(color: ShadTheme.of(context).cardTheme.backgroundColor),
-                textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
-              ),
-              PConfig(
-                textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
-              ),
-              CodeConfig(
-                style: GoogleFonts.sourceCodePro(fontSize: baseFontSize * 1.0, color: mdColor),
-              ),
-              BlockquoteConfig(textColor: mdColor),
-              LinkConfig(
-                style: TextStyle(color: ShadTheme.of(context).linkButtonTheme.foregroundColor, decoration: TextDecoration.underline),
-              ),
-              ListConfig(
-                marker: (isOrdered, depth, index) {
-                  return Padding(
-                    padding: EdgeInsets.only(right: 5),
-                    child: Text("${index + 1}.", textAlign: TextAlign.right),
-                  );
+    final actions = Padding(
+      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Opacity(
+            opacity: hovering ? 1 : 0,
+            child: Padding(
+              padding: EdgeInsets.only(bottom: 5),
+              child: ShadButton.ghost(
+                height: 30,
+                width: 30,
+                padding: EdgeInsets.zero,
+                onPressed: () {
+                  SystemClipboard.instance!.write([
+                    DataWriterItem(suggestedName: "meshwidget.widget")..add(
+                      EncodedData([
+                        raw.DataRepresentation.simple(
+                          format: "text/html",
+                          data: md.markdownToHtml(
+                            text,
+                            extensionSet: md.ExtensionSet.gitHubFlavored,
+                            inlineSyntaxes: [],
+                            blockSyntaxes: [],
+                          ),
+                        ),
+                        raw.DataRepresentation.simple(format: "text/plain", data: text),
+                      ]),
+                    ),
+                  ]);
                 },
+                child: Icon(LucideIcons.copy, size: 18, color: ShadTheme.of(context).colorScheme.mutedForeground),
               ),
-            ],
+            ),
           ),
-          shrinkWrap: true,
-          selectable: true,
+        ],
+      ),
+    );
 
-          /*builders: {
+    return ShadGestureDetector(
+      onHoverChange: (h) {
+        setState(() {
+          hovering = h;
+        });
+      },
+      child: Container(
+        padding: EdgeInsets.all(5),
+        color: Colors.transparent,
+        child: Container(
+          margin: EdgeInsets.only(top: 8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (mine) actions,
+              Expanded(
+                child: Container(
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: ShadTheme.of(context).ghostButtonTheme.hoverBackgroundColor,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: MediaQuery(
+                    data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
+                    child: MarkdownWidget(
+                      padding: const EdgeInsets.all(0),
+                      config: MarkdownConfig(
+                        configs: [
+                          HrConfig(color: mdColor),
+                          H1Config(
+                            style: TextStyle(fontSize: baseFontSize * 2, color: mdColor, fontWeight: FontWeight.bold),
+                          ),
+                          H2Config(
+                            style: TextStyle(fontSize: baseFontSize * 1.8, color: mdColor, inherit: false),
+                          ),
+                          H3Config(
+                            style: TextStyle(fontSize: baseFontSize * 1.6, color: mdColor, inherit: false),
+                          ),
+                          H4Config(
+                            style: TextStyle(fontSize: baseFontSize * 1.4, color: mdColor, inherit: false),
+                          ),
+                          H5Config(
+                            style: TextStyle(fontSize: baseFontSize * 1.2, color: mdColor, inherit: false),
+                          ),
+                          H6Config(
+                            style: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
+                          ),
+                          PreConfig(
+                            decoration: BoxDecoration(color: ShadTheme.of(context).cardTheme.backgroundColor),
+                            textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
+                          ),
+                          PConfig(
+                            textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
+                          ),
+                          CodeConfig(
+                            style: GoogleFonts.sourceCodePro(fontSize: baseFontSize * 1.0, color: mdColor),
+                          ),
+                          BlockquoteConfig(textColor: mdColor),
+                          LinkConfig(
+                            style: TextStyle(
+                              color: ShadTheme.of(context).linkButtonTheme.foregroundColor,
+                              decoration: TextDecoration.underline,
+                            ),
+                          ),
+                          ListConfig(
+                            marker: (isOrdered, depth, index) {
+                              return Padding(
+                                padding: EdgeInsets.only(right: 5),
+                                child: Text("${index + 1}.", textAlign: TextAlign.right),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                      shrinkWrap: true,
+                      selectable: true,
+
+                      /*builders: {
       "code": CodeElementBuilder(
           document: ChatDocumentProvider.of(context).document,
           api: TimuApiProvider.of(context).api,
           layer: layer),
 },*/
-          data: text,
+                      data: text,
+                    ),
+                  ),
+                ),
+              ),
+              if (!mine) actions,
+            ],
+          ),
         ),
       ),
     );
