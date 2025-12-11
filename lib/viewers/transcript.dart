@@ -30,7 +30,10 @@ class _Transcript extends State<TranscriptViewer> {
       builder: (context) {
         final segments = widget.document.root.getElementsByTagName("segment");
         return SelectionArea(
-          child: ListView(padding: EdgeInsets.all(16), children: [for (final segment in segments) TranscriptSegment(segment: segment)]),
+          child: ListView(
+            padding: EdgeInsets.all(16),
+            children: [for (final segment in segments) TranscriptSegment(segment: segment)],
+          ),
         );
       },
     );
@@ -52,22 +55,21 @@ class _TranscriptSegment extends State<TranscriptSegment> {
     final theme = ShadTheme.of(context);
     return ChangeNotifierBuilder(
       source: widget.segment,
-      builder:
-          (context) => Container(
-            margin: EdgeInsets.only(bottom: 8),
-            child: Text.rich(
+      builder: (context) => Container(
+        margin: EdgeInsets.only(bottom: 8),
+        child: Text.rich(
+          TextSpan(
+            children: [
               TextSpan(
-                children: [
-                  TextSpan(
-                    text: '${widget.segment.getAttribute("participant_name") ?? ""}: ',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  TextSpan(text: widget.segment.getAttribute("text") as String? ?? ""),
-                ],
-                style: theme.textTheme.p.copyWith(color: theme.colorScheme.foreground),
+                text: '${widget.segment.getAttribute("participant_name") ?? ""}: ',
+                style: TextStyle(fontWeight: FontWeight.bold),
               ),
-            ),
+              TextSpan(text: widget.segment.getAttribute("text") as String? ?? ""),
+            ],
+            style: theme.textTheme.p.copyWith(color: theme.colorScheme.foreground),
           ),
+        ),
+      ),
     );
   }
 }

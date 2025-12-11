@@ -19,49 +19,48 @@ class VoiceAgentCaller extends StatelessWidget {
     return Center(
       child: ListenableBuilder(
         listenable: meeting,
-        builder:
-            (context, _) => Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (meeting.livekitRoom.connectionState == livekit.ConnectionState.disconnected)
-                  ShadButton.outline(
-                    onPressed: () async {
-                      final breakout = getBreakoutRoom != null ? await getBreakoutRoom!(context) : const Uuid().v4();
-                      if (breakout == null) {
-                        return;
-                      }
-                      await meeting.configure(breakoutRoom: breakout);
-                      await meeting.connect(livekit.FastConnectOptions(microphone: livekit.TrackOption(enabled: true)));
-                      await meeting.room.messaging.sendMessage(to: participant, type: "voice_call", message: {"breakout_room": breakout});
-                    },
-                    child: Text("Start Voice Session"),
-                  ),
-                if (meeting.livekitRoom.connectionState != livekit.ConnectionState.disconnected) ...[
-                  ListenableBuilder(
-                    listenable: meeting.livekitRoom,
-                    builder: (c, _) {
-                      final participant = meeting.livekitRoom.remoteParticipants.values.firstOrNull;
-                      return participant == null
-                          ? Container(constraints: BoxConstraints(maxWidth: 800), child: AspectRatio(aspectRatio: 1.25))
-                          : Padding(
-                            padding: EdgeInsets.all(30),
-                            child: AspectRatio(
-                              aspectRatio: 1.25,
-                              child: AudioWave(
-                                room: meeting.livekitRoom,
-                                participant: participant,
-                                backgroundColor: ShadTheme.of(context).colorScheme.background,
-                                speakingColor: Colors.green,
-                                notSpeakingColor: Colors.green.withAlpha(50),
-                              ),
+        builder: (context, _) => Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (meeting.livekitRoom.connectionState == livekit.ConnectionState.disconnected)
+              ShadButton.outline(
+                onPressed: () async {
+                  final breakout = getBreakoutRoom != null ? await getBreakoutRoom!(context) : const Uuid().v4();
+                  if (breakout == null) {
+                    return;
+                  }
+                  await meeting.configure(breakoutRoom: breakout);
+                  await meeting.connect(livekit.FastConnectOptions(microphone: livekit.TrackOption(enabled: true)));
+                  await meeting.room.messaging.sendMessage(to: participant, type: "voice_call", message: {"breakout_room": breakout});
+                },
+                child: Text("Start Voice Session"),
+              ),
+            if (meeting.livekitRoom.connectionState != livekit.ConnectionState.disconnected) ...[
+              ListenableBuilder(
+                listenable: meeting.livekitRoom,
+                builder: (c, _) {
+                  final participant = meeting.livekitRoom.remoteParticipants.values.firstOrNull;
+                  return participant == null
+                      ? Container(constraints: BoxConstraints(maxWidth: 800), child: AspectRatio(aspectRatio: 1.25))
+                      : Padding(
+                          padding: EdgeInsets.all(30),
+                          child: AspectRatio(
+                            aspectRatio: 1.25,
+                            child: AudioWave(
+                              room: meeting.livekitRoom,
+                              participant: participant,
+                              backgroundColor: ShadTheme.of(context).colorScheme.background,
+                              speakingColor: Colors.green,
+                              notSpeakingColor: Colors.green.withAlpha(50),
                             ),
-                          );
-                    },
-                  ),
-                  if (meeting.livekitRoom.connectionState == livekit.ConnectionState.connected) MeetingControls(controller: meeting),
-                ],
-              ],
-            ),
+                          ),
+                        );
+                },
+              ),
+              if (meeting.livekitRoom.connectionState == livekit.ConnectionState.connected) MeetingControls(controller: meeting),
+            ],
+          ],
+        ),
       ),
     );
   }

@@ -4,11 +4,15 @@ class DotWidget extends StatelessWidget {
   final Color? color;
   final double? radius;
 
-  const DotWidget({super.key, @required this.color, @required this.radius});
+  const DotWidget({super.key, required this.color, required this.radius});
 
   @override
   Widget build(BuildContext context) {
-    return Container(decoration: BoxDecoration(shape: BoxShape.circle, color: color), height: radius, width: radius);
+    return Container(
+      decoration: BoxDecoration(shape: BoxShape.circle, color: color),
+      height: radius,
+      width: radius,
+    );
   }
 }
 
@@ -66,10 +70,9 @@ class _JumpingDotsState extends State<JumpingDots> with TickerProviderStateMixin
   }
 
   void _initAnimation() {
-    _animationControllers =
-        List.generate(widget.numberOfDots, (index) {
-          return AnimationController(vsync: this, duration: widget.animationDuration);
-        }).toList();
+    _animationControllers = List.generate(widget.numberOfDots, (index) {
+      return AnimationController(vsync: this, duration: widget.animationDuration);
+    }).toList();
 
     for (int i = 0; i < widget.numberOfDots; i++) {
       _animations.add(
@@ -112,21 +115,20 @@ class _JumpingDotsState extends State<JumpingDots> with TickerProviderStateMixin
       child: Center(
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
-          children:
-              List.generate(widget.numberOfDots, (index) {
-                return AnimatedBuilder(
-                  animation: _animationControllers![index],
-                  builder: (context, child) {
-                    return Container(
-                      padding: EdgeInsets.all(widget.innerPadding),
-                      child: Transform.translate(
-                        offset: Offset(0, _animations[index].value),
-                        child: DotWidget(color: widget.color, radius: widget.radius),
-                      ),
-                    );
-                  },
+          children: List.generate(widget.numberOfDots, (index) {
+            return AnimatedBuilder(
+              animation: _animationControllers![index],
+              builder: (context, child) {
+                return Container(
+                  padding: EdgeInsets.all(widget.innerPadding),
+                  child: Transform.translate(
+                    offset: Offset(0, _animations[index].value),
+                    child: DotWidget(color: widget.color, radius: widget.radius),
+                  ),
                 );
-              }).toList(),
+              },
+            );
+          }).toList(),
         ),
       ),
     );

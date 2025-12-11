@@ -91,10 +91,9 @@ class _FileBrowser extends State<FileBrowser> {
                 for (final file in files!)
                   ShadButton.ghost(
                     backgroundColor: selection.contains(join(path, file.name)) ? ShadTheme.of(context).colorScheme.selection : null,
-                    decoration:
-                        selection.contains(join(path, file.name))
-                            ? ShadDecoration(border: ShadBorder.all(radius: BorderRadius.all(Radius.zero)))
-                            : null,
+                    decoration: selection.contains(join(path, file.name))
+                        ? ShadDecoration(border: ShadBorder.all(radius: BorderRadius.all(Radius.zero)))
+                        : null,
                     mainAxisAlignment: MainAxisAlignment.start,
                     onPressed: () {
                       if (file.isFolder) {

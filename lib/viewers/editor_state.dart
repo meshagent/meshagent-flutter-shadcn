@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:meshagent/document.dart' as docs;
+import 'package:meshagent/schema.dart';
 
 class ElementEditorController extends ChangeNotifier {
   Object? _editing;
@@ -26,9 +27,12 @@ class ElementEditorController extends ChangeNotifier {
   }
 
   void startEditing(docs.MeshElement element, String attributeName) {
-    String text = element.attributes[attributeName] ?? "";
-    _controller = TextEditingController(text: text);
-    _controller!.selection = TextSelection(baseOffset: 0, extentOffset: text.length);
+    Object? text = element.getAttribute(attributeName);
+    _controller = TextEditingController(text: text == null ? null : "$text");
+
+    if (text != null) {
+      _controller!.selection = TextSelection(baseOffset: 0, extentOffset: "$text".length);
+    }
     editingValue = _controller!.text;
     _editing = element;
     _editingAttribute = attributeName;
@@ -56,7 +60,29 @@ class ElementEditorController extends ChangeNotifier {
     _editingFocusNode!.requestFocus();
     _editingFocusNode!.addListener(() {
       if (!_editingFocusNode!.hasFocus) {
-        element.setAttribute(attributeName, editingValue);
+        if (editingValue == "") {
+          editingValue = null;
+        }
+
+        final prop = element.elementType.properties.firstWhere((x) => x.name == attributeName);
+
+        if (editingValue == null) {
+          element.setAttribute(attributeName, editingValue);
+        } else {
+          if (prop is ValueProperty) {
+            if (prop.type == SimpleValue.string) {
+              element.setAttribute(attributeName, editingValue);
+            } else if (prop.type == SimpleValue.number) {
+              element.setAttribute(attributeName, double.tryParse(editingValue.toString()));
+            } else if (prop.type == SimpleValue.boolean) {
+              if (editingValue == "true") {
+                element.setAttribute(attributeName, true);
+              } else if (editingValue == "false") {
+                element.setAttribute(attributeName, false);
+              }
+            }
+          }
+        }
 
         _editing = null;
         _editingAttribute = null;
@@ -142,49 +168,49 @@ class _ElementTextFieldState extends State<ElementTextField> {
 
     return editing
         ? Container(
-          foregroundDecoration: BoxDecoration(border: Border.all(color: widget.cursorColor, width: 2)),
-          child: IntrinsicHeight(
-            child: IntrinsicWidth(
-              child: EditableText(
-                onChanged: (value) {
-                  controller.editingValue = value;
-                },
-                textHeightBehavior: TextHeightBehavior(
-                  applyHeightToFirstAscent: true,
-                  applyHeightToLastDescent: true,
-                  leadingDistribution: TextLeadingDistribution.even,
+            foregroundDecoration: BoxDecoration(border: Border.all(color: widget.cursorColor, width: 2)),
+            child: IntrinsicHeight(
+              child: IntrinsicWidth(
+                child: EditableText(
+                  onChanged: (value) {
+                    controller.editingValue = value;
+                  },
+                  textHeightBehavior: TextHeightBehavior(
+                    applyHeightToFirstAscent: true,
+                    applyHeightToLastDescent: true,
+                    leadingDistribution: TextLeadingDistribution.even,
+                  ),
+                  scrollPadding: EdgeInsets.zero,
+                  expands: true,
+                  textAlign: widget.textAlign ?? TextAlign.start,
+                  maxLines: widget.maxLines,
+                  minLines: widget.minLines,
+                  controller: controller.controller!,
+                  focusNode: controller.editingFocusNode!,
+                  style: widget.style,
+                  cursorColor: widget.cursorColor,
+                  backgroundCursorColor: widget.selectionColor,
+                  selectionColor: widget.selectionColor,
                 ),
-                scrollPadding: EdgeInsets.zero,
-                expands: true,
-                textAlign: widget.textAlign ?? TextAlign.start,
-                maxLines: widget.maxLines,
-                minLines: widget.minLines,
-                controller: controller.controller!,
-                focusNode: controller.editingFocusNode!,
-                style: widget.style,
-                cursorColor: widget.cursorColor,
-                backgroundCursorColor: widget.selectionColor,
-                selectionColor: widget.selectionColor,
               ),
             ),
-          ),
-        )
+          )
         : Focus(
-          focusNode: focusNode,
-          child: GestureDetector(
-            onTap: () {
-              focusNode.requestFocus();
-            },
-            onDoubleTap: () {
-              controller.startEditing(widget.element, widget.attributeName);
-            },
-            child: Container(
-              constraints: BoxConstraints(minWidth: 10),
-              foregroundDecoration: focused ? BoxDecoration(border: Border.all(color: widget.cursorColor, width: 2)) : null,
-              padding: EdgeInsets.only(right: 3),
-              child: Text(widget.element.attributes[widget.attributeName], style: widget.style, textAlign: widget.textAlign),
+            focusNode: focusNode,
+            child: GestureDetector(
+              onTap: () {
+                focusNode.requestFocus();
+              },
+              onDoubleTap: () {
+                controller.startEditing(widget.element, widget.attributeName);
+              },
+              child: Container(
+                constraints: BoxConstraints(minWidth: 10),
+                foregroundDecoration: focused ? BoxDecoration(border: Border.all(color: widget.cursorColor, width: 2)) : null,
+                padding: EdgeInsets.only(right: 3),
+                child: Text(widget.element.getAttribute(widget.attributeName), style: widget.style, textAlign: widget.textAlign),
+              ),
             ),
-          ),
-        );
+          );
   }
 }

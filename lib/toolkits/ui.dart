@@ -137,39 +137,38 @@ class AskUser extends Tool {
       context: this.context,
       builder: (context) {
         return ControlledForm(
-          builder:
-              (context, controller, formKey) => ShadDialog(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                title: Text(arguments["subject"]),
-                actions: [
-                  ShadButton(
-                    onTapDown: (_) {
-                      if (!formKey.currentState!.saveAndValidate()) {
-                        return;
-                      }
+          builder: (context, controller, formKey) => ShadDialog(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            title: Text(arguments["subject"]),
+            actions: [
+              ShadButton(
+                onTapDown: (_) {
+                  if (!formKey.currentState!.saveAndValidate()) {
+                    return;
+                  }
 
-                      final formData = formKey.currentState!.value;
+                  final formData = formKey.currentState!.value;
 
-                      final output = <String, dynamic>{};
-                      for (var key in formData.keys) {
-                        output[key.toString()] = formData[key];
-                      }
+                  final output = <String, dynamic>{};
+                  for (var key in formData.keys) {
+                    output[key.toString()] = formData[key];
+                  }
 
-                      Navigator.of(context).pop({"result": output});
-                    },
-                    child: Text("OK"),
-                  ),
-                ],
-                child: Padding(
-                  padding: EdgeInsets.symmetric(vertical: 16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    spacing: 16,
-                    children: [Text(arguments["help"] ?? ""), form(context, arguments)],
-                  ),
-                ),
+                  Navigator.of(context).pop({"result": output});
+                },
+                child: Text("OK"),
               ),
+            ],
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                spacing: 16,
+                children: [Text(arguments["help"] ?? ""), form(context, arguments)],
+              ),
+            ),
+          ),
         );
       },
     );
@@ -263,29 +262,28 @@ class AskUserForFile extends Tool {
       context: this.context,
       builder: (context) {
         return ControlledForm(
-          builder:
-              (context, controller, formKey) => ShadDialog(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                title: Text(arguments["title"]),
-                actions: [
-                  ShadButton(
-                    onPressed: () async {
-                      final result = await FilePicker.platform.pickFiles(dialogTitle: arguments["title"]);
-                      if (context.mounted) Navigator.of(context).pop(result);
-                    },
-                    child: Text("Continue"),
-                  ),
-                ],
-                child: Padding(
-                  padding: EdgeInsets.symmetric(vertical: 16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    spacing: 16,
-                    children: [Text(arguments["description"] ?? "")],
-                  ),
-                ),
+          builder: (context, controller, formKey) => ShadDialog(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            title: Text(arguments["title"]),
+            actions: [
+              ShadButton(
+                onPressed: () async {
+                  final result = await FilePicker.platform.pickFiles(dialogTitle: arguments["title"]);
+                  if (context.mounted) Navigator.of(context).pop(result);
+                },
+                child: Text("Continue"),
               ),
+            ],
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                spacing: 16,
+                children: [Text(arguments["description"] ?? "")],
+              ),
+            ),
+          ),
         );
       },
     );

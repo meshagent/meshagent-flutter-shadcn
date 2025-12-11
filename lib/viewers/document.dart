@@ -64,7 +64,7 @@ class DocumentViewerElement extends StatelessWidget {
               width: double.infinity,
               child: Padding(
                 padding: EdgeInsets.only(top: element.parent!.getChildren().indexOf(element) > 0 ? 50 : 0, left: 30, right: 30),
-                child: Text(element.attributes["text"]!, style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                child: Text(element.getAttribute("text")!, style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
               ),
             ),
           ],
@@ -94,12 +94,24 @@ class DocumentViewerElement extends StatelessWidget {
                         ),
                       ),
                       HrConfig(color: mdColor),
-                      H1Config(style: TextStyle(fontSize: baseFontSize * 2, color: mdColor, fontWeight: FontWeight.bold)),
-                      H2Config(style: TextStyle(fontSize: baseFontSize * 1.8, color: mdColor, inherit: false)),
-                      H3Config(style: TextStyle(fontSize: baseFontSize * 1.6, color: mdColor, inherit: false)),
-                      H4Config(style: TextStyle(fontSize: baseFontSize * 1.4, color: mdColor, inherit: false)),
-                      H5Config(style: TextStyle(fontSize: baseFontSize * 1.2, color: mdColor, inherit: false)),
-                      H6Config(style: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false)),
+                      H1Config(
+                        style: TextStyle(fontSize: baseFontSize * 2, color: mdColor, fontWeight: FontWeight.bold),
+                      ),
+                      H2Config(
+                        style: TextStyle(fontSize: baseFontSize * 1.8, color: mdColor, inherit: false),
+                      ),
+                      H3Config(
+                        style: TextStyle(fontSize: baseFontSize * 1.6, color: mdColor, inherit: false),
+                      ),
+                      H4Config(
+                        style: TextStyle(fontSize: baseFontSize * 1.4, color: mdColor, inherit: false),
+                      ),
+                      H5Config(
+                        style: TextStyle(fontSize: baseFontSize * 1.2, color: mdColor, inherit: false),
+                      ),
+                      H6Config(
+                        style: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
+                      ),
                       PreConfig(
                         decoration: BoxDecoration(color: ShadTheme.of(context).cardTheme.backgroundColor),
                         textStyle: GoogleFonts.sourceCodePro(fontSize: baseFontSize * 1.0, color: mdColor),
@@ -110,8 +122,12 @@ class DocumentViewerElement extends StatelessWidget {
                           );
                         },
                       ),
-                      PConfig(textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false, height: 1.5)),
-                      CodeConfig(style: GoogleFonts.sourceCodePro(fontSize: baseFontSize * 1.0, color: mdColor)),
+                      PConfig(
+                        textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false, height: 1.5),
+                      ),
+                      CodeConfig(
+                        style: GoogleFonts.sourceCodePro(fontSize: baseFontSize * 1.0, color: mdColor),
+                      ),
                       BlockquoteConfig(textColor: mdColor),
                       ListConfig(
                         marker: (isOrdered, depth, index) {
@@ -127,7 +143,7 @@ class DocumentViewerElement extends StatelessWidget {
                       ),
                     ],
                   ),
-                  data: element.attributes["text"]!,
+                  data: element.getAttribute("text")!,
                   shrinkWrap: true,
                 ),
               ),
@@ -136,7 +152,7 @@ class DocumentViewerElement extends StatelessWidget {
         ),
       ];
     } else if (element.tagName == "step") {
-      return [Text(element.attributes["description"])];
+      return [Text(element.getAttribute("description"))];
     } else if (element.tagName == "file") {
       return [FilePreview(room: client, path: element.getAttribute("name"))];
     } else if (element.tagName == "plan") {
@@ -148,7 +164,10 @@ class DocumentViewerElement extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.center,
-            children: [Text("Plan", style: TextStyle(fontWeight: FontWeight.bold)), ...buildChildren(context)],
+            children: [
+              Text("Plan", style: TextStyle(fontWeight: FontWeight.bold)),
+              ...buildChildren(context),
+            ],
           ),
         ),
       ];
@@ -161,15 +180,10 @@ class DocumentViewerElement extends StatelessWidget {
   Widget build(BuildContext context) {
     return ChangeNotifierBuilder(
       source: element,
-      builder:
-          (context) => Padding(
-            padding: EdgeInsets.symmetric(horizontal: 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              mainAxisSize: MainAxisSize.min,
-              children: [...buildElement(context)],
-            ),
-          ),
+      builder: (context) => Padding(
+        padding: EdgeInsets.symmetric(horizontal: 10),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.center, mainAxisSize: MainAxisSize.min, children: [...buildElement(context)]),
+      ),
     );
   }
 }

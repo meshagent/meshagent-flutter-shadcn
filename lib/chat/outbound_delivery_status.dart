@@ -104,7 +104,10 @@ class OutboundMessageStatusQueue extends ChangeNotifier implements OutboundStatu
   void markSending(String id) {
     if (_entries.containsKey(id)) return;
 
-    _entries[id] = OutboundEntry(messageId: id, state: Sending(startedAt: DateTime.now()));
+    _entries[id] = OutboundEntry(
+      messageId: id,
+      state: Sending(startedAt: DateTime.now()),
+    );
 
     if (!_disposed) {
       notifyListeners();
@@ -130,7 +133,9 @@ class OutboundMessageStatusQueue extends ChangeNotifier implements OutboundStatu
 
     if (e == null) return;
 
-    _entries[id] = e.copyWith(state: Failed(error: error, stackTrace: stackTrace));
+    _entries[id] = e.copyWith(
+      state: Failed(error: error, stackTrace: stackTrace),
+    );
     notifyListeners();
   }
 

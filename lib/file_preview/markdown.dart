@@ -51,25 +51,44 @@ class _MarkdownPreview extends State<MarkdownPreview> {
         config: MarkdownConfig(
           configs: [
             HrConfig(color: mdColor),
-            H1Config(style: TextStyle(fontSize: baseFontSize * 2, color: mdColor, fontWeight: FontWeight.bold)),
-            H2Config(style: TextStyle(fontSize: baseFontSize * 1.8, color: mdColor, inherit: false)),
-            H3Config(style: TextStyle(fontSize: baseFontSize * 1.6, color: mdColor, inherit: false)),
-            H4Config(style: TextStyle(fontSize: baseFontSize * 1.4, color: mdColor, inherit: false)),
-            H5Config(style: TextStyle(fontSize: baseFontSize * 1.2, color: mdColor, inherit: false)),
-            H6Config(style: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false)),
+            H1Config(
+              style: TextStyle(fontSize: baseFontSize * 2, color: mdColor, fontWeight: FontWeight.bold),
+            ),
+            H2Config(
+              style: TextStyle(fontSize: baseFontSize * 1.8, color: mdColor, inherit: false),
+            ),
+            H3Config(
+              style: TextStyle(fontSize: baseFontSize * 1.6, color: mdColor, inherit: false),
+            ),
+            H4Config(
+              style: TextStyle(fontSize: baseFontSize * 1.4, color: mdColor, inherit: false),
+            ),
+            H5Config(
+              style: TextStyle(fontSize: baseFontSize * 1.2, color: mdColor, inherit: false),
+            ),
+            H6Config(
+              style: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
+            ),
             PreConfig(
               decoration: BoxDecoration(color: ShadTheme.of(context).cardTheme.backgroundColor),
               textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
             ),
-            PConfig(textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false)),
-            CodeConfig(style: GoogleFonts.sourceCodePro(fontSize: baseFontSize * 1.0, color: mdColor)),
+            PConfig(
+              textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
+            ),
+            CodeConfig(
+              style: GoogleFonts.sourceCodePro(fontSize: baseFontSize * 1.0, color: mdColor),
+            ),
             BlockquoteConfig(textColor: mdColor),
             LinkConfig(
               style: TextStyle(color: ShadTheme.of(context).linkButtonTheme.foregroundColor, decoration: TextDecoration.underline),
             ),
             ListConfig(
               marker: (isOrdered, depth, index) {
-                return Padding(padding: EdgeInsets.only(right: 5), child: Text("${index + 1}.", textAlign: TextAlign.right));
+                return Padding(
+                  padding: EdgeInsets.only(right: 5),
+                  child: Text("${index + 1}.", textAlign: TextAlign.right),
+                );
               },
             ),
           ],
