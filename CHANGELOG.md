@@ -1,3 +1,29 @@
+## [0.13.0]
+- Added support for sending binary attachments when invoking agent tools from the Dart client API
+- Breaking change: updated the Luau scripting surface from method-style calls and a `room` module to function-style calls and an `agents` module (e.g., `agents.ask`, `agents.invokeTool`, `log.info`)
+- Improved Luau table support across native/FFI/web bindings (create/set/get operations) for richer interop with Dart maps and tables
+- Improved Luau runtime documentation generation to list module functions distinctly from methods
+- Added/expanded Luau unit tests covering table behaviors
+
+## [0.12.0]
+- Add `schema` and `initialJson` options to `SyncClient.open`, and include them in `room.connect` requests to support document bootstrapping on first connect
+- Add `MeshDocument.encode()` to serialize schema + initial JSON for sharing/transport
+- Add Luau `Buffer` and callback-function reference support across native (FFI) and web (WASM) runtimes, including safe copy-in/copy-out APIs
+- Breaking change: Luau `ui:pickFiles` now uses a callback function and returns buffers rather than base64 strings
+- Breaking change: Luau `room:ask` signature changed to accept arguments and a callback
+- Add image widget support for setting image content from an in-memory buffer, plus small UI sizing/layout improvements
+- Update `shadcn_ui` to `^0.42.0` across Flutter packages and add `image_picker` `^1.0.7` to enable media picking in the chat UI
+- Add a minimal Flutter example app demonstrating room connection
+
+## [0.11.0]
+- Stability
+
+## [0.10.1]
+- Stability
+
+## [0.10.0]
+- Stability
+
 ## [0.9.3]
 - Stability
 
@@ -27,209 +53,3 @@
 
 ## [0.7.1]
 - Stability
-
-## [0.7.0]
-- Stability
-
-## [0.6.10]
-- Stability
-
-## [0.6.9]
-- Stability
-
-## [0.6.8]
-- Stability
-
-## [0.6.7]
-- Stability
-
-## [0.6.6]
-- Stability
-
-## [0.6.5]
-- Stability
-
-## [0.6.4]
-- Stability
-
-## [0.6.3]
-- Stability
-
-## [0.6.2]
-- Stability
-
-## [0.6.1]
-- Stability
-
-## [0.6.0]
-- Stability
-
-## [0.5.19]
-- Stability
-
-## [0.5.18]
-- Stability
-
-## [0.5.17]
-- Stability
-
-## [0.5.16]
-- Stability
-
-## [0.5.15]
-- Stability
-
-## [0.5.14]
-- Stability
-
-## [0.5.13]
-- Stability
-
-## [0.5.12]
-- Stability
-
-## [0.5.8]
-- Stability
-
-## [0.5.7]
-- Stability
-
-## [0.5.6]
-- Stability
-
-## [0.5.5]
-- Stability
-
-## [0.5.4]
-- Stability
-
-## [0.5.3]
-- Stability
-
-## [0.5.2]
-- Stability
-
-## [0.5.1]
-- Stability
-
-## [0.5.0]
-- Stability
-
-## [0.4.3]
-- Stability
-
-## [0.4.2]
-- Stability
-
-## [0.4.1]
-- Stability
-
-## [0.4.0]
-- Stability
-
-## [0.3.1]
-- Stability
-
-## [0.3.0]
-- Stability
-
-## [0.2.1]
-- Stability
-
-## [0.2.0]
-- Stability
-
-## [0.1.0]
-- Stability
-
-## [0.0.39]
-- Stability
-
-## [0.0.38]
-- Stability
-
-## [0.0.37]
-- Stability
-
-## [0.0.36]
-- Stability
-
-## [0.0.35]
-- Stability
-
-## [0.0.34]
-- Stability
-
-## [0.0.33]
-- Stability
-
-## [0.0.32]
-- Stability
-
-## [0.0.31]
-- Stability
-
-## [0.0.31]
-- Stability
-
-## [0.0.29]
-- Stability
-
-## [0.0.28]
-- Stability
-
-## [0.0.27]
-- Stability
-
-## [0.0.26]
-- Stability
-
-## [0.0.25]
-- Stability
-
-## [0.0.24]
-- Stability
-
-## [0.0.23]
-- Stability
-
-## [0.0.22]
-- Stability
-
-## [0.0.21]
-- Stability
-
-## [0.0.20]
-- Stability
-
-## [0.0.19]
-- Stability
-
-## [0.0.18]
-- Stability
-
-## [0.0.17]
-- Stability
-- Meshagent cli 
-
-## [0.0.16]
-- Stability
-
-## [0.0.15]
-- Stability
-
-## [0.0.14]
-- Stability
-
-## [0.0.11]
-- Stability
-
-## [0.0.10]
-- Updated exports
-
-## [0.0.9]
-- Stability
-
-## [0.0.7]
-- Stability
-

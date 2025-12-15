@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:markdown_widget/markdown_widget.dart';
 import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_flutter_shadcn/storage/file_browser.dart';
@@ -476,6 +477,45 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
     }
   }
 
+  Future<void> _onSelectPhoto(ToolkitBuilderOption? storage) async {
+    final picker = ImagePicker();
+
+    List<XFile> picked = const [];
+    try {
+      picked = await picker.pickMultipleMedia(); // images and videos
+    } catch (_) {
+      // Older web/mobile builds may not support pickMultipleMedia.
+    }
+    if (picked.isEmpty) {
+      try {
+        picked = await picker.pickMultiImage(); // at least images
+      } catch (_) {
+        // As a last resort, single image (some platforms).
+        final single = await picker.pickImage(source: ImageSource.gallery);
+        if (single != null) picked = [single];
+      }
+    }
+    if (picked.isEmpty) return;
+
+    final names = PhotoNamer.generateBatchNames(picked);
+
+    for (var i = 0; i < picked.length; i++) {
+      final file = picked[i];
+      final fileName = names[i];
+      final size = await file.length();
+      final stream = file.openRead();
+
+      await widget.controller.uploadFile(fileName, stream, size);
+    }
+
+    if (storage != null) {
+      if (!widget.controller.toolkits.contains(storage)) {
+        widget.controller.toggleToolkit(storage);
+        setState(() {});
+      }
+    }
+  }
+
   Future<void> _onBrowseFiles(ToolkitBuilderOption? storage) async {
     List<String> picked = [];
     await showShadDialog(
@@ -537,6 +577,10 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
     if (widget.toolkits.isEmpty && widget.alwaysShowAttachFiles != true) {
       return SizedBox(width: 0, height: 22);
     }
+
+    final storageToolkit = widget.toolkits.where((x) => x is StaticToolkitBuilderOption && x.config is StorageConfig).firstOrNull;
+    final canUpload = widget.alwaysShowAttachFiles == true || storageToolkit != null;
+
     return ListenableBuilder(
       listenable: popoverController,
       builder: (context, _) => Wrap(
@@ -548,19 +592,22 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
             constraints: BoxConstraints(minWidth: 175),
             anchor: ShadAnchorAuto(followerAnchor: Alignment.topRight, targetAnchor: Alignment.topLeft),
             items: [
-              if (widget.alwaysShowAttachFiles == true ||
-                  widget.toolkits.where((x) => x is StaticToolkitBuilderOption && x.config is StorageConfig).isNotEmpty)
+              if (canUpload) ...[
+                if (!kIsWeb)
+                  ShadContextMenuItem(
+                    leading: Icon(LucideIcons.imageUp),
+                    onPressed: () => _onSelectPhoto(storageToolkit),
+                    child: Text("Upload a photo..."),
+                  ),
                 ShadContextMenuItem(
                   leading: Icon(LucideIcons.paperclip),
-                  onPressed: () => _onSelectAttachment(
-                    widget.toolkits.where((x) => x is StaticToolkitBuilderOption && x.config is StorageConfig).firstOrNull,
-                  ),
+                  onPressed: () => _onSelectAttachment(storageToolkit),
                   child: Text("Upload a file..."),
                 ),
+              ],
               ShadContextMenuItem(
                 leading: Icon(LucideIcons.download),
-                onPressed: () =>
-                    _onBrowseFiles(widget.toolkits.where((x) => x is StaticToolkitBuilderOption && x.config is StorageConfig).firstOrNull),
+                onPressed: () => _onBrowseFiles(storageToolkit),
                 child: Text("Add from room..."),
               ),
 
@@ -2242,5 +2289,48 @@ class FileDropAreaState extends State<FileDropArea> {
         debugPrint('Error dropping file: $err\n$st');
       }
     }
+  }
+}
+
+class PhotoNamer {
+  /// Example:
+  /// IMG_20251211_173812.JPG
+  /// IMG_20251211_173812_1.JPG
+  /// IMG_20251211_173812_2.MOV
+  static List<String> generateBatchNames(List<XFile> files) {
+    if (files.isEmpty) return const [];
+
+    final base = _base();
+    final result = <String>[];
+
+    for (var i = 0; i < files.length; i++) {
+      final file = files[i];
+      final ext = _ext(file.name);
+
+      final candidate = i == 0 ? '$base.$ext' : '${base}_$i.$ext';
+      result.add(candidate);
+    }
+
+    return result;
+  }
+
+  static String _base() {
+    final dt = DateTime.now();
+    final y = dt.year.toString().padLeft(4, '0');
+    final m = dt.month.toString().padLeft(2, '0');
+    final d = dt.day.toString().padLeft(2, '0');
+    final hh = dt.hour.toString().padLeft(2, '0');
+    final mm = dt.minute.toString().padLeft(2, '0');
+    final ss = dt.second.toString().padLeft(2, '0');
+    return 'IMG_$y$m${d}_$hh$mm$ss';
+  }
+
+  static String _ext(String originalName) {
+    final dotIndex = originalName.lastIndexOf('.');
+    final rawExt = dotIndex == -1 ? '' : originalName.substring(dotIndex + 1).toUpperCase();
+
+    if (rawExt.isEmpty) return 'JPG';
+
+    return rawExt;
   }
 }
