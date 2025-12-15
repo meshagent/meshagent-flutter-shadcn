@@ -1034,6 +1034,8 @@ class _ChatThreadInput extends State<ChatThreadInput> {
       children: [
         if (widget.header != null) widget.header!,
         ShadInput(
+          contextMenuBuilder: (context, editableTextState) =>
+              AdaptiveTextSelectionToolbar.editableText(editableTextState: editableTextState),
           top: ListenableBuilder(
             listenable: widget.controller,
             builder: (context, _) {
