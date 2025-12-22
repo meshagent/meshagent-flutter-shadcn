@@ -31,6 +31,12 @@ resolution: workspace
 # the latest version available on pub.dev. To see which dependencies have newer
 # versions available, run `flutter pub outdated`.
 dependencies:
+  flutter:
+    sdk: flutter
+  video_player: ^2.9.2
+  chewie: ^1.8.5
+  pdfrx: ^1.0.103
+  rfw: ^1.0.31
   shadcn_ui: ^0.42.0
   markdown_widget: ^2.3.2+6
   lucide_icons_flutter: ^3.1.1
