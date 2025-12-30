@@ -32,7 +32,7 @@ Widget filePreview({Key? key, required RoomClient room, required String filename
   } else if (audioExtensions.contains(extension)) {
     return AudioPreview(url: url, key: key);
   } else if (pdfExtensions.contains(extension)) {
-    return PdfPreview(url: url, key: key, fit: fit);
+    return PdfPreview(url: url, key: key);
   } else if (customViewers.containsKey(extension)) {
     return customViewers[extension]!(key: key, room: room, filename: filename, url: url);
   } else {
