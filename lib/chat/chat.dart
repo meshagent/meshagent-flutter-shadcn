@@ -824,6 +824,7 @@ class ConnectorToolkitBuilderOption extends ToolkitBuilderOption {
 
     // TODO: connector.server.copyWith(authorization: await connector.authenticate(room))
     //}
+
     final servers = [for (final connector in connectors) connector.server];
     return MCPConfig(servers: servers);
   }
