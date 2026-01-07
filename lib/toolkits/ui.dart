@@ -5,6 +5,7 @@ import 'package:meshagent/room_server_client.dart';
 import 'package:meshagent_flutter_shadcn/ui/ui.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:mime/mime.dart';
+import 'package:flutter_timezone/flutter_timezone.dart';
 
 final askUserSchema = {
   "type": "object",
@@ -393,5 +394,35 @@ class UIToolkit extends RemoteToolkit {
           AskUserForFile(context: context),
           ShowToast(context: context),
         ],
+      );
+}
+
+class GetLocalTime extends Tool {
+  GetLocalTime({
+    required this.context,
+    super.name = "get_local_time",
+    super.description = "get local time and timezone information for the user",
+    super.title = "get local time",
+  }) : super(inputSchema: {"type": "object", "additionalProperties": false, "required": [], "properties": {}});
+
+  final BuildContext context;
+
+  @override
+  Future<Response> execute(ToolContext context, Map<String, dynamic> arguments) async {
+    final zone = await FlutterTimezone.getLocalTimezone();
+    final now = DateTime.now();
+    return TextResponse(
+      text: "${context.room.localParticipant!.getAttribute("name")}'s time info:\ntime: ${now.toIso8601String()}\nzone: ${zone.identifier}",
+    );
+  }
+}
+
+class LocalizationToolkit extends RemoteToolkit {
+  LocalizationToolkit(BuildContext context, {required super.room})
+    : super(
+        name: "localization",
+        title: "localization",
+        description: "tools to find out information about the current user",
+        tools: [GetLocalTime(context: context)],
       );
 }
