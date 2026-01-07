@@ -48,7 +48,7 @@ class _VoiceAgentCaller extends State<VoiceAgentCaller> {
             if (meeting.livekitRoom.connectionState == livekit.ConnectionState.disconnected) ...[
               ShadButton(
                 onPressed: () async {
-                  final breakout = getBreakoutRoom != null ? await getBreakoutRoom!(context) : const Uuid().v4();
+                  final breakout = getBreakoutRoom != null ? await getBreakoutRoom(context) : const Uuid().v4();
                   if (breakout == null) {
                     return;
                   }
