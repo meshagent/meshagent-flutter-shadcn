@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:collection/collection.dart';
 
@@ -1151,10 +1152,12 @@ class ChatThread extends StatefulWidget {
 }
 
 class ChatBubble extends StatefulWidget {
-  const ChatBubble({super.key, required this.mine, required this.text});
+  const ChatBubble({super.key, this.room, required this.mine, required this.text, this.onDelete});
 
+  final RoomClient? room;
   final bool mine;
   final String text;
+  final VoidCallback? onDelete;
 
   @override
   State createState() => _ChatBubble();
@@ -1162,13 +1165,187 @@ class ChatBubble extends StatefulWidget {
 
 class _ChatBubble extends State<ChatBubble> {
   bool hovering = false;
+
+  final optionsController = ShadContextMenuController();
+
+  @override
+  void initState() {
+    super.initState();
+
+    optionsController.addListener(() {
+      setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+    optionsController.dispose();
+  }
+
+  void _onCopy() {
+    SystemClipboard.instance!.write([
+      DataWriterItem(suggestedName: "meshwidget.widget")..add(
+        EncodedData([
+          raw.DataRepresentation.simple(
+            format: "text/html",
+            data: md.markdownToHtml(widget.text, extensionSet: md.ExtensionSet.gitHubFlavored, inlineSyntaxes: [], blockSyntaxes: []),
+          ),
+          raw.DataRepresentation.simple(format: "text/plain", data: widget.text),
+        ]),
+      ),
+    ]);
+  }
+
+  Future<void> _onSave(RoomClient room) async {
+    final fileNameController = TextEditingController();
+    String path = "";
+
+    showShadDialog<void>(
+      context: context,
+      builder: (context) {
+        final theme = ShadTheme.of(context);
+        final tt = theme.textTheme;
+
+        return ShadDialog(
+          title: Text("Save comment file as ..."),
+          crossAxisAlignment: CrossAxisAlignment.start,
+          constraints: BoxConstraints(maxWidth: 700, maxHeight: 544),
+          scrollable: false,
+          actions: [
+            ShadButton.secondary(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: Text("Cancel"),
+            ),
+            ShadButton(
+              onPressed: () async {
+                final f = fileNameController.text.trim();
+                String fileName = f.isEmpty ? "chat-comment.md" : f;
+
+                if (!fileName.endsWith(".md")) {
+                  fileName = "$fileName.md";
+                }
+
+                final fullPath = path.isEmpty ? fileName : "$path/$fileName";
+
+                // Check if file exists
+                final exists = await room.storage.exists(fullPath);
+
+                if (exists && context.mounted) {
+                  // Show overwrite confirmation
+                  final overwrite = await showShadDialog<bool>(
+                    context: context,
+                    builder: (context) => ShadDialog(
+                      title: Text("File already exists"),
+                      description: Text(
+                        "A file with the name '$fileName' already exists in the selected folder. Do you want to overwrite it?",
+                      ),
+                      actions: [
+                        ShadButton.secondary(
+                          onPressed: () {
+                            Navigator.of(context).pop(false);
+                          },
+                          child: Text("Cancel"),
+                        ),
+                        ShadButton(
+                          onPressed: () {
+                            Navigator.of(context).pop(true);
+                          },
+                          child: Text("Overwrite"),
+                        ),
+                      ],
+                    ),
+                  );
+
+                  if (overwrite != true) {
+                    return;
+                  }
+                }
+
+                final handle = await widget.room?.storage.open(fullPath, overwrite: true);
+
+                if (handle == null) {
+                  return;
+                }
+
+                await room.storage.write(handle, utf8.encode(widget.text));
+                await room.storage.close(handle);
+
+                if (context.mounted) {
+                  Navigator.of(context).pop();
+                }
+              },
+              child: Text("Save"),
+            ),
+          ],
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: FileBrowser(
+                  onSelectionChanged: (selection) {
+                    path = selection.join("/");
+                  },
+                  room: room,
+                  multiple: false,
+                  selectionMode: FileBrowserSelectionMode.folders,
+                  rootLabel: "Folders",
+                ),
+              ),
+              Padding(
+                padding: .only(top: 12.0),
+                child: ShadInputFormField(
+                  label: Text('Enter File Name', style: tt.small.copyWith(fontWeight: FontWeight.bold)),
+                  placeholder: const Text('chat-comment.md'),
+                  keyboardType: TextInputType.emailAddress,
+                  controller: fileNameController,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _onDelete() {
+    showShadDialog<void>(
+      context: context,
+      builder: (context) => ShadDialog(
+        title: Text("Delete Message"),
+        description: Text("Are you sure you want to delete this message? This action cannot be undone."),
+        actions: [
+          ShadButton.secondary(
+            onPressed: () {
+              Navigator.of(context).pop();
+            },
+            child: Text("Cancel"),
+          ),
+          ShadButton(
+            onPressed: () {
+              widget.onDelete?.call();
+              Navigator.of(context).pop();
+            },
+            child: Text("Delete"),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final mdColor =
-        ShadTheme.of(context).textTheme.p.color ?? DefaultTextStyle.of(context).style.color ?? ShadTheme.of(context).colorScheme.foreground;
+    final theme = ShadTheme.of(context);
+    final cs = theme.colorScheme;
+    final tt = theme.textTheme;
+    final mdColor = tt.p.color ?? DefaultTextStyle.of(context).style.color ?? cs.foreground;
     final baseFontSize = MediaQuery.of(context).textScaler.scale((DefaultTextStyle.of(context).style.fontSize ?? 14));
     final text = widget.text;
     final mine = widget.mine;
+    final openOptions = optionsController.isOpen || hovering;
 
     final actions = Padding(
       padding: EdgeInsets.symmetric(horizontal: 8, vertical: 5),
@@ -1177,32 +1354,31 @@ class _ChatBubble extends State<ChatBubble> {
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           Opacity(
-            opacity: hovering ? 1 : 0,
+            opacity: openOptions ? 1 : 0,
             child: Padding(
               padding: EdgeInsets.only(bottom: 5),
-              child: ShadButton.ghost(
-                height: 30,
-                width: 30,
-                padding: EdgeInsets.zero,
-                onPressed: () {
-                  SystemClipboard.instance!.write([
-                    DataWriterItem(suggestedName: "meshwidget.widget")..add(
-                      EncodedData([
-                        raw.DataRepresentation.simple(
-                          format: "text/html",
-                          data: md.markdownToHtml(
-                            text,
-                            extensionSet: md.ExtensionSet.gitHubFlavored,
-                            inlineSyntaxes: [],
-                            blockSyntaxes: [],
-                          ),
-                        ),
-                        raw.DataRepresentation.simple(format: "text/plain", data: text),
-                      ]),
+              child: ShadContextMenuRegion(
+                controller: optionsController,
+                constraints: const BoxConstraints(minWidth: 150),
+                items: [
+                  ShadContextMenuItem(onPressed: _onCopy, child: Text('Copy')),
+                  if (widget.room != null)
+                    ShadContextMenuItem(
+                      onPressed: () {
+                        _onSave(widget.room!);
+                      },
+                      child: Text('Save as...'),
                     ),
-                  ]);
-                },
-                child: Icon(LucideIcons.copy, size: 18, color: ShadTheme.of(context).colorScheme.mutedForeground),
+
+                  if (mine && widget.onDelete != null) ShadContextMenuItem(onPressed: _onDelete, child: Text('Delete')),
+                ],
+                child: ShadButton.ghost(
+                  height: 30,
+                  width: 30,
+                  padding: EdgeInsets.zero,
+                  onPressed: optionsController.show,
+                  child: Icon(LucideIcons.ellipsis, size: 18, color: cs.mutedForeground),
+                ),
               ),
             ),
           ),
@@ -1228,10 +1404,7 @@ class _ChatBubble extends State<ChatBubble> {
               Expanded(
                 child: Container(
                   padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: ShadTheme.of(context).ghostButtonTheme.hoverBackgroundColor,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
+                  decoration: BoxDecoration(color: theme.ghostButtonTheme.hoverBackgroundColor, borderRadius: BorderRadius.circular(8)),
                   child: MediaQuery(
                     data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
                     child: MarkdownWidget(
@@ -1258,7 +1431,7 @@ class _ChatBubble extends State<ChatBubble> {
                             style: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
                           ),
                           PreConfig(
-                            decoration: BoxDecoration(color: ShadTheme.of(context).cardTheme.backgroundColor),
+                            decoration: BoxDecoration(color: theme.cardTheme.backgroundColor),
                             textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
                           ),
                           PConfig(
@@ -1269,10 +1442,7 @@ class _ChatBubble extends State<ChatBubble> {
                           ),
                           BlockquoteConfig(textColor: mdColor),
                           LinkConfig(
-                            style: TextStyle(
-                              color: ShadTheme.of(context).linkButtonTheme.foregroundColor,
-                              decoration: TextDecoration.underline,
-                            ),
+                            style: TextStyle(color: theme.linkButtonTheme.foregroundColor, decoration: TextDecoration.underline),
                           ),
                           ListConfig(
                             marker: (isOrdered, depth, index) {
@@ -1559,7 +1729,8 @@ class ChatThreadMessages extends StatelessWidget {
               ),
             ),
 
-          if (text is String && text.isNotEmpty) ...[ChatBubble(mine: mine, text: message.getAttribute("text"))],
+          if (text is String && text.isNotEmpty)
+            ChatBubble(room: room, mine: mine, text: message.getAttribute("text"), onDelete: message.delete),
 
           for (final attachment in message.getChildren())
             Container(
