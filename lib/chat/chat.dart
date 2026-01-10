@@ -1359,18 +1359,20 @@ class _ChatBubble extends State<ChatBubble> {
               padding: EdgeInsets.only(bottom: 5),
               child: ShadContextMenuRegion(
                 controller: optionsController,
-                constraints: const BoxConstraints(minWidth: 150),
+                constraints: const BoxConstraints(minWidth: 200),
                 items: [
-                  ShadContextMenuItem(onPressed: _onCopy, child: Text('Copy')),
+                  ShadContextMenuItem(height: 40, onPressed: _onCopy, child: Text('Copy')),
+
                   if (widget.room != null)
                     ShadContextMenuItem(
+                      height: 40,
                       onPressed: () {
                         _onSave(widget.room!);
                       },
                       child: Text('Save as...'),
                     ),
 
-                  if (mine && widget.onDelete != null) ShadContextMenuItem(onPressed: _onDelete, child: Text('Delete')),
+                  if (mine && widget.onDelete != null) ShadContextMenuItem(height: 40, onPressed: _onDelete, child: Text('Delete')),
                 ],
                 child: ShadButton.ghost(
                   height: 30,
