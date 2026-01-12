@@ -25,6 +25,8 @@ class _MarkdownPreview extends State<MarkdownPreview> {
     load();
   }
 
+  String? markdown;
+
   void load() async {
     final content = await widget.room.storage.download(widget.filename);
     if (!mounted) {
@@ -36,7 +38,16 @@ class _MarkdownPreview extends State<MarkdownPreview> {
     });
   }
 
-  String? markdown;
+  @override
+  Widget build(BuildContext context) {
+    return MarkdownViewer(markdown: markdown ?? "");
+  }
+}
+
+class MarkdownViewer extends StatelessWidget {
+  const MarkdownViewer({required this.markdown, super.key});
+
+  final String markdown;
 
   @override
   Widget build(BuildContext context) {
@@ -95,7 +106,7 @@ class _MarkdownPreview extends State<MarkdownPreview> {
         ),
         shrinkWrap: true,
         selectable: true,
-        data: markdown ?? "",
+        data: markdown,
       ),
     );
   }
