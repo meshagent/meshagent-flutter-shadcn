@@ -1,4 +1,4 @@
-import 'package:meshagent/livekit_client.dart';
+import 'package:meshagent_flutter/meshagent_flutter.dart';
 import 'package:meshagent/room_server_client.dart';
 import 'package:meshagent_flutter_shadcn/meetings/wake_lock.dart';
 import 'package:shared_preferences/shared_preferences.dart';
