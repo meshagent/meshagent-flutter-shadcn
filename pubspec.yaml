@@ -37,7 +37,7 @@ dependencies:
   chewie: ^1.8.5
   pdfrx: ^2.2.18
   rfw: ^1.0.31
-  shadcn_ui: ^0.42.0
+  shadcn_ui: ^0.43.2
   markdown_widget: ^2.3.2+6
   lucide_icons_flutter: ^3.1.1
   google_fonts: ^6.2.1

@@ -39,7 +39,7 @@ dependencies:
   file_picker: ^8.1.5
   meshagent: ^0.21.0
   meshagent_flutter: ^0.21.0
-  shadcn_ui: ^0.42.0
+  shadcn_ui: ^0.43.2
   meshagent_flutter_shadcn:
     path: ..
 
