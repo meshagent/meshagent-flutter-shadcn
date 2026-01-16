@@ -1786,6 +1786,7 @@ class ChatThreadMessages extends StatelessWidget {
                     child: LayoutBuilder(
                       builder: (context, constraints) => ListView(
                         reverse: true,
+                        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
                         padding: EdgeInsets.symmetric(
                           vertical: 16,
                           horizontal: constraints.maxWidth > 912 ? (constraints.maxWidth - 912) / 2 : 16,
