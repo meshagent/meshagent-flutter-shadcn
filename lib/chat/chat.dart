@@ -1183,18 +1183,27 @@ class _ChatBubble extends State<ChatBubble> {
     optionsController.dispose();
   }
 
-  void _onCopy() {
-    SystemClipboard.instance!.write([
-      DataWriterItem(suggestedName: "meshwidget.widget")..add(
-        EncodedData([
-          raw.DataRepresentation.simple(
-            format: "text/html",
-            data: md.markdownToHtml(widget.text, extensionSet: md.ExtensionSet.gitHubFlavored, inlineSyntaxes: [], blockSyntaxes: []),
-          ),
-          raw.DataRepresentation.simple(format: "text/plain", data: widget.text),
-        ]),
-      ),
-    ]);
+  Future<void> _onCopy() async {
+    final clipboard = SystemClipboard.instance;
+    if (clipboard == null) return;
+
+    final text = widget.text;
+    final html = md.markdownToHtml(text, extensionSet: md.ExtensionSet.gitHubFlavored, inlineSyntaxes: const [], blockSyntaxes: const []);
+
+    final reps = <raw.DataRepresentation>[
+      raw.DataRepresentation.simple(format: "text/plain", data: text),
+      raw.DataRepresentation.simple(format: "text/html", data: html),
+    ];
+
+    if (!kIsWeb) {
+      reps.insertAll(0, [
+        raw.DataRepresentation.simple(format: "public.utf8-plain-text", data: text),
+        raw.DataRepresentation.simple(format: "public.plain-text", data: text),
+        raw.DataRepresentation.simple(format: "public.html", data: html),
+      ]);
+    }
+
+    await clipboard.write([DataWriterItem(suggestedName: "meshwidget.widget")..add(EncodedData(reps))]);
   }
 
   Future<void> _onSave(RoomClient room) async {
@@ -1394,6 +1403,7 @@ class _ChatBubble extends State<ChatBubble> {
           hovering = h;
         });
       },
+      onLongPress: optionsController.show,
       child: Container(
         padding: EdgeInsets.all(5),
         color: Colors.transparent,
@@ -1457,7 +1467,7 @@ class _ChatBubble extends State<ChatBubble> {
                         ],
                       ),
                       shrinkWrap: true,
-                      selectable: true,
+                      selectable: kIsWeb,
 
                       /*builders: {
       "code": CodeElementBuilder(
