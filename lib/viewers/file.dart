@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 import 'package:meshagent/room_server_client.dart';
+import "package:meshagent_flutter_shadcn/file_preview/code.dart";
 import "package:meshagent_flutter_shadcn/file_preview/file_preview.dart";
 import 'package:path/path.dart';
 
@@ -11,7 +12,7 @@ import "file/parquet.dart";
 
 Widget? fileViewer(RoomClient client, String path) {
   final ext = basename(path).split(".").last.toLowerCase();
-  if (customViewers[ext] != null) {
+  if (customViewers[ext] != null || isCodeFile(path)) {
     return FilePreview(room: client, path: path);
   }
   return switch (extension(path).toLowerCase()) {
