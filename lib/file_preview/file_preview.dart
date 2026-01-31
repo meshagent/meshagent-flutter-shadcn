@@ -1,4 +1,5 @@
 import "package:flutter/material.dart";
+import "package:meshagent_flutter_shadcn/file_preview/code.dart";
 import "package:path/path.dart";
 import "package:shadcn_ui/shadcn_ui.dart";
 import "package:url_launcher/url_launcher.dart";
@@ -35,6 +36,8 @@ Widget filePreview({Key? key, required RoomClient room, required String filename
     return PdfPreview(url: url, key: key);
   } else if (customViewers.containsKey(extension)) {
     return customViewers[extension]!(key: key, room: room, filename: filename, url: url);
+  } else if (isCodeFile(filename)) {
+    return CodePreview(room: room, filename: filename, url: url, key: key);
   } else {
     return Text(url.pathSegments.last);
   }
