@@ -11,35 +11,61 @@ import "video.dart";
 import "markdown.dart";
 import "../chat/chat.dart";
 
-final imageExtensions = <String>{"png", "jpeg", "jfif", "jpg", "heic", "webp", "tif", "tiff", "gif", "svg"};
+enum FileKind { image, video, audio, pdf, code, parquet, office, markdown, custom, unknown }
+
+final imageExtensions = <String>{"png", "jpg", "jpeg", "jfif", "heic", "heif", "webp", "tif", "tiff", "gif", "svg", "bmp"};
 final pdfExtensions = <String>{"pdf"};
-final mdExtensions = <String>{"md"};
+final markdownExtensions = <String>{"md"};
 final videoExtensions = <String>{"mp4", "mkv", "mov"};
 final audioExtensions = <String>{"mp3", "ogg", "wav"};
 final officeExtensions = <String>{"docx", "pptx", "xlsx"};
+final parquetExtensions = <String>{"parquet"};
 
-final Map<String, Widget Function({Key? key, required RoomClient room, required String filename, required Uri url})> customViewers = {
-  "md": ({Key? key, required RoomClient room, required String filename, required Uri url}) =>
-      MarkdownPreview(filename: filename, room: room),
-};
+final Map<String, Widget Function({Key? key, required RoomClient room, required String filename, required Uri url})> customViewers = {};
+
+FileKind classifyFile(String path) {
+  final base = basename(path).toLowerCase();
+  final ext = extension(base).replaceFirst('.', '');
+
+  if (markdownExtensions.contains(ext)) return FileKind.markdown;
+  if (customViewers.containsKey(ext)) return FileKind.custom;
+  if (imageExtensions.contains(ext)) return FileKind.image;
+  if (videoExtensions.contains(ext)) return FileKind.video;
+  if (audioExtensions.contains(ext)) return FileKind.audio;
+  if (pdfExtensions.contains(ext)) return FileKind.pdf;
+  if (parquetExtensions.contains(ext)) return FileKind.parquet;
+  if (officeExtensions.contains(ext)) return FileKind.office;
+
+  if (base == 'readme' || base == 'readme.txt') return FileKind.markdown;
+  if (isCodeFile(path)) return FileKind.code;
+
+  return FileKind.unknown;
+}
 
 Widget filePreview({Key? key, required RoomClient room, required String filename, required Uri url, BoxFit fit = BoxFit.cover}) {
-  // assuming URL has extension, which is generally bad
-  final extension = basename(filename).split(".").last.toLowerCase();
-  if (imageExtensions.contains(extension)) {
-    return ImagePreview(url: url, key: key, fit: fit);
-  } else if (videoExtensions.contains(extension)) {
-    return VideoPreview(url: url, key: key, fit: fit);
-  } else if (audioExtensions.contains(extension)) {
-    return AudioPreview(url: url, key: key);
-  } else if (pdfExtensions.contains(extension)) {
-    return PdfPreview(url: url, key: key);
-  } else if (customViewers.containsKey(extension)) {
-    return customViewers[extension]!(key: key, room: room, filename: filename, url: url);
-  } else if (isCodeFile(filename)) {
-    return CodePreview(room: room, filename: filename, url: url, key: key);
-  } else {
-    return Text(url.pathSegments.last);
+  final kind = classifyFile(filename);
+
+  switch (kind) {
+    case FileKind.markdown:
+      return MarkdownPreview(filename: filename, room: room, key: key);
+    case FileKind.image:
+      return ImagePreview(url: url, key: key, fit: fit);
+    case FileKind.video:
+      return VideoPreview(url: url, key: key, fit: fit);
+    case FileKind.audio:
+      return AudioPreview(url: url, key: key);
+    case FileKind.pdf:
+      return PdfPreview(url: url, key: key);
+    case FileKind.code:
+      return CodePreview(room: room, filename: filename, url: url, key: key);
+    case FileKind.custom:
+      final base = basename(filename).toLowerCase();
+      final ext = extension(base).replaceFirst('.', '');
+      return customViewers[ext]!(key: key, room: room, filename: filename, url: url);
+    case FileKind.parquet:
+    case FileKind.office:
+    case FileKind.unknown:
+      return Text(url.pathSegments.last);
   }
 }
 
