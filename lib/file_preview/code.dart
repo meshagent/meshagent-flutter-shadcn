@@ -124,7 +124,7 @@ class _CodePreview extends State<CodePreview> {
         if (!mounted) return;
 
         setState(() {
-          text = response.body;
+          text = utf8.decode(response.bodyBytes);
           controller = CodeLineEditingController.fromText(text);
         });
       });
