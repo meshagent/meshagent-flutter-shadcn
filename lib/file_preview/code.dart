@@ -77,6 +77,12 @@ const highlightIdByKey = <String, String>{
   // e.g. 'json', 'xml', 'dart', 'css', 'go', ...
 };
 
+String _ext(String path) {
+  final base = basename(path);
+  if (base.isEmpty) return "";
+  return base.split(".").last.toLowerCase();
+}
+
 bool isCodeFile(String filename) {
   return resolveModeForFilename(filename) != null;
 }
@@ -91,7 +97,7 @@ Mode? resolveModeForFilename(String filename) {
   if (base.startsWith('.env.')) return langPlaintext;
   if (base.startsWith('dockerfile.')) return builtinAllLanguages['dockerfile'];
 
-  final ext = extension(base).replaceFirst('.', '');
+  final ext = _ext(filename);
   if (ext.isEmpty) return null;
 
   final id = highlightIdByKey[ext] ?? ext;

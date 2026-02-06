@@ -10,14 +10,15 @@ class ImagePreview extends StatelessWidget {
   final BoxFit fit;
   final Uri url;
 
-  String _ext(String? path) {
-    if (path == null) return '';
-    return extension(path).replaceFirst('.', '').toLowerCase();
+  String _ext(String path) {
+    final base = basename(path);
+    if (base.isEmpty) return "";
+    return base.split(".").last.toLowerCase();
   }
 
   bool get isSvg {
     final pathExt = _ext(url.path);
-    final queryPathExt = _ext(url.queryParameters['path']);
+    final queryPathExt = _ext(url.queryParameters['path'] ?? "");
     return svgExtensions.contains(pathExt) || svgExtensions.contains(queryPathExt);
   }
 

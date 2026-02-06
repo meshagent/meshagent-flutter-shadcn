@@ -23,12 +23,16 @@ final parquetExtensions = <String>{"parquet"};
 
 final Map<String, Widget Function({Key? key, required RoomClient room, required String filename, required Uri url})> customViewers = {};
 
-FileKind classifyFile(String path) {
-  final base = basename(path).toLowerCase();
-  final ext = extension(base).replaceFirst('.', '');
+String _ext(String path) {
+  final base = basename(path);
+  if (base.isEmpty) return "";
+  return base.split(".").last.toLowerCase();
+}
 
-  if (markdownExtensions.contains(ext)) return FileKind.markdown;
+FileKind classifyFile(String path) {
+  final ext = _ext(path);
   if (customViewers.containsKey(ext)) return FileKind.custom;
+  if (markdownExtensions.contains(ext)) return FileKind.markdown;
   if (imageExtensions.contains(ext)) return FileKind.image;
   if (videoExtensions.contains(ext)) return FileKind.video;
   if (audioExtensions.contains(ext)) return FileKind.audio;
@@ -36,6 +40,7 @@ FileKind classifyFile(String path) {
   if (parquetExtensions.contains(ext)) return FileKind.parquet;
   if (officeExtensions.contains(ext)) return FileKind.office;
 
+  final base = basename(path).toLowerCase();
   if (base == 'readme' || base == 'readme.txt') return FileKind.markdown;
   if (isCodeFile(path)) return FileKind.code;
 
@@ -59,8 +64,7 @@ Widget filePreview({Key? key, required RoomClient room, required String filename
     case FileKind.code:
       return CodePreview(room: room, filename: filename, url: url, key: key);
     case FileKind.custom:
-      final base = basename(filename).toLowerCase();
-      final ext = extension(base).replaceFirst('.', '');
+      final ext = _ext(filename);
       return customViewers[ext]!(key: key, room: room, filename: filename, url: url);
     case FileKind.parquet:
     case FileKind.office:
