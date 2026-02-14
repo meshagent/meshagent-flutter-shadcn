@@ -323,6 +323,7 @@ class _ChangeDeviceButtonState extends State<_ChangeDeviceButton> {
   void onChangeAudioOutput(livekit.MediaDevice device) => _updateDevice("audioOutput", device, widget.onChangeAudioOutput);
 
   final menuController = ShadContextMenuController();
+
   @override
   Widget build(BuildContext context) {
     if (!_loaded) {
