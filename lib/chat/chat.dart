@@ -1552,11 +1552,14 @@ class _ChatThreadState extends State<ChatThread> {
             children: [
               ChatThreadMessages(
                 room: widget.room,
+                path: widget.path,
+                agentName: widget.agentName,
                 startChatCentered: widget.startChatCentered,
                 messages: state.messages,
                 online: state.online,
                 showTyping: (state.typing.isNotEmpty || state.thinking.isNotEmpty) && state.listening.isEmpty,
                 showListening: state.listening.isNotEmpty,
+                threadStatus: state.threadStatus,
                 messageHeaderBuilder: widget.messageHeaderBuilder,
                 fileInThreadBuilder: widget.fileInThreadBuilder,
                 currentStatusEntry: _currentStatusEntry,
@@ -1648,12 +1651,15 @@ class ChatThreadMessages extends StatelessWidget {
   const ChatThreadMessages({
     super.key,
     required this.room,
+    required this.path,
     required this.messages,
     required this.online,
 
     this.startChatCentered = false,
     this.showTyping = false,
     this.showListening = false,
+    this.threadStatus,
+    this.agentName,
     this.messageHeaderBuilder,
     this.fileInThreadBuilder,
     this.currentStatusEntry,
@@ -1663,9 +1669,12 @@ class ChatThreadMessages extends StatelessWidget {
   final Map<String, MessageBuilder>? messageBuilders;
 
   final RoomClient room;
+  final String path;
+  final String? agentName;
   final bool startChatCentered;
   final bool showTyping;
   final bool showListening;
+  final String? threadStatus;
   final List<MeshElement> messages;
   final List<Participant> online;
   final OutboundEntry? currentStatusEntry;
@@ -1724,6 +1733,9 @@ class ChatThreadMessages extends StatelessWidget {
     }
     if (message.tagName == "exec") {
       return ShellLine(previous: previous, message: message, next: next);
+    }
+    if (message.tagName == "event") {
+      return EventLine(previous: previous, message: message, next: next, room: room, path: path, agentName: agentName);
     }
 
     return SizedBox(
@@ -1815,24 +1827,36 @@ class ChatThreadMessages extends StatelessWidget {
                           style: ShadTheme.of(context).textTheme.h3,
                         ),
                       ),
+
                   if (showTyping) SizedBox(height: 20),
                 ],
               ),
             ),
+
             if (showTyping)
               Positioned(
                 left: 0,
                 bottom: 0,
                 right: 0,
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: 912),
-                    child: Container(
-                      width: double.infinity,
-                      height: 15,
-                      alignment: Alignment.centerLeft,
-                      child: SizedBox(
-                        width: 100,
+                child: Row(
+                  mainAxisAlignment: .start,
+                  crossAxisAlignment: .center,
+                  children: [
+                    if (threadStatus != null && threadStatus!.trim().isNotEmpty) ...[
+                      SizedBox(width: 22),
+                      SizedBox(width: 13, height: 13, child: _CyclingProgressIndicator(strokeWidth: 2)),
+                      SizedBox(width: 10),
+                      Expanded(
+                        child: _ProcessingStatusText(
+                          text: threadStatus!.trim(),
+                          style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                        ),
+                      ),
+                    ],
+
+                    if (!(threadStatus != null && threadStatus!.trim().isNotEmpty))
+                      SizedBox(
+                        width: 80,
                         child: JumpingDots(
                           color: ShadTheme.of(context).colorScheme.foreground,
                           radius: 8,
@@ -1841,10 +1865,10 @@ class ChatThreadMessages extends StatelessWidget {
                           animationDuration: const Duration(milliseconds: 200),
                         ),
                       ),
-                    ),
-                  ),
+                  ],
                 ),
               ),
+
             if (showListening)
               Positioned(
                 left: 0,
@@ -1866,6 +1890,114 @@ class ChatThreadMessages extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _CyclingProgressIndicator extends StatefulWidget {
+  const _CyclingProgressIndicator({this.strokeWidth = 2});
+
+  final double strokeWidth;
+
+  @override
+  State<_CyclingProgressIndicator> createState() => _CyclingProgressIndicatorState();
+}
+
+class _CyclingProgressIndicatorState extends State<_CyclingProgressIndicator> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1800))..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Color _colorAt(BuildContext context, double t) {
+    final colorScheme = ShadTheme.of(context).colorScheme;
+    final palette = [colorScheme.primary, colorScheme.foreground, colorScheme.mutedForeground, colorScheme.primary];
+
+    final segmentCount = palette.length - 1;
+    final scaled = t * segmentCount;
+    final index = scaled.floor().clamp(0, segmentCount - 1);
+    final localT = (scaled - index).clamp(0.0, 1.0);
+    final eased = Curves.easeInOut.transform(localT);
+    return Color.lerp(palette[index], palette[index + 1], eased) ?? colorScheme.primary;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) => CircularProgressIndicator(
+        strokeWidth: widget.strokeWidth,
+        valueColor: AlwaysStoppedAnimation<Color>(_colorAt(context, _controller.value)),
+      ),
+    );
+  }
+}
+
+class _ProcessingStatusText extends StatefulWidget {
+  const _ProcessingStatusText({required this.text, required this.style});
+
+  final String text;
+  final TextStyle style;
+
+  @override
+  State<_ProcessingStatusText> createState() => _ProcessingStatusTextState();
+}
+
+class _ProcessingStatusTextState extends State<_ProcessingStatusText> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1700))..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Shader _sweepShader(BuildContext context, Rect rect, double t) {
+    final colorScheme = ShadTheme.of(context).colorScheme;
+    final centerX = -1.4 + (t * 2.8);
+    final highlight = colorScheme.background.withAlpha(210);
+
+    return LinearGradient(
+      begin: Alignment(centerX - 0.45, 0),
+      end: Alignment(centerX + 0.45, 0),
+      colors: [Colors.transparent, highlight, Colors.transparent],
+      stops: const [0.0, 0.5, 1.0],
+    ).createShader(rect);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) {
+        final text = Text(widget.text, style: widget.style);
+        return Stack(
+          alignment: Alignment.centerLeft,
+          children: [
+            text,
+            ShaderMask(
+              blendMode: BlendMode.srcIn,
+              shaderCallback: (rect) => _sweepShader(context, rect, _controller.value),
+              child: Text(widget.text, style: widget.style.copyWith(color: Colors.white)),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -1917,6 +2049,7 @@ class ChatThreadSnapshot {
     required this.listening,
     required this.availableTools,
     required this.agentOnline,
+    required this.threadStatus,
   });
 
   final bool agentOnline;
@@ -1927,6 +2060,7 @@ class ChatThreadSnapshot {
   final List<String> thinking;
   final List<String> listening;
   final List<ThreadToolkitBuilder> availableTools;
+  final String? threadStatus;
 }
 
 class ChatThreadBuilder extends StatefulWidget {
@@ -1960,16 +2094,19 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
   Set<String> thinking = {};
   Set<String> listening = {};
   List<MeshElement> messages = [];
+  String? threadStatus;
 
   @override
   void initState() {
     super.initState();
 
     sub = widget.room.listen(_onRoomMessage);
+    widget.room.messaging.addListener(_onMessagingChanged);
     widget.document.addListener(_onDocumentChanged);
 
     _getParticipants();
     _getMessages();
+    _getThreadStatus();
 
     _checkAgent();
   }
@@ -1998,6 +2135,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
     super.dispose();
 
     sub.cancel();
+    widget.room.messaging.removeListener(_onMessagingChanged);
     widget.document.removeListener(_onDocumentChanged);
   }
 
@@ -2008,6 +2146,17 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
 
     _getParticipants();
     _getMessages();
+    _getThreadStatus();
+  }
+
+  void _onMessagingChanged() {
+    if (!mounted) {
+      return;
+    }
+
+    _getParticipants();
+    _getThreadStatus();
+    _checkAgent();
   }
 
   void _onRoomMessage(RoomEvent event) {
@@ -2016,6 +2165,8 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
     }
 
     if (event is RoomMessageEvent) {
+      _getThreadStatus();
+
       if (event.message.type == "set_thread_tool_providers") {
         if (mounted) {
           setState(() {
@@ -2093,6 +2244,52 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
     setState(() {});
   }
 
+  void _getThreadStatus() {
+    final keyCandidates = <String>{"thread.status.${widget.path}"};
+    if (widget.path.startsWith("/")) {
+      keyCandidates.add("thread.status.${widget.path.substring(1)}");
+    } else {
+      keyCandidates.add("thread.status./${widget.path}");
+    }
+    final candidates = <RemoteParticipant>[];
+
+    if (widget.agentName != null) {
+      candidates.addAll(
+        widget.room.messaging.remoteParticipants.where((participant) => participant.getAttribute("name") == widget.agentName),
+      );
+    }
+
+    candidates.addAll(widget.room.messaging.remoteParticipants.where((participant) => participant.role == "agent"));
+    candidates.addAll(widget.room.messaging.remoteParticipants);
+
+    String? nextStatus;
+    for (final participant in candidates) {
+      for (final key in keyCandidates) {
+        final value = participant.getAttribute(key);
+        if (value is String && value.trim().isNotEmpty) {
+          nextStatus = value.trim();
+          break;
+        }
+      }
+      if (nextStatus != null) {
+        break;
+      }
+    }
+
+    if (nextStatus == threadStatus) {
+      return;
+    }
+
+    if (!mounted) {
+      threadStatus = nextStatus;
+      return;
+    }
+
+    setState(() {
+      threadStatus = nextStatus;
+    });
+  }
+
   List<ThreadToolkitBuilder> availableTools = [];
 
   @override
@@ -2108,6 +2305,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         thinking: thinking.toList(),
         listening: listening.toList(),
         availableTools: availableTools.toList(),
+        threadStatus: threadStatus,
       ),
     );
   }
@@ -2346,6 +2544,422 @@ class _ShellLineState extends State<ShellLine> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class EventLine extends StatefulWidget {
+  const EventLine({
+    super.key,
+    required this.previous,
+    required this.message,
+    required this.next,
+    required this.room,
+    required this.path,
+    this.agentName,
+  });
+
+  final MeshElement? previous;
+  final MeshElement message;
+  final MeshElement? next;
+  final RoomClient room;
+  final String path;
+  final String? agentName;
+
+  @override
+  State<EventLine> createState() => _EventLineState();
+}
+
+class _EventLineState extends State<EventLine> {
+  bool sendingApprovalDecision = false;
+
+  String _humanize(String value) {
+    if (value.trim().isEmpty) {
+      return "";
+    }
+
+    final normalized = value.replaceAll(RegExp(r"[._-]+"), " ").trim();
+    final parts = normalized.split(RegExp(r"\s+"));
+    return parts.where((part) => part.isNotEmpty).map((part) => "${part[0].toUpperCase()}${part.substring(1)}").join(" ");
+  }
+
+  String _defaultHeadline({required String kind, required String state, required String eventName}) {
+    if (kind == "plan") {
+      return state == "completed" ? "Plan Ready" : "Planning";
+    }
+    if (kind == "diff") {
+      return state == "completed" ? "Diff Ready" : "Preparing Diff";
+    }
+    if (kind == "exec") {
+      return state == "completed" ? "Command Complete" : "Running Command";
+    }
+    if (kind == "message") {
+      return state == "completed" ? "Response Ready" : "Composing Response";
+    }
+    if (kind == "turn") {
+      return state == "completed" ? "Turn Complete" : "Thinking";
+    }
+
+    if (eventName.trim().isNotEmpty) {
+      final tail = eventName.split(".").last;
+      return _humanize(tail);
+    }
+
+    return "";
+  }
+
+  bool _useSummaryAsHeadline({required String summary, required String method, required String eventName}) {
+    if (summary.trim().isEmpty) {
+      return false;
+    }
+
+    final lower = summary.toLowerCase();
+    if (lower == method.toLowerCase()) {
+      return false;
+    }
+    if (lower == eventName.toLowerCase()) {
+      return false;
+    }
+    if (method.trim().isNotEmpty && lower.startsWith(method.toLowerCase())) {
+      return false;
+    }
+    return true;
+  }
+
+  List<String> _detailLines(String raw) {
+    final value = raw.trim();
+    if (value.isEmpty) {
+      return const [];
+    }
+
+    if (value.startsWith("[") && value.endsWith("]")) {
+      try {
+        final decoded = jsonDecode(value);
+        if (decoded is List) {
+          return decoded.whereType<String>().map((line) => line.trim()).where((line) => line.isNotEmpty).toList();
+        }
+      } catch (_) {}
+    }
+
+    return value.split(RegExp(r"\r?\n")).map((line) => line.trim()).where((line) => line.isNotEmpty).toList();
+  }
+
+  String _displayText({required bool inProgress, required String headline}) {
+    final bullet = inProgress ? "◦" : "•";
+    return "$bullet $headline";
+  }
+
+  Color _diffLineColor(BuildContext context, String line, Color fallback) {
+    if (line.startsWith("+")) {
+      return const Color(0xFF1B5E20);
+    }
+    if (line.startsWith("-")) {
+      return ShadTheme.of(context).colorScheme.destructive;
+    }
+    return fallback;
+  }
+
+  List<Map<String, dynamic>> _parseUnifiedDiff(String diff) {
+    final results = <Map<String, dynamic>>[];
+    int? oldLine;
+    int? newLine;
+    final hunk = RegExp(r"^@@\s*-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s*@@");
+
+    for (final line in diff.split(RegExp(r"\r?\n"))) {
+      if (line.isEmpty) {
+        continue;
+      }
+
+      if (line.startsWith("--- ") || line.startsWith("+++ ")) {
+        continue;
+      }
+
+      final hunkMatch = hunk.firstMatch(line);
+      if (hunkMatch != null) {
+        oldLine = int.tryParse(hunkMatch.group(1) ?? "");
+        newLine = int.tryParse(hunkMatch.group(2) ?? "");
+        continue;
+      }
+
+      if (line.startsWith(r"\ No newline at end of file")) {
+        continue;
+      }
+
+      if (oldLine == null || newLine == null) {
+        continue;
+      }
+
+      if (line.startsWith("+")) {
+        results.add({"old": null, "new": newLine, "text": line});
+        newLine += 1;
+        continue;
+      }
+
+      if (line.startsWith("-")) {
+        results.add({"old": oldLine, "new": null, "text": line});
+        oldLine += 1;
+        continue;
+      }
+
+      if (line.startsWith(" ")) {
+        results.add({"old": oldLine, "new": newLine, "text": line});
+        oldLine += 1;
+        newLine += 1;
+        continue;
+      }
+    }
+
+    return results;
+  }
+
+  List<Map<String, dynamic>> _extractDiffLinesFromRaw(String raw) {
+    if (raw.trim().isEmpty) {
+      return const [];
+    }
+
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) {
+        return const [];
+      }
+
+      final itemCandidates = <dynamic>[decoded["item"], (decoded["msg"] is Map) ? (decoded["msg"] as Map)["item"] : null, decoded];
+
+      final results = <Map<String, dynamic>>[];
+      for (final candidate in itemCandidates) {
+        if (candidate is! Map) {
+          continue;
+        }
+        final changes = candidate["changes"];
+        if (changes is! List) {
+          continue;
+        }
+
+        for (final change in changes) {
+          if (change is! Map) {
+            continue;
+          }
+          final diff = change["diff"];
+          if (diff is! String || diff.trim().isEmpty) {
+            continue;
+          }
+          results.addAll(_parseUnifiedDiff(diff));
+        }
+
+        if (results.isNotEmpty) {
+          return results;
+        }
+      }
+    } catch (_) {}
+
+    return const [];
+  }
+
+  Future<void> _sendApprovalDecision({required String approvalId, required bool approve}) async {
+    if (sendingApprovalDecision) {
+      return;
+    }
+
+    final candidates = <RemoteParticipant>[];
+    if (widget.agentName != null) {
+      candidates.addAll(
+        widget.room.messaging.remoteParticipants.where((participant) => participant.getAttribute("name") == widget.agentName),
+      );
+    }
+    candidates.addAll(widget.room.messaging.remoteParticipants.where((participant) => participant.role == "agent"));
+
+    final recipients = candidates.toSet().toList();
+    if (recipients.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      sendingApprovalDecision = true;
+    });
+
+    try {
+      await Future.wait([
+        for (final participant in recipients)
+          widget.room.messaging.sendMessage(
+            to: participant,
+            type: approve ? "approved" : "rejected",
+            message: {"path": widget.path, "approval_id": approvalId},
+          ),
+      ]);
+    } finally {
+      if (mounted) {
+        setState(() {
+          sendingApprovalDecision = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    bool isEventTag(MeshElement? element) => element?.tagName == "event";
+    const supportedKinds = {"exec", "tool", "web", "search", "diff", "image", "approval", "collab", "plan"};
+
+    final method = (widget.message.getAttribute("method") as String?) ?? "agent/event";
+    final eventName =
+        (widget.message.getAttribute("name") as String?) ??
+        (widget.message.getAttribute("event_type") as String?) ??
+        method.replaceAll("/", ".");
+    final kind = ((widget.message.getAttribute("kind") as String?) ?? "").trim().toLowerCase();
+    if (!supportedKinds.contains(kind)) {
+      return SizedBox.shrink();
+    }
+    final state = ((widget.message.getAttribute("state") as String?) ?? "info").toLowerCase();
+    final inProgress = state == "in_progress" || state == "running" || state == "queued";
+    final summary = ((widget.message.getAttribute("summary") as String?) ?? method).trim();
+    final headlineAttr = ((widget.message.getAttribute("headline") as String?) ?? "").trim();
+    final detailsAttr = ((widget.message.getAttribute("details") as String?) ?? "").trim();
+    final approvalId =
+        (((widget.message.getAttribute("item_id") as String?) ?? (widget.message.getAttribute("approval_id") as String?) ?? "")).trim();
+    final raw = ((widget.message.getAttribute("data") as String?) ?? "").trim();
+    final useSummaryAsHeadline = _useSummaryAsHeadline(summary: summary, method: method, eventName: eventName);
+    var headline = headlineAttr.isNotEmpty
+        ? headlineAttr
+        : (useSummaryAsHeadline ? summary : _defaultHeadline(kind: kind, state: state, eventName: eventName));
+    if (headline.trim().isEmpty) {
+      return SizedBox.shrink();
+    }
+    final details = _detailLines(detailsAttr);
+    var detailLines = details;
+    if (kind == "web" && details.isNotEmpty) {
+      headline = details.first;
+      detailLines = details.skip(1).toList();
+    } else if (kind == "exec") {
+      detailLines = details.toList();
+    }
+    final diffLines = kind == "diff" ? _extractDiffLinesFromRaw(raw) : const <Map<String, dynamic>>[];
+    final displayText = _displayText(inProgress: inProgress, headline: headline);
+    final canApprove = kind == "approval" && inProgress && approvalId.isNotEmpty;
+
+    Color textColor;
+    if (state == "failed") {
+      textColor = ShadTheme.of(context).colorScheme.destructive;
+    } else if (state == "cancelled") {
+      textColor = ShadTheme.of(context).colorScheme.mutedForeground;
+    } else if (state == "completed") {
+      textColor = ShadTheme.of(context).colorScheme.foreground;
+    } else if (inProgress) {
+      textColor = ShadTheme.of(context).colorScheme.primary;
+    } else {
+      textColor = ShadTheme.of(context).colorScheme.foreground;
+    }
+
+    return Container(
+      margin: EdgeInsets.only(top: isEventTag(widget.previous) ? 0 : 8, bottom: isEventTag(widget.next) ? 0 : 8, right: 50),
+      child: Padding(
+        padding: EdgeInsets.only(top: 10, bottom: 10, left: 12, right: 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: SelectionArea(
+                    child: Text(
+                      displayText,
+                      style: GoogleFonts.sourceCodePro(fontSize: 12, fontWeight: FontWeight.w600, color: textColor, height: 1.3),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (diffLines.isNotEmpty)
+              Container(
+                width: double.infinity,
+                margin: EdgeInsets.only(top: 8),
+                child: Padding(
+                  padding: EdgeInsets.only(left: 14),
+                  child: Column(
+                    children: [
+                      for (final line in diffLines.indexed)
+                        Padding(
+                          padding: EdgeInsets.only(bottom: line.$1 < diffLines.length - 1 ? 2 : 0),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              SizedBox(
+                                width: 42,
+                                child: Text(
+                                  line.$2["old"] is int ? "${line.$2["old"]}" : "",
+                                  textAlign: TextAlign.right,
+                                  style: GoogleFonts.sourceCodePro(fontSize: 11, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                                ),
+                              ),
+                              SizedBox(width: 6),
+                              SizedBox(
+                                width: 42,
+                                child: Text(
+                                  line.$2["new"] is int ? "${line.$2["new"]}" : "",
+                                  textAlign: TextAlign.right,
+                                  style: GoogleFonts.sourceCodePro(fontSize: 11, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                                ),
+                              ),
+                              SizedBox(width: 8),
+                              Expanded(
+                                child: SelectableText(
+                                  (line.$2["text"] as String?) ?? "",
+                                  style: GoogleFonts.sourceCodePro(
+                                    fontSize: 12,
+                                    color: _diffLineColor(context, (line.$2["text"] as String?) ?? "", textColor.withAlpha(220)),
+                                    height: 1.3,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            if (detailLines.isNotEmpty && kind != "diff")
+              Container(
+                width: double.infinity,
+                margin: EdgeInsets.only(top: 8),
+                child: Padding(
+                  padding: EdgeInsets.only(left: 14),
+                  child: SelectionArea(
+                    child: Text(
+                      detailLines.join("\n"),
+                      style: GoogleFonts.sourceCodePro(fontSize: 12, color: textColor.withAlpha(220), height: 1.3),
+                    ),
+                  ),
+                ),
+              ),
+            if (canApprove)
+              Container(
+                width: double.infinity,
+                margin: EdgeInsets.only(top: 8),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    ShadButton(
+                      enabled: !sendingApprovalDecision,
+                      onPressed: () {
+                        _sendApprovalDecision(approvalId: approvalId, approve: true);
+                      },
+                      child: Text("Approve"),
+                    ),
+                    ShadButton.outline(
+                      enabled: !sendingApprovalDecision,
+                      onPressed: () {
+                        _sendApprovalDecision(approvalId: approvalId, approve: false);
+                      },
+                      child: Text("Reject"),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
