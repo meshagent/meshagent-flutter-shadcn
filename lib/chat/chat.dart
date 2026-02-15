@@ -1100,7 +1100,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
                   child: Row(
                     children: [
                       Expanded(child: widget.footer!),
-                      if (trailer != null) trailer,
+                      ?trailer,
                     ],
                   ),
                 ),
@@ -1381,7 +1381,7 @@ class _ChatBubble extends State<ChatBubble> {
                       child: Text('Save as...'),
                     ),
 
-                  if (mine && widget.onDelete != null) ShadContextMenuItem(height: 40, onPressed: _onDelete, child: Text('Delete')),
+                  if (widget.onDelete != null) ShadContextMenuItem(height: 40, onPressed: _onDelete, child: Text('Delete')),
                 ],
                 child: ShadButton.ghost(
                   height: 30,
