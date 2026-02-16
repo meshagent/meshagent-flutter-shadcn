@@ -1838,34 +1838,39 @@ class ChatThreadMessages extends StatelessWidget {
                 left: 0,
                 bottom: 0,
                 right: 0,
-                child: Row(
-                  mainAxisAlignment: .start,
-                  crossAxisAlignment: .center,
-                  children: [
-                    if (threadStatus != null && threadStatus!.trim().isNotEmpty) ...[
-                      SizedBox(width: 22),
-                      SizedBox(width: 13, height: 13, child: _CyclingProgressIndicator(strokeWidth: 2)),
-                      SizedBox(width: 10),
-                      Expanded(
-                        child: _ProcessingStatusText(
-                          text: threadStatus!.trim(),
-                          style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
-                        ),
-                      ),
-                    ],
+                child: LayoutBuilder(
+                  builder: (context, constraints) => Padding(
+                    padding: EdgeInsets.symmetric(horizontal: constraints.maxWidth > 912 ? (constraints.maxWidth - 912) / 2 : 16),
+                    child: Row(
+                      mainAxisAlignment: .start,
+                      crossAxisAlignment: .center,
+                      children: [
+                        if (threadStatus != null && threadStatus!.trim().isNotEmpty) ...[
+                          SizedBox(width: 22),
+                          SizedBox(width: 13, height: 13, child: _CyclingProgressIndicator(strokeWidth: 2)),
+                          SizedBox(width: 10),
+                          Expanded(
+                            child: _ProcessingStatusText(
+                              text: threadStatus!.trim(),
+                              style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                            ),
+                          ),
+                        ],
 
-                    if (!(threadStatus != null && threadStatus!.trim().isNotEmpty))
-                      SizedBox(
-                        width: 80,
-                        child: JumpingDots(
-                          color: ShadTheme.of(context).colorScheme.foreground,
-                          radius: 8,
-                          verticalOffset: -15,
-                          numberOfDots: 3,
-                          animationDuration: const Duration(milliseconds: 200),
-                        ),
-                      ),
-                  ],
+                        if (!(threadStatus != null && threadStatus!.trim().isNotEmpty))
+                          SizedBox(
+                            width: 80,
+                            child: JumpingDots(
+                              color: ShadTheme.of(context).colorScheme.foreground,
+                              radius: 8,
+                              verticalOffset: -15,
+                              numberOfDots: 3,
+                              animationDuration: const Duration(milliseconds: 200),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
 
