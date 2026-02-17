@@ -1729,6 +1729,10 @@ class ChatThreadMessages extends StatelessWidget {
     }
 
     if (message.tagName == "reasoning") {
+      final summary = (message.getAttribute("summary") ?? "").toString().trim();
+      if (summary.isEmpty) {
+        return const SizedBox.shrink();
+      }
       return ReasoningTrace(previous: previous, message: message, next: next);
     }
     if (message.tagName == "exec") {
@@ -2338,33 +2342,13 @@ class _ReasoningTrace extends State<ReasoningTrace> {
             .withAlpha(180);
     final baseFontSize = MediaQuery.of(context).textScaler.scale((DefaultTextStyle.of(context).style.fontSize ?? 14));
 
-    final border = BorderSide(color: ShadTheme.of(context).cardTheme.border!.bottom!.color!);
     return Container(
-      margin: EdgeInsets.only(
-        top: widget.previous?.tagName != widget.message.tagName ? 16 : 0,
-        bottom: widget.next?.tagName != widget.message.tagName ? 8 : 0,
-        right: 50,
-      ),
-      decoration: BoxDecoration(
-        color: ShadTheme.of(context).colorScheme.background,
-        border: Border(
-          left: border,
-          right: border,
-          top: widget.previous?.tagName != widget.message.tagName ? border : BorderSide.none,
-          bottom: border,
-        ),
-        borderRadius: BorderRadius.only(
-          topLeft: widget.previous?.tagName != widget.message.tagName ? Radius.circular(10) : Radius.zero,
-          topRight: widget.previous?.tagName != widget.message.tagName ? Radius.circular(10) : Radius.zero,
-          bottomRight: widget.next?.tagName == widget.message.tagName ? Radius.zero : Radius.circular(10),
-          bottomLeft: widget.next?.tagName == widget.message.tagName ? Radius.zero : Radius.circular(10),
-        ),
-      ),
+      margin: EdgeInsets.only(top: widget.previous?.tagName != widget.message.tagName ? 16 : 0, bottom: 0, right: 50),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Padding(
-            padding: EdgeInsets.only(top: 16, bottom: 16, right: 16, left: 16),
+            padding: EdgeInsets.only(top: 16, bottom: 8, right: 16, left: 16),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
