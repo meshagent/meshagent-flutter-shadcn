@@ -1717,6 +1717,59 @@ class ChatThreadMessages extends StatelessWidget {
     );
   }
 
+  Widget _buildImageInThread(BuildContext context, MeshElement attachment) {
+    final imageIdAttribute = attachment.getAttribute("id");
+    final imageId = (imageIdAttribute is String && imageIdAttribute.trim().isNotEmpty) ? imageIdAttribute.trim() : null;
+
+    final mimeTypeAttribute = attachment.getAttribute("mime_type");
+    final mimeType = mimeTypeAttribute is String ? mimeTypeAttribute : null;
+    final statusAttribute = attachment.getAttribute("status");
+    final status = statusAttribute is String ? statusAttribute.trim() : null;
+    final statusDetailAttribute = attachment.getAttribute("status_detail");
+    final statusDetail = statusDetailAttribute is String ? statusDetailAttribute.trim() : null;
+    final width = _parsePositiveDimension(attachment.getAttribute("width"));
+    final height = _parsePositiveDimension(attachment.getAttribute("height"));
+
+    return ChatThreadImageAttachment(
+      room: room,
+      imageId: imageId,
+      fallbackMimeType: mimeType,
+      status: status,
+      statusDetail: statusDetail,
+      widthPx: width,
+      heightPx: height,
+    );
+  }
+
+  double? _parsePositiveDimension(Object? value) {
+    if (value is num) {
+      final dimension = value.toDouble();
+      return dimension > 0 ? dimension : null;
+    }
+
+    if (value is String) {
+      final parsed = double.tryParse(value.trim());
+      if (parsed != null && parsed > 0) {
+        return parsed;
+      }
+    }
+
+    return null;
+  }
+
+  Widget _buildAttachmentInThread(BuildContext context, MeshElement attachment) {
+    if (attachment.tagName == "image") {
+      return _buildImageInThread(context, attachment);
+    }
+
+    final pathAttribute = attachment.getAttribute("path");
+    if (pathAttribute is! String || pathAttribute.trim().isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return _buildFileInThread(context, pathAttribute);
+  }
+
   Widget _buildMessage(BuildContext context, MeshElement? previous, MeshElement message, MeshElement? next) {
     final isSameAuthor = message.getAttribute("author_name") == previous?.getAttribute("author_name");
     final mine = message.getAttribute("author_name") == room.localParticipant!.getAttribute("name");
@@ -1760,12 +1813,12 @@ class ChatThreadMessages extends StatelessWidget {
           if (text is String && text.isNotEmpty)
             ChatBubble(room: room, mine: mine, text: message.getAttribute("text"), onDelete: message.delete),
 
-          for (final attachment in message.getChildren())
+          for (final attachment in message.getChildren().whereType<MeshElement>())
             Container(
               margin: EdgeInsets.only(top: 8),
               child: Align(
                 alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-                child: _buildFileInThread(context, (attachment as MeshElement).getAttribute("path")),
+                child: _buildAttachmentInThread(context, attachment),
               ),
             ),
 
@@ -1899,6 +1952,217 @@ class ChatThreadMessages extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _ThreadImageRecord {
+  const _ThreadImageRecord({required this.data, required this.mimeType});
+
+  final Uint8List data;
+  final String mimeType;
+}
+
+class ChatThreadImageAttachment extends StatefulWidget {
+  const ChatThreadImageAttachment({
+    super.key,
+    required this.room,
+    required this.imageId,
+    this.fallbackMimeType,
+    this.status,
+    this.statusDetail,
+    this.widthPx,
+    this.heightPx,
+  });
+
+  final RoomClient room;
+  final String? imageId;
+  final String? fallbackMimeType;
+  final String? status;
+  final String? statusDetail;
+  final double? widthPx;
+  final double? heightPx;
+
+  @override
+  State<ChatThreadImageAttachment> createState() => _ChatThreadImageAttachmentState();
+}
+
+class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
+  late Future<_ThreadImageRecord?> _lookup;
+
+  @override
+  void initState() {
+    super.initState();
+    _lookup = _loadImage();
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatThreadImageAttachment oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.imageId != widget.imageId || oldWidget.room != widget.room) {
+      _lookup = _loadImage();
+    }
+  }
+
+  Future<_ThreadImageRecord?> _loadImage() async {
+    final imageId = widget.imageId;
+    if (imageId == null || imageId.trim().isEmpty) {
+      return null;
+    }
+
+    final rows = await widget.room.database.search(table: "images", where: {"id": imageId}, limit: 1, select: ["data", "mime_type"]);
+    if (rows.isEmpty) {
+      return null;
+    }
+
+    final row = rows.first;
+    final data = row["data"];
+    if (data is! Uint8List) {
+      return null;
+    }
+
+    final value = row["mime_type"];
+    final mimeType = (value is String && value.trim().isNotEmpty) ? value : (widget.fallbackMimeType ?? "image/png");
+
+    return _ThreadImageRecord(data: data, mimeType: mimeType);
+  }
+
+  bool _isSvg(String mimeType) {
+    final normalized = mimeType.toLowerCase();
+    return normalized == "image/svg+xml" || normalized == "image/svg";
+  }
+
+  bool _isGeneratingStatus(String? status) {
+    if (status == null || status.trim().isEmpty) {
+      return false;
+    }
+
+    final normalized = status.toLowerCase();
+    return normalized == "generating" ||
+        normalized == "in_progress" ||
+        normalized == "queued" ||
+        normalized == "running" ||
+        normalized == "pending";
+  }
+
+  bool _isFailedStatus(String? status) {
+    if (status == null) {
+      return false;
+    }
+    final normalized = status.toLowerCase();
+    return normalized == "failed" || normalized == "cancelled";
+  }
+
+  Size _displaySize() {
+    const maxPreviewEdge = 250.0;
+    const minPreviewEdge = 80.0;
+
+    final rawWidth = widget.widthPx;
+    final rawHeight = widget.heightPx;
+    if (rawWidth == null || rawHeight == null || rawWidth <= 0 || rawHeight <= 0) {
+      return const Size(maxPreviewEdge, maxPreviewEdge);
+    }
+
+    final ratio = rawWidth / rawHeight;
+    if (ratio >= 1) {
+      final computedHeight = (maxPreviewEdge / ratio).clamp(minPreviewEdge, maxPreviewEdge).toDouble();
+      return Size(maxPreviewEdge, computedHeight);
+    }
+
+    final computedWidth = (maxPreviewEdge * ratio).clamp(minPreviewEdge, maxPreviewEdge).toDouble();
+    return Size(computedWidth, maxPreviewEdge);
+  }
+
+  Widget _buildPlaceholder(BuildContext context, {required bool showSpinner, String? label}) {
+    final size = _displaySize();
+    final trimmedLabel = label == null ? "" : label.trim();
+
+    return SizedBox(
+      width: size.width,
+      height: size.height,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: ColoredBox(
+          color: ShadTheme.of(context).colorScheme.background,
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (showSpinner)
+                  SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                else
+                  Icon(LucideIcons.imageOff, size: 20, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                if (trimmedLabel.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text(
+                      trimmedLabel,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: ShadTheme.of(context).textTheme.small.copyWith(color: ShadTheme.of(context).colorScheme.mutedForeground),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final status = widget.status?.trim();
+    final hasImageId = widget.imageId != null && widget.imageId!.trim().isNotEmpty;
+    final statusDetail = widget.statusDetail?.trim();
+
+    if (!hasImageId) {
+      if (_isFailedStatus(status)) {
+        return FileDefaultPreviewCard(icon: LucideIcons.imageOff, text: statusDetail?.isNotEmpty == true ? statusDetail! : "Image failed");
+      }
+
+      return _buildPlaceholder(context, showSpinner: true, label: statusDetail?.isNotEmpty == true ? statusDetail : "Generating image");
+    }
+
+    return FutureBuilder<_ThreadImageRecord?>(
+      future: _lookup,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return _buildPlaceholder(context, showSpinner: true, label: statusDetail?.isNotEmpty == true ? statusDetail : "Loading image");
+        }
+
+        final image = snapshot.data;
+        if (image == null) {
+          if (_isGeneratingStatus(status)) {
+            return _buildPlaceholder(
+              context,
+              showSpinner: true,
+              label: statusDetail?.isNotEmpty == true ? statusDetail : "Generating image",
+            );
+          }
+          if (_isFailedStatus(status)) {
+            return FileDefaultPreviewCard(
+              icon: LucideIcons.imageOff,
+              text: statusDetail?.isNotEmpty == true ? statusDetail! : "Image failed",
+            );
+          }
+          return const FileDefaultPreviewCard(icon: LucideIcons.imageOff, text: "Image unavailable");
+        }
+
+        final imageWidget = _isSvg(image.mimeType)
+            ? SvgPicture.memory(image.data, fit: BoxFit.cover)
+            : Image.memory(image.data, fit: BoxFit.cover);
+        final size = _displaySize();
+
+        return SizedBox(
+          width: size.width,
+          height: size.height,
+          child: ClipRRect(borderRadius: BorderRadius.circular(16), child: imageWidget),
+        );
+      },
     );
   }
 }
