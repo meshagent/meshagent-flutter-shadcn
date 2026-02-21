@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:collection/collection.dart';
 
@@ -9,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:interactive_viewer_2/interactive_viewer_2.dart';
 import 'package:markdown_widget/markdown_widget.dart';
 import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_flutter_shadcn/storage/file_browser.dart';
@@ -1405,10 +1407,10 @@ class _ChatBubble extends State<ChatBubble> {
       },
       onLongPress: optionsController.show,
       child: Container(
-        padding: EdgeInsets.all(5),
+        padding: EdgeInsets.symmetric(horizontal: 5),
         color: Colors.transparent,
         child: Container(
-          margin: EdgeInsets.only(top: 8),
+          margin: EdgeInsets.only(top: 0),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
@@ -1647,7 +1649,7 @@ typedef MessageBuilder =
       required MeshElement? next,
     });
 
-class ChatThreadMessages extends StatelessWidget {
+class ChatThreadMessages extends StatefulWidget {
   const ChatThreadMessages({
     super.key,
     required this.room,
@@ -1681,6 +1683,126 @@ class ChatThreadMessages extends StatelessWidget {
 
   final Widget Function(BuildContext, MeshDocument, MeshElement)? messageHeaderBuilder;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
+
+  @override
+  State<ChatThreadMessages> createState() => _ChatThreadMessagesState();
+}
+
+class _ChatThreadMessagesState extends State<ChatThreadMessages> {
+  RoomClient get room => widget.room;
+  String get path => widget.path;
+  String? get agentName => widget.agentName;
+  bool get startChatCentered => widget.startChatCentered;
+  bool get showTyping => widget.showTyping;
+  bool get showListening => widget.showListening;
+  String? get threadStatus => widget.threadStatus;
+  List<MeshElement> get messages => widget.messages;
+  List<Participant> get online => widget.online;
+  OutboundEntry? get currentStatusEntry => widget.currentStatusEntry;
+  Map<String, MessageBuilder>? get messageBuilders => widget.messageBuilders;
+  Widget Function(BuildContext, MeshDocument, MeshElement)? get messageHeaderBuilder => widget.messageHeaderBuilder;
+  Widget Function(BuildContext context, String path)? get fileInThreadBuilder => widget.fileInThreadBuilder;
+
+  final OverlayPortalController _imageViewerController = OverlayPortalController();
+  List<_ThreadFeedImage> _overlayImages = const <_ThreadFeedImage>[];
+  int _overlayInitialIndex = 0;
+  LocalHistoryEntry? _imageViewerHistoryEntry;
+
+  void _hideThreadImageViewer() {
+    _imageViewerController.hide();
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  void _closeThreadImageViewer() {
+    final historyEntry = _imageViewerHistoryEntry;
+    if (historyEntry != null) {
+      _imageViewerHistoryEntry = null;
+      historyEntry.remove();
+      return;
+    }
+    _hideThreadImageViewer();
+  }
+
+  void _openThreadImageViewer(BuildContext context, {required List<_ThreadFeedImage> images, required int initialIndex}) {
+    if (images.isEmpty) {
+      return;
+    }
+
+    final route = ModalRoute.of(context);
+    if (_imageViewerHistoryEntry == null && route != null) {
+      final historyEntry = LocalHistoryEntry(
+        onRemove: () {
+          _imageViewerHistoryEntry = null;
+          _hideThreadImageViewer();
+        },
+      );
+      _imageViewerHistoryEntry = historyEntry;
+      route.addLocalHistoryEntry(historyEntry);
+    }
+
+    final clampedInitialIndex = initialIndex.clamp(0, images.length - 1);
+    setState(() {
+      _overlayImages = List<_ThreadFeedImage>.unmodifiable(images);
+      _overlayInitialIndex = clampedInitialIndex;
+    });
+    _imageViewerController.show();
+  }
+
+  @override
+  void dispose() {
+    final historyEntry = _imageViewerHistoryEntry;
+    _imageViewerHistoryEntry = null;
+    historyEntry?.remove();
+    _imageViewerController.hide();
+    super.dispose();
+  }
+
+  List<_ThreadFeedImage> _collectThreadImages() {
+    final imagesInThread = <_ThreadFeedImage>[];
+
+    for (final message in messages) {
+      for (final attachment in message.getChildren().whereType<MeshElement>()) {
+        if (attachment.tagName != "image") {
+          continue;
+        }
+
+        final imageIdAttribute = attachment.getAttribute("id");
+        final imageId = (imageIdAttribute is String && imageIdAttribute.trim().isNotEmpty) ? imageIdAttribute.trim() : null;
+        if (imageId == null) {
+          continue;
+        }
+        final attachmentElementId = attachment.id;
+        if (attachmentElementId == null || attachmentElementId.trim().isEmpty) {
+          continue;
+        }
+
+        final mimeTypeAttribute = attachment.getAttribute("mime_type");
+        final mimeType = mimeTypeAttribute is String ? mimeTypeAttribute : null;
+        final statusAttribute = attachment.getAttribute("status");
+        final status = statusAttribute is String ? statusAttribute.trim() : null;
+        final statusDetailAttribute = attachment.getAttribute("status_detail");
+        final statusDetail = statusDetailAttribute is String ? statusDetailAttribute.trim() : null;
+        final width = _parsePositiveDimension(attachment.getAttribute("width"));
+        final height = _parsePositiveDimension(attachment.getAttribute("height"));
+
+        imagesInThread.add(
+          _ThreadFeedImage(
+            attachmentElementId: attachmentElementId,
+            imageId: imageId,
+            mimeType: mimeType,
+            status: status,
+            statusDetail: statusDetail,
+            widthPx: width,
+            heightPx: height,
+          ),
+        );
+      }
+    }
+
+    return imagesInThread;
+  }
 
   String _sanitizePath(String path) {
     return path.replaceFirst(RegExp(r'^/'), '');
@@ -1717,7 +1839,7 @@ class ChatThreadMessages extends StatelessWidget {
     );
   }
 
-  Widget _buildImageInThread(BuildContext context, MeshElement attachment) {
+  Widget _buildImageInThread(BuildContext context, MeshElement attachment, {required List<_ThreadFeedImage> feedImages}) {
     final imageIdAttribute = attachment.getAttribute("id");
     final imageId = (imageIdAttribute is String && imageIdAttribute.trim().isNotEmpty) ? imageIdAttribute.trim() : null;
 
@@ -1729,6 +1851,14 @@ class ChatThreadMessages extends StatelessWidget {
     final statusDetail = statusDetailAttribute is String ? statusDetailAttribute.trim() : null;
     final width = _parsePositiveDimension(attachment.getAttribute("width"));
     final height = _parsePositiveDimension(attachment.getAttribute("height"));
+    final initialIndex = feedImages.indexWhere((entry) => entry.attachmentElementId == attachment.id);
+
+    VoidCallback? onOpenFullscreen;
+    if (initialIndex >= 0 && feedImages.isNotEmpty) {
+      onOpenFullscreen = () {
+        _openThreadImageViewer(context, images: feedImages, initialIndex: initialIndex);
+      };
+    }
 
     return ChatThreadImageAttachment(
       room: room,
@@ -1738,6 +1868,8 @@ class ChatThreadMessages extends StatelessWidget {
       statusDetail: statusDetail,
       widthPx: width,
       heightPx: height,
+      roundedCorners: false,
+      onOpenFullscreen: onOpenFullscreen,
     );
   }
 
@@ -1757,9 +1889,9 @@ class ChatThreadMessages extends StatelessWidget {
     return null;
   }
 
-  Widget _buildAttachmentInThread(BuildContext context, MeshElement attachment) {
+  Widget _buildAttachmentInThread(BuildContext context, MeshElement attachment, {required List<_ThreadFeedImage> feedImages}) {
     if (attachment.tagName == "image") {
-      return _buildImageInThread(context, attachment);
+      return _buildImageInThread(context, attachment, feedImages: feedImages);
     }
 
     final pathAttribute = attachment.getAttribute("path");
@@ -1770,11 +1902,31 @@ class ChatThreadMessages extends StatelessWidget {
     return _buildFileInThread(context, pathAttribute);
   }
 
-  Widget _buildMessage(BuildContext context, MeshElement? previous, MeshElement message, MeshElement? next) {
+  bool _defaultHeaderWillRender({required MeshElement message}) {
+    final doc = message.doc;
+    if (doc is! MeshDocument) {
+      return false;
+    }
+
+    final members = doc.root.getElementsByTagName("members").firstOrNull?.getElementsByTagName("member") ?? const <MeshElement>[];
+    return members.length > 2;
+  }
+
+  Widget _buildMessage(
+    BuildContext context,
+    MeshElement? previous,
+    MeshElement message,
+    MeshElement? next, {
+    required List<_ThreadFeedImage> feedImages,
+  }) {
     final isSameAuthor = message.getAttribute("author_name") == previous?.getAttribute("author_name");
     final mine = message.getAttribute("author_name") == room.localParticipant!.getAttribute("name");
+    final useDefaultHeaderBuilder = messageHeaderBuilder == null;
+    final shouldShowHeader = !isSameAuthor && (!useDefaultHeaderBuilder || _defaultHeaderWillRender(message: message));
 
     final text = message.getAttribute("text");
+    final hasText = text is String && text.isNotEmpty;
+    final attachments = message.getChildren().whereType<MeshElement>().toList();
     final id = message.getAttribute("id");
 
     if (messageBuilders?[message.tagName] != null) {
@@ -1801,30 +1953,36 @@ class ChatThreadMessages extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (!isSameAuthor)
+          if (shouldShowHeader)
             Container(
-              margin: EdgeInsets.only(top: 8, right: mine ? 0 : 50, left: mine ? 50 : 0),
+              margin: EdgeInsets.only(right: mine ? 0 : 50, left: mine ? 50 : 0),
               child: Align(
                 alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
                 child: (messageHeaderBuilder ?? defaultMessageHeaderBuilder)(context, message.doc as MeshDocument, message),
               ),
             ),
 
-          if (text is String && text.isNotEmpty)
-            ChatBubble(room: room, mine: mine, text: message.getAttribute("text"), onDelete: message.delete),
+          if (hasText)
+            Padding(
+              padding: EdgeInsets.only(top: 0),
+              child: ChatBubble(room: room, mine: mine, text: message.getAttribute("text"), onDelete: message.delete),
+            ),
 
-          for (final attachment in message.getChildren().whereType<MeshElement>())
-            Container(
-              margin: EdgeInsets.only(top: 8),
-              child: Align(
-                alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-                child: _buildAttachmentInThread(context, attachment),
+          for (final attachment in attachments.indexed)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 5),
+              child: Container(
+                margin: EdgeInsets.only(top: 0),
+                child: Align(
+                  alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+                  child: _buildAttachmentInThread(context, attachment.$2, feedImages: feedImages),
+                ),
               ),
             ),
 
           if (currentStatusEntry != null && currentStatusEntry?.messageId == id)
             Padding(
-              padding: EdgeInsets.only(top: 5),
+              padding: EdgeInsets.only(top: 0),
               child: Align(
                 alignment: Alignment.centerRight,
                 child: Text(
@@ -1845,112 +2003,139 @@ class ChatThreadMessages extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     bool bottomAlign = !startChatCentered || messages.isNotEmpty;
+    final feedImages = _collectThreadImages();
 
     final messageWidgets = <Widget>[];
     for (var message in messages.indexed) {
       final previous = message.$1 > 0 ? messages[message.$1 - 1] : null;
       final next = message.$1 < messages.length - 1 ? messages[message.$1 + 1] : null;
 
-      messageWidgets.insert(0, Container(key: ValueKey(message.$2.id), child: _buildMessage(context, previous, message.$2, next)));
+      final messageWidget = Container(
+        key: ValueKey(message.$2.id),
+        child: _buildMessage(context, previous, message.$2, next, feedImages: feedImages),
+      );
+
+      if (messageWidgets.isNotEmpty) {
+        messageWidgets.insert(0, const SizedBox(height: 12));
+      }
+      messageWidgets.insert(0, messageWidget);
     }
-    return Expanded(
-      child: Center(
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: Column(
-                mainAxisAlignment: bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
-                children: [
-                  Expanded(
-                    child: LayoutBuilder(
-                      builder: (context, constraints) => ListView(
-                        reverse: true,
-                        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-                        padding: EdgeInsets.symmetric(
-                          vertical: 16,
-                          horizontal: constraints.maxWidth > 912 ? (constraints.maxWidth - 912) / 2 : 16,
-                        ),
-                        children: messageWidgets,
+    final threadView = Center(
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: Column(
+              mainAxisAlignment: bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) => ListView(
+                      reverse: true,
+                      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                      padding: EdgeInsets.symmetric(
+                        vertical: 16,
+                        horizontal: constraints.maxWidth > 912 ? (constraints.maxWidth - 912) / 2 : 16,
                       ),
+                      children: messageWidgets,
                     ),
                   ),
+                ),
 
-                  if (!bottomAlign)
-                    if (online.firstOrNull != null)
-                      Padding(
-                        padding: EdgeInsets.symmetric(vertical: 20, horizontal: 50),
-                        child: Text(
-                          online.first.getAttribute("empty_state_title") ?? "How can I help you?",
-                          style: ShadTheme.of(context).textTheme.h3,
-                        ),
+                if (!bottomAlign)
+                  if (online.firstOrNull != null)
+                    Padding(
+                      padding: EdgeInsets.symmetric(vertical: 20, horizontal: 50),
+                      child: Text(
+                        online.first.getAttribute("empty_state_title") ?? "How can I help you?",
+                        style: ShadTheme.of(context).textTheme.h3,
                       ),
+                    ),
 
-                  if (showTyping) SizedBox(height: 20),
-                ],
+                if (showTyping) SizedBox(height: 20),
+              ],
+            ),
+          ),
+
+          if (showTyping)
+            Positioned(
+              left: 0,
+              bottom: 0,
+              right: 0,
+              child: LayoutBuilder(
+                builder: (context, constraints) => Padding(
+                  padding: EdgeInsets.symmetric(horizontal: constraints.maxWidth > 912 ? (constraints.maxWidth - 912) / 2 : 16),
+                  child: Row(
+                    mainAxisAlignment: .start,
+                    crossAxisAlignment: .center,
+                    children: [
+                      if (threadStatus != null && threadStatus!.trim().isNotEmpty) ...[
+                        SizedBox(width: 12),
+                        SizedBox(width: 10),
+                        Expanded(
+                          child: _ProcessingStatusText(
+                            text: threadStatus!.trim(),
+                            style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                          ),
+                        ),
+                        SizedBox(width: 10),
+                        SizedBox(width: 13, height: 13, child: _CyclingProgressIndicator(strokeWidth: 2)),
+                      ],
+
+                      if (!(threadStatus != null && threadStatus!.trim().isNotEmpty))
+                        SizedBox(
+                          width: 80,
+                          child: JumpingDots(
+                            color: ShadTheme.of(context).colorScheme.foreground,
+                            radius: 8,
+                            verticalOffset: -15,
+                            numberOfDots: 3,
+                            animationDuration: const Duration(milliseconds: 200),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               ),
             ),
 
-            if (showTyping)
-              Positioned(
-                left: 0,
-                bottom: 0,
-                right: 0,
-                child: LayoutBuilder(
-                  builder: (context, constraints) => Padding(
-                    padding: EdgeInsets.symmetric(horizontal: constraints.maxWidth > 912 ? (constraints.maxWidth - 912) / 2 : 16),
-                    child: Row(
-                      mainAxisAlignment: .start,
-                      crossAxisAlignment: .center,
-                      children: [
-                        if (threadStatus != null && threadStatus!.trim().isNotEmpty) ...[
-                          SizedBox(width: 22),
-                          SizedBox(width: 13, height: 13, child: _CyclingProgressIndicator(strokeWidth: 2)),
-                          SizedBox(width: 10),
-                          Expanded(
-                            child: _ProcessingStatusText(
-                              text: threadStatus!.trim(),
-                              style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
-                            ),
-                          ),
-                        ],
-
-                        if (!(threadStatus != null && threadStatus!.trim().isNotEmpty))
-                          SizedBox(
-                            width: 80,
-                            child: JumpingDots(
-                              color: ShadTheme.of(context).colorScheme.foreground,
-                              radius: 8,
-                              verticalOffset: -15,
-                              numberOfDots: 3,
-                              animationDuration: const Duration(milliseconds: 200),
-                            ),
-                          ),
-                      ],
+          if (showListening)
+            Positioned(
+              left: 0,
+              bottom: 0,
+              right: 0,
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: 912),
+                  child: SizedBox(
+                    height: 1,
+                    child: LinearProgressIndicator(
+                      backgroundColor: ShadTheme.of(context).colorScheme.background,
+                      color: ShadTheme.of(context).colorScheme.mutedForeground,
                     ),
                   ),
                 ),
               ),
+            ),
+        ],
+      ),
+    );
 
-            if (showListening)
-              Positioned(
-                left: 0,
-                bottom: 0,
-                right: 0,
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: 912),
-                    child: SizedBox(
-                      height: 1,
-                      child: LinearProgressIndicator(
-                        backgroundColor: ShadTheme.of(context).colorScheme.background,
-                        color: ShadTheme.of(context).colorScheme.mutedForeground,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
+    return Expanded(
+      child: OverlayPortal(
+        controller: _imageViewerController,
+        overlayLocation: OverlayChildLocation.rootOverlay,
+        overlayChildBuilder: (context) {
+          if (_overlayImages.isEmpty) {
+            return const SizedBox.shrink();
+          }
+          return _ThreadImageGalleryPage(
+            room: room,
+            images: _overlayImages,
+            initialIndex: _overlayInitialIndex,
+            onClose: _closeThreadImageViewer,
+          );
+        },
+        child: threadView,
       ),
     );
   }
@@ -1963,6 +2148,26 @@ class _ThreadImageRecord {
   final String mimeType;
 }
 
+class _ThreadFeedImage {
+  const _ThreadFeedImage({
+    required this.attachmentElementId,
+    required this.imageId,
+    this.mimeType,
+    this.status,
+    this.statusDetail,
+    this.widthPx,
+    this.heightPx,
+  });
+
+  final String attachmentElementId;
+  final String imageId;
+  final String? mimeType;
+  final String? status;
+  final String? statusDetail;
+  final double? widthPx;
+  final double? heightPx;
+}
+
 class ChatThreadImageAttachment extends StatefulWidget {
   const ChatThreadImageAttachment({
     super.key,
@@ -1973,6 +2178,8 @@ class ChatThreadImageAttachment extends StatefulWidget {
     this.statusDetail,
     this.widthPx,
     this.heightPx,
+    this.roundedCorners = true,
+    this.onOpenFullscreen,
   });
 
   final RoomClient room;
@@ -1982,6 +2189,8 @@ class ChatThreadImageAttachment extends StatefulWidget {
   final String? statusDetail;
   final double? widthPx;
   final double? heightPx;
+  final bool roundedCorners;
+  final VoidCallback? onOpenFullscreen;
 
   @override
   State<ChatThreadImageAttachment> createState() => _ChatThreadImageAttachmentState();
@@ -2054,23 +2263,256 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
   }
 
   Size _displaySize() {
-    const maxPreviewEdge = 250.0;
-    const minPreviewEdge = 80.0;
+    const maxPreviewEdge = 312.5;
+    const fallbackPreviewEdge = 312.5;
 
     final rawWidth = widget.widthPx;
     final rawHeight = widget.heightPx;
     if (rawWidth == null || rawHeight == null || rawWidth <= 0 || rawHeight <= 0) {
-      return const Size(maxPreviewEdge, maxPreviewEdge);
+      return const Size(fallbackPreviewEdge, fallbackPreviewEdge);
     }
 
-    final ratio = rawWidth / rawHeight;
-    if (ratio >= 1) {
-      final computedHeight = (maxPreviewEdge / ratio).clamp(minPreviewEdge, maxPreviewEdge).toDouble();
-      return Size(maxPreviewEdge, computedHeight);
+    final largestEdge = math.max(rawWidth, rawHeight);
+    if (largestEdge <= maxPreviewEdge) {
+      return Size(rawWidth, rawHeight);
     }
 
-    final computedWidth = (maxPreviewEdge * ratio).clamp(minPreviewEdge, maxPreviewEdge).toDouble();
-    return Size(computedWidth, maxPreviewEdge);
+    final scale = maxPreviewEdge / largestEdge;
+    return Size(rawWidth * scale, rawHeight * scale);
+  }
+
+  String _defaultImageExtension(String mimeType) {
+    switch (mimeType.trim().toLowerCase()) {
+      case "image/jpeg":
+      case "image/jpg":
+        return "jpg";
+      case "image/gif":
+        return "gif";
+      case "image/webp":
+        return "webp";
+      case "image/svg+xml":
+      case "image/svg":
+      case "public.svg-image":
+        return "svg";
+      case "image/tiff":
+      case "image/tif":
+        return "tiff";
+      case "image/bmp":
+        return "bmp";
+      case "image/heic":
+        return "heic";
+      case "image/heif":
+        return "heif";
+      case "image/x-icon":
+      case "image/vnd.microsoft.icon":
+        return "ico";
+      case "image/png":
+      default:
+        return "png";
+    }
+  }
+
+  String _suggestedFileName(String mimeType) {
+    return "image.${_defaultImageExtension(mimeType)}";
+  }
+
+  String _ensureFileNameExtension(String rawPath, String mimeType) {
+    final trimmed = rawPath.trim();
+    if (trimmed.isEmpty) {
+      return _suggestedFileName(mimeType);
+    }
+
+    final slash = trimmed.lastIndexOf("/");
+    final fileName = slash == -1 ? trimmed : trimmed.substring(slash + 1);
+
+    if (fileName.isEmpty) {
+      final suggested = _suggestedFileName(mimeType);
+      return trimmed.endsWith("/") ? "$trimmed$suggested" : "$trimmed/$suggested";
+    }
+
+    if (fileName.contains(".")) {
+      return trimmed;
+    }
+
+    return "$trimmed.${_defaultImageExtension(mimeType)}";
+  }
+
+  FileFormat? _clipboardImageFormat(String mimeType) {
+    switch (mimeType.trim().toLowerCase()) {
+      case "image/jpeg":
+      case "image/jpg":
+        return Formats.jpeg;
+      case "image/gif":
+        return Formats.gif;
+      case "image/webp":
+        return Formats.webp;
+      case "image/svg+xml":
+      case "image/svg":
+      case "public.svg-image":
+        return Formats.svg;
+      case "image/tiff":
+      case "image/tif":
+        return Formats.tiff;
+      case "image/bmp":
+        return Formats.bmp;
+      case "image/heic":
+        return Formats.heic;
+      case "image/heif":
+        return Formats.heif;
+      case "image/x-icon":
+      case "image/vnd.microsoft.icon":
+        return Formats.ico;
+      case "image/png":
+        return Formats.png;
+      default:
+        return null;
+    }
+  }
+
+  Future<void> _onCopyImage(_ThreadImageRecord image) async {
+    final clipboard = SystemClipboard.instance;
+    if (clipboard == null) {
+      return;
+    }
+
+    final mimeType = image.mimeType.trim().toLowerCase();
+    final format = _clipboardImageFormat(mimeType);
+    final item = DataWriterItem(suggestedName: _suggestedFileName(mimeType));
+    if (format != null) {
+      item.add(format(image.data));
+    } else {
+      item.add(EncodedData([raw.DataRepresentation.simple(format: mimeType, data: image.data)]));
+    }
+
+    await clipboard.write([item]);
+  }
+
+  Future<void> _onSaveImage(_ThreadImageRecord image) async {
+    final fileNameController = TextEditingController(text: _suggestedFileName(image.mimeType));
+    String selectedFolder = "";
+
+    await showShadDialog<void>(
+      context: context,
+      builder: (context) {
+        final theme = ShadTheme.of(context);
+        final tt = theme.textTheme;
+
+        return ShadDialog(
+          title: const Text("Save image as ..."),
+          crossAxisAlignment: CrossAxisAlignment.start,
+          constraints: const BoxConstraints(maxWidth: 700, maxHeight: 544),
+          scrollable: false,
+          actions: [
+            ShadButton.secondary(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: const Text("Cancel"),
+            ),
+            ShadButton(
+              onPressed: () async {
+                final value = fileNameController.text.trim();
+                var fullPath = value.isEmpty ? _suggestedFileName(image.mimeType) : value;
+
+                if (!fullPath.contains("/")) {
+                  fullPath = selectedFolder.isEmpty ? fullPath : "$selectedFolder/$fullPath";
+                }
+                fullPath = _ensureFileNameExtension(fullPath, image.mimeType);
+
+                final exists = await widget.room.storage.exists(fullPath);
+                if (exists && context.mounted) {
+                  final overwrite = await showShadDialog<bool>(
+                    context: context,
+                    builder: (context) => ShadDialog(
+                      title: const Text("File already exists"),
+                      description: Text("A file at '$fullPath' already exists in room storage. Do you want to overwrite it?"),
+                      actions: [
+                        ShadButton.secondary(
+                          onPressed: () {
+                            Navigator.of(context).pop(false);
+                          },
+                          child: const Text("Cancel"),
+                        ),
+                        ShadButton(
+                          onPressed: () {
+                            Navigator.of(context).pop(true);
+                          },
+                          child: const Text("Overwrite"),
+                        ),
+                      ],
+                    ),
+                  );
+
+                  if (overwrite != true) {
+                    return;
+                  }
+                }
+
+                final handle = await widget.room.storage.open(fullPath, overwrite: true);
+                await widget.room.storage.write(handle, image.data);
+                await widget.room.storage.close(handle);
+
+                if (context.mounted) {
+                  Navigator.of(context).pop();
+                }
+              },
+              child: const Text("Save"),
+            ),
+          ],
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: FileBrowser(
+                  onSelectionChanged: (selection) {
+                    selectedFolder = selection.join("/");
+                  },
+                  room: widget.room,
+                  multiple: false,
+                  selectionMode: FileBrowserSelectionMode.folders,
+                  rootLabel: "Folders",
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: ShadInputFormField(
+                  label: Text("File name or path", style: tt.small.copyWith(fontWeight: FontWeight.bold)),
+                  placeholder: Text(_suggestedFileName(image.mimeType)),
+                  controller: fileNameController,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    fileNameController.dispose();
+  }
+
+  Widget _wrapContextMenu({required _ThreadImageRecord image, required Widget child}) {
+    return ShadContextMenuRegion(
+      items: [
+        ShadContextMenuItem(height: 40, onPressed: () => _onSaveImage(image), child: const Text("Save As...")),
+        ShadContextMenuItem(height: 40, onPressed: () => _onCopyImage(image), child: const Text("Copy")),
+      ],
+      child: child,
+    );
+  }
+
+  Widget _wrapWithCorners(Widget child) {
+    if (!widget.roundedCorners) {
+      return child;
+    }
+    return ClipRRect(borderRadius: BorderRadius.circular(16), child: child);
+  }
+
+  Widget _wrapTapTarget(Widget child) {
+    if (widget.onOpenFullscreen == null) {
+      return child;
+    }
+
+    return ShadGestureDetector(cursor: SystemMouseCursors.zoomIn, onTap: widget.onOpenFullscreen, child: child);
   }
 
   Widget _buildPlaceholder(BuildContext context, {required bool showSpinner, String? label}) {
@@ -2080,9 +2522,8 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
     return SizedBox(
       width: size.width,
       height: size.height,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: ColoredBox(
+      child: _wrapWithCorners(
+        ColoredBox(
           color: ShadTheme.of(context).colorScheme.background,
           child: Center(
             child: Column(
@@ -2153,14 +2594,513 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
         }
 
         final imageWidget = _isSvg(image.mimeType)
-            ? SvgPicture.memory(image.data, fit: BoxFit.cover)
-            : Image.memory(image.data, fit: BoxFit.cover);
+            ? SvgPicture.memory(image.data, fit: (widget.widthPx != null && widget.heightPx != null) ? BoxFit.contain : BoxFit.cover)
+            : Image.memory(image.data, fit: (widget.widthPx != null && widget.heightPx != null) ? BoxFit.contain : BoxFit.cover);
         final size = _displaySize();
 
-        return SizedBox(
-          width: size.width,
-          height: size.height,
-          child: ClipRRect(borderRadius: BorderRadius.circular(16), child: imageWidget),
+        final imageContainer = SizedBox(width: size.width, height: size.height, child: _wrapWithCorners(imageWidget));
+        return _wrapContextMenu(image: image, child: _wrapTapTarget(imageContainer));
+      },
+    );
+  }
+}
+
+class _ThreadImageGalleryPage extends StatefulWidget {
+  const _ThreadImageGalleryPage({required this.room, required this.images, required this.initialIndex, required this.onClose});
+
+  final RoomClient room;
+  final List<_ThreadFeedImage> images;
+  final int initialIndex;
+  final VoidCallback onClose;
+
+  @override
+  State<_ThreadImageGalleryPage> createState() => _ThreadImageGalleryPageState();
+}
+
+class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
+  late final PageController _controller;
+  late int _currentIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentIndex = widget.initialIndex.clamp(0, widget.images.length - 1);
+    _controller = PageController(initialPage: _currentIndex);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _changePage(int nextIndex) {
+    if (nextIndex < 0 || nextIndex >= widget.images.length) {
+      return;
+    }
+    _controller.animateToPage(nextIndex, duration: const Duration(milliseconds: 180), curve: Curves.easeInOut);
+  }
+
+  String _defaultImageExtension(String mimeType) {
+    switch (mimeType.trim().toLowerCase()) {
+      case "image/jpeg":
+      case "image/jpg":
+        return "jpg";
+      case "image/gif":
+        return "gif";
+      case "image/webp":
+        return "webp";
+      case "image/svg+xml":
+      case "image/svg":
+      case "public.svg-image":
+        return "svg";
+      case "image/tiff":
+      case "image/tif":
+        return "tiff";
+      case "image/bmp":
+        return "bmp";
+      case "image/heic":
+        return "heic";
+      case "image/heif":
+        return "heif";
+      case "image/x-icon":
+      case "image/vnd.microsoft.icon":
+        return "ico";
+      case "image/png":
+      default:
+        return "png";
+    }
+  }
+
+  String _suggestedFileName(String mimeType) {
+    return "image.${_defaultImageExtension(mimeType)}";
+  }
+
+  String _ensureFileNameExtension(String rawPath, String mimeType) {
+    final trimmed = rawPath.trim();
+    if (trimmed.isEmpty) {
+      return _suggestedFileName(mimeType);
+    }
+
+    final slash = trimmed.lastIndexOf("/");
+    final fileName = slash == -1 ? trimmed : trimmed.substring(slash + 1);
+
+    if (fileName.isEmpty) {
+      final suggested = _suggestedFileName(mimeType);
+      return trimmed.endsWith("/") ? "$trimmed$suggested" : "$trimmed/$suggested";
+    }
+
+    if (fileName.contains(".")) {
+      return trimmed;
+    }
+
+    return "$trimmed.${_defaultImageExtension(mimeType)}";
+  }
+
+  FileFormat? _clipboardImageFormat(String mimeType) {
+    switch (mimeType.trim().toLowerCase()) {
+      case "image/jpeg":
+      case "image/jpg":
+        return Formats.jpeg;
+      case "image/gif":
+        return Formats.gif;
+      case "image/webp":
+        return Formats.webp;
+      case "image/svg+xml":
+      case "image/svg":
+      case "public.svg-image":
+        return Formats.svg;
+      case "image/tiff":
+      case "image/tif":
+        return Formats.tiff;
+      case "image/bmp":
+        return Formats.bmp;
+      case "image/heic":
+        return Formats.heic;
+      case "image/heif":
+        return Formats.heif;
+      case "image/x-icon":
+      case "image/vnd.microsoft.icon":
+        return Formats.ico;
+      case "image/png":
+        return Formats.png;
+      default:
+        return null;
+    }
+  }
+
+  Future<_ThreadImageRecord?> _loadCurrentImage() async {
+    final entry = widget.images[_currentIndex];
+    final rows = await widget.room.database.search(table: "images", where: {"id": entry.imageId}, limit: 1, select: ["data", "mime_type"]);
+    if (rows.isEmpty) {
+      return null;
+    }
+
+    final row = rows.first;
+    final data = row["data"];
+    if (data is! Uint8List) {
+      return null;
+    }
+
+    final mimeTypeValue = row["mime_type"];
+    final mimeType = (mimeTypeValue is String && mimeTypeValue.trim().isNotEmpty) ? mimeTypeValue : (entry.mimeType ?? "image/png");
+    return _ThreadImageRecord(data: data, mimeType: mimeType);
+  }
+
+  Future<void> _copyImageRecord(_ThreadImageRecord image) async {
+    final clipboard = SystemClipboard.instance;
+    if (clipboard == null) {
+      return;
+    }
+
+    final mimeType = image.mimeType.trim().toLowerCase();
+    final format = _clipboardImageFormat(mimeType);
+    final item = DataWriterItem(suggestedName: _suggestedFileName(mimeType));
+    if (format != null) {
+      item.add(format(image.data));
+    } else {
+      item.add(EncodedData([raw.DataRepresentation.simple(format: mimeType, data: image.data)]));
+    }
+
+    await clipboard.write([item]);
+  }
+
+  Future<void> _onCopyCurrentImage() async {
+    final image = await _loadCurrentImage();
+    if (image == null) {
+      return;
+    }
+    await _copyImageRecord(image);
+  }
+
+  Future<void> _saveImageRecord(_ThreadImageRecord image) async {
+    if (!mounted) {
+      return;
+    }
+    final fileNameController = TextEditingController(text: _suggestedFileName(image.mimeType));
+    String selectedFolder = "";
+
+    await showShadDialog<void>(
+      context: context,
+      builder: (context) {
+        final theme = ShadTheme.of(context);
+        final tt = theme.textTheme;
+
+        return ShadDialog(
+          title: const Text("Save image as ..."),
+          crossAxisAlignment: CrossAxisAlignment.start,
+          constraints: const BoxConstraints(maxWidth: 700, maxHeight: 544),
+          scrollable: false,
+          actions: [
+            ShadButton.secondary(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: const Text("Cancel"),
+            ),
+            ShadButton(
+              onPressed: () async {
+                final value = fileNameController.text.trim();
+                var fullPath = value.isEmpty ? _suggestedFileName(image.mimeType) : value;
+
+                if (!fullPath.contains("/")) {
+                  fullPath = selectedFolder.isEmpty ? fullPath : "$selectedFolder/$fullPath";
+                }
+                fullPath = _ensureFileNameExtension(fullPath, image.mimeType);
+
+                final exists = await widget.room.storage.exists(fullPath);
+                if (exists && context.mounted) {
+                  final overwrite = await showShadDialog<bool>(
+                    context: context,
+                    builder: (context) => ShadDialog(
+                      title: const Text("File already exists"),
+                      description: Text("A file at '$fullPath' already exists in room storage. Do you want to overwrite it?"),
+                      actions: [
+                        ShadButton.secondary(
+                          onPressed: () {
+                            Navigator.of(context).pop(false);
+                          },
+                          child: const Text("Cancel"),
+                        ),
+                        ShadButton(
+                          onPressed: () {
+                            Navigator.of(context).pop(true);
+                          },
+                          child: const Text("Overwrite"),
+                        ),
+                      ],
+                    ),
+                  );
+
+                  if (overwrite != true) {
+                    return;
+                  }
+                }
+
+                final handle = await widget.room.storage.open(fullPath, overwrite: true);
+                await widget.room.storage.write(handle, image.data);
+                await widget.room.storage.close(handle);
+
+                if (context.mounted) {
+                  Navigator.of(context).pop();
+                }
+              },
+              child: const Text("Save"),
+            ),
+          ],
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: FileBrowser(
+                  onSelectionChanged: (selection) {
+                    selectedFolder = selection.join("/");
+                  },
+                  room: widget.room,
+                  multiple: false,
+                  selectionMode: FileBrowserSelectionMode.folders,
+                  rootLabel: "Folders",
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: ShadInputFormField(
+                  label: Text("File name or path", style: tt.small.copyWith(fontWeight: FontWeight.bold)),
+                  placeholder: Text(_suggestedFileName(image.mimeType)),
+                  controller: fileNameController,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    fileNameController.dispose();
+  }
+
+  Future<void> _onSaveCurrentImage() async {
+    final image = await _loadCurrentImage();
+    if (image == null) {
+      return;
+    }
+    await _saveImageRecord(image);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final canGoBack = _currentIndex > 0;
+    final canGoForward = _currentIndex < widget.images.length - 1;
+
+    return Positioned.fill(
+      child: Material(
+        color: Colors.black,
+        child: SafeArea(
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: PageView.builder(
+                  controller: _controller,
+                  itemCount: widget.images.length,
+                  onPageChanged: (index) {
+                    setState(() {
+                      _currentIndex = index;
+                    });
+                  },
+                  itemBuilder: (context, index) {
+                    final image = widget.images[index];
+                    return _ThreadFullscreenImage(
+                      room: widget.room,
+                      imageId: image.imageId,
+                      fallbackMimeType: image.mimeType,
+                      status: image.status,
+                      statusDetail: image.statusDetail,
+                      onCopyImage: _copyImageRecord,
+                      onSaveImage: _saveImageRecord,
+                    );
+                  },
+                ),
+              ),
+              Positioned(
+                top: 12,
+                left: 12,
+                child: ShadIconButton.ghost(
+                  icon: Icon(LucideIcons.x, color: Colors.white),
+                  onPressed: widget.onClose,
+                ),
+              ),
+              Positioned(
+                top: 12,
+                right: 12,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  spacing: 8,
+                  children: [
+                    ShadButton.ghost(
+                      onPressed: _onCopyCurrentImage,
+                      leading: const Icon(LucideIcons.copy, size: 16, color: Colors.white),
+                      child: Text("Copy", style: ShadTheme.of(context).textTheme.small.copyWith(color: Colors.white)),
+                    ),
+                    ShadButton.ghost(
+                      onPressed: _onSaveCurrentImage,
+                      leading: const Icon(LucideIcons.save, size: 16, color: Colors.white),
+                      child: Text("Save As...", style: ShadTheme.of(context).textTheme.small.copyWith(color: Colors.white)),
+                    ),
+                  ],
+                ),
+              ),
+              if (widget.images.length > 1)
+                Positioned(
+                  right: 16,
+                  bottom: 16,
+                  child: Text(
+                    "${_currentIndex + 1} / ${widget.images.length}",
+                    style: ShadTheme.of(context).textTheme.small.copyWith(color: Colors.white.withAlpha(220)),
+                  ),
+                ),
+              if (widget.images.length > 1)
+                Positioned(
+                  left: 12,
+                  top: 0,
+                  bottom: 0,
+                  child: Center(
+                    child: ShadIconButton.ghost(
+                      icon: Icon(LucideIcons.chevronLeft, color: canGoBack ? Colors.white : Colors.white30),
+                      onPressed: canGoBack ? () => _changePage(_currentIndex - 1) : null,
+                    ),
+                  ),
+                ),
+              if (widget.images.length > 1)
+                Positioned(
+                  right: 12,
+                  top: 0,
+                  bottom: 0,
+                  child: Center(
+                    child: ShadIconButton.ghost(
+                      icon: Icon(LucideIcons.chevronRight, color: canGoForward ? Colors.white : Colors.white30),
+                      onPressed: canGoForward ? () => _changePage(_currentIndex + 1) : null,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ThreadFullscreenImage extends StatelessWidget {
+  const _ThreadFullscreenImage({
+    required this.room,
+    required this.imageId,
+    this.fallbackMimeType,
+    this.status,
+    this.statusDetail,
+    this.onCopyImage,
+    this.onSaveImage,
+  });
+
+  final RoomClient room;
+  final String imageId;
+  final String? fallbackMimeType;
+  final String? status;
+  final String? statusDetail;
+  final Future<void> Function(_ThreadImageRecord image)? onCopyImage;
+  final Future<void> Function(_ThreadImageRecord image)? onSaveImage;
+
+  Future<_ThreadImageRecord?> _loadImage() async {
+    final rows = await room.database.search(table: "images", where: {"id": imageId}, limit: 1, select: ["data", "mime_type"]);
+    if (rows.isEmpty) {
+      return null;
+    }
+
+    final row = rows.first;
+    final data = row["data"];
+    if (data is! Uint8List) {
+      return null;
+    }
+
+    final mimeTypeValue = row["mime_type"];
+    final mimeType = (mimeTypeValue is String && mimeTypeValue.trim().isNotEmpty) ? mimeTypeValue : (fallbackMimeType ?? "image/png");
+
+    return _ThreadImageRecord(data: data, mimeType: mimeType);
+  }
+
+  bool _isSvg(String mimeType) {
+    final normalized = mimeType.toLowerCase();
+    return normalized == "image/svg+xml" || normalized == "image/svg";
+  }
+
+  bool _isGeneratingStatus(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return false;
+    }
+
+    final normalized = value.toLowerCase();
+    return normalized == "generating" ||
+        normalized == "in_progress" ||
+        normalized == "queued" ||
+        normalized == "running" ||
+        normalized == "pending";
+  }
+
+  bool _isFailedStatus(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return false;
+    }
+    final normalized = value.toLowerCase();
+    return normalized == "failed" || normalized == "cancelled";
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final detail = statusDetail?.trim();
+    final normalizedStatus = status?.trim();
+
+    return FutureBuilder<_ThreadImageRecord?>(
+      future: _loadImage(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+        }
+
+        final image = snapshot.data;
+        if (image == null) {
+          if (_isGeneratingStatus(normalizedStatus)) {
+            return Center(
+              child: Text(
+                detail?.isNotEmpty == true ? detail! : "Generating image",
+                style: ShadTheme.of(context).textTheme.p.copyWith(color: Colors.white70),
+              ),
+            );
+          }
+
+          final message = _isFailedStatus(normalizedStatus) ? (detail?.isNotEmpty == true ? detail! : "Image failed") : "Image unavailable";
+          return Center(
+            child: Text(message, style: ShadTheme.of(context).textTheme.p.copyWith(color: Colors.white70)),
+          );
+        }
+
+        final imageWidget = _isSvg(image.mimeType)
+            ? SvgPicture.memory(image.data, fit: BoxFit.contain)
+            : Image.memory(image.data, fit: BoxFit.contain);
+
+        final viewer = InteractiveViewer2(
+          child: Center(
+            child: Padding(padding: const EdgeInsets.all(24), child: imageWidget),
+          ),
+        );
+        if (onCopyImage == null && onSaveImage == null) {
+          return viewer;
+        }
+
+        return ShadContextMenuRegion(
+          items: [
+            if (onSaveImage != null) ShadContextMenuItem(height: 40, onPressed: () => onSaveImage!(image), child: const Text("Save As...")),
+            if (onCopyImage != null) ShadContextMenuItem(height: 40, onPressed: () => onCopyImage!(image), child: const Text("Copy")),
+          ],
+          child: viewer,
         );
       },
     );
@@ -2281,7 +3221,7 @@ Widget defaultMessageHeaderBuilder(BuildContext context, MeshDocument thread, Me
   final members = thread.root.getElementsByTagName("members").firstOrNull?.getElementsByTagName("member") ?? [];
   if (members.length > 2) {
     return Container(
-      padding: EdgeInsets.only(top: 16, left: 8, right: 8),
+      padding: EdgeInsets.only(left: 8, right: 8),
       width: ((message.getAttribute("text") as String?)?.isEmpty ?? true) ? 250 : double.infinity,
       child: SelectionArea(
         child: Row(
@@ -2607,12 +3547,12 @@ class _ReasoningTrace extends State<ReasoningTrace> {
     final baseFontSize = MediaQuery.of(context).textScaler.scale((DefaultTextStyle.of(context).style.fontSize ?? 14));
 
     return Container(
-      margin: EdgeInsets.only(top: widget.previous?.tagName != widget.message.tagName ? 16 : 0, bottom: 0, right: 50),
+      margin: EdgeInsets.only(top: 0, bottom: 0, right: 50, left: 5),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Padding(
-            padding: EdgeInsets.only(top: 16, bottom: 8, right: 16, left: 16),
+            padding: EdgeInsets.only(right: 16, left: 16),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -2712,11 +3652,7 @@ class _ShellLineState extends State<ShellLine> {
   Widget build(BuildContext context) {
     final border = BorderSide(color: ShadTheme.of(context).cardTheme.border!.bottom!.color!);
     return Container(
-      margin: EdgeInsets.only(
-        top: widget.previous?.tagName != widget.message.tagName ? 16 : 0,
-        bottom: widget.next?.tagName != widget.message.tagName ? 8 : 0,
-        right: 50,
-      ),
+      margin: EdgeInsets.only(top: 0, bottom: 0, right: 50, left: 5),
       decoration: BoxDecoration(
         color: ShadTheme.of(context).colorScheme.background,
         border: Border(
@@ -2741,7 +3677,7 @@ class _ShellLineState extends State<ShellLine> {
                 border: Border(bottom: border),
                 color: ShadTheme.of(context).colorScheme.secondary,
               ),
-              padding: EdgeInsets.only(top: 14, bottom: 14, left: 16, right: 16),
+              padding: EdgeInsets.only(left: 16, right: 16),
               child: Row(
                 children: [
                   Icon(LucideIcons.terminal),
@@ -2751,7 +3687,7 @@ class _ShellLineState extends State<ShellLine> {
               ),
             ),
           Padding(
-            padding: EdgeInsets.only(top: 16, bottom: 16, right: 16, left: 8),
+            padding: EdgeInsets.only(right: 16, left: 8),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -2898,9 +3834,8 @@ class _EventLineState extends State<EventLine> {
     return value.split(RegExp(r"\r?\n")).map((line) => line.trim()).where((line) => line.isNotEmpty).toList();
   }
 
-  String _displayText({required bool inProgress, required String headline}) {
-    final bullet = inProgress ? "◦" : "•";
-    return "$bullet $headline";
+  String _displayText({required String headline}) {
+    return headline;
   }
 
   Color _diffLineColor(BuildContext context, String line, Color fallback) {
@@ -3051,7 +3986,6 @@ class _EventLineState extends State<EventLine> {
 
   @override
   Widget build(BuildContext context) {
-    bool isEventTag(MeshElement? element) => element?.tagName == "event";
     const supportedKinds = {"exec", "tool", "web", "search", "diff", "image", "approval", "collab", "plan"};
 
     final method = (widget.message.getAttribute("method") as String?) ?? "agent/event";
@@ -3087,7 +4021,7 @@ class _EventLineState extends State<EventLine> {
       detailLines = details.toList();
     }
     final diffLines = kind == "diff" ? _extractDiffLinesFromRaw(raw) : const <Map<String, dynamic>>[];
-    final displayText = _displayText(inProgress: inProgress, headline: headline);
+    final displayText = _displayText(headline: headline);
     final canApprove = kind == "approval" && inProgress && approvalId.isNotEmpty;
 
     Color textColor;
@@ -3104,9 +4038,9 @@ class _EventLineState extends State<EventLine> {
     }
 
     return Container(
-      margin: EdgeInsets.only(top: isEventTag(widget.previous) ? 0 : 8, bottom: isEventTag(widget.next) ? 0 : 8, right: 50),
+      margin: EdgeInsets.only(top: 0, bottom: 0, right: 50, left: 5),
       child: Padding(
-        padding: EdgeInsets.only(top: 10, bottom: 10, left: 12, right: 12),
+        padding: EdgeInsets.only(left: 16, right: 16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -3117,7 +4051,7 @@ class _EventLineState extends State<EventLine> {
                   child: SelectionArea(
                     child: Text(
                       displayText,
-                      style: GoogleFonts.sourceCodePro(fontSize: 12, fontWeight: FontWeight.w600, color: textColor, height: 1.3),
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: textColor, height: 1.3),
                     ),
                   ),
                 ),
@@ -3126,7 +4060,7 @@ class _EventLineState extends State<EventLine> {
             if (diffLines.isNotEmpty)
               Container(
                 width: double.infinity,
-                margin: EdgeInsets.only(top: 8),
+                margin: EdgeInsets.only(top: 0),
                 child: Padding(
                   padding: EdgeInsets.only(left: 14),
                   child: Column(
@@ -3175,21 +4109,15 @@ class _EventLineState extends State<EventLine> {
             if (detailLines.isNotEmpty && kind != "diff")
               Container(
                 width: double.infinity,
-                margin: EdgeInsets.only(top: 8),
-                child: Padding(
-                  padding: EdgeInsets.only(left: 14),
-                  child: SelectionArea(
-                    child: Text(
-                      detailLines.join("\n"),
-                      style: GoogleFonts.sourceCodePro(fontSize: 12, color: textColor.withAlpha(220), height: 1.3),
-                    ),
-                  ),
+                margin: EdgeInsets.only(top: 0),
+                child: SelectionArea(
+                  child: Text(detailLines.join("\n"), style: TextStyle(color: textColor.withAlpha(220), height: 1.3)),
                 ),
               ),
             if (canApprove)
               Container(
                 width: double.infinity,
-                margin: EdgeInsets.only(top: 8),
+                margin: EdgeInsets.only(top: 0),
                 child: Wrap(
                   spacing: 8,
                   runSpacing: 8,
@@ -3229,13 +4157,14 @@ class ChatThreadPreview extends StatelessWidget {
     final ext = path.split(".").last.toLowerCase();
 
     if (imageExtensions.contains(ext)) {
+      const previewEdge = 312.5;
       return FutureBuilder(
         future: room.storage.downloadUrl(path),
         builder: (context, snapshot) {
           if (snapshot.hasData) {
             return SizedBox(
-              width: 250,
-              height: 250,
+              width: previewEdge,
+              height: previewEdge,
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(16),
                 child: ImagePreview(key: ValueKey(path), url: Uri.parse(snapshot.data!), fit: BoxFit.cover),
@@ -3243,7 +4172,11 @@ class ChatThreadPreview extends StatelessWidget {
             );
           }
 
-          return SizedBox(width: 250, height: 250, child: ColoredBox(color: ShadTheme.of(context).colorScheme.background));
+          return SizedBox(
+            width: previewEdge,
+            height: previewEdge,
+            child: ColoredBox(color: ShadTheme.of(context).colorScheme.background),
+          );
         },
       );
     }
