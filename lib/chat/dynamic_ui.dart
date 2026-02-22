@@ -63,7 +63,7 @@ class _DynamicUI extends State<DynamicUI> {
     final widgetName = widget.message.getAttribute("widget");
     final data = widget.message.getAttribute("data");
 
-    Response? response;
+    Chunk? response;
     if (renderer is String && widgetName is String) {
       try {
         setState(() {
@@ -72,20 +72,24 @@ class _DynamicUI extends State<DynamicUI> {
         if (data == null) {
           return;
         }
-        response = await widget.room.agents.invokeTool(
+        final result = await widget.room.agents.invokeTool(
           toolkit: renderer,
           tool: widgetName,
           arguments: {"platform": "flutter", "output": "rfw", "data": data},
         );
+        response = switch (result) {
+          ToolCallChunkResult(:final chunk) => chunk,
+          ToolCallStreamResult() => throw RoomServerException("dynamic UI renderer returned a stream; expected a single chunk"),
+        };
 
         final resp = response;
-        if (resp is TextResponse) {
+        if (resp is TextChunk) {
           if (!mounted) return;
           setState(() {
             _remoteWidgets = parseLibraryFile(resp.text);
             _runtime.update(mainName, _remoteWidgets!);
           });
-        } else if (resp is JsonResponse) {
+        } else if (resp is JsonChunk) {
           if (!mounted) return;
 
           setState(() {
@@ -111,7 +115,7 @@ class _DynamicUI extends State<DynamicUI> {
         if (!mounted) return;
         setState(() {
           error = Exception(
-            "${e.message} at ${e.line}, ${e.column}:\n${(response as TextResponse).text.split("\n").mapIndexed((i, s) => "${i + 1}: $s").join("\n")}",
+            "${e.message} at ${e.line}, ${e.column}:\n${(response as TextChunk).text.split("\n").mapIndexed((i, s) => "${i + 1}: $s").join("\n")}",
           );
         });
       }

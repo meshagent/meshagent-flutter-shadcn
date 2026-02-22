@@ -133,7 +133,7 @@ class AskUser extends Tool {
   }
 
   @override
-  Future<Response> execute(ToolContext context, Map<String, dynamic> arguments) async {
+  Future<Chunk> execute(ToolContext context, Map<String, dynamic> arguments) async {
     final result = await showShadDialog<Map<String, dynamic>>(
       context: this.context,
       builder: (context) {
@@ -179,7 +179,7 @@ class AskUser extends Tool {
     } else if (result["user_feedback"] != null) {
       throw Exception("The user cancelled the request");
     }
-    return JsonResponse(json: result["result"]);
+    return JsonChunk(json: result["result"]);
   }
 }
 
@@ -200,9 +200,9 @@ class ShowToast extends Tool {
   final BuildContext context;
 
   @override
-  Future<Response> execute(ToolContext context, Map<String, dynamic> arguments) async {
+  Future<Chunk> execute(ToolContext context, Map<String, dynamic> arguments) async {
     ShadToaster.of(this.context).show(ShadToast(title: Text(arguments["title"]), description: Text(arguments["description"])));
-    return EmptyResponse();
+    return EmptyChunk();
   }
 }
 
@@ -228,9 +228,9 @@ class DisplayDocument extends Tool {
   final void Function(String path) opener;
 
   @override
-  Future<Response> execute(ToolContext context, Map<String, dynamic> arguments) async {
+  Future<Chunk> execute(ToolContext context, Map<String, dynamic> arguments) async {
     opener(arguments["path"]);
-    return EmptyResponse();
+    return EmptyChunk();
   }
 }
 
@@ -258,7 +258,7 @@ class AskUserForFile extends Tool {
   final BuildContext context;
 
   @override
-  Future<FileResponse> execute(ToolContext context, Map<String, dynamic> arguments) async {
+  Future<FileChunk> execute(ToolContext context, Map<String, dynamic> arguments) async {
     final result = await showShadDialog<FilePickerResult>(
       context: this.context,
       builder: (context) {
@@ -296,7 +296,7 @@ class AskUserForFile extends Tool {
     } else {
       final file = result.files[0];
 
-      return FileResponse(data: file.bytes!, name: file.name, mimeType: lookupMimeType(file.name) ?? "application/octet-stream");
+      return FileChunk(data: file.bytes!, name: file.name, mimeType: lookupMimeType(file.name) ?? "application/octet-stream");
     }
   }
 }
@@ -408,10 +408,10 @@ class GetLocalTime extends Tool {
   final BuildContext context;
 
   @override
-  Future<Response> execute(ToolContext context, Map<String, dynamic> arguments) async {
+  Future<Chunk> execute(ToolContext context, Map<String, dynamic> arguments) async {
     final zone = await FlutterTimezone.getLocalTimezone();
     final now = DateTime.now();
-    return TextResponse(
+    return TextChunk(
       text: "${context.room.localParticipant!.getAttribute("name")}'s time info:\ntime: ${now.toIso8601String()}\nzone: ${zone.identifier}",
     );
   }

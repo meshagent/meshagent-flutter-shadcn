@@ -1,4 +1,5 @@
 import 'package:flutter/widgets.dart';
+import 'package:meshagent/agents_client.dart';
 import 'package:meshagent/room_server_client.dart';
 import 'package:path/path.dart' as pathlib;
 
@@ -21,13 +22,17 @@ class _ParquetViewer extends State<ParquetViewer> {
 
   void query() async {
     try {
-      final data =
-          await widget.client.agents.invokeTool(
-                toolkit: "meshagent.duckdb",
-                tool: "duckdb_query",
-                arguments: {"database": dbName, "query": queryValue},
-              )
-              as JsonResponse;
+      final result = await widget.client.agents.invokeTool(
+        toolkit: "meshagent.duckdb",
+        tool: "duckdb_query",
+        arguments: {"database": dbName, "query": queryValue},
+      );
+
+      final data = switch (result) {
+        ToolCallChunkResult(:final chunk) when chunk is JsonChunk => chunk,
+        ToolCallStreamResult() => throw RoomServerException("duckdb_query returned a stream; expected JSON"),
+        ToolCallChunkResult(:final chunk) => throw RoomServerException("duckdb_query returned unexpected chunk type: ${chunk.runtimeType}"),
+      };
 
       if (mounted) {
         setState(() {
