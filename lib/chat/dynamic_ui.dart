@@ -75,11 +75,11 @@ class _DynamicUI extends State<DynamicUI> {
         final result = await widget.room.agents.invokeTool(
           toolkit: renderer,
           tool: widgetName,
-          arguments: {"platform": "flutter", "output": "rfw", "data": data},
+          input: ToolContentInput(JsonChunk(json: {"platform": "flutter", "output": "rfw", "data": data})),
         );
         response = switch (result) {
-          ToolCallChunkResult(:final chunk) => chunk,
-          ToolCallStreamResult() => throw RoomServerException("dynamic UI renderer returned a stream; expected a single chunk"),
+          ToolChunkOutput(:final chunk) => chunk,
+          ToolStreamOutput() => throw RoomServerException("dynamic UI renderer returned a stream; expected a single chunk"),
         };
 
         final resp = response;
@@ -146,7 +146,7 @@ class _DynamicUI extends State<DynamicUI> {
         await widget.room.agents.invokeTool(
           toolkit: data!["toolkit"] as String,
           tool: data["tool"] as String,
-          arguments: data["arguments"] as Map<String, dynamic>,
+          input: ToolContentInput(JsonChunk(json: data["arguments"] as Map<String, dynamic>)),
         );
       } else if (name == "open") {
         await launchUrl(Uri.parse(data!["url"] as String), webOnlyWindowName: data["target"] as String?);
