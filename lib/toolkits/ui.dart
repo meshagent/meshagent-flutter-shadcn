@@ -122,7 +122,7 @@ final askUserSchema = {
   },
 };
 
-class AskUser extends Tool {
+class AskUser extends FunctionTool {
   AskUser({required this.context, super.name = "ask_user", super.description = "ask the user a question", super.title = "ask user"})
     : super(
         inputSchema: askUserSchema,
@@ -186,7 +186,7 @@ class AskUser extends Tool {
   }
 }
 
-class ShowToast extends Tool {
+class ShowToast extends FunctionTool {
   ShowToast({required this.context, super.name = "show_toast", super.description = "show a toast notification", super.title = "show toast"})
     : super(
         inputSchema: {
@@ -210,7 +210,7 @@ class ShowToast extends Tool {
   }
 }
 
-class DisplayDocument extends Tool {
+class DisplayDocument extends FunctionTool {
   DisplayDocument({
     required this.context,
     required this.opener,
@@ -252,7 +252,7 @@ final askUserForFileSchema = {
   },
 };
 
-class AskUserForFile extends Tool {
+class AskUserForFile extends FunctionTool {
   AskUserForFile({
     required this.context,
     super.name = "ask_user_for_file",
@@ -405,7 +405,7 @@ class UIToolkit extends RemoteToolkit {
       );
 }
 
-class GetLocalTime extends Tool {
+class GetLocalTime extends FunctionTool {
   GetLocalTime({
     required this.context,
     super.name = "get_local_time",
