@@ -27,7 +27,6 @@ import 'package:meshagent_flutter/meshagent_flutter.dart';
 import 'package:meshagent_flutter_shadcn/file_preview/file_preview.dart';
 import 'package:meshagent_flutter_shadcn/file_preview/image.dart';
 
-import 'jumping_dots.dart';
 import 'outbound_delivery_status.dart';
 
 const webPDFFormat = SimpleFileFormat(uniformTypeIdentifiers: ['com.adobe.pdf'], mimeTypes: ['web application/pdf']);
@@ -134,18 +133,6 @@ class ChatThreadController extends ChangeNotifier {
   final TextEditingController textFieldController = ShadTextEditingController();
   final List<FileAttachment> _attachmentUploads = [];
   final OutboundMessageStatusQueue outboundStatus = OutboundMessageStatusQueue();
-  bool _thinking = false;
-
-  bool get thinking {
-    return _thinking;
-  }
-
-  set thinking(bool value) {
-    if (value != _thinking) {
-      _thinking = value;
-      notifyListeners();
-    }
-  }
 
   bool _listening = false;
 
@@ -875,11 +862,9 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   late final focusNode = FocusNode(
     onKeyEvent: (_, event) {
       if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.enter && !HardwareKeyboard.instance.isShiftPressed) {
-        if (!widget.controller.thinking) {
-          widget.onSend(widget.controller.text, widget.controller.attachmentUploads);
+        widget.onSend(widget.controller.text, widget.controller.attachmentUploads);
 
-          widget.controller.textFieldController.clear();
-        }
+        widget.controller.textFieldController.clear();
 
         return KeyEventResult.handled;
       }
@@ -1559,7 +1544,7 @@ class _ChatThreadState extends State<ChatThread> {
                 startChatCentered: widget.startChatCentered,
                 messages: state.messages,
                 online: state.online,
-                showTyping: (state.typing.isNotEmpty || state.thinking.isNotEmpty) && state.listening.isEmpty,
+                showTyping: (state.threadStatus?.trim().isNotEmpty ?? false) && state.listening.isEmpty,
                 showListening: state.listening.isNotEmpty,
                 threadStatus: state.threadStatus,
                 messageHeaderBuilder: widget.messageHeaderBuilder,
@@ -1592,7 +1577,7 @@ class _ChatThreadState extends State<ChatThread> {
                             : widget.toolsBuilder == null
                             ? null
                             : widget.toolsBuilder!(context, controller, state),
-                        trailing: state.thinking.isNotEmpty
+                        trailing: (state.threadStatus?.trim().isNotEmpty ?? false)
                             ? ShadGestureDetector(
                                 cursor: SystemMouseCursors.click,
                                 onTapDown: (_) {
@@ -2068,30 +2053,16 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                     mainAxisAlignment: .start,
                     crossAxisAlignment: .center,
                     children: [
-                      if (threadStatus != null && threadStatus!.trim().isNotEmpty) ...[
-                        SizedBox(width: 12),
-                        SizedBox(width: 10),
-                        Expanded(
-                          child: _ProcessingStatusText(
-                            text: threadStatus!.trim(),
-                            style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
-                          ),
+                      SizedBox(width: 12),
+                      SizedBox(width: 10),
+                      SizedBox(width: 13, height: 13, child: _CyclingProgressIndicator(strokeWidth: 2)),
+                      SizedBox(width: 10),
+                      Expanded(
+                        child: _ProcessingStatusText(
+                          text: threadStatus?.trim() ?? "",
+                          style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
                         ),
-                        SizedBox(width: 10),
-                        SizedBox(width: 13, height: 13, child: _CyclingProgressIndicator(strokeWidth: 2)),
-                      ],
-
-                      if (!(threadStatus != null && threadStatus!.trim().isNotEmpty))
-                        SizedBox(
-                          width: 80,
-                          child: JumpingDots(
-                            color: ShadTheme.of(context).colorScheme.foreground,
-                            radius: 8,
-                            verticalOffset: -15,
-                            numberOfDots: 3,
-                            animationDuration: const Duration(milliseconds: 200),
-                          ),
-                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -3258,7 +3229,6 @@ class ChatThreadSnapshot {
     required this.online,
     required this.offline,
     required this.typing,
-    required this.thinking,
     required this.listening,
     required this.availableTools,
     required this.agentOnline,
@@ -3270,7 +3240,6 @@ class ChatThreadSnapshot {
   final List<Participant> online;
   final List<String> offline;
   final List<String> typing;
-  final List<String> thinking;
   final List<String> listening;
   final List<ThreadToolkitBuilder> availableTools;
   final String? threadStatus;
@@ -3304,7 +3273,6 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
   Set<Participant> onlineParticipants = {};
   Set<String> offlineParticipants = {};
   Map<String, Timer> typing = {};
-  Set<String> thinking = {};
   Set<String> listening = {};
   List<MeshElement> messages = [];
   String? threadStatus;
@@ -3416,17 +3384,6 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         if (mounted) {
           setState(() {});
         }
-      } else if (event.message.type == "thinking" && event.message.message["path"] == widget.path) {
-        if (event.message.message["thinking"] == true) {
-          thinking.add(event.message.fromParticipantId);
-        } else {
-          thinking.remove(event.message.fromParticipantId);
-        }
-
-        widget.controller.thinking = thinking.isNotEmpty;
-        if (mounted) {
-          setState(() {});
-        }
       }
     }
   }
@@ -3464,7 +3421,12 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
     } else {
       keyCandidates.add("thread.status./${widget.path}");
     }
-    final candidates = <RemoteParticipant>[];
+
+    final candidates = <Participant>[];
+    final localParticipant = widget.room.localParticipant;
+    if (localParticipant != null) {
+      candidates.add(localParticipant);
+    }
 
     if (widget.agentName != null) {
       candidates.addAll(
@@ -3515,7 +3477,6 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         online: onlineParticipants.toList(),
         offline: offlineParticipants.toList(),
         typing: typing.keys.toList(),
-        thinking: thinking.toList(),
         listening: listening.toList(),
         availableTools: availableTools.toList(),
         threadStatus: threadStatus,
