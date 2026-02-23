@@ -124,7 +124,10 @@ final askUserSchema = {
 
 class AskUser extends Tool {
   AskUser({required this.context, super.name = "ask_user", super.description = "ask the user a question", super.title = "ask user"})
-    : super(inputSchema: askUserSchema);
+    : super(
+        inputSchema: askUserSchema,
+        outputSpec: ToolContentSpec(types: [ToolContentType.json], stream: false),
+      );
 
   final BuildContext context;
 
@@ -133,7 +136,7 @@ class AskUser extends Tool {
   }
 
   @override
-  Future<Chunk> execute(ToolContext context, Map<String, dynamic> arguments) async {
+  Future<Content> execute(ToolContext context, Map<String, dynamic> arguments) async {
     final result = await showShadDialog<Map<String, dynamic>>(
       context: this.context,
       builder: (context) {
@@ -179,7 +182,7 @@ class AskUser extends Tool {
     } else if (result["user_feedback"] != null) {
       throw Exception("The user cancelled the request");
     }
-    return JsonChunk(json: result["result"]);
+    return JsonContent(json: result["result"]);
   }
 }
 
@@ -195,14 +198,15 @@ class ShowToast extends Tool {
             "description": {"type": "string"},
           },
         },
+        outputSpec: ToolContentSpec(types: [ToolContentType.empty], stream: false),
       );
 
   final BuildContext context;
 
   @override
-  Future<Chunk> execute(ToolContext context, Map<String, dynamic> arguments) async {
+  Future<Content> execute(ToolContext context, Map<String, dynamic> arguments) async {
     ShadToaster.of(this.context).show(ShadToast(title: Text(arguments["title"]), description: Text(arguments["description"])));
-    return EmptyChunk();
+    return EmptyContent();
   }
 }
 
@@ -222,15 +226,16 @@ class DisplayDocument extends Tool {
              "path": {"type": "string"},
            },
          },
+         outputSpec: ToolContentSpec(types: [ToolContentType.empty], stream: false),
        );
 
   final BuildContext context;
   final void Function(String path) opener;
 
   @override
-  Future<Chunk> execute(ToolContext context, Map<String, dynamic> arguments) async {
+  Future<Content> execute(ToolContext context, Map<String, dynamic> arguments) async {
     opener(arguments["path"]);
-    return EmptyChunk();
+    return EmptyContent();
   }
 }
 
@@ -253,12 +258,15 @@ class AskUserForFile extends Tool {
     super.name = "ask_user_for_file",
     super.description = "ask the user for a file (will be accessible as a blob url to other tools)",
     super.title = "ask user for file",
-  }) : super(inputSchema: askUserForFileSchema);
+  }) : super(
+         inputSchema: askUserForFileSchema,
+         outputSpec: ToolContentSpec(types: [ToolContentType.file], stream: false),
+       );
 
   final BuildContext context;
 
   @override
-  Future<FileChunk> execute(ToolContext context, Map<String, dynamic> arguments) async {
+  Future<Content> execute(ToolContext context, Map<String, dynamic> arguments) async {
     final result = await showShadDialog<FilePickerResult>(
       context: this.context,
       builder: (context) {
@@ -296,7 +304,7 @@ class AskUserForFile extends Tool {
     } else {
       final file = result.files[0];
 
-      return FileChunk(data: file.bytes!, name: file.name, mimeType: lookupMimeType(file.name) ?? "application/octet-stream");
+      return FileContent(data: file.bytes!, name: file.name, mimeType: lookupMimeType(file.name) ?? "application/octet-stream");
     }
   }
 }
@@ -403,15 +411,18 @@ class GetLocalTime extends Tool {
     super.name = "get_local_time",
     super.description = "get local time and timezone information for the user",
     super.title = "get local time",
-  }) : super(inputSchema: {"type": "object", "additionalProperties": false, "required": [], "properties": {}});
+  }) : super(
+         inputSchema: {"type": "object", "additionalProperties": false, "required": [], "properties": {}},
+         outputSpec: ToolContentSpec(types: [ToolContentType.text], stream: false),
+       );
 
   final BuildContext context;
 
   @override
-  Future<Chunk> execute(ToolContext context, Map<String, dynamic> arguments) async {
+  Future<Content> execute(ToolContext context, Map<String, dynamic> arguments) async {
     final zone = await FlutterTimezone.getLocalTimezone();
     final now = DateTime.now();
-    return TextChunk(
+    return TextContent(
       text: "${context.room.localParticipant!.getAttribute("name")}'s time info:\ntime: ${now.toIso8601String()}\nzone: ${zone.identifier}",
     );
   }

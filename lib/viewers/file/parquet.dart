@@ -25,13 +25,15 @@ class _ParquetViewer extends State<ParquetViewer> {
       final result = await widget.client.agents.invokeTool(
         toolkit: "meshagent.duckdb",
         tool: "duckdb_query",
-        input: ToolContentInput(JsonChunk(json: {"database": dbName, "query": queryValue})),
+        input: ToolContentInput(JsonContent(json: {"database": dbName, "query": queryValue})),
       );
 
       final data = switch (result) {
-        ToolChunkOutput(:final chunk) when chunk is JsonChunk => chunk,
+        ToolContentOutput(:final content) when content is JsonContent => content,
         ToolStreamOutput() => throw RoomServerException("duckdb_query returned a stream; expected JSON"),
-        ToolChunkOutput(:final chunk) => throw RoomServerException("duckdb_query returned unexpected chunk type: ${chunk.runtimeType}"),
+        ToolContentOutput(:final content) => throw RoomServerException(
+          "duckdb_query returned unexpected content type: ${content.runtimeType}",
+        ),
       };
 
       if (mounted) {

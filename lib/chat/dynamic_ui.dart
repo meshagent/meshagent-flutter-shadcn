@@ -63,7 +63,7 @@ class _DynamicUI extends State<DynamicUI> {
     final widgetName = widget.message.getAttribute("widget");
     final data = widget.message.getAttribute("data");
 
-    Chunk? response;
+    Content? response;
     if (renderer is String && widgetName is String) {
       try {
         setState(() {
@@ -75,21 +75,21 @@ class _DynamicUI extends State<DynamicUI> {
         final result = await widget.room.agents.invokeTool(
           toolkit: renderer,
           tool: widgetName,
-          input: ToolContentInput(JsonChunk(json: {"platform": "flutter", "output": "rfw", "data": data})),
+          input: ToolContentInput(JsonContent(json: {"platform": "flutter", "output": "rfw", "data": data})),
         );
         response = switch (result) {
-          ToolChunkOutput(:final chunk) => chunk,
-          ToolStreamOutput() => throw RoomServerException("dynamic UI renderer returned a stream; expected a single chunk"),
+          ToolContentOutput(:final content) => content,
+          ToolStreamOutput() => throw RoomServerException("dynamic UI renderer returned a stream; expected a single content"),
         };
 
         final resp = response;
-        if (resp is TextChunk) {
+        if (resp is TextContent) {
           if (!mounted) return;
           setState(() {
             _remoteWidgets = parseLibraryFile(resp.text);
             _runtime.update(mainName, _remoteWidgets!);
           });
-        } else if (resp is JsonChunk) {
+        } else if (resp is JsonContent) {
           if (!mounted) return;
 
           setState(() {
@@ -115,7 +115,7 @@ class _DynamicUI extends State<DynamicUI> {
         if (!mounted) return;
         setState(() {
           error = Exception(
-            "${e.message} at ${e.line}, ${e.column}:\n${(response as TextChunk).text.split("\n").mapIndexed((i, s) => "${i + 1}: $s").join("\n")}",
+            "${e.message} at ${e.line}, ${e.column}:\n${(response as TextContent).text.split("\n").mapIndexed((i, s) => "${i + 1}: $s").join("\n")}",
           );
         });
       }
@@ -146,7 +146,7 @@ class _DynamicUI extends State<DynamicUI> {
         await widget.room.agents.invokeTool(
           toolkit: data!["toolkit"] as String,
           tool: data["tool"] as String,
-          input: ToolContentInput(JsonChunk(json: data["arguments"] as Map<String, dynamic>)),
+          input: ToolContentInput(JsonContent(json: data["arguments"] as Map<String, dynamic>)),
         );
       } else if (name == "open") {
         await launchUrl(Uri.parse(data!["url"] as String), webOnlyWindowName: data["target"] as String?);
