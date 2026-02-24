@@ -3221,7 +3221,7 @@ Widget defaultMessageHeaderBuilder(BuildContext context, MeshDocument thread, Me
   final members = thread.root.getElementsByTagName("members").firstOrNull?.getElementsByTagName("member") ?? [];
   if (members.length > 2) {
     return Container(
-      padding: EdgeInsets.only(left: 8, right: 8),
+      padding: EdgeInsets.only(left: 21, right: 21),
       width: ((message.getAttribute("text") as String?)?.isEmpty ?? true) ? 250 : double.infinity,
       child: SelectionArea(
         child: Row(
