@@ -28,6 +28,7 @@ import 'package:meshagent_flutter_shadcn/file_preview/file_preview.dart';
 import 'package:meshagent_flutter_shadcn/file_preview/image.dart';
 
 import 'outbound_delivery_status.dart';
+import 'folder_drop.dart';
 
 const webPDFFormat = SimpleFileFormat(uniformTypeIdentifiers: ['com.adobe.pdf'], mimeTypes: ['web application/pdf']);
 
@@ -4262,6 +4263,14 @@ class FileDropAreaState extends State<FileDropArea> {
     return completer.future;
   }
 
+  Future<T> _getValue<T extends Object>(DataReader reader, ValueFormat<T> format) {
+    final completer = Completer<T>();
+
+    reader.getValue(format, completer.complete, onError: completer.completeError);
+
+    return completer.future;
+  }
+
   @override
   Widget build(BuildContext context) {
     return DropRegion(
@@ -4298,6 +4307,43 @@ class FileDropAreaState extends State<FileDropArea> {
       if (reader == null) continue;
 
       try {
+        FolderDropPayload? folderPayload;
+        if (reader.canProvide(Formats.fileUri)) {
+          try {
+            final namedUri = await _getValue(reader, Formats.fileUri);
+
+            folderPayload = await resolveFolderDrop(namedUri);
+          } catch (err, st) {
+            debugPrint('Error reading dropped folder uri: $err\n$st');
+          }
+        }
+
+        if (kIsWeb && folderPayload == null) {
+          try {
+            final rawItem = reader.rawReader;
+
+            if (rawItem != null) {
+              final result = rawItem.getDataForFormat('web:entry');
+              final entryData = await result.$1;
+              if (entryData != null) {
+                folderPayload = await resolveFolderDropFromEntry(entryData);
+              }
+            }
+          } catch (err, st) {
+            debugPrint('Error reading dropped folder entry on web: $err\n$st');
+          }
+        }
+
+        if (folderPayload != null) {
+          for (final file in folderPayload.files) {
+            final relativePath = file.relativePath.replaceAll('\\', '/');
+            final uploadPath = relativePath.isEmpty ? folderPayload.folderName : '${folderPayload.folderName}/$relativePath';
+
+            await widget.onFileDrop(uploadPath, file.dataStream, file.fileSize);
+          }
+          continue;
+        }
+
         final name = (await reader.getSuggestedName())!;
         final fmt = _preferredFormats.firstWhereOrNull(reader.canProvide);
         final file = await _getFile(reader, fmt);
