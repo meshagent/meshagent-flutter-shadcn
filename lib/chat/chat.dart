@@ -1943,7 +1943,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
         children: [
           if (shouldShowHeader)
             Container(
-              margin: EdgeInsets.only(right: mine ? 0 : 50, left: mine ? 50 : 0),
+              margin: EdgeInsets.only(right: mine ? 0 : 50, left: mine ? 50 : 0, bottom: 6),
               child: Align(
                 alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
                 child: (messageHeaderBuilder ?? defaultMessageHeaderBuilder)(context, message.doc as MeshDocument, message),
@@ -3221,7 +3221,7 @@ Widget defaultMessageHeaderBuilder(BuildContext context, MeshDocument thread, Me
   final members = thread.root.getElementsByTagName("members").firstOrNull?.getElementsByTagName("member") ?? [];
   if (members.length > 2) {
     return Container(
-      padding: EdgeInsets.only(left: 21, right: 21),
+      padding: EdgeInsets.only(left: 8, right: 8),
       width: ((message.getAttribute("text") as String?)?.isEmpty ?? true) ? 250 : double.infinity,
       child: SelectionArea(
         child: Row(
