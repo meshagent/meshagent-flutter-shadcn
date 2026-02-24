@@ -2050,23 +2050,13 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
               right: 0,
               child: LayoutBuilder(
                 builder: (context, constraints) => Padding(
-                  padding: EdgeInsets.symmetric(horizontal: constraints.maxWidth > 912 ? (constraints.maxWidth - 912) / 2 : 16),
+                  padding: EdgeInsets.symmetric(horizontal: constraints.maxWidth > 912 ? (constraints.maxWidth - 912) / 2 : 15),
                   child: Row(
                     mainAxisAlignment: .start,
                     crossAxisAlignment: .center,
                     children: [
-                      SizedBox(width: 12),
                       SizedBox(width: 10),
-                      SizedBox(width: 13, height: 13, child: _CyclingProgressIndicator(strokeWidth: 2)),
-                      SizedBox(width: 10),
-                      Expanded(
-                        child: _ProcessingStatusText(
-                          text: (threadStatus?.trim().isNotEmpty ?? false) ? threadStatus!.trim() : "Thinking",
-                          style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
-                        ),
-                      ),
-                      if (threadStatusMode != null && onCancel != null) ...[
-                        SizedBox(width: 10),
+                      if (threadStatusMode != null && onCancel != null)
                         ShadGestureDetector(
                           cursor: SystemMouseCursors.click,
                           onTapDown: (_) {
@@ -2074,15 +2064,33 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                           },
                           child: ShadTooltip(
                             builder: (context) => Text("Stop"),
-                            child: Container(
-                              width: 22,
-                              height: 22,
-                              decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
-                              child: Icon(LucideIcons.x, color: ShadTheme.of(context).colorScheme.background),
+                            child: SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  Positioned.fill(child: _CyclingProgressIndicator(strokeWidth: 2)),
+                                  Container(
+                                    width: 18,
+                                    height: 18,
+                                    decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
+                                    child: Icon(LucideIcons.x, color: ShadTheme.of(context).colorScheme.background, size: 12),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
+                        )
+                      else
+                        SizedBox(width: 13, height: 13, child: _CyclingProgressIndicator(strokeWidth: 2)),
+                      SizedBox(width: 10),
+                      Expanded(
+                        child: _ProcessingStatusText(
+                          text: (threadStatus?.trim().isNotEmpty ?? false) ? threadStatus!.trim() : "Thinking",
+                          style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
                         ),
-                      ],
+                      ),
                     ],
                   ),
                 ),
