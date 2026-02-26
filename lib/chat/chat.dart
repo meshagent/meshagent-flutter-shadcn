@@ -1743,7 +1743,6 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     final historyEntry = _imageViewerHistoryEntry;
     _imageViewerHistoryEntry = null;
     historyEntry?.remove();
-    _imageViewerController.hide();
     super.dispose();
   }
 
