@@ -1439,7 +1439,7 @@ class _ChatBubble extends State<ChatBubble> {
                     data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
                     child: MarkdownWidget(
                       padding: const EdgeInsets.all(0),
-                      config: buildChatBubbleMarkdownConfig(context),
+                      config: buildChatBubbleMarkdownConfig(context, threadTypography: true),
                       shrinkWrap: true,
                       selectable: kIsWeb,
 
@@ -3570,7 +3570,7 @@ class _ReasoningTrace extends State<ReasoningTrace> {
                 Expanded(
                   child: MarkdownWidget(
                     padding: const EdgeInsets.all(0),
-                    config: buildChatBubbleMarkdownConfig(context),
+                    config: buildChatBubbleMarkdownConfig(context, threadTypography: true),
                     shrinkWrap: true,
                     selectable: true,
 
