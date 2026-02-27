@@ -1,4 +1,4 @@
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:markdown_widget/markdown_widget.dart';
 import 'package:meshagent_flutter_shadcn/code_language_resolver.dart';
@@ -71,6 +71,7 @@ Widget _buildHighlightedCodeBlock({
   if (lines.isNotEmpty && lines.last.isEmpty) {
     lines.removeLast();
   }
+  final normalizedCode = lines.join("\n");
 
   if (languageId == "diff") {
     return Container(
@@ -89,7 +90,7 @@ Widget _buildHighlightedCodeBlock({
                 child: Container(
                   decoration: BoxDecoration(color: diffLineBackgroundColor(line.$2), borderRadius: BorderRadius.circular(4)),
                   padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                  child: Text.rich(
+                  child: SelectableText.rich(
                     highlightCodeSpanWithReHighlight(
                       context: context,
                       code: line.$2,
@@ -98,7 +99,6 @@ Widget _buildHighlightedCodeBlock({
                       theme: monokaiSublimeTheme,
                       fallbackLanguageId: "diff",
                     ),
-                    softWrap: false,
                   ),
                 ),
               ),
@@ -108,14 +108,14 @@ Widget _buildHighlightedCodeBlock({
     );
   }
 
-  final span = highlightCodeSpanWithReHighlight(context: context, code: code, languageOrFilename: language, textStyle: textStyle);
+  final span = highlightCodeSpanWithReHighlight(context: context, code: normalizedCode, languageOrFilename: language, textStyle: textStyle);
 
   return Container(
     margin: const EdgeInsets.symmetric(vertical: 8.0),
     padding: const EdgeInsets.all(16.0),
     decoration: BoxDecoration(color: backgroundColor, borderRadius: const BorderRadius.all(Radius.circular(8.0))),
     width: double.infinity,
-    child: SingleChildScrollView(scrollDirection: Axis.horizontal, child: Text.rich(span, softWrap: false)),
+    child: SingleChildScrollView(scrollDirection: Axis.horizontal, child: SelectableText.rich(span)),
   );
 }
 
