@@ -4,104 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart';
 import 'package:meshagent/room_server_client.dart';
-import 'package:path/path.dart';
-import 'package:re_highlight/languages/all.dart';
-import 'package:re_highlight/re_highlight.dart';
+import 'package:meshagent_flutter_shadcn/code_language_resolver.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:re_editor/re_editor.dart';
 import 'package:flutter_highlight/themes/monokai-sublime.dart';
 import 'package:re_highlight/languages/plaintext.dart';
 
-const highlightIdByKey = <String, String>{
-  // special filenames
-  'dockerfile': 'dockerfile',
-  'makefile': 'makefile',
-  'cmakelists.txt': 'cmake',
-  'nginx.conf': 'nginx',
-  'apache.conf': 'apache',
-  'httpd.conf': 'apache',
-  'rakefile': 'ruby',
-  'gemfile': 'ruby',
-  'gradlew': 'bash',
-  '.bashrc': 'bash',
-  '.zshrc': 'bash',
-  '.profile': 'bash',
-  'gradlew.bat': 'dos',
-  'readme': 'markdown',
-  'license': 'plaintext',
-  'changelog': 'plaintext',
-  '.env': 'plaintext',
-  '.gitignore': 'plaintext',
-  '.dockerignore': 'plaintext',
-  '.gitattributes': 'plaintext',
-  '.gitmodules': 'plaintext',
-  '.npmrc': 'plaintext',
-  '.editorconfig': 'plaintext',
-
-  // common extensions that differ from ids
-  'py': 'python',
-  'rs': 'rust',
-  'cs': 'csharp',
-  'js': 'javascript',
-  'jsx': 'javascript',
-  'tsx': 'typescript',
-  'ts': 'typescript',
-  'yml': 'yaml',
-  'html': 'xml',
-  'sh': 'bash',
-  'zsh': 'bash',
-  'ksh': 'bash',
-  'ps1': 'powershell',
-  'bat': 'dos',
-  'cmd': 'dos',
-  'rb': 'ruby',
-  'kt': 'kotlin',
-  'kts': 'kotlin',
-  'erl': 'erlang',
-  'ex': 'elixir',
-  'exs': 'elixir',
-  'cc': 'cpp',
-  'cxx': 'cpp',
-  'hpp': 'cpp',
-  'hh': 'cpp',
-  'h': 'cpp',
-  'jsonl': 'json',
-  'ndjson': 'json',
-  'md': 'markdown',
-  'txt': 'plaintext',
-  'log': 'plaintext',
-  'env': 'plaintext',
-  'conf': 'plaintext',
-
-  // extensions that are ids already can be omitted
-  // e.g. 'json', 'xml', 'dart', 'css', 'go', ...
-};
-
-String _ext(String path) {
-  final base = basename(path);
-  if (base.isEmpty) return "";
-  return base.split(".").last.toLowerCase();
-}
-
 bool isCodeFile(String filename) {
   return resolveModeForFilename(filename) != null;
-}
-
-Mode? resolveModeForFilename(String filename) {
-  final base = basename(filename).toLowerCase();
-
-  final byNameId = highlightIdByKey[base] ?? base;
-  final byNameMode = builtinAllLanguages[byNameId];
-  if (byNameMode != null) return byNameMode;
-
-  if (base.startsWith('.env.')) return langPlaintext;
-  if (base.startsWith('dockerfile.')) return builtinAllLanguages['dockerfile'];
-
-  final ext = _ext(filename);
-  if (ext.isEmpty) return null;
-
-  final id = highlightIdByKey[ext] ?? ext;
-  return builtinAllLanguages[id];
 }
 
 class CodePreview extends StatefulWidget {

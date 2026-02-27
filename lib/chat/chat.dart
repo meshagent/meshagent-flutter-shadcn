@@ -13,8 +13,11 @@ import 'package:image_picker/image_picker.dart';
 import 'package:interactive_viewer_2/interactive_viewer_2.dart';
 import 'package:markdown_widget/markdown_widget.dart';
 import 'package:meshagent/meshagent.dart';
+import 'package:meshagent_flutter_shadcn/chat_bubble_markdown_config.dart';
+import 'package:meshagent_flutter_shadcn/code_language_resolver.dart';
 import 'package:meshagent_flutter_shadcn/storage/file_browser.dart';
 import 'package:meshagent_flutter_shadcn/ui/ui.dart';
+import 'package:re_highlight/styles/monokai-sublime.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:super_clipboard/super_clipboard.dart';
 import 'package:super_drag_and_drop/super_drag_and_drop.dart';
@@ -33,6 +36,30 @@ import 'folder_drop.dart';
 const webPDFFormat = SimpleFileFormat(uniformTypeIdentifiers: ['com.adobe.pdf'], mimeTypes: ['web application/pdf']);
 
 enum UploadStatus { initial, uploading, completed, failed }
+
+Set<String> _threadParticipantNames(MeshDocument thread) {
+  final members = thread.root.getElementsByTagName("members").firstOrNull?.getElementsByTagName("member") ?? const <MeshElement>[];
+  final names = <String>{};
+  for (final member in members) {
+    final name = member.getAttribute("name");
+    if (name is String) {
+      final normalized = name.trim();
+      if (normalized.isNotEmpty) {
+        names.add(normalized);
+      }
+    }
+  }
+  return names;
+}
+
+bool _shouldShowAuthorNames({required MeshDocument thread, String? localParticipantName}) {
+  final participantNames = _threadParticipantNames(thread);
+  final normalizedLocal = localParticipantName?.trim();
+  if (normalizedLocal != null && normalizedLocal.isNotEmpty && !participantNames.contains(normalizedLocal)) {
+    participantNames.add(normalizedLocal);
+  }
+  return participantNames.length > 2;
+}
 
 class FileAttachment extends ChangeNotifier {
   FileAttachment({required this.path, UploadStatus initialStatus = UploadStatus.initial}) : _status = initialStatus;
@@ -1343,9 +1370,6 @@ class _ChatBubble extends State<ChatBubble> {
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final cs = theme.colorScheme;
-    final tt = theme.textTheme;
-    final mdColor = tt.p.color ?? DefaultTextStyle.of(context).style.color ?? cs.foreground;
-    final baseFontSize = MediaQuery.of(context).textScaler.scale((DefaultTextStyle.of(context).style.fontSize ?? 14));
     final text = widget.text;
     final mine = widget.mine;
     final openOptions = optionsController.isOpen || hovering;
@@ -1415,51 +1439,7 @@ class _ChatBubble extends State<ChatBubble> {
                     data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
                     child: MarkdownWidget(
                       padding: const EdgeInsets.all(0),
-                      config: MarkdownConfig(
-                        configs: [
-                          HrConfig(color: mdColor),
-                          H1Config(
-                            style: TextStyle(fontSize: baseFontSize * 2, color: mdColor, fontWeight: FontWeight.bold),
-                          ),
-                          H2Config(
-                            style: TextStyle(fontSize: baseFontSize * 1.8, color: mdColor, inherit: false),
-                          ),
-                          H3Config(
-                            style: TextStyle(fontSize: baseFontSize * 1.6, color: mdColor, inherit: false),
-                          ),
-                          H4Config(
-                            style: TextStyle(fontSize: baseFontSize * 1.4, color: mdColor, inherit: false),
-                          ),
-                          H5Config(
-                            style: TextStyle(fontSize: baseFontSize * 1.2, color: mdColor, inherit: false),
-                          ),
-                          H6Config(
-                            style: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
-                          ),
-                          PreConfig(
-                            decoration: BoxDecoration(color: theme.cardTheme.backgroundColor),
-                            textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
-                          ),
-                          PConfig(
-                            textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
-                          ),
-                          CodeConfig(
-                            style: GoogleFonts.sourceCodePro(fontSize: baseFontSize * 1.0, color: mdColor),
-                          ),
-                          BlockquoteConfig(textColor: mdColor),
-                          LinkConfig(
-                            style: TextStyle(color: theme.linkButtonTheme.foregroundColor, decoration: TextDecoration.underline),
-                          ),
-                          ListConfig(
-                            marker: (isOrdered, depth, index) {
-                              return Padding(
-                                padding: EdgeInsets.only(right: 5),
-                                child: Text("${index + 1}.", textAlign: TextAlign.right),
-                              );
-                            },
-                          ),
-                        ],
-                      ),
+                      config: buildChatBubbleMarkdownConfig(context),
                       shrinkWrap: true,
                       selectable: kIsWeb,
 
@@ -1895,8 +1875,8 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
       return false;
     }
 
-    final members = doc.root.getElementsByTagName("members").firstOrNull?.getElementsByTagName("member") ?? const <MeshElement>[];
-    return members.length > 2;
+    final localParticipantName = room.localParticipant?.getAttribute("name");
+    return _shouldShowAuthorNames(thread: doc, localParticipantName: localParticipantName is String ? localParticipantName : null);
   }
 
   Widget _buildMessage(
@@ -1907,7 +1887,8 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     required List<_ThreadFeedImage> feedImages,
   }) {
     final isSameAuthor = message.getAttribute("author_name") == previous?.getAttribute("author_name");
-    final mine = message.getAttribute("author_name") == room.localParticipant!.getAttribute("name");
+    final localParticipantName = room.localParticipant?.getAttribute("name");
+    final mine = message.getAttribute("author_name") == localParticipantName;
     final useDefaultHeaderBuilder = messageHeaderBuilder == null;
     final shouldShowHeader = !isSameAuthor && (!useDefaultHeaderBuilder || _defaultHeaderWillRender(message: message));
 
@@ -1945,7 +1926,14 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
               margin: EdgeInsets.only(right: mine ? 0 : 50, left: mine ? 50 : 0, bottom: 6),
               child: Align(
                 alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-                child: (messageHeaderBuilder ?? defaultMessageHeaderBuilder)(context, message.doc as MeshDocument, message),
+                child:
+                    messageHeaderBuilder?.call(context, message.doc as MeshDocument, message) ??
+                    defaultMessageHeaderBuilder(
+                      context,
+                      message.doc as MeshDocument,
+                      message,
+                      localParticipantName: localParticipantName is String ? localParticipantName : null,
+                    ),
               ),
             ),
 
@@ -3214,11 +3202,10 @@ class _ProcessingStatusTextState extends State<_ProcessingStatusText> with Singl
   }
 }
 
-Widget defaultMessageHeaderBuilder(BuildContext context, MeshDocument thread, MeshElement message) {
+Widget defaultMessageHeaderBuilder(BuildContext context, MeshDocument thread, MeshElement message, {String? localParticipantName}) {
   final name = message.getAttribute("author_name") ?? "";
   final createdAt = message.getAttribute("created_at") == null ? DateTime.now() : DateTime.parse(message.getAttribute("created_at"));
-  final members = thread.root.getElementsByTagName("members").firstOrNull?.getElementsByTagName("member") ?? [];
-  if (members.length > 2) {
+  if (_shouldShowAuthorNames(thread: thread, localParticipantName: localParticipantName)) {
     return Container(
       padding: EdgeInsets.only(left: 8, right: 8),
       width: ((message.getAttribute("text") as String?)?.isEmpty ?? true) ? 250 : double.infinity,
@@ -3570,13 +3557,6 @@ class _ReasoningTrace extends State<ReasoningTrace> {
   bool expanded = false;
   @override
   Widget build(BuildContext context) {
-    final mdColor =
-        (ShadTheme.of(context).textTheme.p.color ??
-                DefaultTextStyle.of(context).style.color ??
-                ShadTheme.of(context).colorScheme.foreground)
-            .withAlpha(180);
-    final baseFontSize = MediaQuery.of(context).textScaler.scale((DefaultTextStyle.of(context).style.fontSize ?? 14));
-
     return Container(
       margin: EdgeInsets.only(top: 0, bottom: 0, right: 50, left: 5),
       child: Column(
@@ -3590,54 +3570,7 @@ class _ReasoningTrace extends State<ReasoningTrace> {
                 Expanded(
                   child: MarkdownWidget(
                     padding: const EdgeInsets.all(0),
-                    config: MarkdownConfig(
-                      configs: [
-                        HrConfig(color: mdColor),
-                        H1Config(
-                          style: TextStyle(fontSize: baseFontSize * 2, color: mdColor, fontWeight: FontWeight.bold),
-                        ),
-                        H2Config(
-                          style: TextStyle(fontSize: baseFontSize * 1.8, color: mdColor, inherit: false),
-                        ),
-                        H3Config(
-                          style: TextStyle(fontSize: baseFontSize * 1.6, color: mdColor, inherit: false),
-                        ),
-                        H4Config(
-                          style: TextStyle(fontSize: baseFontSize * 1.4, color: mdColor, inherit: false),
-                        ),
-                        H5Config(
-                          style: TextStyle(fontSize: baseFontSize * 1.2, color: mdColor, inherit: false),
-                        ),
-                        H6Config(
-                          style: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
-                        ),
-                        PreConfig(
-                          decoration: BoxDecoration(color: ShadTheme.of(context).cardTheme.backgroundColor),
-                          textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
-                        ),
-                        PConfig(
-                          textStyle: TextStyle(fontSize: baseFontSize * 1.0, color: mdColor, inherit: false),
-                        ),
-                        CodeConfig(
-                          style: GoogleFonts.sourceCodePro(fontSize: baseFontSize * 1.0, color: mdColor),
-                        ),
-                        BlockquoteConfig(textColor: mdColor),
-                        LinkConfig(
-                          style: TextStyle(
-                            color: ShadTheme.of(context).linkButtonTheme.foregroundColor,
-                            decoration: TextDecoration.underline,
-                          ),
-                        ),
-                        ListConfig(
-                          marker: (isOrdered, depth, index) {
-                            return Padding(
-                              padding: EdgeInsets.only(right: 5),
-                              child: Text("${index + 1}.", textAlign: TextAlign.right),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
+                    config: buildChatBubbleMarkdownConfig(context),
                     shrinkWrap: true,
                     selectable: true,
 
@@ -3869,20 +3802,97 @@ class _EventLineState extends State<EventLine> {
     return headline;
   }
 
-  Color _diffLineColor(BuildContext context, String line, Color fallback) {
-    if (line.startsWith("+")) {
-      return const Color(0xFF1B5E20);
+  String? _languageFromDiffHeaderPath(String value) {
+    final path = value.trim();
+    if (path.isEmpty || path == "/dev/null") {
+      return null;
     }
-    if (line.startsWith("-")) {
-      return ShadTheme.of(context).colorScheme.destructive;
-    }
-    return fallback;
+
+    final normalized = path.startsWith("a/") || path.startsWith("b/") ? path.substring(2) : path;
+    return resolveLanguageIdForFilename(normalized);
   }
 
-  List<Map<String, dynamic>> _parseUnifiedDiff(String diff) {
+  String? _singleDiffPathFromHeadline(String headline) {
+    final trimmed = headline.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+
+    final withPath = trimmed.replaceFirst(RegExp(r"^(edited|added|deleted)\s+", caseSensitive: false), "");
+    if (withPath == trimmed) {
+      return null;
+    }
+
+    if (RegExp(r"^\d+\s+files?\b", caseSensitive: false).hasMatch(withPath)) {
+      return null;
+    }
+
+    final withoutCounts = withPath.replaceFirst(RegExp(r"\s+\(\+\d+\s+-\d+\)\s*$"), "").trim();
+    if (withoutCounts.isEmpty) {
+      return null;
+    }
+
+    final moveParts = withoutCounts.split(RegExp(r"\s*(?:→|->)\s*"));
+    final candidate = moveParts.isNotEmpty ? moveParts.last.trim() : withoutCounts;
+    return candidate.isEmpty ? withoutCounts : candidate;
+  }
+
+  String? _languageFromDiffHeadline(String headline) {
+    final path = _singleDiffPathFromHeadline(headline);
+    if (path == null || path.isEmpty) {
+      return null;
+    }
+    return _languageFromDiffHeaderPath(path);
+  }
+
+  TextSpan _diffLineSpan({required BuildContext context, required String line, required String? languageId, required TextStyle textStyle}) {
+    if (line.isEmpty) {
+      return TextSpan(text: "", style: textStyle);
+    }
+
+    if (languageId == null) {
+      return highlightCodeSpanWithReHighlight(
+        context: context,
+        code: line,
+        languageOrFilename: "diff",
+        textStyle: textStyle,
+        theme: monokaiSublimeTheme,
+        fallbackLanguageId: "diff",
+      );
+    }
+
+    if (line.startsWith("+") || line.startsWith("-") || line.startsWith(" ")) {
+      final marker = line.substring(0, 1);
+      final rest = line.length > 1 ? line.substring(1) : "";
+      return TextSpan(
+        style: textStyle,
+        children: [
+          TextSpan(text: marker, style: textStyle),
+          highlightCodeSpanWithReHighlight(
+            context: context,
+            code: rest,
+            languageOrFilename: languageId,
+            textStyle: textStyle,
+            theme: monokaiSublimeTheme,
+          ),
+        ],
+      );
+    }
+
+    return highlightCodeSpanWithReHighlight(
+      context: context,
+      code: line,
+      languageOrFilename: languageId,
+      textStyle: textStyle,
+      theme: monokaiSublimeTheme,
+    );
+  }
+
+  List<Map<String, dynamic>> _parseUnifiedDiff(String diff, {String? defaultLanguageId}) {
     final results = <Map<String, dynamic>>[];
     int? oldLine;
     int? newLine;
+    String? currentLanguageId = defaultLanguageId;
     final hunk = RegExp(r"^@@\s*-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s*@@");
 
     for (final line in diff.split(RegExp(r"\r?\n"))) {
@@ -3890,7 +3900,19 @@ class _EventLineState extends State<EventLine> {
         continue;
       }
 
-      if (line.startsWith("--- ") || line.startsWith("+++ ")) {
+      if (line.startsWith("--- ")) {
+        final language = _languageFromDiffHeaderPath(line.substring(4));
+        if (language != null) {
+          currentLanguageId = language;
+        }
+        continue;
+      }
+
+      if (line.startsWith("+++ ")) {
+        final language = _languageFromDiffHeaderPath(line.substring(4));
+        if (language != null) {
+          currentLanguageId = language;
+        }
         continue;
       }
 
@@ -3910,19 +3932,19 @@ class _EventLineState extends State<EventLine> {
       }
 
       if (line.startsWith("+")) {
-        results.add({"old": null, "new": newLine, "text": line});
+        results.add({"old": null, "new": newLine, "text": line, "language": currentLanguageId});
         newLine += 1;
         continue;
       }
 
       if (line.startsWith("-")) {
-        results.add({"old": oldLine, "new": null, "text": line});
+        results.add({"old": oldLine, "new": null, "text": line, "language": currentLanguageId});
         oldLine += 1;
         continue;
       }
 
       if (line.startsWith(" ")) {
-        results.add({"old": oldLine, "new": newLine, "text": line});
+        results.add({"old": oldLine, "new": newLine, "text": line, "language": currentLanguageId});
         oldLine += 1;
         newLine += 1;
         continue;
@@ -3932,10 +3954,12 @@ class _EventLineState extends State<EventLine> {
     return results;
   }
 
-  List<Map<String, dynamic>> _extractDiffLinesFromRaw(String raw) {
+  List<Map<String, dynamic>> _extractDiffLinesFromRaw({required String raw, required String headline}) {
     if (raw.trim().isEmpty) {
       return const [];
     }
+
+    final headlineLanguageId = _languageFromDiffHeadline(headline);
 
     try {
       final decoded = jsonDecode(raw);
@@ -3963,7 +3987,22 @@ class _EventLineState extends State<EventLine> {
           if (diff is! String || diff.trim().isEmpty) {
             continue;
           }
-          results.addAll(_parseUnifiedDiff(diff));
+
+          String? languageId;
+          final changePath = change["path"];
+          if (changePath is String) {
+            languageId = _languageFromDiffHeaderPath(changePath);
+          }
+          final rawKind = change["kind"];
+          if (languageId == null && rawKind is Map) {
+            final movePath = rawKind["movePath"] ?? rawKind["move_path"];
+            if (movePath is String) {
+              languageId = _languageFromDiffHeaderPath(movePath);
+            }
+          }
+          languageId ??= headlineLanguageId;
+
+          results.addAll(_parseUnifiedDiff(diff, defaultLanguageId: languageId));
         }
 
         if (results.isNotEmpty) {
@@ -4051,7 +4090,7 @@ class _EventLineState extends State<EventLine> {
     } else if (kind == "exec") {
       detailLines = details.toList();
     }
-    final diffLines = kind == "diff" ? _extractDiffLinesFromRaw(raw) : const <Map<String, dynamic>>[];
+    final diffLines = kind == "diff" ? _extractDiffLinesFromRaw(raw: raw, headline: headline) : const <Map<String, dynamic>>[];
     final displayText = _displayText(headline: headline);
     final canApprove = kind == "approval" && inProgress && approvalId.isNotEmpty;
 
@@ -4097,41 +4136,61 @@ class _EventLineState extends State<EventLine> {
                   child: Column(
                     children: [
                       for (final line in diffLines.indexed)
-                        Padding(
-                          padding: EdgeInsets.only(bottom: line.$1 < diffLines.length - 1 ? 2 : 0),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              SizedBox(
-                                width: 42,
-                                child: Text(
-                                  line.$2["old"] is int ? "${line.$2["old"]}" : "",
-                                  textAlign: TextAlign.right,
-                                  style: GoogleFonts.sourceCodePro(fontSize: 11, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                        Builder(
+                          builder: (context) {
+                            final lineText = (line.$2["text"] as String?) ?? "";
+                            final languageId = line.$2["language"];
+                            final lineBackground = diffLineBackgroundColor(lineText);
+                            final numberColor = lineBackground != null
+                                ? const Color(0xFFE5E7EB).withAlpha(220)
+                                : ShadTheme.of(context).colorScheme.mutedForeground;
+                            final lineStyle = GoogleFonts.sourceCodePro(
+                              fontSize: 12,
+                              color: lineBackground != null ? const Color(0xFFE5E7EB) : textColor.withAlpha(220),
+                              height: 1.3,
+                            );
+
+                            return Padding(
+                              padding: EdgeInsets.only(bottom: line.$1 < diffLines.length - 1 ? 2 : 0),
+                              child: Container(
+                                decoration: BoxDecoration(color: lineBackground, borderRadius: BorderRadius.circular(4)),
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    SizedBox(
+                                      width: 42,
+                                      child: Text(
+                                        line.$2["old"] is int ? "${line.$2["old"]}" : "",
+                                        textAlign: TextAlign.right,
+                                        style: GoogleFonts.sourceCodePro(fontSize: 11, color: numberColor),
+                                      ),
+                                    ),
+                                    SizedBox(width: 6),
+                                    SizedBox(
+                                      width: 42,
+                                      child: Text(
+                                        line.$2["new"] is int ? "${line.$2["new"]}" : "",
+                                        textAlign: TextAlign.right,
+                                        style: GoogleFonts.sourceCodePro(fontSize: 11, color: numberColor),
+                                      ),
+                                    ),
+                                    SizedBox(width: 8),
+                                    Expanded(
+                                      child: SelectableText.rich(
+                                        _diffLineSpan(
+                                          context: context,
+                                          line: lineText,
+                                          languageId: languageId is String ? languageId : null,
+                                          textStyle: lineStyle,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                              SizedBox(width: 6),
-                              SizedBox(
-                                width: 42,
-                                child: Text(
-                                  line.$2["new"] is int ? "${line.$2["new"]}" : "",
-                                  textAlign: TextAlign.right,
-                                  style: GoogleFonts.sourceCodePro(fontSize: 11, color: ShadTheme.of(context).colorScheme.mutedForeground),
-                                ),
-                              ),
-                              SizedBox(width: 8),
-                              Expanded(
-                                child: SelectableText(
-                                  (line.$2["text"] as String?) ?? "",
-                                  style: GoogleFonts.sourceCodePro(
-                                    fontSize: 12,
-                                    color: _diffLineColor(context, (line.$2["text"] as String?) ?? "", textColor.withAlpha(220)),
-                                    height: 1.3,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
+                            );
+                          },
                         ),
                     ],
                   ),
