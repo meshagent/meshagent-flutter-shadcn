@@ -931,6 +931,7 @@ class ChatThreadInput extends StatefulWidget {
     required this.room,
     required this.onSend,
     required this.controller,
+    this.autoFocus = true,
     this.placeholder,
     this.onChanged,
     this.attachmentBuilder,
@@ -942,6 +943,7 @@ class ChatThreadInput extends StatefulWidget {
   });
 
   final Widget? placeholder;
+  final bool autoFocus;
 
   final RoomClient room;
   final void Function(String, List<FileAttachment>) onSend;
@@ -1028,6 +1030,18 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     }
   }
 
+  void _scheduleAutoFocus() {
+    if (!widget.autoFocus) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !widget.autoFocus || focusNode.hasFocus) {
+        return;
+      }
+      focusNode.requestFocus();
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1035,6 +1049,15 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     widget.controller.textFieldController.addListener(_onTextChanged);
     widget.controller.addListener(_onChanged);
     ClipboardEvents.instance?.registerPasteEventListener(onPasteEvent);
+    _scheduleAutoFocus();
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatThreadInput oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!oldWidget.autoFocus && widget.autoFocus) {
+      _scheduleAutoFocus();
+    }
   }
 
   @override

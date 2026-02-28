@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_flutter_shadcn/chat/chat.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
@@ -313,6 +314,23 @@ class _NewChatThreadState extends State<NewChatThread> {
     });
   }
 
+  void _goToNewMessageScreen() {
+    if (_creatingNewThread) {
+      _cancelPendingNewThread();
+      return;
+    }
+    if (_threadPath == null) {
+      return;
+    }
+    setState(() {
+      _threadPath = null;
+      _newThreadError = null;
+      _pendingMessageText = null;
+      _pendingAttachmentPaths = const [];
+    });
+    _controller.clear();
+  }
+
   ChatThreadSnapshot _buildSnapshot() {
     return ChatThreadSnapshot(
       messages: const [],
@@ -385,6 +403,7 @@ class _NewChatThreadState extends State<NewChatThread> {
               child: ChatThreadInput(
                 room: widget.room,
                 controller: _controller,
+                autoFocus: false,
                 leading: toolsBuilder == null
                     ? null
                     : _controller.toolkits.isNotEmpty
@@ -407,16 +426,22 @@ class _NewChatThreadState extends State<NewChatThread> {
 
   @override
   Widget build(BuildContext context) {
-    if (_threadPath != null) {
-      return widget.builder(context, _threadPath!, (context) => _buildPendingThreadView(allowCancel: false));
-    }
+    final content = switch ((_threadPath, _creatingNewThread)) {
+      (final threadPath?, _) => widget.builder(context, threadPath, (context) => _buildPendingThreadView(allowCancel: false)),
+      (_, true) => _buildPendingThreadView(allowCancel: true),
+      _ => _buildNewThreadComposer(context),
+    };
 
-    if (_creatingNewThread) {
-      return _buildPendingThreadView(allowCancel: true);
-    }
+    return CallbackShortcuts(
+      bindings: {const SingleActivator(LogicalKeyboardKey.keyN, control: true): _goToNewMessageScreen},
+      child: content,
+    );
+  }
 
+  Widget _buildNewThreadComposer(BuildContext context) {
     final snapshot = _buildSnapshot();
     final toolsBuilder = widget.toolsBuilder;
+    final headingStyle = ShadTheme.of(context).textTheme.h4;
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 912),
@@ -426,7 +451,7 @@ class _NewChatThreadState extends State<NewChatThread> {
             mainAxisSize: MainAxisSize.min,
             spacing: 12,
             children: [
-              Text("Start a new thread", style: ShadTheme.of(context).textTheme.h4),
+              Text("Start a new thread", style: headingStyle),
               ChatThreadInput(
                 room: widget.room,
                 controller: _controller,
@@ -448,8 +473,13 @@ class _NewChatThreadState extends State<NewChatThread> {
                   }
                 },
               ),
-              if (_newThreadError != null)
+              if (_newThreadError != null) ...[
                 ShadAlert.destructive(title: const Text("Unable to start thread"), description: Text(_newThreadError!)),
+              ] else ...[
+                // Reserve matching space below the composer so the heading above
+                // doesn't visually push the input downward in the centered state.
+                Opacity(opacity: 0, child: Text("Start a new thread", style: headingStyle)),
+              ],
             ],
           ),
         ),
