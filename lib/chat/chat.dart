@@ -455,6 +455,77 @@ class ChatThreadLoader extends StatelessWidget {
   }
 }
 
+double chatThreadFeedHorizontalPadding(double maxWidth) {
+  return maxWidth > 912 ? (maxWidth - 912) / 2 : 16;
+}
+
+double chatThreadStatusHorizontalPadding(double maxWidth) {
+  return maxWidth > 912 ? (maxWidth - 912) / 2 : 15;
+}
+
+class ChatThreadInputFrame extends StatelessWidget {
+  const ChatThreadInputFrame({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+      child: Center(
+        child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 912), child: child),
+      ),
+    );
+  }
+}
+
+class ChatThreadViewportBody extends StatelessWidget {
+  const ChatThreadViewportBody({
+    super.key,
+    required this.children,
+    this.bottomAlign = true,
+    this.centerContent,
+    this.bottomSpacer = 0,
+    this.overlays = const [],
+  });
+
+  final List<Widget> children;
+  final bool bottomAlign;
+  final Widget? centerContent;
+  final double bottomSpacer;
+  final List<Widget> overlays;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: Column(
+              mainAxisAlignment: bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) => ListView(
+                      reverse: true,
+                      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                      padding: EdgeInsets.symmetric(vertical: 16, horizontal: chatThreadFeedHorizontalPadding(constraints.maxWidth)),
+                      children: children,
+                    ),
+                  ),
+                ),
+                if (!bottomAlign && centerContent != null) centerContent!,
+                if (bottomSpacer > 0) SizedBox(height: bottomSpacer),
+              ],
+            ),
+          ),
+          ...overlays,
+        ],
+      ),
+    );
+  }
+}
+
 class ChatThreadAttachButton extends StatefulWidget {
   const ChatThreadAttachButton({
     required this.controller,
@@ -1544,53 +1615,47 @@ class _ChatThreadState extends State<ChatThread> {
               ),
               ListenableBuilder(
                 listenable: controller,
-                builder: (context, _) => Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 15, vertical: 8),
-                  child: Center(
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(maxWidth: 912),
-                      child: ChatThreadInput(
-                        onClear: () {
-                          final participant = widget.room.messaging.remoteParticipants.firstWhereOrNull(
-                            (x) => x.getAttribute("name") == widget.agentName,
-                          );
-                          if (participant != null) {
-                            widget.room.messaging.sendMessage(to: participant, type: "clear", message: {"path": widget.path});
-                          }
-                        },
-                        leading: controller.toolkits.isNotEmpty
-                            ? null
-                            : widget.toolsBuilder == null
-                            ? null
-                            : widget.toolsBuilder!(context, controller, state),
-                        footer: controller.toolkits.isEmpty
-                            ? null
-                            : widget.toolsBuilder == null
-                            ? null
-                            : widget.toolsBuilder!(context, controller, state),
-                        trailing: null,
-                        room: widget.room,
-                        onSend: (value, attachments) {
-                          final messageType = state.threadStatusMode == "steerable" ? "steer" : "chat";
-                          controller.send(
-                            thread: widget.document,
-                            path: widget.path,
-                            message: ChatMessage(id: const Uuid().v4(), text: value, attachments: attachments.map((x) => x.path).toList()),
-                            messageType: messageType,
-                            onMessageSent: widget.onMessageSent,
-                          );
-                        },
-                        onChanged: (value, attachments) {
-                          for (final part in controller.getOnlineParticipants(widget.document)) {
-                            if (part.id != widget.room.localParticipant?.id) {
-                              widget.room.messaging.sendMessage(to: part, type: "typing", message: {"path": widget.path});
-                            }
-                          }
-                        },
-                        controller: controller,
-                        attachmentBuilder: widget.attachmentBuilder,
-                      ),
-                    ),
+                builder: (context, _) => ChatThreadInputFrame(
+                  child: ChatThreadInput(
+                    onClear: () {
+                      final participant = widget.room.messaging.remoteParticipants.firstWhereOrNull(
+                        (x) => x.getAttribute("name") == widget.agentName,
+                      );
+                      if (participant != null) {
+                        widget.room.messaging.sendMessage(to: participant, type: "clear", message: {"path": widget.path});
+                      }
+                    },
+                    leading: controller.toolkits.isNotEmpty
+                        ? null
+                        : widget.toolsBuilder == null
+                        ? null
+                        : widget.toolsBuilder!(context, controller, state),
+                    footer: controller.toolkits.isEmpty
+                        ? null
+                        : widget.toolsBuilder == null
+                        ? null
+                        : widget.toolsBuilder!(context, controller, state),
+                    trailing: null,
+                    room: widget.room,
+                    onSend: (value, attachments) {
+                      final messageType = state.threadStatusMode == "steerable" ? "steer" : "chat";
+                      controller.send(
+                        thread: widget.document,
+                        path: widget.path,
+                        message: ChatMessage(id: const Uuid().v4(), text: value, attachments: attachments.map((x) => x.path).toList()),
+                        messageType: messageType,
+                        onMessageSent: widget.onMessageSent,
+                      );
+                    },
+                    onChanged: (value, attachments) {
+                      for (final part in controller.getOnlineParticipants(widget.document)) {
+                        if (part.id != widget.room.localParticipant?.id) {
+                          widget.room.messaging.sendMessage(to: part, type: "typing", message: {"path": widget.path});
+                        }
+                      }
+                    },
+                    controller: controller,
+                    attachmentBuilder: widget.attachmentBuilder,
                   ),
                 ),
               ),
@@ -1995,116 +2060,54 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
       }
       messageWidgets.insert(0, messageWidget);
     }
-    final threadView = Center(
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: Column(
-              mainAxisAlignment: bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
-              children: [
-                Expanded(
-                  child: LayoutBuilder(
-                    builder: (context, constraints) => ListView(
-                      reverse: true,
-                      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-                      padding: EdgeInsets.symmetric(
-                        vertical: 16,
-                        horizontal: constraints.maxWidth > 912 ? (constraints.maxWidth - 912) / 2 : 16,
-                      ),
-                      children: messageWidgets,
-                    ),
-                  ),
+    final threadView = ChatThreadViewportBody(
+      bottomAlign: bottomAlign,
+      centerContent: !bottomAlign && online.firstOrNull != null
+          ? Padding(
+              padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 50),
+              child: Text(
+                online.first.getAttribute("empty_state_title") ?? "How can I help you?",
+                style: ShadTheme.of(context).textTheme.h3,
+              ),
+            )
+          : null,
+      bottomSpacer: showTyping ? 20 : 0,
+      overlays: [
+        if (showTyping)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: LayoutBuilder(
+              builder: (context, constraints) => Padding(
+                padding: EdgeInsets.symmetric(horizontal: chatThreadStatusHorizontalPadding(constraints.maxWidth)),
+                child: ChatThreadProcessingStatusRow(
+                  text: (threadStatus?.trim().isNotEmpty ?? false) ? threadStatus!.trim() : "Thinking",
+                  onCancel: threadStatusMode != null ? onCancel : null,
                 ),
-
-                if (!bottomAlign)
-                  if (online.firstOrNull != null)
-                    Padding(
-                      padding: EdgeInsets.symmetric(vertical: 20, horizontal: 50),
-                      child: Text(
-                        online.first.getAttribute("empty_state_title") ?? "How can I help you?",
-                        style: ShadTheme.of(context).textTheme.h3,
-                      ),
-                    ),
-
-                if (showTyping) SizedBox(height: 20),
-              ],
+              ),
             ),
           ),
-
-          if (showTyping)
-            Positioned(
-              left: 0,
-              bottom: 0,
-              right: 0,
-              child: LayoutBuilder(
-                builder: (context, constraints) => Padding(
-                  padding: EdgeInsets.symmetric(horizontal: constraints.maxWidth > 912 ? (constraints.maxWidth - 912) / 2 : 15),
-                  child: Row(
-                    mainAxisAlignment: .start,
-                    crossAxisAlignment: .center,
-                    children: [
-                      SizedBox(width: 10),
-                      if (threadStatusMode != null && onCancel != null)
-                        ShadGestureDetector(
-                          cursor: SystemMouseCursors.click,
-                          onTapDown: (_) {
-                            onCancel!();
-                          },
-                          child: ShadTooltip(
-                            builder: (context) => Text("Stop"),
-                            child: SizedBox(
-                              width: 24,
-                              height: 24,
-                              child: Stack(
-                                alignment: Alignment.center,
-                                children: [
-                                  Positioned.fill(child: _CyclingProgressIndicator(strokeWidth: 2)),
-                                  Container(
-                                    width: 18,
-                                    height: 18,
-                                    decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
-                                    child: Icon(LucideIcons.x, color: ShadTheme.of(context).colorScheme.background, size: 12),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        )
-                      else
-                        SizedBox(width: 13, height: 13, child: _CyclingProgressIndicator(strokeWidth: 2)),
-                      SizedBox(width: 10),
-                      Expanded(
-                        child: _ProcessingStatusText(
-                          text: (threadStatus?.trim().isNotEmpty ?? false) ? threadStatus!.trim() : "Thinking",
-                          style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
-                        ),
-                      ),
-                    ],
+        if (showListening)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 912),
+                child: SizedBox(
+                  height: 1,
+                  child: LinearProgressIndicator(
+                    backgroundColor: ShadTheme.of(context).colorScheme.background,
+                    color: ShadTheme.of(context).colorScheme.mutedForeground,
                   ),
                 ),
               ),
             ),
-
-          if (showListening)
-            Positioned(
-              left: 0,
-              bottom: 0,
-              right: 0,
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(maxWidth: 912),
-                  child: SizedBox(
-                    height: 1,
-                    child: LinearProgressIndicator(
-                      backgroundColor: ShadTheme.of(context).colorScheme.background,
-                      color: ShadTheme.of(context).colorScheme.mutedForeground,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
+          ),
+      ],
+      children: messageWidgets,
     );
 
     return Expanded(
@@ -3198,6 +3201,59 @@ class _ProcessingStatusTextState extends State<_ProcessingStatusText> with Singl
           ],
         );
       },
+    );
+  }
+}
+
+class ChatThreadProcessingStatusRow extends StatelessWidget {
+  const ChatThreadProcessingStatusRow({super.key, required this.text, this.onCancel});
+
+  final String text;
+  final VoidCallback? onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        const SizedBox(width: 10),
+        if (onCancel != null)
+          ShadGestureDetector(
+            cursor: SystemMouseCursors.click,
+            onTapDown: (_) {
+              onCancel!();
+            },
+            child: ShadTooltip(
+              builder: (context) => const Text("Stop"),
+              child: SizedBox(
+                width: 24,
+                height: 24,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    const Positioned.fill(child: _CyclingProgressIndicator(strokeWidth: 2)),
+                    Container(
+                      width: 18,
+                      height: 18,
+                      decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
+                      child: Icon(LucideIcons.x, color: ShadTheme.of(context).colorScheme.background, size: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          )
+        else
+          const SizedBox(width: 13, height: 13, child: _CyclingProgressIndicator(strokeWidth: 2)),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _ProcessingStatusText(
+            text: text,
+            style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
+          ),
+        ),
+      ],
     );
   }
 }
