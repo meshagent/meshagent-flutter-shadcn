@@ -20,6 +20,7 @@ class NewChatThread extends StatefulWidget {
     this.toolkit = "chat",
     this.tool = "new_thread",
     this.toolsBuilder,
+    this.onThreadPathChanged,
   });
 
   final RoomClient room;
@@ -28,6 +29,7 @@ class NewChatThread extends StatefulWidget {
   final String toolkit;
   final String tool;
   final NewChatThreadToolsBuilder? toolsBuilder;
+  final ValueChanged<String?>? onThreadPathChanged;
 
   @override
   State<NewChatThread> createState() => _NewChatThreadState();
@@ -48,6 +50,10 @@ class _NewChatThreadState extends State<NewChatThread> {
   List<String> _pendingAttachmentPaths = const [];
   int _newThreadOperationId = 0;
   final GlobalKey _sendingStatusKey = GlobalKey();
+
+  void _notifyThreadPathChanged() {
+    widget.onThreadPathChanged?.call(_threadPath);
+  }
 
   @override
   void initState() {
@@ -249,6 +255,7 @@ class _NewChatThreadState extends State<NewChatThread> {
         _newThreadError = null;
         _creatingNewThread = false;
       });
+      _notifyThreadPathChanged();
     } catch (e) {
       if (!mounted || operationId != _newThreadOperationId) {
         return;
@@ -328,6 +335,7 @@ class _NewChatThreadState extends State<NewChatThread> {
       _pendingMessageText = null;
       _pendingAttachmentPaths = const [];
     });
+    _notifyThreadPathChanged();
     _controller.clear();
   }
 
