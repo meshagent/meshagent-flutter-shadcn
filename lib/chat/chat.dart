@@ -1320,6 +1320,9 @@ class ChatBubble extends StatefulWidget {
 }
 
 class _ChatBubble extends State<ChatBubble> {
+  static const double _actionSlotSize = 30;
+  static const double _actionGap = 4;
+
   bool hovering = false;
 
   final optionsController = ShadContextMenuController();
@@ -1546,7 +1549,7 @@ class _ChatBubble extends State<ChatBubble> {
     );
 
     final reactAction = SizedBox(
-      width: 30,
+      width: _actionSlotSize,
       height: 35,
       child: IgnorePointer(
         ignoring: !(openOptions && widget.showReactionAction),
@@ -1565,11 +1568,11 @@ class _ChatBubble extends State<ChatBubble> {
         children: [
           if (mine) ...[
             reactAction,
-            const SizedBox(width: 4),
+            const SizedBox(width: _actionGap),
             optionsAction,
           ] else ...[
             optionsAction,
-            const SizedBox(width: 4),
+            const SizedBox(width: _actionGap),
             reactAction,
           ],
         ],
@@ -1810,6 +1813,9 @@ class ChatThreadMessages extends StatefulWidget {
 }
 
 class _ChatThreadMessagesState extends State<ChatThreadMessages> {
+  static const double _chatBubbleHorizontalInset = 5;
+  static const double _chatBubbleActionRailWidth = 80;
+
   static const List<String> _defaultReactionOptions = <String>[
     "👍",
     "👎",
@@ -2553,7 +2559,11 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
         children: [
           if (shouldShowHeader)
             Container(
-              margin: EdgeInsets.only(right: mine ? 0 : 50, left: mine ? 50 : 0, bottom: 6),
+              margin: EdgeInsets.only(
+                left: mine ? _chatBubbleHorizontalInset + _chatBubbleActionRailWidth : _chatBubbleHorizontalInset,
+                right: mine ? _chatBubbleHorizontalInset : _chatBubbleHorizontalInset + _chatBubbleActionRailWidth,
+                bottom: 6,
+              ),
               child: Align(
                 alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
                 child:
