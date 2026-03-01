@@ -34,8 +34,37 @@ import 'outbound_delivery_status.dart';
 import 'folder_drop.dart';
 
 const webPDFFormat = SimpleFileFormat(uniformTypeIdentifiers: ['com.adobe.pdf'], mimeTypes: ['web application/pdf']);
+const List<String> _emojiFontFamilyFallback = <String>['Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji'];
 
 enum UploadStatus { initial, uploading, completed, failed }
+
+String _normalizeEmojiPresentationKey(String value) {
+  return value.replaceAll('\u{FE0F}', '').replaceAll('\u{FE0E}', '').replaceAll('\u{200D}', '').trim();
+}
+
+String _primaryEmojiFontFamily() {
+  switch (defaultTargetPlatform) {
+    case TargetPlatform.iOS:
+    case TargetPlatform.macOS:
+      return 'Apple Color Emoji';
+    case TargetPlatform.windows:
+      return 'Segoe UI Emoji';
+    case TargetPlatform.android:
+    case TargetPlatform.fuchsia:
+    case TargetPlatform.linux:
+      return 'Noto Color Emoji';
+  }
+}
+
+TextStyle _emojiTextStyle({double size = 14}) {
+  return TextStyle(
+    inherit: false,
+    fontSize: size,
+    height: 1,
+    fontFamily: _primaryEmojiFontFamily(),
+    fontFamilyFallback: _emojiFontFamilyFallback,
+  );
+}
 
 Set<String> _threadParticipantNames(MeshDocument thread) {
   final members = thread.root.getElementsByTagName("members").firstOrNull?.getElementsByTagName("member") ?? const <MeshElement>[];
@@ -1267,12 +1296,24 @@ class ChatThread extends StatefulWidget {
 }
 
 class ChatBubble extends StatefulWidget {
-  const ChatBubble({super.key, this.room, required this.mine, required this.text, this.onDelete});
+  const ChatBubble({
+    super.key,
+    this.room,
+    required this.mine,
+    required this.text,
+    this.onDelete,
+    this.reactionAction,
+    this.showReactionAction = false,
+    this.onReactFromMenu,
+  });
 
   final RoomClient? room;
   final bool mine;
   final String text;
   final VoidCallback? onDelete;
+  final Widget? reactionAction;
+  final bool showReactionAction;
+  final VoidCallback? onReactFromMenu;
 
   @override
   State createState() => _ChatBubble();
@@ -1467,6 +1508,54 @@ class _ChatBubble extends State<ChatBubble> {
     final text = widget.text;
     final mine = widget.mine;
     final openOptions = optionsController.isOpen || hovering;
+    final canLongPressReact =
+        (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS) && widget.onReactFromMenu != null;
+
+    final optionsAction = IgnorePointer(
+      ignoring: !openOptions,
+      child: Opacity(
+        opacity: openOptions ? 1 : 0,
+        child: Padding(
+          padding: EdgeInsets.only(bottom: 5),
+          child: ShadContextMenuRegion(
+            controller: optionsController,
+            constraints: const BoxConstraints(minWidth: 200),
+            items: [
+              ShadContextMenuItem(height: 40, onPressed: _onCopy, child: Text('Copy')),
+              if (canLongPressReact) ShadContextMenuItem(height: 40, onPressed: widget.onReactFromMenu, child: Text('React')),
+              if (widget.room != null)
+                ShadContextMenuItem(
+                  height: 40,
+                  onPressed: () {
+                    _onSave(widget.room!);
+                  },
+                  child: Text('Save as...'),
+                ),
+              if (widget.onDelete != null) ShadContextMenuItem(height: 40, onPressed: _onDelete, child: Text('Delete')),
+            ],
+            child: ShadButton.ghost(
+              height: 30,
+              width: 30,
+              padding: EdgeInsets.zero,
+              onPressed: optionsController.show,
+              child: Icon(LucideIcons.ellipsis, size: 18, color: cs.mutedForeground),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final reactAction = SizedBox(
+      width: 30,
+      height: 35,
+      child: IgnorePointer(
+        ignoring: !(openOptions && widget.showReactionAction),
+        child: Opacity(
+          opacity: openOptions && widget.showReactionAction ? 1 : 0,
+          child: Padding(padding: const EdgeInsets.only(bottom: 5), child: widget.reactionAction ?? const SizedBox.shrink()),
+        ),
+      ),
+    );
 
     final actions = Padding(
       padding: EdgeInsets.symmetric(horizontal: 8, vertical: 5),
@@ -1474,37 +1563,15 @@ class _ChatBubble extends State<ChatBubble> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          Opacity(
-            opacity: openOptions ? 1 : 0,
-            child: Padding(
-              padding: EdgeInsets.only(bottom: 5),
-              child: ShadContextMenuRegion(
-                controller: optionsController,
-                constraints: const BoxConstraints(minWidth: 200),
-                items: [
-                  ShadContextMenuItem(height: 40, onPressed: _onCopy, child: Text('Copy')),
-
-                  if (widget.room != null)
-                    ShadContextMenuItem(
-                      height: 40,
-                      onPressed: () {
-                        _onSave(widget.room!);
-                      },
-                      child: Text('Save as...'),
-                    ),
-
-                  if (widget.onDelete != null) ShadContextMenuItem(height: 40, onPressed: _onDelete, child: Text('Delete')),
-                ],
-                child: ShadButton.ghost(
-                  height: 30,
-                  width: 30,
-                  padding: EdgeInsets.zero,
-                  onPressed: optionsController.show,
-                  child: Icon(LucideIcons.ellipsis, size: 18, color: cs.mutedForeground),
-                ),
-              ),
-            ),
-          ),
+          if (mine) ...[
+            reactAction,
+            const SizedBox(width: 4),
+            optionsAction,
+          ] else ...[
+            optionsAction,
+            const SizedBox(width: 4),
+            reactAction,
+          ],
         ],
       ),
     );
@@ -1743,6 +1810,79 @@ class ChatThreadMessages extends StatefulWidget {
 }
 
 class _ChatThreadMessagesState extends State<ChatThreadMessages> {
+  static const List<String> _defaultReactionOptions = <String>[
+    "👍",
+    "👎",
+    "❤️",
+    "❤️‍🔥",
+    "❤️‍🩹",
+    "😂",
+    "🤣",
+    "😄",
+    "😁",
+    "😆",
+    "🙂",
+    "😊",
+    "😉",
+    "😍",
+    "😘",
+    "😜",
+    "🤪",
+    "😎",
+    "🤩",
+    "🥳",
+    "😮",
+    "😯",
+    "😲",
+    "😢",
+    "😭",
+    "😡",
+    "😤",
+    "🤔",
+    "🤨",
+    "😴",
+    "😬",
+    "🙃",
+    "🫠",
+    "👀",
+    "🙌",
+    "👏",
+    "🙏",
+    "🤝",
+    "💪",
+    "🔥",
+    "✨",
+    "💯",
+    "✅",
+    "❌",
+    "⚠️",
+    "❓",
+    "💡",
+    "🧪",
+    "🛠️",
+    "🐛",
+    "🚀",
+    "📌",
+    "📎",
+    "📝",
+    "📷",
+    "🎉",
+    "🎊",
+    "🎈",
+    "🎁",
+    "🏆",
+    "⭐",
+    "🌟",
+    "⚡",
+    "☕",
+    "🍕",
+    "🍻",
+    "🤖",
+  ];
+  static const String _reactionTargetMessage = "message";
+  static const String _reactionTargetAttachment = "attachment";
+  static const Map<String, String> _reactionEmojiCanonicalByKey = <String, String>{"❤": "❤️", "♥": "❤️", "⚠": "⚠️", "🛠": "🛠️"};
+
   RoomClient get room => widget.room;
   String get path => widget.path;
   String? get agentName => widget.agentName;
@@ -1763,6 +1903,401 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   List<_ThreadFeedImage> _overlayImages = const <_ThreadFeedImage>[];
   int _overlayInitialIndex = 0;
   LocalHistoryEntry? _imageViewerHistoryEntry;
+
+  String? _localParticipantName() {
+    final name = room.localParticipant?.getAttribute("name");
+    if (name is! String) {
+      return null;
+    }
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    return trimmed;
+  }
+
+  String? _normalizeReactionValue(Object? value) {
+    if (value is! String) {
+      return null;
+    }
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    if (trimmed.characters.length != 1) {
+      return null;
+    }
+    final emoji = trimmed.characters.first;
+    final emojiKey = _normalizeEmojiPresentationKey(emoji);
+    return _reactionEmojiCanonicalByKey[emojiKey] ?? emoji;
+  }
+
+  String? _normalizeReactionUserName(Object? value) {
+    if (value is! String) {
+      return null;
+    }
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    return trimmed.toLowerCase();
+  }
+
+  bool _isLocalReactionAuthor(MeshElement reactionElement, {required String? normalizedLocalUserName}) {
+    final reactionUserName = _normalizeReactionUserName(reactionElement.getAttribute("user_name"));
+    if (normalizedLocalUserName != null && reactionUserName == normalizedLocalUserName) {
+      return true;
+    }
+
+    return false;
+  }
+
+  List<MeshElement> _reactionElements({required MeshElement message}) {
+    final reactions = <MeshElement>[];
+    for (final child in message.getChildren().whereType<MeshElement>()) {
+      if (child.tagName != "reaction") {
+        continue;
+      }
+      reactions.add(child);
+    }
+    return reactions;
+  }
+
+  void _createReactionElement({required MeshElement message, required Map<String, Object?> attributes}) {
+    message.createChildElement("reaction", attributes);
+  }
+
+  String? _normalizeReactionAttachmentRef(Object? value) {
+    if (value is! String) {
+      return null;
+    }
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    return trimmed;
+  }
+
+  String _reactionUsersTooltipText(Iterable<String> userNames) {
+    final names = userNames.map((name) => name.trim()).where((name) => name.isNotEmpty).toSet().toList()
+      ..sort((left, right) => left.toLowerCase().compareTo(right.toLowerCase()));
+
+    if (names.isEmpty) {
+      return "No users";
+    }
+
+    const maxNames = 10;
+    if (names.length <= maxNames) {
+      return names.join(", ");
+    }
+
+    final shown = names.take(maxNames).join(", ");
+    final othersCount = names.length - maxNames;
+    return "$shown, and $othersCount others";
+  }
+
+  String? _reactionAttachmentRefFromElement(MeshElement reactionElement) {
+    return _normalizeReactionAttachmentRef(reactionElement.getAttribute("attachment_ref"));
+  }
+
+  String _reactionTargetFromElement(MeshElement reactionElement) {
+    final attachmentRef = _reactionAttachmentRefFromElement(reactionElement);
+    final targetRaw = reactionElement.getAttribute("target");
+    if (targetRaw is! String) {
+      return attachmentRef == null ? _reactionTargetMessage : _reactionTargetAttachment;
+    }
+
+    final normalized = targetRaw.trim().toLowerCase();
+    if (normalized == _reactionTargetAttachment) {
+      return attachmentRef == null ? _reactionTargetMessage : _reactionTargetAttachment;
+    }
+    if (normalized == _reactionTargetMessage) {
+      return _reactionTargetMessage;
+    }
+    return attachmentRef == null ? _reactionTargetMessage : _reactionTargetAttachment;
+  }
+
+  List<MeshElement> _reactionElementsForTarget({required MeshElement message, required String target, String? attachmentRef}) {
+    final normalizedTarget = target.trim().toLowerCase();
+    final normalizedAttachmentRef = _normalizeReactionAttachmentRef(attachmentRef);
+    final effectiveTarget = normalizedTarget == _reactionTargetAttachment && normalizedAttachmentRef != null
+        ? _reactionTargetAttachment
+        : _reactionTargetMessage;
+
+    final reactions = <MeshElement>[];
+    for (final reactionElement in _reactionElements(message: message)) {
+      if (_reactionTargetFromElement(reactionElement) != effectiveTarget) {
+        continue;
+      }
+      if (effectiveTarget == _reactionTargetAttachment) {
+        final reactionAttachmentRef = _reactionAttachmentRefFromElement(reactionElement);
+        if (reactionAttachmentRef != normalizedAttachmentRef) {
+          continue;
+        }
+      }
+      reactions.add(reactionElement);
+    }
+    return reactions;
+  }
+
+  String? _selectedReactionForTarget({required MeshElement message, required String target, String? attachmentRef}) {
+    final normalizedLocalUserName = _normalizeReactionUserName(_localParticipantName());
+    if (normalizedLocalUserName == null) {
+      return null;
+    }
+
+    final normalizedTarget = target.trim().toLowerCase();
+    final normalizedAttachmentRef = _normalizeReactionAttachmentRef(attachmentRef);
+    final effectiveTarget = normalizedTarget == _reactionTargetAttachment && normalizedAttachmentRef != null
+        ? _reactionTargetAttachment
+        : _reactionTargetMessage;
+
+    for (final reactionElement in _reactionElementsForTarget(
+      message: message,
+      target: effectiveTarget,
+      attachmentRef: normalizedAttachmentRef,
+    )) {
+      if (!_isLocalReactionAuthor(reactionElement, normalizedLocalUserName: normalizedLocalUserName)) {
+        continue;
+      }
+      final value = _normalizeReactionValue(reactionElement.getAttribute("value"));
+      if (value != null) {
+        return value;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _showReactionPickerDialog(
+    BuildContext context, {
+    required String? selectedReaction,
+    required ValueChanged<String> onSelected,
+  }) async {
+    await showShadDialog<void>(
+      context: context,
+      builder: (context) {
+        final theme = ShadTheme.of(context);
+        return ShadDialog(
+          title: const Text("React"),
+          constraints: const BoxConstraints(maxWidth: 320),
+          actions: [ShadButton.ghost(onPressed: () => Navigator.of(context).pop(), child: const Text("Close"))],
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 360),
+            child: SingleChildScrollView(
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final reaction in _defaultReactionOptions)
+                    Builder(
+                      builder: (context) {
+                        final selected =
+                            selectedReaction != null &&
+                            _normalizeEmojiPresentationKey(selectedReaction) == _normalizeEmojiPresentationKey(reaction);
+                        return ShadButton.ghost(
+                          width: 34,
+                          height: 34,
+                          padding: EdgeInsets.zero,
+                          backgroundColor: selected ? theme.colorScheme.foreground.withValues(alpha: 0.16) : null,
+                          hoverBackgroundColor: selected
+                              ? theme.colorScheme.foreground.withValues(alpha: 0.24)
+                              : theme.colorScheme.muted.withValues(alpha: 0.55),
+                          onPressed: () {
+                            onSelected(reaction);
+                            Navigator.of(context).pop();
+                          },
+                          child: Text(reaction, style: _emojiTextStyle(size: 18)),
+                        );
+                      },
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _toggleReaction({
+    required MeshElement message,
+    required String reaction,
+    String target = _reactionTargetMessage,
+    String? attachmentRef,
+    bool removeIfSame = false,
+  }) {
+    final userName = _localParticipantName();
+    final normalizedUserName = _normalizeReactionUserName(userName);
+    if (normalizedUserName == null) {
+      return;
+    }
+    final normalizedValue = _normalizeReactionValue(reaction);
+    if (normalizedValue == null) {
+      return;
+    }
+
+    final normalizedTarget = target.trim().toLowerCase();
+    final normalizedAttachmentRef = _normalizeReactionAttachmentRef(attachmentRef);
+    final effectiveTarget = normalizedTarget == _reactionTargetAttachment && normalizedAttachmentRef != null
+        ? _reactionTargetAttachment
+        : _reactionTargetMessage;
+    final reactions = _reactionElementsForTarget(message: message, target: effectiveTarget, attachmentRef: normalizedAttachmentRef);
+
+    final mine = <MeshElement>[];
+    final mineWithSameValue = <MeshElement>[];
+    for (final reactionElement in reactions) {
+      if (!_isLocalReactionAuthor(reactionElement, normalizedLocalUserName: normalizedUserName)) {
+        continue;
+      }
+      mine.add(reactionElement);
+      final existingValue = _normalizeReactionValue(reactionElement.getAttribute("value"));
+      if (existingValue == normalizedValue) {
+        mineWithSameValue.add(reactionElement);
+      }
+    }
+
+    if (mineWithSameValue.isNotEmpty) {
+      if (removeIfSame) {
+        for (final reactionElement in mineWithSameValue) {
+          reactionElement.delete();
+        }
+      }
+      return;
+    }
+
+    for (final reactionElement in mine) {
+      reactionElement.delete();
+    }
+
+    final attrs = <String, Object?>{
+      "user_name": userName,
+      "value": normalizedValue,
+      "target": effectiveTarget,
+      "created_at": DateTime.now().toUtc().toIso8601String(),
+    };
+    if (effectiveTarget == _reactionTargetAttachment && normalizedAttachmentRef != null) {
+      attrs["attachment_ref"] = normalizedAttachmentRef;
+    }
+
+    _createReactionElement(message: message, attributes: attrs);
+  }
+
+  Widget _buildReactionRow(
+    BuildContext context, {
+    required MeshElement message,
+    required bool mine,
+    String target = _reactionTargetMessage,
+    String? attachmentRef,
+    bool showAddWhenEmpty = true,
+  }) {
+    final localUserName = _localParticipantName();
+    final normalizedLocalUserName = _normalizeReactionUserName(localUserName);
+    final normalizedTarget = target.trim().toLowerCase();
+    final normalizedAttachmentRef = _normalizeReactionAttachmentRef(attachmentRef);
+    final effectiveTarget = normalizedTarget == _reactionTargetAttachment && normalizedAttachmentRef != null
+        ? _reactionTargetAttachment
+        : _reactionTargetMessage;
+    final grouped = <String, Set<String>>{};
+    final groupedDisplayNames = <String, Map<String, String>>{};
+    final mineValues = <String>{};
+    for (final reactionElement in _reactionElementsForTarget(
+      message: message,
+      target: effectiveTarget,
+      attachmentRef: normalizedAttachmentRef,
+    )) {
+      final value = _normalizeReactionValue(reactionElement.getAttribute("value"));
+      if (value == null) {
+        continue;
+      }
+      final userName = _normalizeReactionUserName(reactionElement.getAttribute("user_name"));
+      if (userName == null) {
+        continue;
+      }
+      final displayNameRaw = reactionElement.getAttribute("user_name");
+      final displayName = displayNameRaw is String && displayNameRaw.trim().isNotEmpty ? displayNameRaw.trim() : userName;
+      grouped.putIfAbsent(value, () => <String>{}).add(userName);
+      groupedDisplayNames.putIfAbsent(value, () => <String, String>{})[userName] = displayName;
+      if (_isLocalReactionAuthor(reactionElement, normalizedLocalUserName: normalizedLocalUserName)) {
+        mineValues.add(value);
+      }
+    }
+
+    final showAddButton = localUserName != null && (showAddWhenEmpty || grouped.isNotEmpty);
+    if (grouped.isEmpty && !showAddButton) {
+      return const SizedBox.shrink();
+    }
+
+    final entries = grouped.entries.toList()..sort((left, right) => left.key.compareTo(right.key));
+    String? selectedReaction;
+    selectedReaction = entries.firstWhereOrNull((entry) => mineValues.contains(entry.key))?.key;
+    final alignment = mine ? Alignment.centerRight : Alignment.centerLeft;
+    final theme = ShadTheme.of(context);
+
+    return Container(
+      margin: EdgeInsets.only(top: 6, right: mine ? 0 : 50, left: mine ? 50 : 0),
+      child: Align(
+        alignment: alignment,
+        child: Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            for (final entry in entries)
+              Builder(
+                builder: (context) {
+                  final users = entry.value;
+                  final tooltipText = _reactionUsersTooltipText(groupedDisplayNames[entry.key]?.values ?? const <String>[]);
+                  final isMine = mineValues.contains(entry.key);
+                  return Tooltip(
+                    message: tooltipText,
+                    child: ShadButton.ghost(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      backgroundColor: isMine ? theme.colorScheme.accent.withValues(alpha: 0.2) : theme.colorScheme.muted,
+                      hoverBackgroundColor: isMine
+                          ? theme.colorScheme.accent.withValues(alpha: 0.25)
+                          : theme.colorScheme.muted.withValues(alpha: 0.7),
+                      onPressed: localUserName == null
+                          ? null
+                          : () => _toggleReaction(
+                              message: message,
+                              reaction: entry.key,
+                              target: effectiveTarget,
+                              attachmentRef: normalizedAttachmentRef,
+                            ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(entry.key, style: _emojiTextStyle(size: 14)),
+                          const SizedBox(width: 4),
+                          Text(
+                            "${users.length}",
+                            style: theme.textTheme.small.copyWith(fontWeight: isMine ? FontWeight.w700 : FontWeight.w500),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            if (showAddButton)
+              _ReactionPickerButton(
+                reactionOptions: _defaultReactionOptions,
+                selectedReaction: selectedReaction,
+                onSelected: (reaction) {
+                  _toggleReaction(
+                    message: message,
+                    reaction: reaction,
+                    target: effectiveTarget,
+                    attachmentRef: normalizedAttachmentRef,
+                    removeIfSame: true,
+                  );
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 
   void _hideThreadImageViewer() {
     _imageViewerController.hide();
@@ -1976,13 +2511,20 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   }) {
     final isSameAuthor = message.getAttribute("author_name") == previous?.getAttribute("author_name");
     final localParticipantName = room.localParticipant?.getAttribute("name");
+    final localParticipantReactionName = _localParticipantName();
     final mine = message.getAttribute("author_name") == localParticipantName;
     final useDefaultHeaderBuilder = messageHeaderBuilder == null;
     final shouldShowHeader = !isSameAuthor && (!useDefaultHeaderBuilder || _defaultHeaderWillRender(message: message));
 
     final text = message.getAttribute("text");
     final hasText = text is String && text.isNotEmpty;
-    final attachments = message.getChildren().whereType<MeshElement>().toList();
+    final attachments = message
+        .getChildren()
+        .whereType<MeshElement>()
+        .where((child) => child.tagName == "file" || child.tagName == "image")
+        .toList();
+    final hasMessageLevelReactions = _reactionElementsForTarget(message: message, target: _reactionTargetMessage).isNotEmpty;
+    final selectedMessageReaction = _selectedReactionForTarget(message: message, target: _reactionTargetMessage);
     final id = message.getAttribute("id");
 
     if (messageBuilders?[message.tagName] != null) {
@@ -2028,20 +2570,57 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
           if (hasText)
             Padding(
               padding: EdgeInsets.only(top: 0),
-              child: ChatBubble(room: room, mine: mine, text: message.getAttribute("text"), onDelete: message.delete),
+              child: ChatBubble(
+                room: room,
+                mine: mine,
+                text: message.getAttribute("text"),
+                onDelete: message.delete,
+                reactionAction: localParticipantReactionName == null
+                    ? null
+                    : _ReactionPickerButton(
+                        reactionOptions: _defaultReactionOptions,
+                        selectedReaction: selectedMessageReaction,
+                        onSelected: (reaction) {
+                          _toggleReaction(message: message, reaction: reaction, target: _reactionTargetMessage, removeIfSame: true);
+                        },
+                      ),
+                showReactionAction: localParticipantReactionName != null && !hasMessageLevelReactions,
+                onReactFromMenu: localParticipantReactionName == null
+                    ? null
+                    : () {
+                        _showReactionPickerDialog(
+                          context,
+                          selectedReaction: selectedMessageReaction,
+                          onSelected: (reaction) {
+                            _toggleReaction(message: message, reaction: reaction, target: _reactionTargetMessage, removeIfSame: true);
+                          },
+                        );
+                      },
+              ),
             ),
 
-          for (final attachment in attachments.indexed)
+          for (final attachment in attachments) ...[
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 5),
               child: Container(
                 margin: EdgeInsets.only(top: 0),
                 child: Align(
                   alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-                  child: _buildAttachmentInThread(context, attachment.$2, feedImages: feedImages),
+                  child: _buildAttachmentInThread(context, attachment, feedImages: feedImages),
                 ),
               ),
             ),
+            if (_normalizeReactionAttachmentRef(attachment.id) != null)
+              _buildReactionRow(
+                context,
+                message: message,
+                mine: mine,
+                target: _reactionTargetAttachment,
+                attachmentRef: _normalizeReactionAttachmentRef(attachment.id),
+              ),
+          ],
+
+          _buildReactionRow(context, message: message, mine: mine, target: _reactionTargetMessage, showAddWhenEmpty: false),
 
           if (currentStatusEntry != null && currentStatusEntry?.messageId == id)
             Padding(
@@ -2149,6 +2728,87 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
           );
         },
         child: threadView,
+      ),
+    );
+  }
+}
+
+class _ReactionPickerButton extends StatefulWidget {
+  const _ReactionPickerButton({required this.reactionOptions, required this.onSelected, this.selectedReaction});
+
+  final List<String> reactionOptions;
+  final ValueChanged<String> onSelected;
+  final String? selectedReaction;
+
+  @override
+  State<_ReactionPickerButton> createState() => _ReactionPickerButtonState();
+}
+
+class _ReactionPickerButtonState extends State<_ReactionPickerButton> {
+  final ShadPopoverController _controller = ShadPopoverController();
+
+  void _onSelectReaction(String reaction) {
+    widget.onSelected(reaction);
+    _controller.hide();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+
+    return ShadContextMenu(
+      controller: _controller,
+      constraints: const BoxConstraints(minWidth: 220, maxWidth: 220),
+      anchor: const ShadAnchorAuto(offset: Offset(0, 4), followerAnchor: Alignment.topRight, targetAnchor: Alignment.bottomRight),
+      items: [
+        Padding(
+          padding: const EdgeInsets.all(4),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 280),
+            child: SingleChildScrollView(
+              child: Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                children: [
+                  for (final reaction in widget.reactionOptions)
+                    Builder(
+                      builder: (context) {
+                        final selected =
+                            widget.selectedReaction != null &&
+                            _normalizeEmojiPresentationKey(widget.selectedReaction!) == _normalizeEmojiPresentationKey(reaction);
+                        return ShadButton.ghost(
+                          width: 32,
+                          height: 32,
+                          padding: EdgeInsets.zero,
+                          backgroundColor: selected ? theme.colorScheme.foreground.withValues(alpha: 0.16) : null,
+                          hoverBackgroundColor: selected
+                              ? theme.colorScheme.foreground.withValues(alpha: 0.24)
+                              : theme.colorScheme.muted.withValues(alpha: 0.55),
+                          onPressed: () => _onSelectReaction(reaction),
+                          child: Text(reaction, style: _emojiTextStyle(size: 18)),
+                        );
+                      },
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+      child: Tooltip(
+        message: "Add reaction",
+        child: ShadIconButton.ghost(
+          width: 30,
+          height: 30,
+          icon: const Icon(LucideIcons.smilePlus, size: 14),
+          onPressed: _controller.toggle,
+        ),
       ),
     );
   }
