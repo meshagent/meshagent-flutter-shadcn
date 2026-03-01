@@ -2228,14 +2228,14 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
       }
     }
 
-    final showAddButton = localUserName != null && (showAddWhenEmpty || grouped.isNotEmpty);
-    if (grouped.isEmpty && !showAddButton) {
-      return const SizedBox.shrink();
-    }
-
     final entries = grouped.entries.toList()..sort((left, right) => left.key.compareTo(right.key));
     String? selectedReaction;
     selectedReaction = entries.firstWhereOrNull((entry) => mineValues.contains(entry.key))?.key;
+    final hasSelectedReaction = selectedReaction != null;
+    final showAddButton = localUserName != null && !hasSelectedReaction && (showAddWhenEmpty || grouped.isNotEmpty);
+    if (grouped.isEmpty && !showAddButton) {
+      return const SizedBox.shrink();
+    }
     final alignment = mine ? Alignment.centerRight : Alignment.centerLeft;
     final theme = ShadTheme.of(context);
 
@@ -2254,33 +2254,58 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                   final users = entry.value;
                   final tooltipText = _reactionUsersTooltipText(groupedDisplayNames[entry.key]?.values ?? const <String>[]);
                   final isMine = mineValues.contains(entry.key);
-                  return Tooltip(
-                    message: tooltipText,
-                    child: ShadButton.ghost(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      backgroundColor: isMine ? theme.colorScheme.accent.withValues(alpha: 0.2) : theme.colorScheme.muted,
-                      hoverBackgroundColor: isMine
-                          ? theme.colorScheme.accent.withValues(alpha: 0.25)
-                          : theme.colorScheme.muted.withValues(alpha: 0.7),
-                      onPressed: localUserName == null
-                          ? null
-                          : () => _toggleReaction(
-                              message: message,
-                              reaction: entry.key,
-                              target: effectiveTarget,
-                              attachmentRef: normalizedAttachmentRef,
+                  Widget reactionChip({required VoidCallback? onPressed}) {
+                    return Tooltip(
+                      message: tooltipText,
+                      child: ShadButton.ghost(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        backgroundColor: isMine ? theme.colorScheme.accent.withValues(alpha: 0.2) : theme.colorScheme.muted,
+                        hoverBackgroundColor: isMine
+                            ? theme.colorScheme.accent.withValues(alpha: 0.25)
+                            : theme.colorScheme.muted.withValues(alpha: 0.7),
+                        onPressed: onPressed,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(entry.key, style: _emojiTextStyle(size: 14)),
+                            const SizedBox(width: 4),
+                            Text(
+                              "${users.length}",
+                              style: theme.textTheme.small.copyWith(fontWeight: isMine ? FontWeight.w700 : FontWeight.w500),
                             ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(entry.key, style: _emojiTextStyle(size: 14)),
-                          const SizedBox(width: 4),
-                          Text(
-                            "${users.length}",
-                            style: theme.textTheme.small.copyWith(fontWeight: isMine ? FontWeight.w700 : FontWeight.w500),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
+                    );
+                  }
+
+                  if (localUserName == null) {
+                    return reactionChip(onPressed: null);
+                  }
+
+                  if (hasSelectedReaction) {
+                    return _ReactionPickerButton(
+                      reactionOptions: _defaultReactionOptions,
+                      selectedReaction: selectedReaction,
+                      onSelected: (reaction) {
+                        _toggleReaction(
+                          message: message,
+                          reaction: reaction,
+                          target: effectiveTarget,
+                          attachmentRef: normalizedAttachmentRef,
+                          removeIfSame: true,
+                        );
+                      },
+                      triggerBuilder: (onPressed) => reactionChip(onPressed: onPressed),
+                    );
+                  }
+
+                  return reactionChip(
+                    onPressed: () => _toggleReaction(
+                      message: message,
+                      reaction: entry.key,
+                      target: effectiveTarget,
+                      attachmentRef: normalizedAttachmentRef,
                     ),
                   );
                 },
@@ -2744,11 +2769,12 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
 }
 
 class _ReactionPickerButton extends StatefulWidget {
-  const _ReactionPickerButton({required this.reactionOptions, required this.onSelected, this.selectedReaction});
+  const _ReactionPickerButton({required this.reactionOptions, required this.onSelected, this.selectedReaction, this.triggerBuilder});
 
   final List<String> reactionOptions;
   final ValueChanged<String> onSelected;
   final String? selectedReaction;
+  final Widget Function(VoidCallback onPressed)? triggerBuilder;
 
   @override
   State<_ReactionPickerButton> createState() => _ReactionPickerButtonState();
@@ -2771,6 +2797,17 @@ class _ReactionPickerButtonState extends State<_ReactionPickerButton> {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
+    final trigger =
+        widget.triggerBuilder?.call(_controller.toggle) ??
+        Tooltip(
+          message: "Add reaction",
+          child: ShadIconButton.ghost(
+            width: 30,
+            height: 30,
+            icon: const Icon(LucideIcons.smilePlus, size: 14),
+            onPressed: _controller.toggle,
+          ),
+        );
 
     return ShadContextMenu(
       controller: _controller,
@@ -2811,15 +2848,7 @@ class _ReactionPickerButtonState extends State<_ReactionPickerButton> {
           ),
         ),
       ],
-      child: Tooltip(
-        message: "Add reaction",
-        child: ShadIconButton.ghost(
-          width: 30,
-          height: 30,
-          icon: const Icon(LucideIcons.smilePlus, size: 14),
-          onPressed: _controller.toggle,
-        ),
-      ),
+      child: trigger,
     );
   }
 }
