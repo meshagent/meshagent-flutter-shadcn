@@ -561,7 +561,7 @@ class ChatThreadAttachButton extends StatefulWidget {
     super.key,
     this.toolkits = const [],
     this.alwaysShowAttachFiles,
-    this.availableConnectors = const [],
+    this.availableConnectors,
     this.onConnectorSetup,
     this.agentName,
   });
@@ -573,7 +573,7 @@ class ChatThreadAttachButton extends StatefulWidget {
 
   final ChatThreadController controller;
 
-  final List<Connector> availableConnectors;
+  final Future<List<Connector>> Function()? availableConnectors;
 
   final Future<void> Function(Connector connector)? onConnectorSetup;
 
@@ -688,10 +688,90 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
   ShadPopoverController popoverController = ShadPopoverController();
   ShadPopoverController addMcpController = ShadPopoverController();
 
+  List<Connector> _availableConnectors = const [];
+  bool _loadingAvailableConnectors = false;
+  Object? _availableConnectorsError;
+  int _connectorLoadVersion = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    addMcpController.addListener(_onAddMcpControllerChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatThreadAttachButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final loaderAvailabilityChanged = (oldWidget.availableConnectors == null) != (widget.availableConnectors == null);
+    if (loaderAvailabilityChanged) {
+      _availableConnectors = const [];
+      _availableConnectorsError = null;
+      _loadingAvailableConnectors = false;
+      _connectorLoadVersion++;
+      if (addMcpController.isOpen) {
+        unawaited(_refreshAvailableConnectors());
+      }
+    }
+  }
+
+  void _onAddMcpControllerChanged() {
+    if (addMcpController.isOpen) {
+      unawaited(_refreshAvailableConnectors());
+    }
+  }
+
+  Future<void> _refreshAvailableConnectors() async {
+    final loader = widget.availableConnectors;
+    if (loader == null) {
+      if (_availableConnectors.isEmpty && _availableConnectorsError == null && !_loadingAvailableConnectors) {
+        return;
+      }
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _availableConnectors = const [];
+        _availableConnectorsError = null;
+        _loadingAvailableConnectors = false;
+      });
+      return;
+    }
+
+    final loadVersion = ++_connectorLoadVersion;
+    if (mounted) {
+      setState(() {
+        _loadingAvailableConnectors = true;
+        _availableConnectorsError = null;
+      });
+    }
+
+    try {
+      final connectors = await loader();
+      if (!mounted || loadVersion != _connectorLoadVersion) {
+        return;
+      }
+      setState(() {
+        _availableConnectors = connectors;
+        _loadingAvailableConnectors = false;
+      });
+    } catch (error) {
+      if (!mounted || loadVersion != _connectorLoadVersion) {
+        return;
+      }
+      setState(() {
+        _availableConnectors = const [];
+        _loadingAvailableConnectors = false;
+        _availableConnectorsError = error;
+      });
+    }
+  }
+
   @override
   void dispose() {
-    super.dispose();
+    addMcpController.removeListener(_onAddMcpControllerChanged);
+    addMcpController.dispose();
     popoverController.dispose();
+    super.dispose();
   }
 
   Set<Connector> setup = {};
@@ -788,8 +868,16 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
                   constraints: BoxConstraints(minWidth: 175),
                   anchor: ShadAnchorAuto(followerAnchor: Alignment.topRight, targetAnchor: Alignment.topLeft),
                   items: [
-                    if (widget.availableConnectors.isEmpty) ShadContextMenuItem(child: Text("No connectors are configured for this room")),
-                    for (final connector in widget.availableConnectors)
+                    if (_loadingAvailableConnectors) ShadContextMenuItem(child: Text("Loading connectors...")),
+                    if (!_loadingAvailableConnectors && _availableConnectorsError != null)
+                      ShadContextMenuItem(
+                        leading: Icon(LucideIcons.refreshCw),
+                        onPressed: _refreshAvailableConnectors,
+                        child: Text("Unable to load connectors"),
+                      ),
+                    if (!_loadingAvailableConnectors && _availableConnectorsError == null && _availableConnectors.isEmpty)
+                      ShadContextMenuItem(child: Text("No connectors are configured for this room")),
+                    for (final connector in _availableConnectors)
                       ConnectorContextMenuItem(
                         selected:
                             widget.controller.toolkits.whereType<ConnectorToolkitBuilderOption>().firstOrNull?.connectors.firstWhereOrNull(
