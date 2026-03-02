@@ -806,15 +806,26 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
                             );
                             setState(() {});
                           } else {
-                            await widget.onConnectorSetup!(connector);
-                            var mcp =
-                                widget.controller.toolkits.firstWhereOrNull((c) => c is ConnectorToolkitBuilderOption)
-                                    as ConnectorToolkitBuilderOption?;
-                            if (mounted) {
-                              if (mcp!.connectors.firstWhereOrNull((c) => c.name == connector.name) == null) {
-                                setState(() {
-                                  mcp.connectors.add(connector);
-                                });
+                            try {
+                              if (widget.onConnectorSetup == null) {
+                                throw Exception("Connector setup handler is not configured");
+                              }
+                              await widget.onConnectorSetup!(connector);
+                              var mcp =
+                                  widget.controller.toolkits.firstWhereOrNull((c) => c is ConnectorToolkitBuilderOption)
+                                      as ConnectorToolkitBuilderOption?;
+                              if (mounted) {
+                                if (mcp!.connectors.firstWhereOrNull((c) => c.name == connector.name) == null) {
+                                  setState(() {
+                                    mcp.connectors.add(connector);
+                                  });
+                                }
+                              }
+                            } catch (error) {
+                              if (mounted) {
+                                ShadToaster.of(this.context).show(
+                                  ShadToast.destructive(title: Text("Failed to connect ${connector.name}"), description: Text("$error")),
+                                );
                               }
                             }
                           }
@@ -875,16 +886,28 @@ class ConnectorContextMenuItem extends StatefulWidget {
 class _ConnectorContextMenuItem extends State<ConnectorContextMenuItem> {
   bool? connected;
 
-  @override
-  void initState() {
-    super.initState();
-    widget.connector.isConnected(widget.room, widget.agentName).then((value) {
+  Future<void> _loadConnectedState() async {
+    try {
+      final value = await widget.connector.isConnected(widget.room, widget.agentName);
       if (mounted) {
         setState(() {
           connected = value;
         });
       }
-    });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          // Fall back to showing "Connect" when status checks fail.
+          connected = false;
+        });
+      }
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadConnectedState();
   }
 
   @override
