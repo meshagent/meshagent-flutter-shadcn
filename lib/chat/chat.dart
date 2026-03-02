@@ -850,15 +850,27 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
             ),
           ),
           for (final tool in widget.controller.toolkits) ...[
-            ShadButton.ghost(
-              trailing: Icon(LucideIcons.x),
-              hoverBackgroundColor: ShadTheme.of(context).colorScheme.background,
-              decoration: ShadDecoration(border: ShadBorder.all(radius: BorderRadius.circular(30))),
-              child: Text(tool.selectedText),
-              onPressed: () {
-                setState(() {
-                  widget.controller.toggleToolkit(tool);
-                });
+            Builder(
+              builder: (context) {
+                void removeToolkit() {
+                  setState(() {
+                    widget.controller.toggleToolkit(tool);
+                  });
+                }
+
+                final isConnectorToolkit = tool is ConnectorToolkitBuilderOption;
+
+                return ShadButton.ghost(
+                  trailing: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: removeToolkit,
+                    child: Padding(padding: EdgeInsets.all(2), child: Icon(LucideIcons.x, size: 14)),
+                  ),
+                  hoverBackgroundColor: ShadTheme.of(context).colorScheme.background,
+                  decoration: ShadDecoration(border: ShadBorder.all(radius: BorderRadius.circular(30))),
+                  onPressed: isConnectorToolkit ? () {} : removeToolkit,
+                  child: Text(tool.selectedText),
+                );
               },
             ),
             if (tool is ConnectorToolkitBuilderOption) ...[
