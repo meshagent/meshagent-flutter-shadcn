@@ -1809,7 +1809,7 @@ class _ChatThreadState extends State<ChatThread> {
           },
 
           child: Column(
-            mainAxisAlignment: bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
+            mainAxisAlignment: bottomAlign ? .end : .center,
             children: [
               ChatThreadMessages(
                 room: widget.room,
@@ -2721,6 +2721,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                       message.doc as MeshDocument,
                       message,
                       localParticipantName: localParticipantName is String ? localParticipantName : null,
+                      isLastMessage: message == messages.last,
                     ),
               ),
             ),
@@ -4103,10 +4104,21 @@ class ChatThreadProcessingStatusRow extends StatelessWidget {
   }
 }
 
-Widget defaultMessageHeaderBuilder(BuildContext context, MeshDocument thread, MeshElement message, {String? localParticipantName}) {
+Widget defaultMessageHeaderBuilder(
+  BuildContext context,
+  MeshDocument thread,
+  MeshElement message, {
+  String? localParticipantName,
+  bool isLastMessage = false,
+}) {
+  final theme = ShadTheme.of(context);
+  final tt = theme.textTheme;
+  final cs = theme.colorScheme;
+
   final name = message.getAttribute("author_name") ?? "";
   final createdAt = message.getAttribute("created_at") == null ? DateTime.now() : DateTime.parse(message.getAttribute("created_at"));
-  if (_shouldShowAuthorNames(thread: thread, localParticipantName: localParticipantName)) {
+
+  if (isLastMessage || _shouldShowAuthorNames(thread: thread, localParticipantName: localParticipantName)) {
     return Container(
       padding: EdgeInsets.only(left: 8, right: 8),
       width: ((message.getAttribute("text") as String?)?.isEmpty ?? true) ? 250 : double.infinity,
@@ -4115,14 +4127,14 @@ Widget defaultMessageHeaderBuilder(BuildContext context, MeshDocument thread, Me
           children: [
             Text(
               name.split("@").first,
-              style: ShadTheme.of(context).textTheme.small.copyWith(color: ShadTheme.of(context).colorScheme.foreground),
-              overflow: TextOverflow.ellipsis,
+              style: tt.small.copyWith(color: cs.foreground),
+              overflow: .ellipsis,
             ),
             Spacer(),
             Text(
               timeAgo(createdAt),
-              style: ShadTheme.of(context).textTheme.small.copyWith(color: ShadTheme.of(context).colorScheme.mutedForeground),
-              overflow: TextOverflow.ellipsis,
+              style: tt.small.copyWith(color: cs.mutedForeground),
+              overflow: .ellipsis,
             ),
           ],
         ),
