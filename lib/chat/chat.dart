@@ -75,21 +75,6 @@ TextStyle _emojiTextStyle({double size = 14}) {
   );
 }
 
-Set<String> _threadParticipantNames(MeshDocument thread) {
-  final members = thread.root.getElementsByTagName("members").firstOrNull?.getElementsByTagName("member") ?? const <MeshElement>[];
-  final names = <String>{};
-  for (final member in members) {
-    final name = member.getAttribute("name");
-    if (name is String) {
-      final normalized = name.trim();
-      if (normalized.isNotEmpty) {
-        names.add(normalized);
-      }
-    }
-  }
-  return names;
-}
-
 bool _shouldShowAuthorNames({required MeshDocument thread, String? localParticipantName}) {
   return true;
 }
