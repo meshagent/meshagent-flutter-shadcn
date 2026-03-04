@@ -35,6 +35,15 @@ import 'folder_drop.dart';
 
 const webPDFFormat = SimpleFileFormat(uniformTypeIdentifiers: ['com.adobe.pdf'], mimeTypes: ['web application/pdf']);
 const List<String> _emojiFontFamilyFallback = <String>['Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji'];
+const double _chatBubbleContentHorizontalPadding = 16;
+const double _chatBubbleContentTopPadding = 4;
+const double _chatBubbleContentBottomPadding = 2;
+const EdgeInsets _chatBubbleContentPadding = EdgeInsets.only(
+  left: _chatBubbleContentHorizontalPadding,
+  right: _chatBubbleContentHorizontalPadding,
+  top: _chatBubbleContentTopPadding,
+  bottom: _chatBubbleContentBottomPadding,
+);
 
 enum UploadStatus { initial, uploading, completed, failed }
 
@@ -82,12 +91,7 @@ Set<String> _threadParticipantNames(MeshDocument thread) {
 }
 
 bool _shouldShowAuthorNames({required MeshDocument thread, String? localParticipantName}) {
-  final participantNames = _threadParticipantNames(thread);
-  final normalizedLocal = localParticipantName?.trim();
-  if (normalizedLocal != null && normalizedLocal.isNotEmpty && !participantNames.contains(normalizedLocal)) {
-    participantNames.add(normalizedLocal);
-  }
-  return participantNames.length > 2;
+  return true;
 }
 
 class FileAttachment extends ChangeNotifier {
@@ -1720,7 +1724,7 @@ class _ChatBubble extends State<ChatBubble> {
               if (mine) actions,
               Expanded(
                 child: Container(
-                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding: _chatBubbleContentPadding,
                   decoration: BoxDecoration(color: theme.ghostButtonTheme.hoverBackgroundColor, borderRadius: BorderRadius.circular(8)),
                   child: MediaQuery(
                     data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
@@ -4120,7 +4124,7 @@ Widget defaultMessageHeaderBuilder(
 
   if (isLastMessage || _shouldShowAuthorNames(thread: thread, localParticipantName: localParticipantName)) {
     return Container(
-      padding: EdgeInsets.only(left: 8, right: 8),
+      padding: _chatBubbleContentPadding,
       width: ((message.getAttribute("text") as String?)?.isEmpty ?? true) ? 250 : double.infinity,
       child: SelectionArea(
         child: Row(
