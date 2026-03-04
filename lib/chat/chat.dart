@@ -87,7 +87,7 @@ bool _shouldShowAuthorNames({required MeshDocument thread, String? localParticip
   if (normalizedLocal != null && normalizedLocal.isNotEmpty && !participantNames.contains(normalizedLocal)) {
     participantNames.add(normalizedLocal);
   }
-  return participantNames.length > 2;
+  return participantNames.length > 1;
 }
 
 class FileAttachment extends ChangeNotifier {
@@ -2668,8 +2668,10 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     final localParticipantReactionName = _localParticipantName();
     final mine = message.getAttribute("author_name") == localParticipantName;
     final useDefaultHeaderBuilder = messageHeaderBuilder == null;
-    final shouldShowHeader = !isSameAuthor && (!useDefaultHeaderBuilder || _defaultHeaderWillRender(message: message));
+    final shouldShowHeader =
+        (!isSameAuthor && (!useDefaultHeaderBuilder || _defaultHeaderWillRender(message: message))) || (message == messages.last);
 
+    final id = message.getAttribute("id");
     final text = message.getAttribute("text");
     final hasText = text is String && text.isNotEmpty;
     final attachments = message
@@ -2679,7 +2681,6 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
         .toList();
     final hasMessageLevelReactions = _reactionElementsForTarget(message: message, target: _reactionTargetMessage).isNotEmpty;
     final selectedMessageReaction = _selectedReactionForTarget(message: message, target: _reactionTargetMessage);
-    final id = message.getAttribute("id");
 
     if (messageBuilders?[message.tagName] != null) {
       return messageBuilders![message.tagName]!(room: room, previous: previous, message: message, next: next);
@@ -2702,18 +2703,18 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     return SizedBox(
       key: ValueKey(id),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: .start,
+        mainAxisSize: .min,
         children: [
           if (shouldShowHeader)
             Container(
-              margin: EdgeInsets.only(
+              margin: .only(
                 left: mine ? _chatBubbleHorizontalInset + _chatBubbleActionRailWidth : _chatBubbleHorizontalInset,
                 right: mine ? _chatBubbleHorizontalInset : _chatBubbleHorizontalInset + _chatBubbleActionRailWidth,
                 bottom: 6,
               ),
               child: Align(
-                alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+                alignment: mine ? .centerRight : .centerLeft,
                 child:
                     messageHeaderBuilder?.call(context, message.doc as MeshDocument, message) ??
                     defaultMessageHeaderBuilder(
@@ -2783,16 +2784,14 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
 
           if (currentStatusEntry != null && currentStatusEntry?.messageId == id)
             Padding(
-              padding: EdgeInsets.only(top: 0),
+              padding: .only(top: 0),
               child: Align(
-                alignment: Alignment.centerRight,
+                alignment: .centerRight,
                 child: Text(
                   currentStatusEntry!.state.status.name,
-                  style: ShadTheme.of(context).textTheme.p.copyWith(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: Color(currentStatusEntry!.state.status.colorValue),
-                  ),
+                  style: ShadTheme.of(
+                    context,
+                  ).textTheme.p.copyWith(fontSize: 12, fontWeight: .w700, color: Color(currentStatusEntry!.state.status.colorValue)),
                 ),
               ),
             ),
