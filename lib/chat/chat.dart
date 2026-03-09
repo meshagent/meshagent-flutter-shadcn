@@ -134,23 +134,19 @@ class MeshagentFileUpload extends FileAttachment {
     }
 
     try {
-      final handle = await room.storage.open(path, overwrite: true);
+      status = UploadStatus.uploading;
+      notifyListeners();
 
-      try {
-        status = UploadStatus.uploading;
-        notifyListeners();
-
-        await for (final len in dataStream.asyncMap((item) async {
-          await room.storage.write(handle, Uint8List.fromList(item));
-
-          return item.length;
-        })) {
-          _bytesUploaded += len;
+      Stream<Uint8List> trackedStream() async* {
+        await for (final item in dataStream) {
+          final chunk = item is Uint8List ? item : Uint8List.fromList(item);
+          yield chunk;
+          _bytesUploaded += chunk.length;
           notifyListeners();
         }
-      } finally {
-        await room.storage.close(handle);
       }
+
+      await room.storage.uploadStream(path, trackedStream(), overwrite: true, size: size > 0 ? size : null);
 
       _completer.complete();
 
@@ -1501,6 +1497,11 @@ class _ChatBubble extends State<ChatBubble> {
             ),
             ShadButton(
               onPressed: () async {
+                final room = widget.room;
+                if (room == null) {
+                  return;
+                }
+
                 final f = fileNameController.text.trim();
                 String fileName = f.isEmpty ? "chat-comment.md" : f;
 
@@ -1544,14 +1545,8 @@ class _ChatBubble extends State<ChatBubble> {
                   }
                 }
 
-                final handle = await widget.room?.storage.open(fullPath, overwrite: true);
-
-                if (handle == null) {
-                  return;
-                }
-
-                await room.storage.write(handle, utf8.encode(widget.text));
-                await room.storage.close(handle);
+                final bytes = Uint8List.fromList(utf8.encode(widget.text));
+                await room.storage.uploadStream(fullPath, Stream.value(bytes), overwrite: true, size: bytes.length);
 
                 if (context.mounted) {
                   Navigator.of(context).pop();
@@ -3272,9 +3267,7 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
                   }
                 }
 
-                final handle = await widget.room.storage.open(fullPath, overwrite: true);
-                await widget.room.storage.write(handle, image.data);
-                await widget.room.storage.close(handle);
+                await widget.room.storage.uploadStream(fullPath, Stream.value(image.data), overwrite: true, size: image.data.length);
 
                 if (context.mounted) {
                   Navigator.of(context).pop();
@@ -3661,9 +3654,7 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
                   }
                 }
 
-                final handle = await widget.room.storage.open(fullPath, overwrite: true);
-                await widget.room.storage.write(handle, image.data);
-                await widget.room.storage.close(handle);
+                await widget.room.storage.uploadStream(fullPath, Stream.value(image.data), overwrite: true, size: image.data.length);
 
                 if (context.mounted) {
                   Navigator.of(context).pop();
@@ -4204,11 +4195,38 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
     widget.room.messaging.addListener(_onMessagingChanged);
     widget.document.addListener(_onDocumentChanged);
 
+    _ensureThreadMembers();
     _getParticipants();
     _getMessages();
     _getThreadStatus();
 
     _checkAgent();
+  }
+
+  void _ensureThreadMembers() {
+    final members = widget.document.root.getChildren().whereType<MeshElement>().firstWhereOrNull((x) => x.tagName == "members");
+    if (members == null) {
+      return;
+    }
+
+    final existing = <String>{};
+    for (final member in members.getChildren().whereType<MeshElement>()) {
+      final name = member.getAttribute("name");
+      if (name is String && name.trim().isNotEmpty) {
+        existing.add(name);
+      }
+    }
+
+    final localName = widget.room.localParticipant?.getAttribute("name");
+    if (localName is String && localName.trim().isNotEmpty && !existing.contains(localName)) {
+      members.createChildElement("member", {"name": localName});
+      existing.add(localName);
+    }
+
+    final agentName = widget.agentName;
+    if (agentName != null && agentName.trim().isNotEmpty && !existing.contains(agentName)) {
+      members.createChildElement("member", {"name": agentName});
+    }
   }
 
   bool agentOnline = false;
@@ -4244,6 +4262,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
       return;
     }
 
+    _ensureThreadMembers();
     _getParticipants();
     _getMessages();
     _getThreadStatus();
@@ -4254,6 +4273,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
       return;
     }
 
+    _ensureThreadMembers();
     _getParticipants();
     _getThreadStatus();
     _checkAgent();
