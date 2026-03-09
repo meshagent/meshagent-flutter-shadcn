@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -30,6 +31,7 @@ class CodePreview extends StatefulWidget {
 class _CodePreview extends State<CodePreview> {
   final theme = monokaiSublimeTheme;
   String? text;
+  Object? saveError;
 
   @override
   void initState() {
@@ -68,8 +70,9 @@ class _CodePreview extends State<CodePreview> {
     // TODO: editor replaces this handler, need to update editor to fix
     onKeyEvent: (node, event) {
       if (event.logicalKey == LogicalKeyboardKey.save) {
-        if (!saving) {
-          save();
+        if (!saving && dirty) {
+          unawaited(save());
+          return KeyEventResult.handled;
         }
       }
       return KeyEventResult.ignored;
@@ -78,18 +81,42 @@ class _CodePreview extends State<CodePreview> {
   var dirty = false;
   var saving = false;
 
-  void save() async {
+  Future<void> save() async {
+    final room = widget.room;
+    final currentController = controller;
+    if (room == null || currentController == null || saving) {
+      return;
+    }
+
     setState(() {
       saving = true;
+      saveError = null;
     });
+
+    final nextText = currentController.text;
     try {
-      final bytes = Uint8List.fromList(utf8.encode(controller!.text));
-      await widget.room!.storage.uploadStream(widget.filename, Stream.value(bytes), overwrite: true, size: bytes.length);
-    } finally {
+      final bytes = Uint8List.fromList(utf8.encode(nextText));
+      await room.storage.uploadStream(widget.filename, Stream.value(bytes), overwrite: true, size: bytes.length);
+      if (!mounted) {
+        return;
+      }
       setState(() {
-        saving = false;
         dirty = false;
+        text = nextText;
       });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        saveError = error;
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          saving = false;
+        });
+      }
     }
   }
 
@@ -115,11 +142,22 @@ class _CodePreview extends State<CodePreview> {
                 ShadButton.secondary(
                   enabled: !saving && dirty,
                   onPressed: () async {
-                    save();
+                    await save();
                   },
                   leading: saving ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator()) : Icon(LucideIcons.save),
                   child: Text("Save"),
                 ),
+                if (saveError != null) ...[
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      "Save failed: $saveError",
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: ShadTheme.of(context).colorScheme.destructive),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
