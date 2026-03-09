@@ -84,12 +84,7 @@ class _CodePreview extends State<CodePreview> {
     });
     try {
       final bytes = Uint8List.fromList(utf8.encode(controller!.text));
-      await widget.room!.storage.uploadStream(
-        widget.filename,
-        Stream.value(bytes),
-        overwrite: true,
-        size: bytes.length,
-      );
+      await widget.room!.storage.uploadStream(widget.filename, Stream.value(bytes), overwrite: true, size: bytes.length);
     } finally {
       setState(() {
         saving = false;
