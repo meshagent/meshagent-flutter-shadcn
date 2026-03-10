@@ -2824,13 +2824,22 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
             right: 0,
             bottom: 0,
             child: LayoutBuilder(
-              builder: (context, constraints) => Padding(
-                padding: EdgeInsets.symmetric(horizontal: chatThreadStatusHorizontalPadding(constraints.maxWidth)),
-                child: ChatThreadProcessingStatusRow(
-                  text: (threadStatus?.trim().isNotEmpty ?? false) ? threadStatus!.trim() : "Thinking",
-                  onCancel: threadStatusMode != null ? onCancel : null,
-                ),
-              ),
+              builder: (context, constraints) {
+                final trimmedThreadStatus = threadStatus?.trim();
+                final hasThreadStatus = trimmedThreadStatus != null && trimmedThreadStatus.isNotEmpty;
+                final cancelling = _isCancellingThreadStatusText(trimmedThreadStatus);
+                final displayStatus = hasThreadStatus ? trimmedThreadStatus : "Thinking";
+
+                return Padding(
+                  padding: EdgeInsets.symmetric(horizontal: chatThreadStatusHorizontalPadding(constraints.maxWidth)),
+                  child: ChatThreadProcessingStatusRow(
+                    text: displayStatus,
+                    onCancel: onCancel,
+                    showCancelButton: threadStatusMode != null,
+                    cancelEnabled: !cancelling,
+                  ),
+                );
+              },
             ),
           ),
         if (showListening)
@@ -4031,41 +4040,67 @@ class _ProcessingStatusTextState extends State<_ProcessingStatusText> with Singl
   }
 }
 
+bool _isCancellingThreadStatusText(String? status) {
+  if (status == null) {
+    return false;
+  }
+
+  final normalized = status.trim().toLowerCase();
+  return normalized == "cancelling" || normalized == "canceling";
+}
+
 class ChatThreadProcessingStatusRow extends StatelessWidget {
-  const ChatThreadProcessingStatusRow({super.key, required this.text, this.onCancel});
+  const ChatThreadProcessingStatusRow({
+    super.key,
+    required this.text,
+    this.onCancel,
+    this.showCancelButton = false,
+    this.cancelEnabled = true,
+  });
 
   final String text;
   final VoidCallback? onCancel;
+  final bool showCancelButton;
+  final bool cancelEnabled;
 
   @override
   Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final cancelButtonColor = cancelEnabled ? theme.colorScheme.foreground : theme.colorScheme.muted;
+    final cancelIconColor = cancelEnabled ? theme.colorScheme.background : theme.colorScheme.mutedForeground;
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.start,
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         const SizedBox(width: 10),
-        if (onCancel != null)
-          ShadGestureDetector(
-            cursor: SystemMouseCursors.click,
-            onTapDown: (_) {
-              onCancel!();
-            },
-            child: ShadTooltip(
-              builder: (context) => const Text("Stop"),
-              child: SizedBox(
-                width: 24,
-                height: 24,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    const Positioned.fill(child: _CyclingProgressIndicator(strokeWidth: 2)),
-                    Container(
-                      width: 18,
-                      height: 18,
-                      decoration: BoxDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
-                      child: Icon(LucideIcons.x, color: ShadTheme.of(context).colorScheme.background, size: 12),
-                    ),
-                  ],
+        if (showCancelButton)
+          Opacity(
+            opacity: cancelEnabled ? 1 : 0.55,
+            child: ShadGestureDetector(
+              cursor: cancelEnabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+              onTapDown: cancelEnabled && onCancel != null
+                  ? (_) {
+                      onCancel!();
+                    }
+                  : null,
+              child: ShadTooltip(
+                builder: (context) => Text(cancelEnabled ? "Stop" : "Cancelling"),
+                child: SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      const Positioned.fill(child: _CyclingProgressIndicator(strokeWidth: 2)),
+                      Container(
+                        width: 18,
+                        height: 18,
+                        decoration: BoxDecoration(shape: BoxShape.circle, color: cancelButtonColor),
+                        child: Icon(LucideIcons.x, color: cancelIconColor, size: 12),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -4076,7 +4111,7 @@ class ChatThreadProcessingStatusRow extends StatelessWidget {
         Expanded(
           child: _ProcessingStatusText(
             text: text,
-            style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
+            style: TextStyle(fontSize: 13, color: theme.colorScheme.mutedForeground),
           ),
         ),
       ],
