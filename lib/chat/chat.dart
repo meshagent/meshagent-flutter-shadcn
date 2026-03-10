@@ -1805,6 +1805,7 @@ class _ChatThreadState extends State<ChatThread> {
                 showTyping: (state.threadStatusMode != null) && state.listening.isEmpty,
                 showListening: state.listening.isNotEmpty,
                 threadStatus: state.threadStatus,
+                threadStatusStartedAt: state.threadStatusStartedAt,
                 threadStatusMode: state.threadStatusMode,
                 onCancel: () {
                   controller.cancel(widget.path, widget.document);
@@ -1888,6 +1889,7 @@ class ChatThreadMessages extends StatefulWidget {
     this.showTyping = false,
     this.showListening = false,
     this.threadStatus,
+    this.threadStatusStartedAt,
     this.threadStatusMode,
     this.onCancel,
     this.agentName,
@@ -1906,6 +1908,7 @@ class ChatThreadMessages extends StatefulWidget {
   final bool showTyping;
   final bool showListening;
   final String? threadStatus;
+  final DateTime? threadStatusStartedAt;
   final String? threadStatusMode;
   final void Function()? onCancel;
   final List<MeshElement> messages;
@@ -2003,6 +2006,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   bool get showTyping => widget.showTyping;
   bool get showListening => widget.showListening;
   String? get threadStatus => widget.threadStatus;
+  DateTime? get threadStatusStartedAt => widget.threadStatusStartedAt;
   String? get threadStatusMode => widget.threadStatusMode;
   void Function()? get onCancel => widget.onCancel;
   List<MeshElement> get messages => widget.messages;
@@ -2834,6 +2838,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                   padding: EdgeInsets.symmetric(horizontal: chatThreadStatusHorizontalPadding(constraints.maxWidth)),
                   child: ChatThreadProcessingStatusRow(
                     text: displayStatus,
+                    startedAt: threadStatusStartedAt,
                     onCancel: onCancel,
                     showCancelButton: threadStatusMode != null,
                     cancelEnabled: !cancelling,
@@ -4049,43 +4054,106 @@ bool _isCancellingThreadStatusText(String? status) {
   return normalized == "cancelling" || normalized == "canceling";
 }
 
-class ChatThreadProcessingStatusRow extends StatelessWidget {
+class ChatThreadProcessingStatusRow extends StatefulWidget {
   const ChatThreadProcessingStatusRow({
     super.key,
     required this.text,
+    this.startedAt,
     this.onCancel,
     this.showCancelButton = false,
     this.cancelEnabled = true,
   });
 
   final String text;
+  final DateTime? startedAt;
   final VoidCallback? onCancel;
   final bool showCancelButton;
   final bool cancelEnabled;
 
   @override
+  State<ChatThreadProcessingStatusRow> createState() => _ChatThreadProcessingStatusRowState();
+}
+
+class _ChatThreadProcessingStatusRowState extends State<ChatThreadProcessingStatusRow> {
+  Timer? _ticker;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncTicker();
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatThreadProcessingStatusRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.startedAt != widget.startedAt) {
+      _syncTicker();
+    }
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  void _syncTicker() {
+    final shouldTick = widget.startedAt != null;
+    if (!shouldTick) {
+      _ticker?.cancel();
+      _ticker = null;
+      return;
+    }
+
+    if (_ticker != null) {
+      return;
+    }
+
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+  }
+
+  String _displayText() {
+    final startedAt = widget.startedAt;
+    if (startedAt == null) {
+      return widget.text;
+    }
+
+    final elapsed = DateTime.now().difference(startedAt);
+    final seconds = elapsed.inSeconds < 0 ? 0 : elapsed.inSeconds;
+    if (seconds == 0) {
+      return widget.text;
+    }
+    return "${widget.text} (${seconds}s)";
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
-    final cancelButtonColor = cancelEnabled ? theme.colorScheme.foreground : theme.colorScheme.muted;
-    final cancelIconColor = cancelEnabled ? theme.colorScheme.background : theme.colorScheme.mutedForeground;
+    final cancelButtonColor = widget.cancelEnabled ? theme.colorScheme.foreground : theme.colorScheme.muted;
+    final cancelIconColor = widget.cancelEnabled ? theme.colorScheme.background : theme.colorScheme.mutedForeground;
+    final displayText = _displayText();
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.start,
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         const SizedBox(width: 10),
-        if (showCancelButton)
+        if (widget.showCancelButton)
           Opacity(
-            opacity: cancelEnabled ? 1 : 0.55,
+            opacity: widget.cancelEnabled ? 1 : 0.55,
             child: ShadGestureDetector(
-              cursor: cancelEnabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
-              onTapDown: cancelEnabled && onCancel != null
+              cursor: widget.cancelEnabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+              onTapDown: widget.cancelEnabled && widget.onCancel != null
                   ? (_) {
-                      onCancel!();
+                      widget.onCancel!();
                     }
                   : null,
               child: ShadTooltip(
-                builder: (context) => Text(cancelEnabled ? "Stop" : "Cancelling"),
+                builder: (context) => Text(widget.cancelEnabled ? "Stop" : "Cancelling"),
                 child: SizedBox(
                   width: 24,
                   height: 24,
@@ -4110,7 +4178,7 @@ class ChatThreadProcessingStatusRow extends StatelessWidget {
         const SizedBox(width: 10),
         Expanded(
           child: _ProcessingStatusText(
-            text: text,
+            text: displayText,
             style: TextStyle(fontSize: 13, color: theme.colorScheme.mutedForeground),
           ),
         ),
@@ -4176,6 +4244,7 @@ class ChatThreadSnapshot {
     required this.availableTools,
     required this.agentOnline,
     required this.threadStatus,
+    required this.threadStatusStartedAt,
     required this.threadStatusMode,
   });
 
@@ -4187,6 +4256,7 @@ class ChatThreadSnapshot {
   final List<String> listening;
   final List<ThreadToolkitBuilder> availableTools;
   final String? threadStatus;
+  final DateTime? threadStatusStartedAt;
   final String? threadStatusMode;
 }
 
@@ -4221,6 +4291,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
   Set<String> listening = {};
   List<MeshElement> messages = [];
   String? threadStatus;
+  DateTime? threadStatusStartedAt;
   String? threadStatusMode;
 
   @override
@@ -4393,14 +4464,17 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
     final keyCandidates = <String>{"thread.status.${widget.path}"};
     final textKeyCandidates = <String>{"thread.status.text.${widget.path}"};
     final modeKeyCandidates = <String>{"thread.status.mode.${widget.path}"};
+    final startedAtKeyCandidates = <String>{"thread.status.started_at.${widget.path}"};
     if (widget.path.startsWith("/")) {
       keyCandidates.add("thread.status.${widget.path.substring(1)}");
       textKeyCandidates.add("thread.status.text.${widget.path.substring(1)}");
       modeKeyCandidates.add("thread.status.mode.${widget.path.substring(1)}");
+      startedAtKeyCandidates.add("thread.status.started_at.${widget.path.substring(1)}");
     } else {
       keyCandidates.add("thread.status./${widget.path}");
       textKeyCandidates.add("thread.status.text./${widget.path}");
       modeKeyCandidates.add("thread.status.mode./${widget.path}");
+      startedAtKeyCandidates.add("thread.status.started_at./${widget.path}");
     }
 
     final candidates = <Participant>[];
@@ -4420,6 +4494,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
 
     String? nextStatus;
     String? nextMode;
+    DateTime? nextStartedAt;
     for (final participant in candidates) {
       if (nextStatus == null) {
         for (final key in textKeyCandidates) {
@@ -4453,7 +4528,27 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         }
       }
 
-      if (nextStatus != null && nextMode != null) {
+      if (nextStartedAt == null) {
+        for (final key in startedAtKeyCandidates) {
+          final value = participant.getAttribute(key);
+          if (value is! String) {
+            continue;
+          }
+
+          final normalized = value.trim();
+          if (normalized.isEmpty) {
+            continue;
+          }
+
+          final parsed = DateTime.tryParse(normalized);
+          if (parsed != null) {
+            nextStartedAt = parsed;
+            break;
+          }
+        }
+      }
+
+      if (nextStatus != null && nextMode != null && nextStartedAt != null) {
         break;
       }
     }
@@ -4462,18 +4557,31 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
       nextMode = "busy";
     }
 
-    if (nextStatus == threadStatus && nextMode == threadStatusMode) {
+    if (nextStatus == null) {
+      nextStartedAt = null;
+    } else if (nextStartedAt == null) {
+      if (threadStatusStartedAt != null && threadStatus != null) {
+        nextStartedAt = threadStatusStartedAt;
+      } else {
+        nextStartedAt = DateTime.now();
+      }
+    }
+
+    final sameStartedAt = nextStartedAt?.millisecondsSinceEpoch == threadStatusStartedAt?.millisecondsSinceEpoch;
+    if (nextStatus == threadStatus && nextMode == threadStatusMode && sameStartedAt) {
       return;
     }
 
     if (!mounted) {
       threadStatus = nextStatus;
+      threadStatusStartedAt = nextStartedAt;
       threadStatusMode = nextMode;
       return;
     }
 
     setState(() {
       threadStatus = nextStatus;
+      threadStatusStartedAt = nextStartedAt;
       threadStatusMode = nextMode;
     });
   }
@@ -4493,6 +4601,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         listening: listening.toList(),
         availableTools: availableTools.toList(),
         threadStatus: threadStatus,
+        threadStatusStartedAt: threadStatusStartedAt,
         threadStatusMode: threadStatusMode,
       ),
     );
@@ -4759,216 +4868,248 @@ class _EventLineState extends State<EventLine> {
     return headline;
   }
 
-  String? _languageFromDiffHeaderPath(String value) {
-    final path = value.trim();
-    if (path.isEmpty || path == "/dev/null") {
+  String? _eventPath() {
+    final value = widget.message.getAttribute("path");
+    if (value is! String) {
       return null;
     }
 
-    final normalized = path.startsWith("a/") || path.startsWith("b/") ? path.substring(2) : path;
-    return resolveLanguageIdForFilename(normalized);
+    final normalized = value.trim();
+    return normalized.isEmpty ? null : normalized;
   }
 
-  String? _singleDiffPathFromHeadline(String headline) {
-    final trimmed = headline.trim();
-    if (trimmed.isEmpty) {
+  String? _execPreviewText({required String kind}) {
+    if (kind != "exec") {
       return null;
     }
 
-    final withPath = trimmed.replaceFirst(RegExp(r"^(edited|added|deleted)\s+", caseSensitive: false), "");
-    if (withPath == trimmed) {
+    final value = widget.message.getAttribute("preview");
+    if (value is! String || value.isEmpty) {
       return null;
     }
 
-    if (RegExp(r"^\d+\s+files?\b", caseSensitive: false).hasMatch(withPath)) {
-      return null;
-    }
-
-    final withoutCounts = withPath.replaceFirst(RegExp(r"\s+\(\+\d+\s+-\d+\)\s*$"), "").trim();
-    if (withoutCounts.isEmpty) {
-      return null;
-    }
-
-    final moveParts = withoutCounts.split(RegExp(r"\s*(?:→|->)\s*"));
-    final candidate = moveParts.isNotEmpty ? moveParts.last.trim() : withoutCounts;
-    return candidate.isEmpty ? withoutCounts : candidate;
+    return value;
   }
 
-  String? _languageFromDiffHeadline(String headline) {
-    final path = _singleDiffPathFromHeadline(headline);
-    if (path == null || path.isEmpty) {
+  String? _diffPreviewPathForChange(dynamic change) {
+    if (change is! Map) {
       return null;
     }
-    return _languageFromDiffHeaderPath(path);
-  }
 
-  TextSpan _diffLineSpan({required BuildContext context, required String line, required String? languageId, required TextStyle textStyle}) {
-    if (line.isEmpty) {
-      return TextSpan(text: "", style: textStyle);
-    }
+    final rawPath = change["path"];
+    final path = rawPath is String ? rawPath.trim() : "";
 
-    if (languageId == null) {
-      return highlightCodeSpanWithReHighlight(
-        context: context,
-        code: line,
-        languageOrFilename: "diff",
-        textStyle: textStyle,
-        theme: monokaiSublimeTheme,
-        fallbackLanguageId: "diff",
-      );
-    }
-
-    if (line.startsWith("+") || line.startsWith("-") || line.startsWith(" ")) {
-      final marker = line.substring(0, 1);
-      final rest = line.length > 1 ? line.substring(1) : "";
-      return TextSpan(
-        style: textStyle,
-        children: [
-          TextSpan(text: marker, style: textStyle),
-          highlightCodeSpanWithReHighlight(
-            context: context,
-            code: rest,
-            languageOrFilename: languageId,
-            textStyle: textStyle,
-            theme: monokaiSublimeTheme,
-          ),
-        ],
-      );
-    }
-
-    return highlightCodeSpanWithReHighlight(
-      context: context,
-      code: line,
-      languageOrFilename: languageId,
-      textStyle: textStyle,
-      theme: monokaiSublimeTheme,
-    );
-  }
-
-  List<Map<String, dynamic>> _parseUnifiedDiff(String diff, {String? defaultLanguageId}) {
-    final results = <Map<String, dynamic>>[];
-    int? oldLine;
-    int? newLine;
-    String? currentLanguageId = defaultLanguageId;
-    final hunk = RegExp(r"^@@\s*-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s*@@");
-
-    for (final line in diff.split(RegExp(r"\r?\n"))) {
-      if (line.isEmpty) {
-        continue;
-      }
-
-      if (line.startsWith("--- ")) {
-        final language = _languageFromDiffHeaderPath(line.substring(4));
-        if (language != null) {
-          currentLanguageId = language;
+    var movePath = "";
+    final rawMovePath = change["move_path"] ?? change["movePath"];
+    if (rawMovePath is String) {
+      movePath = rawMovePath.trim();
+    } else {
+      final rawKind = change["kind"];
+      if (rawKind is Map) {
+        final nestedMovePath = rawKind["move_path"] ?? rawKind["movePath"];
+        if (nestedMovePath is String) {
+          movePath = nestedMovePath.trim();
         }
-        continue;
-      }
-
-      if (line.startsWith("+++ ")) {
-        final language = _languageFromDiffHeaderPath(line.substring(4));
-        if (language != null) {
-          currentLanguageId = language;
-        }
-        continue;
-      }
-
-      final hunkMatch = hunk.firstMatch(line);
-      if (hunkMatch != null) {
-        oldLine = int.tryParse(hunkMatch.group(1) ?? "");
-        newLine = int.tryParse(hunkMatch.group(2) ?? "");
-        continue;
-      }
-
-      if (line.startsWith(r"\ No newline at end of file")) {
-        continue;
-      }
-
-      if (oldLine == null || newLine == null) {
-        continue;
-      }
-
-      if (line.startsWith("+")) {
-        results.add({"old": null, "new": newLine, "text": line, "language": currentLanguageId});
-        newLine += 1;
-        continue;
-      }
-
-      if (line.startsWith("-")) {
-        results.add({"old": oldLine, "new": null, "text": line, "language": currentLanguageId});
-        oldLine += 1;
-        continue;
-      }
-
-      if (line.startsWith(" ")) {
-        results.add({"old": oldLine, "new": newLine, "text": line, "language": currentLanguageId});
-        oldLine += 1;
-        newLine += 1;
-        continue;
       }
     }
 
-    return results;
+    if (path.isNotEmpty && movePath.isNotEmpty && path != movePath) {
+      return "$path -> $movePath";
+    }
+    if (movePath.isNotEmpty) {
+      return movePath;
+    }
+    if (path.isNotEmpty) {
+      return path;
+    }
+    return null;
   }
 
-  List<Map<String, dynamic>> _extractDiffLinesFromRaw({required String raw, required String headline}) {
-    if (raw.trim().isEmpty) {
+  List<Map<String, String>> _extractDiffPreviewBlocksFromEncoded({
+    required String encoded,
+    required String headline,
+    String? fallbackPath,
+  }) {
+    if (encoded.trim().isEmpty) {
       return const [];
     }
 
-    final headlineLanguageId = _languageFromDiffHeadline(headline);
-
     try {
-      final decoded = jsonDecode(raw);
+      final decoded = jsonDecode(encoded);
       if (decoded is! Map) {
         return const [];
       }
 
       final itemCandidates = <dynamic>[decoded["item"], (decoded["msg"] is Map) ? (decoded["msg"] as Map)["item"] : null, decoded];
 
-      final results = <Map<String, dynamic>>[];
       for (final candidate in itemCandidates) {
         if (candidate is! Map) {
           continue;
         }
+
         final changes = candidate["changes"];
         if (changes is! List) {
           continue;
         }
 
+        final previews = <Map<String, String>>[];
         for (final change in changes) {
           if (change is! Map) {
             continue;
           }
+
           final diff = change["diff"];
-          if (diff is! String || diff.trim().isEmpty) {
+          if (diff is! String) {
             continue;
           }
 
-          String? languageId;
-          final changePath = change["path"];
-          if (changePath is String) {
-            languageId = _languageFromDiffHeaderPath(changePath);
+          final normalizedDiff = diff.replaceAll("\r\n", "\n").trimRight();
+          if (normalizedDiff.isEmpty) {
+            continue;
           }
-          final rawKind = change["kind"];
-          if (languageId == null && rawKind is Map) {
-            final movePath = rawKind["movePath"] ?? rawKind["move_path"];
-            if (movePath is String) {
-              languageId = _languageFromDiffHeaderPath(movePath);
-            }
-          }
-          languageId ??= headlineLanguageId;
 
-          results.addAll(_parseUnifiedDiff(diff, defaultLanguageId: languageId));
+          final path = _diffPreviewPathForChange(change) ?? fallbackPath ?? headline;
+          previews.add({"path": path, "diff": normalizedDiff});
         }
 
-        if (results.isNotEmpty) {
-          return results;
+        if (previews.isNotEmpty) {
+          return previews;
         }
       }
     } catch (_) {}
 
     return const [];
+  }
+
+  List<Map<String, String>> _extractDiffPreviewBlocks({required String headline}) {
+    final previewCandidates = <String>[];
+
+    final preview = widget.message.getAttribute("preview");
+    if (preview is String && preview.trim().isNotEmpty) {
+      previewCandidates.add(preview);
+    }
+
+    final raw = widget.message.getAttribute("data");
+    if (raw is String && raw.trim().isNotEmpty) {
+      previewCandidates.add(raw);
+    }
+
+    final fallbackPath = _eventPath();
+    for (final candidate in previewCandidates) {
+      final previews = _extractDiffPreviewBlocksFromEncoded(encoded: candidate, headline: headline, fallbackPath: fallbackPath);
+      if (previews.isNotEmpty) {
+        return previews;
+      }
+    }
+
+    return const [];
+  }
+
+  Widget _buildThreadPreviewBlock(
+    BuildContext context, {
+    required String header,
+    required String code,
+    required String languageOrFilename,
+    String fallbackLanguageId = plaintextLanguageId,
+  }) {
+    final normalizedCode = code.replaceAll("\r\n", "\n").trimRight();
+    if (normalizedCode.isEmpty) {
+      return SizedBox.shrink();
+    }
+
+    final theme = ShadTheme.of(context);
+    const previewBackground = Color(0xFF050505);
+    const previewHeaderBackground = Color(0xFF111111);
+    final codeTextStyle = GoogleFonts.sourceCodePro(fontSize: 12, color: const Color(0xFFE5E7EB), height: 1.3);
+    final headerTextStyle = GoogleFonts.sourceCodePro(fontSize: 11, color: theme.colorScheme.mutedForeground);
+    final resolvedLanguageId = resolveLanguageIdForFilename(languageOrFilename) ?? fallbackLanguageId;
+    final body = resolvedLanguageId == "diff"
+        ? SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            child: Builder(
+              builder: (context) {
+                final lines = normalizedCode.split("\n");
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (final line in lines.indexed)
+                      Padding(
+                        padding: EdgeInsets.only(bottom: line.$1 < lines.length - 1 ? 2 : 0),
+                        child: Container(
+                          decoration: BoxDecoration(color: diffLineBackgroundColor(line.$2), borderRadius: BorderRadius.circular(4)),
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                          child: SelectableText.rich(
+                            highlightCodeSpanWithReHighlight(
+                              context: context,
+                              code: line.$2,
+                              languageOrFilename: "diff",
+                              textStyle: codeTextStyle,
+                              theme: monokaiSublimeTheme,
+                              fallbackLanguageId: "diff",
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
+          )
+        : SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            child: SelectableText.rich(
+              highlightCodeSpanWithReHighlight(
+                context: context,
+                code: normalizedCode,
+                languageOrFilename: languageOrFilename,
+                textStyle: codeTextStyle,
+                theme: monokaiSublimeTheme,
+                fallbackLanguageId: fallbackLanguageId,
+              ),
+            ),
+          );
+
+    return Container(
+      width: double.infinity,
+      margin: EdgeInsets.only(top: 6),
+      decoration: BoxDecoration(
+        color: previewBackground,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: theme.colorScheme.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: previewHeaderBackground,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: SelectionArea(child: Text(header, style: headerTextStyle)),
+                ),
+                ShadIconButton.ghost(
+                  width: 24,
+                  height: 24,
+                  iconSize: 14,
+                  icon: const Icon(LucideIcons.copy, size: 14),
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: normalizedCode));
+                  },
+                ),
+              ],
+            ),
+          ),
+          body,
+        ],
+      ),
+    );
   }
 
   Future<void> _sendApprovalDecision({required String approvalId, required bool approve}) async {
@@ -5031,7 +5172,6 @@ class _EventLineState extends State<EventLine> {
     final detailsAttr = ((widget.message.getAttribute("details") as String?) ?? "").trim();
     final approvalId =
         (((widget.message.getAttribute("item_id") as String?) ?? (widget.message.getAttribute("approval_id") as String?) ?? "")).trim();
-    final raw = ((widget.message.getAttribute("data") as String?) ?? "").trim();
     final useSummaryAsHeadline = _useSummaryAsHeadline(summary: summary, method: method, eventName: eventName);
     var headline = headlineAttr.isNotEmpty
         ? headlineAttr
@@ -5047,7 +5187,9 @@ class _EventLineState extends State<EventLine> {
     } else if (kind == "exec") {
       detailLines = details.toList();
     }
-    final diffLines = kind == "diff" ? _extractDiffLinesFromRaw(raw: raw, headline: headline) : const <Map<String, dynamic>>[];
+    final eventPath = _eventPath();
+    final execPreview = _execPreviewText(kind: kind);
+    final diffPreviewBlocks = kind == "diff" ? _extractDiffPreviewBlocks(headline: headline) : const <Map<String, String>>[];
     final displayText = _displayText(headline: headline);
     final canApprove = kind == "approval" && inProgress && approvalId.isNotEmpty;
 
@@ -5084,76 +5226,22 @@ class _EventLineState extends State<EventLine> {
                 ),
               ],
             ),
-            if (diffLines.isNotEmpty)
-              Container(
-                width: double.infinity,
-                margin: EdgeInsets.only(top: 0),
-                child: Padding(
-                  padding: EdgeInsets.only(left: 14),
-                  child: Column(
-                    children: [
-                      for (final line in diffLines.indexed)
-                        Builder(
-                          builder: (context) {
-                            final lineText = (line.$2["text"] as String?) ?? "";
-                            final languageId = line.$2["language"];
-                            final lineBackground = diffLineBackgroundColor(lineText);
-                            final numberColor = lineBackground != null
-                                ? const Color(0xFFE5E7EB).withAlpha(220)
-                                : ShadTheme.of(context).colorScheme.mutedForeground;
-                            final lineStyle = GoogleFonts.sourceCodePro(
-                              fontSize: 12,
-                              color: lineBackground != null ? const Color(0xFFE5E7EB) : textColor.withAlpha(220),
-                              height: 1.3,
-                            );
-
-                            return Padding(
-                              padding: EdgeInsets.only(bottom: line.$1 < diffLines.length - 1 ? 2 : 0),
-                              child: Container(
-                                decoration: BoxDecoration(color: lineBackground, borderRadius: BorderRadius.circular(4)),
-                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    SizedBox(
-                                      width: 42,
-                                      child: Text(
-                                        line.$2["old"] is int ? "${line.$2["old"]}" : "",
-                                        textAlign: TextAlign.right,
-                                        style: GoogleFonts.sourceCodePro(fontSize: 11, color: numberColor),
-                                      ),
-                                    ),
-                                    SizedBox(width: 6),
-                                    SizedBox(
-                                      width: 42,
-                                      child: Text(
-                                        line.$2["new"] is int ? "${line.$2["new"]}" : "",
-                                        textAlign: TextAlign.right,
-                                        style: GoogleFonts.sourceCodePro(fontSize: 11, color: numberColor),
-                                      ),
-                                    ),
-                                    SizedBox(width: 8),
-                                    Expanded(
-                                      child: SelectableText.rich(
-                                        _diffLineSpan(
-                                          context: context,
-                                          line: lineText,
-                                          languageId: languageId is String ? languageId : null,
-                                          textStyle: lineStyle,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                    ],
-                  ),
-                ),
+            if (kind == "exec" && eventPath != null && execPreview != null)
+              _buildThreadPreviewBlock(context, header: eventPath, code: execPreview, languageOrFilename: eventPath),
+            if (diffPreviewBlocks.isNotEmpty)
+              Column(
+                children: [
+                  for (final preview in diffPreviewBlocks)
+                    _buildThreadPreviewBlock(
+                      context,
+                      header: preview["path"] ?? "diff",
+                      code: preview["diff"] ?? "",
+                      languageOrFilename: "diff",
+                      fallbackLanguageId: "diff",
+                    ),
+                ],
               ),
-            if (detailLines.isNotEmpty && kind != "diff")
+            if (detailLines.isNotEmpty && (kind != "diff" || diffPreviewBlocks.isEmpty))
               Container(
                 width: double.infinity,
                 margin: EdgeInsets.only(top: 0),
