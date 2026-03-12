@@ -349,6 +349,7 @@ class _NewChatThreadState extends State<NewChatThread> {
       availableTools: _availableTools,
       agentOnline: _agent != null,
       threadStatus: null,
+      threadStatusStartedAt: null,
       threadStatusMode: null,
     );
   }
