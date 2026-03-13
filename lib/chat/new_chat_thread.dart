@@ -221,7 +221,7 @@ class _NewChatThreadState extends State<NewChatThread> {
                 "attachments": [
                   for (final path in attachmentPaths) {"path": path},
                 ],
-                if (tools.isNotEmpty) "tools": tools,
+                "tools": tools,
               },
             },
           ),
@@ -351,6 +351,9 @@ class _NewChatThreadState extends State<NewChatThread> {
       threadStatus: null,
       threadStatusStartedAt: null,
       threadStatusMode: null,
+      supportsAgentMessages: _agent?.getAttribute("supports_agent_messages") == true,
+      threadTurnId: null,
+      pendingMessages: const [],
     );
   }
 
@@ -424,7 +427,11 @@ class _NewChatThreadState extends State<NewChatThread> {
                     ? null
                     : Padding(padding: const EdgeInsets.only(top: 8), child: toolsBuilder(context, _controller, snapshot)),
                 trailing: null,
-                onSend: (text, attachments) {},
+                onSend: (text, attachments) async {
+                  if (text.isNotEmpty || attachments.isNotEmpty) {
+                    return;
+                  }
+                },
               ),
             ),
           ),
@@ -476,9 +483,12 @@ class _NewChatThreadState extends State<NewChatThread> {
                     ? null
                     : Padding(padding: const EdgeInsets.only(top: 8), child: toolsBuilder(context, _controller, snapshot)),
                 trailing: null,
-                onSend: (value, attachments) {
+                onSend: (value, attachments) async {
+                  if (value.isEmpty && attachments.isEmpty) {
+                    return;
+                  }
                   if (_agent != null && !_creatingNewThread) {
-                    _startNewThread();
+                    await _startNewThread();
                   }
                 },
               ),
