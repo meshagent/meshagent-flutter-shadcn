@@ -466,6 +466,33 @@ class ChatThreadController extends ChangeNotifier {
     }
   }
 
+  Future<void> clearThread(String path, MeshDocument thread, {bool useAgentMessages = false, String? participantName}) async {
+    if (useAgentMessages) {
+      await Future.wait([
+        for (final participant in getAgentParticipants(thread, participantName: participantName))
+          room.messaging.sendMessage(
+            to: participant,
+            type: _agentRoomMessageType,
+            message: {
+              "payload": {"type": _agentThreadClearType, "thread_id": path},
+            },
+          ),
+      ]);
+      return;
+    }
+
+    final normalizedParticipantName = participantName?.trim();
+    final participant = room.messaging.remoteParticipants.firstWhereOrNull((x) {
+      if (normalizedParticipantName == null || normalizedParticipantName.isEmpty) {
+        return true;
+      }
+      return x.getAttribute("name") == normalizedParticipantName;
+    });
+    if (participant != null) {
+      await room.messaging.sendMessage(to: participant, type: "clear", message: {"path": path});
+    }
+  }
+
   Future<FileAttachment> uploadFile(String path, Stream<Uint8List> dataStream, int size) async {
     final uploader = MeshagentFileUpload(room: room, path: path, dataStream: dataStream, size: size);
     uploader.addListener(notifyListeners);
@@ -2136,24 +2163,12 @@ class _ChatThreadState extends State<ChatThread> {
   }
 
   Future<void> _clearThread(ChatThreadSnapshot state) async {
-    if (state.supportsAgentMessages) {
-      await Future.wait([
-        for (final participant in controller.getAgentParticipants(widget.document, participantName: widget.agentName))
-          widget.room.messaging.sendMessage(
-            to: participant,
-            type: _agentRoomMessageType,
-            message: {
-              "payload": {"type": _agentThreadClearType, "thread_id": widget.path},
-            },
-          ),
-      ]);
-      return;
-    }
-
-    final participant = widget.room.messaging.remoteParticipants.firstWhereOrNull((x) => x.getAttribute("name") == widget.agentName);
-    if (participant != null) {
-      await widget.room.messaging.sendMessage(to: participant, type: "clear", message: {"path": widget.path});
-    }
+    await controller.clearThread(
+      widget.path,
+      widget.document,
+      useAgentMessages: state.supportsAgentMessages,
+      participantName: widget.agentName,
+    );
   }
 
   @override
