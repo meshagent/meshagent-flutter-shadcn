@@ -2284,6 +2284,7 @@ class _ChatThreadState extends State<ChatThread> {
                 threadStatus: state.threadStatus,
                 threadStatusStartedAt: state.threadStatusStartedAt,
                 threadStatusMode: state.threadStatusMode,
+                pendingItemId: state.pendingItemId,
                 onCancel: () {
                   controller.cancel(
                     widget.path,
@@ -2453,6 +2454,7 @@ class ChatThreadMessages extends StatefulWidget {
     this.threadStatus,
     this.threadStatusStartedAt,
     this.threadStatusMode,
+    this.pendingItemId,
     this.onCancel,
     this.agentName,
     this.messageHeaderBuilder,
@@ -2473,6 +2475,7 @@ class ChatThreadMessages extends StatefulWidget {
   final String? threadStatus;
   final DateTime? threadStatusStartedAt;
   final String? threadStatusMode;
+  final String? pendingItemId;
   final void Function()? onCancel;
   final List<MeshElement> messages;
   final List<Participant> online;
@@ -2572,6 +2575,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   String? get threadStatus => widget.threadStatus;
   DateTime? get threadStatusStartedAt => widget.threadStatusStartedAt;
   String? get threadStatusMode => widget.threadStatusMode;
+  String? get pendingItemId => widget.pendingItemId;
   void Function()? get onCancel => widget.onCancel;
   List<MeshElement> get messages => widget.messages;
   List<Participant> get online => widget.online;
@@ -3255,7 +3259,18 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
       return ShellLine(previous: previous, message: message, next: next);
     }
     if (message.tagName == "event") {
-      return EventLine(previous: previous, message: message, next: next, room: room, path: path, agentName: agentName, openFile: openFile);
+      return EventLine(
+        previous: previous,
+        message: message,
+        next: next,
+        room: room,
+        path: path,
+        agentName: agentName,
+        openFile: openFile,
+        pendingItemId: pendingItemId,
+        threadStatus: threadStatus,
+        threadStatusStartedAt: threadStatusStartedAt,
+      );
     }
 
     return SizedBox(
@@ -4756,6 +4771,50 @@ class _ChatThreadProcessingStatusRowState extends State<ChatThreadProcessingStat
   }
 }
 
+class _PreviewSweepOverlay extends StatefulWidget {
+  const _PreviewSweepOverlay();
+
+  @override
+  State<_PreviewSweepOverlay> createState() => _PreviewSweepOverlayState();
+}
+
+class _PreviewSweepOverlayState extends State<_PreviewSweepOverlay> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1700))..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) {
+        final centerX = -1.6 + (_controller.value * 3.2);
+        return Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            gradient: LinearGradient(
+              begin: Alignment(centerX - 0.75, 0),
+              end: Alignment(centerX + 0.75, 0),
+              colors: const <Color>[Color(0x22000000), Color(0x7A000000), Color(0x22000000)],
+              stops: const <double>[0.0, 0.5, 1.0],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 Widget defaultMessageHeaderBuilder(
   BuildContext context,
   MeshDocument thread,
@@ -4818,6 +4877,7 @@ class ChatThreadSnapshot {
     required this.supportsAgentMessages,
     required this.threadTurnId,
     required this.pendingMessages,
+    required this.pendingItemId,
   });
 
   final bool agentOnline;
@@ -4833,6 +4893,7 @@ class ChatThreadSnapshot {
   final bool supportsAgentMessages;
   final String? threadTurnId;
   final List<PendingAgentMessage> pendingMessages;
+  final String? pendingItemId;
 }
 
 class ChatThreadBuilder extends StatefulWidget {
@@ -4871,6 +4932,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
   bool supportsAgentMessages = false;
   String? threadTurnId;
   List<PendingAgentMessage> pendingMessages = const [];
+  String? pendingItemId;
 
   @override
   void initState() {
@@ -5023,16 +5085,19 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
     final textKeyCandidates = <String>{"thread.status.text.${widget.path}"};
     final modeKeyCandidates = <String>{"thread.status.mode.${widget.path}"};
     final startedAtKeyCandidates = <String>{"thread.status.started_at.${widget.path}"};
+    final pendingItemIdKeyCandidates = <String>{"thread.status.pending_item_id.${widget.path}"};
     if (widget.path.startsWith("/")) {
       keyCandidates.add("thread.status.${widget.path.substring(1)}");
       textKeyCandidates.add("thread.status.text.${widget.path.substring(1)}");
       modeKeyCandidates.add("thread.status.mode.${widget.path.substring(1)}");
       startedAtKeyCandidates.add("thread.status.started_at.${widget.path.substring(1)}");
+      pendingItemIdKeyCandidates.add("thread.status.pending_item_id.${widget.path.substring(1)}");
     } else {
       keyCandidates.add("thread.status./${widget.path}");
       textKeyCandidates.add("thread.status.text./${widget.path}");
       modeKeyCandidates.add("thread.status.mode./${widget.path}");
       startedAtKeyCandidates.add("thread.status.started_at./${widget.path}");
+      pendingItemIdKeyCandidates.add("thread.status.pending_item_id./${widget.path}");
     }
 
     final candidates = <Participant>[];
@@ -5051,6 +5116,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
     DateTime? nextStartedAt;
     String? nextTurnId;
     List<PendingAgentMessage> nextPendingMessages = const [];
+    String? nextPendingItemId;
     bool nextSupportsAgentMessages = false;
     for (final participant in candidates) {
       if (_supportsAgentMessages(participant)) {
@@ -5132,7 +5198,17 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         }
       }
 
-      if (nextStatus != null && nextMode != null && nextStartedAt != null && nextTurnId != null) {
+      if (nextPendingItemId == null) {
+        for (final key in pendingItemIdKeyCandidates) {
+          final value = participant.getAttribute(key);
+          if (value is String && value.trim().isNotEmpty) {
+            nextPendingItemId = value.trim();
+            break;
+          }
+        }
+      }
+
+      if (nextStatus != null && nextMode != null && nextStartedAt != null && nextTurnId != null && nextPendingItemId != null) {
         break;
       }
     }
@@ -5142,6 +5218,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
       nextStartedAt = null;
       nextTurnId = null;
       nextPendingMessages = const [];
+      nextPendingItemId = null;
     } else {
       nextMode ??= "busy";
     }
@@ -5161,6 +5238,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         nextMode == threadStatusMode &&
         sameStartedAt &&
         nextTurnId == threadTurnId &&
+        nextPendingItemId == pendingItemId &&
         nextSupportsAgentMessages == supportsAgentMessages &&
         samePendingMessages) {
       return;
@@ -5173,6 +5251,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
       threadTurnId = nextTurnId;
       supportsAgentMessages = nextSupportsAgentMessages;
       pendingMessages = nextPendingMessages;
+      pendingItemId = nextPendingItemId;
       return;
     }
 
@@ -5183,6 +5262,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
       threadTurnId = nextTurnId;
       supportsAgentMessages = nextSupportsAgentMessages;
       pendingMessages = nextPendingMessages;
+      pendingItemId = nextPendingItemId;
     });
   }
 
@@ -5206,6 +5286,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         supportsAgentMessages: supportsAgentMessages,
         threadTurnId: threadTurnId,
         pendingMessages: pendingMessages,
+        pendingItemId: pendingItemId,
       ),
     );
   }
@@ -5381,6 +5462,9 @@ class EventLine extends StatefulWidget {
     required this.path,
     this.agentName,
     this.openFile,
+    this.pendingItemId,
+    this.threadStatus,
+    this.threadStatusStartedAt,
   });
 
   final MeshElement? previous;
@@ -5390,6 +5474,9 @@ class EventLine extends StatefulWidget {
   final String path;
   final String? agentName;
   final FutureOr<void> Function(String path)? openFile;
+  final String? pendingItemId;
+  final String? threadStatus;
+  final DateTime? threadStatusStartedAt;
 
   @override
   State<EventLine> createState() => _EventLineState();
@@ -5616,6 +5703,7 @@ class _EventLineState extends State<EventLine> {
     required String code,
     required String languageOrFilename,
     String fallbackLanguageId = plaintextLanguageId,
+    bool showProcessingOverlay = false,
   }) {
     final normalizedCode = code.replaceAll("\r\n", "\n").trimRight();
     if (normalizedCode.isEmpty) {
@@ -5631,7 +5719,7 @@ class _EventLineState extends State<EventLine> {
     final body = resolvedLanguageId == "diff"
         ? SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: _chatBubbleContentHorizontalPadding, vertical: 8),
             child: Builder(
               builder: (context) {
                 final lines = normalizedCode.split("\n");
@@ -5663,7 +5751,7 @@ class _EventLineState extends State<EventLine> {
           )
         : SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: _chatBubbleContentHorizontalPadding, vertical: 8),
             child: SelectableText.rich(
               highlightCodeSpanWithReHighlight(
                 context: context,
@@ -5676,6 +5764,37 @@ class _EventLineState extends State<EventLine> {
             ),
           );
 
+    final previewContent = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: _chatBubbleContentHorizontalPadding, vertical: 6),
+          decoration: BoxDecoration(
+            color: previewHeaderBackground,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: SelectionArea(child: Text(header, style: headerTextStyle)),
+              ),
+              ShadIconButton.ghost(
+                width: 24,
+                height: 24,
+                iconSize: 14,
+                icon: const Icon(LucideIcons.copy, size: 14),
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: normalizedCode));
+                },
+              ),
+            ],
+          ),
+        ),
+        body,
+      ],
+    );
+
     return Container(
       width: double.infinity,
       margin: EdgeInsets.only(top: 6),
@@ -5684,34 +5803,10 @@ class _EventLineState extends State<EventLine> {
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: theme.colorScheme.border),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Stack(
         children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: previewHeaderBackground,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: SelectionArea(child: Text(header, style: headerTextStyle)),
-                ),
-                ShadIconButton.ghost(
-                  width: 24,
-                  height: 24,
-                  iconSize: 14,
-                  icon: const Icon(LucideIcons.copy, size: 14),
-                  onPressed: () {
-                    Clipboard.setData(ClipboardData(text: normalizedCode));
-                  },
-                ),
-              ],
-            ),
-          ),
-          body,
+          previewContent,
+          if (showProcessingOverlay) Positioned.fill(child: IgnorePointer(child: _PreviewSweepOverlay())),
         ],
       ),
     );
@@ -5826,8 +5921,11 @@ class _EventLineState extends State<EventLine> {
     final execPreview = _execPreviewText(kind: kind);
     final diffPreviewBlocks = kind == "diff" ? _extractDiffPreviewBlocks(headline: headline) : const <Map<String, String>>[];
     final displayText = _displayText(headline: headline);
+    final itemId = ((widget.message.getAttribute("item_id") as String?) ?? "").trim();
+    final showPreviewOverlay = itemId.isNotEmpty && widget.pendingItemId != null && widget.pendingItemId == itemId && inProgress;
     final canApprove = kind == "approval" && inProgress && approvalId.isNotEmpty;
     final canOpenPath = eventPath != null && widget.openFile != null && ((kind == "thread" && eventPath != widget.path) || kind == "file");
+    const eventTextPadding = EdgeInsets.only(left: _chatBubbleContentHorizontalPadding);
 
     Color textColor;
     if (state == "failed") {
@@ -5843,9 +5941,9 @@ class _EventLineState extends State<EventLine> {
     }
 
     return Container(
-      margin: EdgeInsets.only(top: 0, bottom: 0, right: 50, left: 5),
+      margin: EdgeInsets.only(top: 0, bottom: 0, left: 5),
       child: Padding(
-        padding: EdgeInsets.only(left: 16, right: 16),
+        padding: EdgeInsets.zero,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -5859,37 +5957,50 @@ class _EventLineState extends State<EventLine> {
                           onTap: () {
                             unawaited(Future.sync(() => widget.openFile!(eventPath)));
                           },
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  displayText,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    color: textColor,
-                                    height: 1.3,
-                                    decoration: TextDecoration.underline,
+                          child: Padding(
+                            padding: eventTextPadding,
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    displayText,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: textColor,
+                                      height: 1.3,
+                                      decoration: TextDecoration.underline,
+                                    ),
                                   ),
                                 ),
-                              ),
-                              const SizedBox(width: 6),
-                              Icon(LucideIcons.externalLink, size: 12, color: textColor),
-                            ],
+                                const SizedBox(width: 6),
+                                Icon(LucideIcons.externalLink, size: 12, color: textColor),
+                              ],
+                            ),
                           ),
                         )
-                      : SelectionArea(
-                          child: Text(
-                            displayText,
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: textColor, height: 1.3),
+                      : Padding(
+                          padding: eventTextPadding,
+                          child: SelectionArea(
+                            child: Text(
+                              displayText,
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: textColor, height: 1.3),
+                            ),
                           ),
                         ),
                 ),
               ],
             ),
-            if (kind == "exec" && eventPath != null && execPreview != null)
-              _buildThreadPreviewBlock(context, header: eventPath, code: execPreview, languageOrFilename: eventPath),
+            if (kind == "exec" && execPreview != null)
+              _buildThreadPreviewBlock(
+                context,
+                header: eventPath ?? "command",
+                code: execPreview,
+                languageOrFilename: eventPath ?? "command.sh",
+                fallbackLanguageId: "sh",
+                showProcessingOverlay: showPreviewOverlay,
+              ),
             if (diffPreviewBlocks.isNotEmpty)
               Column(
                 children: [
@@ -5900,6 +6011,7 @@ class _EventLineState extends State<EventLine> {
                       code: preview["diff"] ?? "",
                       languageOrFilename: "diff",
                       fallbackLanguageId: "diff",
+                      showProcessingOverlay: showPreviewOverlay,
                     ),
                 ],
               ),
@@ -5907,33 +6019,39 @@ class _EventLineState extends State<EventLine> {
               Container(
                 width: double.infinity,
                 margin: EdgeInsets.only(top: 0),
-                child: SelectionArea(
-                  child: Text(detailLines.join("\n"), style: TextStyle(color: textColor.withAlpha(220), height: 1.3)),
+                child: Padding(
+                  padding: eventTextPadding,
+                  child: SelectionArea(
+                    child: Text(detailLines.join("\n"), style: TextStyle(color: textColor.withAlpha(220), height: 1.3)),
+                  ),
                 ),
               ),
             if (canApprove)
               Container(
                 width: double.infinity,
                 margin: EdgeInsets.only(top: 0),
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    ShadButton(
-                      enabled: !sendingApprovalDecision,
-                      onPressed: () {
-                        _sendApprovalDecision(approvalId: approvalId, approve: true);
-                      },
-                      child: Text("Approve"),
-                    ),
-                    ShadButton.outline(
-                      enabled: !sendingApprovalDecision,
-                      onPressed: () {
-                        _sendApprovalDecision(approvalId: approvalId, approve: false);
-                      },
-                      child: Text("Reject"),
-                    ),
-                  ],
+                child: Padding(
+                  padding: eventTextPadding,
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      ShadButton(
+                        enabled: !sendingApprovalDecision,
+                        onPressed: () {
+                          _sendApprovalDecision(approvalId: approvalId, approve: true);
+                        },
+                        child: Text("Approve"),
+                      ),
+                      ShadButton.outline(
+                        enabled: !sendingApprovalDecision,
+                        onPressed: () {
+                          _sendApprovalDecision(approvalId: approvalId, approve: false);
+                        },
+                        child: Text("Reject"),
+                      ),
+                    ],
+                  ),
                 ),
               ),
           ],

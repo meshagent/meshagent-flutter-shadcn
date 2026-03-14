@@ -371,6 +371,7 @@ class _NewChatThreadState extends State<NewChatThread> {
       supportsAgentMessages: _agent?.getAttribute("supports_agent_messages") == true,
       threadTurnId: null,
       pendingMessages: const [],
+      pendingItemId: null,
     );
   }
 
