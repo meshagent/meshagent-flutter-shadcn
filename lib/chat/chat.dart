@@ -104,6 +104,10 @@ bool _supportsAgentMessages(Participant participant) {
   return participant.getAttribute("supports_agent_messages") == true;
 }
 
+String _displayParticipantName(String name) {
+  return name.split("@").first.trim();
+}
+
 String? _normalizeAgentAttachmentUrl(String path) {
   final trimmedPath = path.trim();
   if (trimmedPath.isEmpty) {
@@ -704,12 +708,14 @@ class ChatThreadController extends ChangeNotifier {
       }
 
       if (useAgentMessages) {
+        final senderName = room.localParticipant?.getAttribute("name");
         _markPendingAgentMessage(
           message: PendingAgentMessage(
             messageId: message.id,
             messageType: messageType == "steer" ? _agentTurnSteerType : _agentTurnStartType,
             text: message.text,
             attachments: List<String>.from(message.attachments),
+            senderName: senderName is String && senderName.trim().isNotEmpty ? senderName.trim() : null,
             awaitingAcceptance: true,
           ),
         );
@@ -1489,11 +1495,25 @@ class _ChatThreadInput extends State<ChatThreadInput> {
       return;
     }
 
+    final draftText = widget.controller.text;
+    final draftAttachments = widget.controller.attachmentUploads;
+    final sendFuture = widget.onSend(draftText, draftAttachments);
+    widget.controller.clear();
+
     try {
-      await widget.onSend(widget.controller.text, widget.controller.attachmentUploads);
+      await sendFuture;
     } catch (error) {
       if (!mounted) {
         return;
+      }
+
+      if (widget.controller.textFieldController.text.isEmpty && widget.controller.attachmentUploads.isEmpty) {
+        widget.controller.textFieldController.text = draftText;
+        for (final attachment in draftAttachments) {
+          if (attachment.status == UploadStatus.completed) {
+            widget.controller.attachFile(attachment.path);
+          }
+        }
       }
 
       ShadToaster.of(context).show(ShadToast.destructive(title: const Text("Unable to send message"), description: Text("$error")));
@@ -2166,7 +2186,8 @@ class _ChatThreadState extends State<ChatThread> {
     for (final message in state.pendingMessages) {
       combined[message.messageId] = message;
     }
-    return combined.values.toList();
+    final values = combined.values.toList();
+    return [...values.where((message) => !message.awaitingAcceptance), ...values.where((message) => message.awaitingAcceptance)];
   }
 
   bool _isWaitingForTurnStart({required ChatThreadSnapshot state, required List<PendingAgentMessage> pendingMessages}) {
@@ -2291,49 +2312,45 @@ class _ChatThreadState extends State<ChatThread> {
                         if (pendingMessages.isNotEmpty)
                           Padding(
                             padding: const EdgeInsets.only(bottom: 10),
-                            child: Column(
+                            child: Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
                               children: [
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 5),
-                                  child: Padding(
-                                    padding: _chatBubbleContentPadding,
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Text(
-                                          "Queued messages",
-                                          style: ShadTheme.of(context).textTheme.small.copyWith(fontWeight: FontWeight.w600),
+                                const SizedBox(width: 10),
+                                const SizedBox(width: 24, height: 24),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        "Pending messages:",
+                                        style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      for (final pending in pendingMessages)
+                                        Padding(
+                                          padding: const EdgeInsets.only(bottom: 4),
+                                          child: Text(
+                                            [
+                                              if (pending.senderName != null) "${_displayParticipantName(pending.senderName!)}:",
+                                              if (pending.text.trim().isNotEmpty) pending.text.trim(),
+                                              if (pending.attachments.isNotEmpty)
+                                                "${pending.attachments.length} attachment${pending.attachments.length == 1 ? "" : "s"}",
+                                              if (pending.awaitingAcceptance) "(waiting for acceptance)",
+                                            ].join(" "),
+                                            style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                                          ),
                                         ),
-                                        const SizedBox(height: 6),
-                                        for (final pending in pendingMessages)
-                                          Padding(
-                                            padding: const EdgeInsets.only(top: 4),
-                                            child: Text(
-                                              [
-                                                if (pending.senderName != null) "${pending.senderName}:",
-                                                if (pending.text.trim().isNotEmpty) pending.text.trim(),
-                                                if (pending.attachments.isNotEmpty)
-                                                  "${pending.attachments.length} attachment${pending.attachments.length == 1 ? "" : "s"}",
-                                                if (pending.awaitingAcceptance) "(waiting for acceptance)",
-                                              ].join(" "),
-                                              style: ShadTheme.of(context).textTheme.small,
-                                            ),
+                                      if (canInterruptActiveTurn)
+                                        Padding(
+                                          padding: const EdgeInsets.only(top: 8),
+                                          child: _ProcessingStatusText(
+                                            text: "Messages will be processed shortly. Press Esc to interrupt and send now.",
+                                            style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
                                           ),
-                                        if (canInterruptActiveTurn)
-                                          Padding(
-                                            padding: const EdgeInsets.only(top: 8),
-                                            child: Text(
-                                              "Press Esc to stop the current turn and restart with these queued messages.",
-                                              style: ShadTheme.of(
-                                                context,
-                                              ).textTheme.small.copyWith(color: ShadTheme.of(context).colorScheme.mutedForeground),
-                                            ),
-                                          ),
-                                      ],
-                                    ),
+                                        ),
+                                    ],
                                   ),
                                 ),
                               ],
@@ -4761,7 +4778,7 @@ Widget defaultMessageHeaderBuilder(
         child: Row(
           children: [
             Text(
-              name.split("@").first,
+              _displayParticipantName(name),
               style: tt.small.copyWith(color: cs.foreground),
               overflow: .ellipsis,
             ),
