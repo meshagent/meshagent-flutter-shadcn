@@ -47,6 +47,7 @@ class _NewChatThreadState extends State<NewChatThread> {
   List<ThreadToolkitBuilder> _availableTools = const [];
   String? _requestedToolProvidersFromParticipantId;
   bool _creatingNewThread = false;
+  DateTime? _creatingNewThreadStartedAt;
   String? _newThreadError;
   String? _threadPath;
   String? _pendingMessageText;
@@ -85,6 +86,7 @@ class _NewChatThreadState extends State<NewChatThread> {
       _controller = widget.controller ?? ChatThreadController(room: widget.room);
       _availableTools = const [];
       _requestedToolProvidersFromParticipantId = null;
+      _creatingNewThreadStartedAt = null;
       _onMessagingChanged();
     }
 
@@ -93,6 +95,7 @@ class _NewChatThreadState extends State<NewChatThread> {
       _threadPath = null;
       _newThreadError = null;
       _creatingNewThread = false;
+      _creatingNewThreadStartedAt = null;
       _pendingMessageText = null;
       _pendingAttachmentPaths = const [];
       _availableTools = const [];
@@ -206,6 +209,7 @@ class _NewChatThreadState extends State<NewChatThread> {
     final operationId = ++_newThreadOperationId;
     setState(() {
       _creatingNewThread = true;
+      _creatingNewThreadStartedAt = DateTime.now();
       _newThreadError = null;
       _pendingMessageText = prompt;
       _pendingAttachmentPaths = attachmentPaths;
@@ -263,6 +267,7 @@ class _NewChatThreadState extends State<NewChatThread> {
         _threadPath = path;
         _newThreadError = null;
         _creatingNewThread = false;
+        _creatingNewThreadStartedAt = null;
       });
       _notifyThreadPathChanged();
     } catch (e) {
@@ -272,6 +277,7 @@ class _NewChatThreadState extends State<NewChatThread> {
       _restoreDraft(text: prompt, attachmentPaths: attachmentPaths);
       setState(() {
         _creatingNewThread = false;
+        _creatingNewThreadStartedAt = null;
         _pendingMessageText = null;
         _pendingAttachmentPaths = const [];
         _newThreadError = "$e";
@@ -324,6 +330,7 @@ class _NewChatThreadState extends State<NewChatThread> {
 
     setState(() {
       _creatingNewThread = false;
+      _creatingNewThreadStartedAt = null;
       _newThreadError = null;
       _pendingMessageText = null;
       _pendingAttachmentPaths = const [];
@@ -341,6 +348,7 @@ class _NewChatThreadState extends State<NewChatThread> {
     setState(() {
       _threadPath = null;
       _newThreadError = null;
+      _creatingNewThreadStartedAt = null;
       _pendingMessageText = null;
       _pendingAttachmentPaths = const [];
     });
@@ -406,7 +414,8 @@ class _NewChatThreadState extends State<NewChatThread> {
                     padding: EdgeInsets.symmetric(horizontal: chatThreadStatusHorizontalPadding(constraints.maxWidth)),
                     child: ChatThreadProcessingStatusRow(
                       key: _sendingStatusKey,
-                      text: "Sending",
+                      text: "Sending message",
+                      startedAt: _creatingNewThreadStartedAt,
                       onCancel: allowCancel ? _cancelPendingNewThread : null,
                     ),
                   ),
@@ -480,6 +489,10 @@ class _NewChatThreadState extends State<NewChatThread> {
               ChatThreadInput(
                 room: widget.room,
                 controller: _controller,
+                sendEnabled: _agent != null && !_creatingNewThread,
+                sendDisabledReason: _agent == null
+                    ? "Wait for @${widget.agentName} to come online."
+                    : "Wait for the message to be accepted.",
                 placeholder: Text(_agent == null ? "Waiting for @${widget.agentName} to come online..." : "Send the first message"),
                 leading: toolsBuilder == null
                     ? null
