@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart';
 import 'package:meshagent/room_server_client.dart';
@@ -20,6 +21,7 @@ class CodePreviewController extends ChangeNotifier {
   bool _dirty = false;
   bool _saving = false;
   Object? _saveError;
+  bool _notifyScheduled = false;
 
   bool get dirty => _dirty;
   bool get saving => _saving;
@@ -43,7 +45,7 @@ class CodePreviewController extends ChangeNotifier {
     _dirty = false;
     _saving = false;
     _saveError = null;
-    notifyListeners();
+    _notifyListenersSafely();
   }
 
   void _sync(_CodePreview state) {
@@ -51,10 +53,36 @@ class CodePreviewController extends ChangeNotifier {
       return;
     }
 
+    final changed = _dirty != state.dirty || _saving != state.saving || _saveError != state.saveError;
     _dirty = state.dirty;
     _saving = state.saving;
     _saveError = state.saveError;
-    notifyListeners();
+    if (changed) {
+      _notifyListenersSafely();
+    }
+  }
+
+  void _notifyListenersSafely() {
+    final phase = SchedulerBinding.instance.schedulerPhase;
+    final shouldDefer =
+        phase == SchedulerPhase.transientCallbacks ||
+        phase == SchedulerPhase.midFrameMicrotasks ||
+        phase == SchedulerPhase.persistentCallbacks;
+
+    if (!shouldDefer) {
+      notifyListeners();
+      return;
+    }
+
+    if (_notifyScheduled) {
+      return;
+    }
+
+    _notifyScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _notifyScheduled = false;
+      notifyListeners();
+    });
   }
 }
 
