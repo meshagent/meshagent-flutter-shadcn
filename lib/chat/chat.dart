@@ -56,6 +56,8 @@ const String _agentThreadClearType = "meshagent.agent.thread.clear";
 const String _agentToolApproveType = "meshagent.agent.tool_call.approve";
 const String _agentToolRejectType = "meshagent.agent.tool_call.reject";
 const String _agentTurnStartAcceptedType = "meshagent.agent.turn.start.accepted";
+const String _agentTurnInterruptAcceptedType = "meshagent.agent.turn.interrupt.accepted";
+const String _agentTurnInterruptedType = "meshagent.agent.turn.interrupted";
 const String _agentTurnStartedType = "meshagent.agent.turn.started";
 const String _agentTurnSteerAcceptedType = "meshagent.agent.turn.steer.accepted";
 const String _agentTurnSteerRejectedType = "meshagent.agent.turn.steer.rejected";
@@ -420,6 +422,10 @@ class ChatThreadController extends ChangeNotifier {
 
     if (type == _agentTurnStartAcceptedType) {
       _markPendingAgentMessageAccepted(normalizedSourceMessageId);
+      return;
+    }
+
+    if (type == _agentTurnInterruptAcceptedType || type == _agentTurnInterruptedType) {
       return;
     }
 
@@ -1429,6 +1435,7 @@ class ChatThreadInput extends StatefulWidget {
     this.header,
     this.footer,
     this.onClear,
+    this.onInterrupt,
   });
 
   final Widget? placeholder;
@@ -1440,6 +1447,7 @@ class ChatThreadInput extends StatefulWidget {
   final Future<void> Function(String, List<FileAttachment>) onSend;
   final void Function(String, List<FileAttachment>)? onChanged;
   final void Function()? onClear;
+  final void Function()? onInterrupt;
   final ChatThreadController controller;
   final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
   final Widget? leading;
@@ -1503,6 +1511,13 @@ class _ChatThreadInput extends State<ChatThreadInput> {
       if (event is KeyDownEvent && event.character == "l" && HardwareKeyboard.instance.isControlPressed) {
         if (widget.onClear != null) {
           widget.onClear!();
+        }
+      }
+
+      if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.escape) {
+        if (widget.onInterrupt != null) {
+          widget.onInterrupt!();
+          return KeyEventResult.handled;
         }
       }
 
@@ -2162,6 +2177,10 @@ class _ChatThreadState extends State<ChatThread> {
     return pendingMessages.any((message) => message.messageType == _agentTurnStartType);
   }
 
+  bool _canInterruptActiveTurn({required ChatThreadSnapshot state, required List<PendingAgentMessage> pendingMessages}) {
+    return state.supportsAgentMessages && state.threadTurnId != null && pendingMessages.isNotEmpty;
+  }
+
   Future<void> _clearThread(ChatThreadSnapshot state) async {
     await controller.clearThread(
       widget.path,
@@ -2263,40 +2282,60 @@ class _ChatThreadState extends State<ChatThread> {
                 builder: (context, _) {
                   final pendingMessages = _combinedPendingMessages(state);
                   final waitingForTurnStart = _isWaitingForTurnStart(state: state, pendingMessages: pendingMessages);
+                  final canInterruptActiveTurn = _canInterruptActiveTurn(state: state, pendingMessages: pendingMessages);
                   return ChatThreadInputFrame(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         if (pendingMessages.isNotEmpty)
-                          Container(
-                            width: double.infinity,
-                            margin: const EdgeInsets.only(bottom: 10),
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                            decoration: BoxDecoration(
-                              color: ShadTheme.of(context).colorScheme.secondary,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: ShadTheme.of(context).colorScheme.border),
-                            ),
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Text("Queued messages", style: ShadTheme.of(context).textTheme.small.copyWith(fontWeight: FontWeight.w600)),
-                                const SizedBox(height: 6),
-                                for (final pending in pendingMessages)
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 4),
-                                    child: Text(
-                                      [
-                                        if (pending.senderName != null) "${pending.senderName}:",
-                                        if (pending.text.trim().isNotEmpty) pending.text.trim(),
-                                        if (pending.attachments.isNotEmpty)
-                                          "${pending.attachments.length} attachment${pending.attachments.length == 1 ? "" : "s"}",
-                                        if (pending.awaitingAcceptance) "(waiting for acceptance)",
-                                      ].join(" "),
-                                      style: ShadTheme.of(context).textTheme.small,
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 5),
+                                  child: Padding(
+                                    padding: _chatBubbleContentPadding,
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          "Queued messages",
+                                          style: ShadTheme.of(context).textTheme.small.copyWith(fontWeight: FontWeight.w600),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        for (final pending in pendingMessages)
+                                          Padding(
+                                            padding: const EdgeInsets.only(top: 4),
+                                            child: Text(
+                                              [
+                                                if (pending.senderName != null) "${pending.senderName}:",
+                                                if (pending.text.trim().isNotEmpty) pending.text.trim(),
+                                                if (pending.attachments.isNotEmpty)
+                                                  "${pending.attachments.length} attachment${pending.attachments.length == 1 ? "" : "s"}",
+                                                if (pending.awaitingAcceptance) "(waiting for acceptance)",
+                                              ].join(" "),
+                                              style: ShadTheme.of(context).textTheme.small,
+                                            ),
+                                          ),
+                                        if (canInterruptActiveTurn)
+                                          Padding(
+                                            padding: const EdgeInsets.only(top: 8),
+                                            child: Text(
+                                              "Press Esc to stop the current turn and restart with these queued messages.",
+                                              style: ShadTheme.of(
+                                                context,
+                                              ).textTheme.small.copyWith(color: ShadTheme.of(context).colorScheme.mutedForeground),
+                                            ),
+                                          ),
+                                      ],
                                     ),
                                   ),
+                                ),
                               ],
                             ),
                           ),
@@ -2308,6 +2347,17 @@ class _ChatThreadState extends State<ChatThread> {
                           onClear: () {
                             _clearThread(state);
                           },
+                          onInterrupt: canInterruptActiveTurn
+                              ? () {
+                                  controller.cancel(
+                                    widget.path,
+                                    widget.document,
+                                    useAgentMessages: state.supportsAgentMessages,
+                                    turnId: state.threadTurnId,
+                                    participantName: widget.agentName,
+                                  );
+                                }
+                              : null,
                           leading: controller.toolkits.isNotEmpty
                               ? null
                               : widget.toolsBuilder == null

@@ -17,6 +17,7 @@ class NewChatThread extends StatefulWidget {
     required this.room,
     required this.agentName,
     required this.builder,
+    this.controller,
     this.toolkit = "chat",
     this.tool = "new_thread",
     this.toolsBuilder,
@@ -26,6 +27,7 @@ class NewChatThread extends StatefulWidget {
   final RoomClient room;
   final String agentName;
   final NewChatThreadBuilder builder;
+  final ChatThreadController? controller;
   final String toolkit;
   final String tool;
   final NewChatThreadToolsBuilder? toolsBuilder;
@@ -39,6 +41,7 @@ class _NewChatThreadState extends State<NewChatThread> {
   static const _toolProviderProbePath = ".new-thread";
 
   late ChatThreadController _controller;
+  late bool _ownsController;
   StreamSubscription<RoomEvent>? _roomSubscription;
   RemoteParticipant? _agent;
   List<ThreadToolkitBuilder> _availableTools = const [];
@@ -58,7 +61,8 @@ class _NewChatThreadState extends State<NewChatThread> {
   @override
   void initState() {
     super.initState();
-    _controller = ChatThreadController(room: widget.room);
+    _ownsController = widget.controller == null;
+    _controller = widget.controller ?? ChatThreadController(room: widget.room);
     _roomSubscription = widget.room.listen(_onRoomEvent);
     widget.room.messaging.addListener(_onMessagingChanged);
     _onMessagingChanged();
@@ -67,15 +71,18 @@ class _NewChatThreadState extends State<NewChatThread> {
   @override
   void didUpdateWidget(covariant NewChatThread oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.room != widget.room) {
+    if (oldWidget.room != widget.room || oldWidget.controller != widget.controller) {
       _newThreadOperationId++;
       _roomSubscription?.cancel();
       _roomSubscription = widget.room.listen(_onRoomEvent);
       oldWidget.room.messaging.removeListener(_onMessagingChanged);
       widget.room.messaging.addListener(_onMessagingChanged);
 
-      _controller.dispose();
-      _controller = ChatThreadController(room: widget.room);
+      if (_ownsController) {
+        _controller.dispose();
+      }
+      _ownsController = widget.controller == null;
+      _controller = widget.controller ?? ChatThreadController(room: widget.room);
       _availableTools = const [];
       _requestedToolProvidersFromParticipantId = null;
       _onMessagingChanged();
@@ -99,7 +106,9 @@ class _NewChatThreadState extends State<NewChatThread> {
   void dispose() {
     _roomSubscription?.cancel();
     widget.room.messaging.removeListener(_onMessagingChanged);
-    _controller.dispose();
+    if (_ownsController) {
+      _controller.dispose();
+    }
     super.dispose();
   }
 
