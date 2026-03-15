@@ -5836,8 +5836,8 @@ class _EventLineState extends State<EventLine> {
     return normalized.isEmpty ? null : normalized;
   }
 
-  String? _execPreviewText({required String kind}) {
-    if (kind != "exec") {
+  String? _commandPreviewText({required String kind}) {
+    if (kind != "exec" && kind != "file") {
       return null;
     }
 
@@ -6259,7 +6259,7 @@ class _EventLineState extends State<EventLine> {
       detailLines = details.toList();
     }
     final eventPath = _eventPath();
-    final execPreview = _execPreviewText(kind: kind);
+    final commandPreview = _commandPreviewText(kind: kind);
     final eventLogs = _eventLogs();
     final diffPreviewBlocks = kind == "diff" ? _extractDiffPreviewBlocks(headline: headline) : const <Map<String, String>>[];
     final displayText = _displayText(headline: headline);
@@ -6334,12 +6334,12 @@ class _EventLineState extends State<EventLine> {
                 ),
               ],
             ),
-            if (kind == "exec" && execPreview != null)
+            if ((kind == "exec" || kind == "file") && commandPreview != null)
               _buildThreadPreviewBlock(
                 context,
-                header: eventPath ?? "command",
-                code: execPreview,
-                languageOrFilename: eventPath ?? "command.sh",
+                header: "command",
+                code: commandPreview,
+                languageOrFilename: "command.sh",
                 fallbackLanguageId: "sh",
                 showProcessingOverlay: showPreviewOverlay,
                 logs: eventLogs,
@@ -6358,7 +6358,8 @@ class _EventLineState extends State<EventLine> {
                     ),
                 ],
               ),
-            if (eventLogs.isNotEmpty && !(kind == "exec" && execPreview != null)) _buildEventLogsBlock(context, logs: eventLogs),
+            if (eventLogs.isNotEmpty && !((kind == "exec" || kind == "file") && commandPreview != null))
+              _buildEventLogsBlock(context, logs: eventLogs),
             if (detailLines.isNotEmpty && (kind != "diff" || diffPreviewBlocks.isEmpty))
               Container(
                 width: double.infinity,
