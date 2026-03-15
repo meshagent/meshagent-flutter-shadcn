@@ -139,6 +139,20 @@ class OutboundMessageStatusQueue extends ChangeNotifier implements OutboundStatu
     notifyListeners();
   }
 
+  void clear(String id) {
+    if (_entries.remove(id) == null) {
+      return;
+    }
+
+    if (_lastSentEntry?.messageId == id) {
+      _lastSentEntry = null;
+    }
+
+    if (!_disposed) {
+      notifyListeners();
+    }
+  }
+
   @override
   void dispose() {
     _disposed = true;

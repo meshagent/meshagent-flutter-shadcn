@@ -154,6 +154,7 @@ class PendingAgentMessage {
     required this.attachments,
     this.senderName,
     this.awaitingAcceptance = false,
+    this.awaitingOnline = false,
   });
 
   final String messageId;
@@ -163,6 +164,7 @@ class PendingAgentMessage {
   final List<String> attachments;
   final String? senderName;
   final bool awaitingAcceptance;
+  final bool awaitingOnline;
 
   factory PendingAgentMessage.fromQueueJson(Map<String, dynamic> json) {
     final content = json["content"];
@@ -199,7 +201,31 @@ class PendingAgentMessage {
       text: textParts.join("\n\n"),
       attachments: attachments,
       senderName: senderName is String && senderName.trim().isNotEmpty ? senderName.trim() : null,
+      awaitingOnline: false,
     );
+  }
+}
+
+class ChatSendCancelledException implements Exception {
+  const ChatSendCancelledException();
+
+  @override
+  String toString() => "send cancelled";
+}
+
+class _PendingSendWait {
+  _PendingSendWait({required this.messageId, required this.threadPath});
+
+  final String messageId;
+  final String threadPath;
+  final Completer<void> cancelled = Completer<void>();
+  VoidCallback? detach;
+
+  void cancel() {
+    if (!cancelled.isCompleted) {
+      cancelled.complete();
+    }
+    detach?.call();
   }
 }
 
@@ -331,6 +357,7 @@ class ChatThreadController extends ChangeNotifier {
   final List<FileAttachment> _attachmentUploads = [];
   final OutboundMessageStatusQueue outboundStatus = OutboundMessageStatusQueue();
   final LinkedHashMap<String, PendingAgentMessage> _pendingAgentMessages = LinkedHashMap<String, PendingAgentMessage>();
+  final LinkedHashMap<String, _PendingSendWait> _pendingSendWaits = LinkedHashMap<String, _PendingSendWait>();
 
   bool _listening = false;
 
@@ -412,6 +439,30 @@ class ChatThreadController extends ChangeNotifier {
       attachments: existing.attachments,
       senderName: existing.senderName,
       awaitingAcceptance: false,
+      awaitingOnline: false,
+    );
+    notifyListeners();
+  }
+
+  void _setPendingAgentMessageAwaitingOnline(String? messageId, bool awaitingOnline) {
+    if (messageId == null || messageId.trim().isEmpty) {
+      return;
+    }
+
+    final existing = _pendingAgentMessages[messageId];
+    if (existing == null || existing.awaitingOnline == awaitingOnline) {
+      return;
+    }
+
+    _pendingAgentMessages[messageId] = PendingAgentMessage(
+      messageId: existing.messageId,
+      messageType: existing.messageType,
+      threadPath: existing.threadPath,
+      text: existing.text,
+      attachments: existing.attachments,
+      senderName: existing.senderName,
+      awaitingAcceptance: existing.awaitingAcceptance,
+      awaitingOnline: awaitingOnline,
     );
     notifyListeners();
   }
@@ -474,7 +525,96 @@ class ChatThreadController extends ChangeNotifier {
     }
   }
 
+  List<RemoteParticipant> _matchingRecipients({
+    required MeshDocument thread,
+    required bool useAgentMessages,
+    required String? participantName,
+  }) {
+    final normalizedParticipantName = participantName?.trim();
+    if (useAgentMessages) {
+      return getAgentParticipants(thread, participantName: normalizedParticipantName).toList();
+    }
+
+    return getOnlineParticipants(thread).whereType<RemoteParticipant>().where((participant) {
+      if (normalizedParticipantName == null || normalizedParticipantName.isEmpty) {
+        return true;
+      }
+      return participant.getAttribute("name") == normalizedParticipantName;
+    }).toList();
+  }
+
+  bool hasPendingSendWait(String threadPath) {
+    return _pendingSendWaits.values.any((wait) => wait.threadPath == threadPath);
+  }
+
+  void cancelPendingSend(String threadPath) {
+    final waits = _pendingSendWaits.values.where((wait) => wait.threadPath == threadPath).toList();
+    for (final wait in waits) {
+      wait.cancel();
+    }
+  }
+
+  Future<List<RemoteParticipant>> _waitForRecipients({
+    required MeshDocument thread,
+    required String path,
+    required String messageId,
+    required bool useAgentMessages,
+    required String? participantName,
+  }) async {
+    final existing = _pendingSendWaits.remove(messageId);
+    existing?.cancel();
+
+    final wait = _PendingSendWait(messageId: messageId, threadPath: path);
+    _pendingSendWaits[messageId] = wait;
+    _setPendingAgentMessageAwaitingOnline(messageId, true);
+    notifyListeners();
+
+    final completer = Completer<List<RemoteParticipant>>();
+
+    void listener() {
+      if (completer.isCompleted) {
+        return;
+      }
+
+      final recipients = _matchingRecipients(thread: thread, useAgentMessages: useAgentMessages, participantName: participantName);
+      if (recipients.isNotEmpty) {
+        completer.complete(recipients);
+      }
+    }
+
+    void finish() {
+      final removed = _pendingSendWaits.remove(messageId);
+      if (identical(removed, wait)) {
+        room.messaging.removeListener(listener);
+        wait.detach = null;
+      }
+      _setPendingAgentMessageAwaitingOnline(messageId, false);
+      notifyListeners();
+    }
+
+    wait.detach = () {
+      room.messaging.removeListener(listener);
+      wait.detach = null;
+    };
+    room.messaging.addListener(listener);
+    listener();
+
+    try {
+      return await Future.any([
+        completer.future,
+        wait.cancelled.future.then<List<RemoteParticipant>>((_) => throw const ChatSendCancelledException()),
+      ]);
+    } finally {
+      finish();
+    }
+  }
+
   Future<void> cancel(String path, MeshDocument thread, {bool useAgentMessages = false, String? turnId, String? participantName}) async {
+    if (hasPendingSendWait(path)) {
+      cancelPendingSend(path);
+      return;
+    }
+
     if (useAgentMessages) {
       if (turnId == null || turnId.trim().isEmpty) {
         return;
@@ -705,38 +845,7 @@ class ChatThreadController extends ChangeNotifier {
         insertMessage(thread: thread, message: message);
       }
 
-      final List<Future<void>> sentMessages = [];
-      if (notifyOnSend) {
-        final normalizedParticipantName = remoteStoreParticipantName?.trim();
-        final participants = useAgentMessages
-            ? getAgentParticipants(thread, participantName: normalizedParticipantName).toList()
-            : getOnlineParticipants(thread).whereType<RemoteParticipant>().where((participant) {
-                if (normalizedParticipantName == null || normalizedParticipantName.isEmpty) {
-                  return true;
-                }
-                return participant.getAttribute("name") == normalizedParticipantName;
-              }).toList();
-        if (participants.isEmpty) {
-          throw StateError("no matching recipients are available for '$path'");
-        }
-        for (final participant in participants) {
-          final participantName = participant.getAttribute("name");
-          final shouldStoreRemotely =
-              remoteStoreParticipantName != null && participantName is String && participantName == remoteStoreParticipantName;
-          sentMessages.add(
-            sendMessageToParticipant(
-              participant: participant,
-              path: path,
-              message: message,
-              messageType: messageType,
-              useAgentMessages: useAgentMessages,
-              turnId: turnId,
-              store: shouldStoreRemotely,
-            ),
-          );
-        }
-      }
-
+      final normalizedParticipantName = remoteStoreParticipantName?.trim();
       if (useAgentMessages) {
         final senderName = room.localParticipant?.getAttribute("name");
         _markPendingAgentMessage(
@@ -748,6 +857,7 @@ class ChatThreadController extends ChangeNotifier {
             attachments: List<String>.from(message.attachments),
             senderName: senderName is String && senderName.trim().isNotEmpty ? senderName.trim() : null,
             awaitingAcceptance: true,
+            awaitingOnline: false,
           ),
         );
       }
@@ -755,10 +865,55 @@ class ChatThreadController extends ChangeNotifier {
       outboundStatus.markSending(message.id);
 
       try {
+        final List<Future<void>> sentMessages = [];
+        if (notifyOnSend) {
+          var participants = _matchingRecipients(
+            thread: thread,
+            useAgentMessages: useAgentMessages,
+            participantName: normalizedParticipantName,
+          );
+          if (participants.isEmpty) {
+            final shouldWaitForRecipient = useAgentMessages || (normalizedParticipantName != null && normalizedParticipantName.isNotEmpty);
+            if (!shouldWaitForRecipient) {
+              throw StateError("no matching recipients are available for '$path'");
+            }
+            participants = await _waitForRecipients(
+              thread: thread,
+              path: path,
+              messageId: message.id,
+              useAgentMessages: useAgentMessages,
+              participantName: normalizedParticipantName,
+            );
+          }
+
+          for (final participant in participants) {
+            final participantName = participant.getAttribute("name");
+            final shouldStoreRemotely =
+                remoteStoreParticipantName != null && participantName is String && participantName == remoteStoreParticipantName;
+            sentMessages.add(
+              sendMessageToParticipant(
+                participant: participant,
+                path: path,
+                message: message,
+                messageType: messageType,
+                useAgentMessages: useAgentMessages,
+                turnId: turnId,
+                store: shouldStoreRemotely,
+              ),
+            );
+          }
+        }
+
         await Future.wait(sentMessages);
         outboundStatus.markDelivered(message.id);
         onMessageSent?.call(message);
         clear();
+      } on ChatSendCancelledException {
+        outboundStatus.clear(message.id);
+        if (useAgentMessages) {
+          _clearPendingAgentMessage(message.id);
+        }
+        rethrow;
       } catch (error, stackTrace) {
         outboundStatus.markFailed(message.id, error, stackTrace);
         if (useAgentMessages) {
@@ -1473,6 +1628,8 @@ class ChatThreadInput extends StatefulWidget {
     this.footer,
     this.onClear,
     this.onInterrupt,
+    this.onCancelSend,
+    this.sendPendingText,
   });
 
   final Widget? placeholder;
@@ -1485,6 +1642,8 @@ class ChatThreadInput extends StatefulWidget {
   final void Function(String, List<FileAttachment>)? onChanged;
   final void Function()? onClear;
   final void Function()? onInterrupt;
+  final void Function()? onCancelSend;
+  final String? sendPendingText;
   final ChatThreadController controller;
   final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
   final Widget? leading;
@@ -1498,6 +1657,7 @@ class ChatThreadInput extends StatefulWidget {
 class _ChatThreadInput extends State<ChatThreadInput> {
   bool showSendButton = false;
   bool allAttachmentsUploaded = true;
+  bool sending = false;
 
   String text = "";
   List<FileAttachment> attachments = [];
@@ -1521,6 +1681,10 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   }
 
   Future<void> _handleSend() async {
+    if (sending) {
+      return;
+    }
+
     if (!widget.sendEnabled) {
       _showSendDisabledToast();
       return;
@@ -1528,11 +1692,27 @@ class _ChatThreadInput extends State<ChatThreadInput> {
 
     final draftText = widget.controller.text;
     final draftAttachments = widget.controller.attachmentUploads;
+    setState(() {
+      sending = true;
+    });
     final sendFuture = widget.onSend(draftText, draftAttachments);
     widget.controller.clear();
 
     try {
       await sendFuture;
+    } on ChatSendCancelledException {
+      if (!mounted) {
+        return;
+      }
+
+      if (widget.controller.textFieldController.text.isEmpty && widget.controller.attachmentUploads.isEmpty) {
+        widget.controller.textFieldController.text = draftText;
+        for (final attachment in draftAttachments) {
+          if (attachment.status == UploadStatus.completed) {
+            widget.controller.attachFile(attachment.path);
+          }
+        }
+      }
     } catch (error) {
       if (!mounted) {
         return;
@@ -1548,6 +1728,12 @@ class _ChatThreadInput extends State<ChatThreadInput> {
       }
 
       ShadToaster.of(context).show(ShadToast.destructive(title: const Text("Unable to send message"), description: Text("$error")));
+    } finally {
+      if (mounted) {
+        setState(() {
+          sending = false;
+        });
+      }
     }
   }
 
@@ -1716,9 +1902,46 @@ class _ChatThreadInput extends State<ChatThreadInput> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final cancelSendButton = ShadTooltip(
+      waitDuration: const Duration(seconds: 1),
+      builder: (context) =>
+          Text(widget.sendPendingText?.trim().isNotEmpty == true ? widget.sendPendingText!.trim() : "Waiting for agent to come online."),
+      child: ShadGestureDetector(
+        cursor: widget.onCancelSend == null ? SystemMouseCursors.basic : SystemMouseCursors.click,
+        onTapDown: widget.onCancelSend == null
+            ? null
+            : (_) {
+                widget.onCancelSend!();
+              },
+        child: Opacity(
+          opacity: widget.onCancelSend == null ? 0.55 : 1,
+          child: SizedBox(
+            width: 32,
+            height: 32,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                const Positioned.fill(
+                  child: Padding(padding: EdgeInsets.all(1), child: _CyclingProgressIndicator(strokeWidth: 2)),
+                ),
+                Container(
+                  width: 18,
+                  height: 18,
+                  decoration: BoxDecoration(shape: BoxShape.circle, color: theme.colorScheme.background),
+                  child: Icon(LucideIcons.x, color: theme.colorScheme.foreground, size: 16),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
     final trailer =
         widget.trailing ??
-        (showSendButton && allAttachmentsUploaded
+        (sending
+            ? cancelSendButton
+            : showSendButton && allAttachmentsUploaded
             ? ShadTooltip(
                 waitDuration: Duration(seconds: 1),
                 builder: (context) => Text(
@@ -2336,6 +2559,7 @@ class _ChatThreadState extends State<ChatThread> {
                   final pendingMessages = _combinedPendingMessages(state);
                   final waitingForTurnStart = _isWaitingForTurnStart(state: state, pendingMessages: pendingMessages);
                   final canInterruptActiveTurn = _canInterruptActiveTurn(state: state, pendingMessages: pendingMessages);
+                  final waitingForOnlineMessage = pendingMessages.firstWhereOrNull((message) => message.awaitingOnline);
                   return ChatThreadInputFrame(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
@@ -2369,7 +2593,10 @@ class _ChatThreadState extends State<ChatThread> {
                                               if (pending.text.trim().isNotEmpty) pending.text.trim(),
                                               if (pending.attachments.isNotEmpty)
                                                 "${pending.attachments.length} attachment${pending.attachments.length == 1 ? "" : "s"}",
-                                              if (pending.awaitingAcceptance) "(waiting for acceptance)",
+                                              if (pending.awaitingOnline)
+                                                "(waiting for @${_displayParticipantName(widget.agentName ?? "agent")} to come online)"
+                                              else if (pending.awaitingAcceptance)
+                                                "(waiting for acceptance)",
                                             ].join(" "),
                                             style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
                                           ),
@@ -2407,6 +2634,14 @@ class _ChatThreadState extends State<ChatThread> {
                                   );
                                 }
                               : null,
+                          onCancelSend: controller.hasPendingSendWait(widget.path)
+                              ? () {
+                                  controller.cancelPendingSend(widget.path);
+                                }
+                              : null,
+                          sendPendingText: waitingForOnlineMessage == null
+                              ? null
+                              : "Waiting for ${_displayParticipantName(widget.agentName ?? "agent")} to come online.",
                           leading: controller.toolkits.isNotEmpty
                               ? null
                               : widget.toolsBuilder == null

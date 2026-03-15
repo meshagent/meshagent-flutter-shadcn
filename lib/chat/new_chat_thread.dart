@@ -47,12 +47,15 @@ class _NewChatThreadState extends State<NewChatThread> {
   List<ThreadToolkitBuilder> _availableTools = const [];
   String? _requestedToolProvidersFromParticipantId;
   bool _creatingNewThread = false;
+  bool _waitingForAgent = false;
   DateTime? _creatingNewThreadStartedAt;
   String? _newThreadError;
   String? _threadPath;
   String? _pendingMessageText;
   List<String> _pendingAttachmentPaths = const [];
   int _newThreadOperationId = 0;
+  Completer<RemoteParticipant>? _waitForAgentCompleter;
+  Completer<void>? _waitForAgentReadyCompleter;
   final GlobalKey _sendingStatusKey = GlobalKey();
 
   void _notifyThreadPathChanged() {
@@ -87,6 +90,7 @@ class _NewChatThreadState extends State<NewChatThread> {
       _availableTools = const [];
       _requestedToolProvidersFromParticipantId = null;
       _creatingNewThreadStartedAt = null;
+      _cancelWaitingForAgent();
       _onMessagingChanged();
     }
 
@@ -95,11 +99,13 @@ class _NewChatThreadState extends State<NewChatThread> {
       _threadPath = null;
       _newThreadError = null;
       _creatingNewThread = false;
+      _waitingForAgent = false;
       _creatingNewThreadStartedAt = null;
       _pendingMessageText = null;
       _pendingAttachmentPaths = const [];
       _availableTools = const [];
       _requestedToolProvidersFromParticipantId = null;
+      _cancelWaitingForAgent();
       _controller.clear();
       _onMessagingChanged();
     }
@@ -109,6 +115,7 @@ class _NewChatThreadState extends State<NewChatThread> {
   void dispose() {
     _roomSubscription?.cancel();
     widget.room.messaging.removeListener(_onMessagingChanged);
+    _cancelWaitingForAgent();
     if (_ownsController) {
       _controller.dispose();
     }
@@ -141,6 +148,7 @@ class _NewChatThreadState extends State<NewChatThread> {
     setState(() {
       _availableTools = nextTools;
     });
+    _signalWaitingForAgentReady();
   }
 
   Future<void> _requestToolProviders() async {
@@ -168,6 +176,7 @@ class _NewChatThreadState extends State<NewChatThread> {
     );
     if (nextAgent == _agent) {
       unawaited(_requestToolProviders());
+      _signalWaitingForAgentReady();
       return;
     }
 
@@ -179,7 +188,77 @@ class _NewChatThreadState extends State<NewChatThread> {
       }
     });
 
+    final waitCompleter = _waitForAgentCompleter;
+    if (nextAgent != null && waitCompleter != null && !waitCompleter.isCompleted) {
+      waitCompleter.complete(nextAgent);
+      _waitForAgentCompleter = null;
+    }
+
     unawaited(_requestToolProviders());
+    _signalWaitingForAgentReady();
+  }
+
+  Future<RemoteParticipant> _waitForAgentOnline() {
+    final agent = _agent;
+    if (agent != null) {
+      return Future.value(agent);
+    }
+
+    final existing = _waitForAgentCompleter;
+    if (existing != null) {
+      return existing.future;
+    }
+
+    final completer = Completer<RemoteParticipant>();
+    _waitForAgentCompleter = completer;
+    return completer.future;
+  }
+
+  void _cancelWaitingForAgent() {
+    final completer = _waitForAgentCompleter;
+    _waitForAgentCompleter = null;
+    if (completer != null && !completer.isCompleted) {
+      completer.completeError(const ChatSendCancelledException());
+    }
+
+    final readinessCompleter = _waitForAgentReadyCompleter;
+    _waitForAgentReadyCompleter = null;
+    if (readinessCompleter != null && !readinessCompleter.isCompleted) {
+      readinessCompleter.completeError(const ChatSendCancelledException());
+    }
+  }
+
+  void _signalWaitingForAgentReady() {
+    final completer = _waitForAgentReadyCompleter;
+    if (completer != null && !completer.isCompleted) {
+      completer.complete();
+    }
+  }
+
+  Future<void> _waitForToolkitAvailable({required String toolkitName}) async {
+    while (true) {
+      final agent = _agent ?? await _waitForAgentOnline();
+      await _requestToolProviders();
+
+      try {
+        final toolkits = await widget.room.agents.listToolkits(participantId: agent.id, timeout: 1000);
+        if (toolkits.any((toolkit) => toolkit.name == toolkitName)) {
+          return;
+        }
+      } catch (_) {}
+
+      final completer = Completer<void>();
+      _waitForAgentReadyCompleter = completer;
+      try {
+        await Future.any([completer.future, Future<void>.delayed(const Duration(milliseconds: 250))]);
+      } on ChatSendCancelledException {
+        rethrow;
+      } finally {
+        if (identical(_waitForAgentReadyCompleter, completer)) {
+          _waitForAgentReadyCompleter = null;
+        }
+      }
+    }
   }
 
   Future<void> _waitForThreadCreated({required String path}) async {
@@ -198,7 +277,7 @@ class _NewChatThreadState extends State<NewChatThread> {
     final attachments = _controller.attachmentUploads;
     final attachmentPaths = [for (final attachment in attachments) attachment.path];
     final hasPendingUploads = attachments.any((attachment) => attachment.status != UploadStatus.completed);
-    if (_creatingNewThread || _agent == null || hasPendingUploads) {
+    if (_creatingNewThread || _waitingForAgent || hasPendingUploads) {
       return;
     }
     if (prompt.isEmpty && attachments.isEmpty) {
@@ -207,9 +286,11 @@ class _NewChatThreadState extends State<NewChatThread> {
 
     FocusManager.instance.primaryFocus?.unfocus();
     final operationId = ++_newThreadOperationId;
+    final waitingForAgent = _agent == null;
     setState(() {
-      _creatingNewThread = true;
-      _creatingNewThreadStartedAt = DateTime.now();
+      _creatingNewThread = !waitingForAgent;
+      _waitingForAgent = waitingForAgent;
+      _creatingNewThreadStartedAt = waitingForAgent ? null : DateTime.now();
       _newThreadError = null;
       _pendingMessageText = prompt;
       _pendingAttachmentPaths = attachmentPaths;
@@ -217,6 +298,21 @@ class _NewChatThreadState extends State<NewChatThread> {
     _controller.clear();
 
     try {
+      final agent = _agent ?? await _waitForAgentOnline();
+      await _waitForToolkitAvailable(toolkitName: widget.toolkit);
+      final readyAgent = _agent ?? agent;
+      if (!mounted || operationId != _newThreadOperationId) {
+        return;
+      }
+
+      if (_waitingForAgent) {
+        setState(() {
+          _waitingForAgent = false;
+          _creatingNewThread = true;
+          _creatingNewThreadStartedAt = DateTime.now();
+        });
+      }
+
       final tools = <Map<String, dynamic>>[];
       for (final toolkit in _controller.toolkits) {
         tools.add((await toolkit.build(widget.room)).toJson());
@@ -225,7 +321,7 @@ class _NewChatThreadState extends State<NewChatThread> {
       final result = await widget.room.agents.invokeTool(
         toolkit: widget.toolkit,
         tool: widget.tool,
-        participantId: _agent!.id,
+        participantId: readyAgent.id,
         input: ToolContentInput(
           JsonContent(
             json: {
@@ -267,9 +363,23 @@ class _NewChatThreadState extends State<NewChatThread> {
         _threadPath = path;
         _newThreadError = null;
         _creatingNewThread = false;
+        _waitingForAgent = false;
         _creatingNewThreadStartedAt = null;
       });
       _notifyThreadPathChanged();
+    } on ChatSendCancelledException {
+      if (!mounted || operationId != _newThreadOperationId) {
+        return;
+      }
+      _restoreDraft(text: prompt, attachmentPaths: attachmentPaths);
+      setState(() {
+        _creatingNewThread = false;
+        _waitingForAgent = false;
+        _creatingNewThreadStartedAt = null;
+        _pendingMessageText = null;
+        _pendingAttachmentPaths = const [];
+        _newThreadError = null;
+      });
     } catch (e) {
       if (!mounted || operationId != _newThreadOperationId) {
         return;
@@ -277,6 +387,7 @@ class _NewChatThreadState extends State<NewChatThread> {
       _restoreDraft(text: prompt, attachmentPaths: attachmentPaths);
       setState(() {
         _creatingNewThread = false;
+        _waitingForAgent = false;
         _creatingNewThreadStartedAt = null;
         _pendingMessageText = null;
         _pendingAttachmentPaths = const [];
@@ -319,17 +430,19 @@ class _NewChatThreadState extends State<NewChatThread> {
   }
 
   void _cancelPendingNewThread() {
-    if (!_creatingNewThread) {
+    if (!_creatingNewThread && !_waitingForAgent) {
       return;
     }
 
     _newThreadOperationId++;
+    _cancelWaitingForAgent();
     final pendingText = _pendingMessageText ?? "";
     final pendingAttachmentPaths = [for (final path in _pendingAttachmentPaths) path];
     _restoreDraft(text: pendingText, attachmentPaths: pendingAttachmentPaths);
 
     setState(() {
       _creatingNewThread = false;
+      _waitingForAgent = false;
       _creatingNewThreadStartedAt = null;
       _newThreadError = null;
       _pendingMessageText = null;
@@ -348,6 +461,7 @@ class _NewChatThreadState extends State<NewChatThread> {
     setState(() {
       _threadPath = null;
       _newThreadError = null;
+      _waitingForAgent = false;
       _creatingNewThreadStartedAt = null;
       _pendingMessageText = null;
       _pendingAttachmentPaths = const [];
@@ -490,11 +604,13 @@ class _NewChatThreadState extends State<NewChatThread> {
               ChatThreadInput(
                 room: widget.room,
                 controller: _controller,
-                sendEnabled: _agent != null && !_creatingNewThread,
-                sendDisabledReason: _agent == null
-                    ? "Wait for @${widget.agentName} to come online."
+                sendEnabled: !_creatingNewThread && !_waitingForAgent,
+                sendDisabledReason: _waitingForAgent
+                    ? "Waiting for ${widget.agentName} to be ready."
                     : "Wait for the message to be accepted.",
-                placeholder: Text(_agent == null ? "Waiting for @${widget.agentName} to come online..." : "Send the first message"),
+                sendPendingText: _waitingForAgent ? "Waiting for ${widget.agentName} to be ready." : null,
+                onCancelSend: _waitingForAgent ? _cancelPendingNewThread : null,
+                placeholder: const Text("Type a message"),
                 leading: toolsBuilder == null
                     ? null
                     : _controller.toolkits.isNotEmpty
@@ -510,7 +626,7 @@ class _NewChatThreadState extends State<NewChatThread> {
                   if (value.isEmpty && attachments.isEmpty) {
                     return;
                   }
-                  if (_agent != null && !_creatingNewThread) {
+                  if (!_creatingNewThread && !_waitingForAgent) {
                     await _startNewThread();
                   }
                 },
