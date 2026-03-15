@@ -6255,10 +6255,7 @@ class _EventLineState extends State<EventLine> {
     }
     final details = _detailLines(detailsAttr);
     var detailLines = details;
-    if (kind == "web" && details.isNotEmpty) {
-      headline = details.first;
-      detailLines = details.skip(1).toList();
-    } else if (kind == "exec") {
+    if (kind == "exec") {
       detailLines = details.toList();
     }
     final eventPath = _eventPath();
