@@ -31,6 +31,7 @@ import 'package:meshagent_flutter/meshagent_flutter.dart';
 import 'package:meshagent_flutter_shadcn/file_preview/file_preview.dart';
 import 'package:meshagent_flutter_shadcn/file_preview/image.dart';
 
+import 'ansi.dart';
 import 'outbound_delivery_status.dart';
 import 'folder_drop.dart';
 
@@ -148,6 +149,7 @@ class PendingAgentMessage {
   const PendingAgentMessage({
     required this.messageId,
     required this.messageType,
+    required this.threadPath,
     required this.text,
     required this.attachments,
     this.senderName,
@@ -156,6 +158,7 @@ class PendingAgentMessage {
 
   final String messageId;
   final String messageType;
+  final String threadPath;
   final String text;
   final List<String> attachments;
   final String? senderName;
@@ -188,9 +191,11 @@ class PendingAgentMessage {
     final senderName = json["sender_name"];
     final messageType = json["message_type"];
     final messageId = json["message_id"];
+    final threadPath = json["thread_id"];
     return PendingAgentMessage(
       messageId: messageId is String ? messageId : const Uuid().v4(),
       messageType: messageType is String ? messageType : _agentTurnSteerType,
+      threadPath: threadPath is String ? threadPath : "",
       text: textParts.join("\n\n"),
       attachments: attachments,
       senderName: senderName is String && senderName.trim().isNotEmpty ? senderName.trim() : null,
@@ -356,6 +361,10 @@ class ChatThreadController extends ChangeNotifier {
 
   List<PendingAgentMessage> get pendingAgentMessages => List<PendingAgentMessage>.unmodifiable(_pendingAgentMessages.values);
 
+  List<PendingAgentMessage> pendingAgentMessagesForPath(String path) {
+    return List<PendingAgentMessage>.unmodifiable(_pendingAgentMessages.values.where((message) => message.threadPath == path));
+  }
+
   Iterable<RemoteParticipant> getAgentParticipants(MeshDocument document, {String? participantName}) sync* {
     final normalizedParticipantName = participantName?.trim();
     for (final participant in getOnlineParticipants(document).whereType<RemoteParticipant>()) {
@@ -398,6 +407,7 @@ class ChatThreadController extends ChangeNotifier {
     _pendingAgentMessages[messageId] = PendingAgentMessage(
       messageId: existing.messageId,
       messageType: existing.messageType,
+      threadPath: existing.threadPath,
       text: existing.text,
       attachments: existing.attachments,
       senderName: existing.senderName,
@@ -415,6 +425,24 @@ class ChatThreadController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void clearPendingAgentMessagesForThread(String threadPath) {
+    if (threadPath.trim().isEmpty || _pendingAgentMessages.isEmpty) {
+      return;
+    }
+
+    var changed = false;
+    _pendingAgentMessages.removeWhere((_, message) {
+      if (message.threadPath != threadPath) {
+        return false;
+      }
+      changed = true;
+      return true;
+    });
+    if (changed) {
+      notifyListeners();
+    }
+  }
+
   void handleAgentMessagePayload(Map<String, dynamic> payload) {
     final type = payload["type"];
     if (type is! String) {
@@ -423,6 +451,8 @@ class ChatThreadController extends ChangeNotifier {
 
     final sourceMessageId = payload["source_message_id"];
     final normalizedSourceMessageId = sourceMessageId is String ? sourceMessageId : null;
+    final threadPath = payload["thread_id"];
+    final normalizedThreadPath = threadPath is String ? threadPath.trim() : "";
 
     if (type == _agentTurnStartAcceptedType) {
       _markPendingAgentMessageAccepted(normalizedSourceMessageId);
@@ -440,7 +470,7 @@ class ChatThreadController extends ChangeNotifier {
     }
 
     if (type == _agentTurnEndedType || type == _agentThreadClearedType) {
-      clearPendingAgentMessages();
+      clearPendingAgentMessagesForThread(normalizedThreadPath);
     }
   }
 
@@ -713,6 +743,7 @@ class ChatThreadController extends ChangeNotifier {
           message: PendingAgentMessage(
             messageId: message.id,
             messageType: messageType == "steer" ? _agentTurnSteerType : _agentTurnStartType,
+            threadPath: path,
             text: message.text,
             attachments: List<String>.from(message.attachments),
             senderName: senderName is String && senderName.trim().isNotEmpty ? senderName.trim() : null,
@@ -2180,7 +2211,7 @@ class _ChatThreadState extends State<ChatThread> {
 
   List<PendingAgentMessage> _combinedPendingMessages(ChatThreadSnapshot state) {
     final combined = <String, PendingAgentMessage>{};
-    for (final message in controller.pendingAgentMessages) {
+    for (final message in controller.pendingAgentMessagesForPath(widget.path)) {
       combined[message.messageId] = message;
     }
     for (final message in state.pendingMessages) {
@@ -2389,7 +2420,7 @@ class _ChatThreadState extends State<ChatThread> {
                           trailing: null,
                           room: widget.room,
                           onSend: (value, attachments) async {
-                            final messageType = state.threadStatusMode == "steerable" ? "steer" : "chat";
+                            final messageType = state.threadStatusMode == "steerable" && state.threadTurnId != null ? "steer" : "chat";
                             final normalizedAgentName = widget.agentName?.trim();
                             final hasConfiguredAgent = normalizedAgentName != null && normalizedAgentName.isNotEmpty;
                             await controller.send(
@@ -4798,13 +4829,13 @@ class _PreviewSweepOverlayState extends State<_PreviewSweepOverlay> with SingleT
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) {
-        final centerX = -1.6 + (_controller.value * 3.2);
+        final centerX = -1.4 + (_controller.value * 2.8);
         return Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(8),
             gradient: LinearGradient(
-              begin: Alignment(centerX - 0.75, 0),
-              end: Alignment(centerX + 0.75, 0),
+              begin: Alignment(centerX - 0.45, 0),
+              end: Alignment(centerX + 0.45, 0),
               colors: const <Color>[Color(0x22000000), Color(0x7A000000), Color(0x22000000)],
               stops: const <double>[0.0, 0.5, 1.0],
             ),
@@ -5583,6 +5614,35 @@ class _EventLineState extends State<EventLine> {
     return value;
   }
 
+  List<({String source, String text})> _eventLogs() {
+    final logs = <({String source, String text})>[];
+
+    for (final child in widget.message.getChildren().whereType<MeshElement>()) {
+      if (child.tagName != "log") {
+        continue;
+      }
+
+      final source = child.getAttribute("source");
+      final text = child.getAttribute("text");
+      if (source is! String || text is! String) {
+        continue;
+      }
+
+      final normalizedSource = source.trim();
+      if (normalizedSource.isEmpty) {
+        continue;
+      }
+
+      logs.add((source: normalizedSource, text: text));
+    }
+
+    if (logs.length <= 10) {
+      return logs;
+    }
+
+    return logs.sublist(logs.length - 10);
+  }
+
   String? _diffPreviewPathForChange(dynamic change) {
     if (change is! Map) {
       return null;
@@ -5704,9 +5764,11 @@ class _EventLineState extends State<EventLine> {
     required String languageOrFilename,
     String fallbackLanguageId = plaintextLanguageId,
     bool showProcessingOverlay = false,
+    List<({String source, String text})> logs = const [],
   }) {
+    final hasLogs = logs.isNotEmpty;
     final normalizedCode = code.replaceAll("\r\n", "\n").trimRight();
-    if (normalizedCode.isEmpty) {
+    if (normalizedCode.isEmpty && !hasLogs) {
       return SizedBox.shrink();
     }
 
@@ -5763,6 +5825,37 @@ class _EventLineState extends State<EventLine> {
               ),
             ),
           );
+    final logsBody = hasLogs
+        ? Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(_chatBubbleContentHorizontalPadding, 0, _chatBubbleContentHorizontalPadding, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (final line in logs.indexed)
+                        Padding(
+                          padding: EdgeInsets.only(bottom: line.$1 < logs.length - 1 ? 2 : 0),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: line.$2.source == "stderr" ? const Color(0xFF2A0B0B) : Colors.transparent,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: SelectableText.rich(TextSpan(children: [ansiToTextSpan(line.$2.text, baseStyle: codeTextStyle)])),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          )
+        : null;
 
     final previewContent = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -5779,19 +5872,21 @@ class _EventLineState extends State<EventLine> {
               Expanded(
                 child: SelectionArea(child: Text(header, style: headerTextStyle)),
               ),
-              ShadIconButton.ghost(
-                width: 24,
-                height: 24,
-                iconSize: 14,
-                icon: const Icon(LucideIcons.copy, size: 14),
-                onPressed: () {
-                  Clipboard.setData(ClipboardData(text: normalizedCode));
-                },
-              ),
+              if (normalizedCode.isNotEmpty)
+                ShadIconButton.ghost(
+                  width: 24,
+                  height: 24,
+                  iconSize: 14,
+                  icon: const Icon(LucideIcons.copy, size: 14),
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: normalizedCode));
+                  },
+                ),
             ],
           ),
         ),
-        body,
+        if (normalizedCode.isNotEmpty) body,
+        if (logsBody != null) logsBody,
       ],
     );
 
@@ -5809,6 +5904,20 @@ class _EventLineState extends State<EventLine> {
           if (showProcessingOverlay) Positioned.fill(child: IgnorePointer(child: _PreviewSweepOverlay())),
         ],
       ),
+    );
+  }
+
+  Widget _buildEventLogsBlock(BuildContext context, {required List<({String source, String text})> logs}) {
+    if (logs.isEmpty) {
+      return SizedBox.shrink();
+    }
+    return _buildThreadPreviewBlock(
+      context,
+      header: "logs",
+      code: " ",
+      languageOrFilename: "logs.txt",
+      fallbackLanguageId: plaintextLanguageId,
+      logs: logs,
     );
   }
 
@@ -5919,10 +6028,11 @@ class _EventLineState extends State<EventLine> {
     }
     final eventPath = _eventPath();
     final execPreview = _execPreviewText(kind: kind);
+    final eventLogs = _eventLogs();
     final diffPreviewBlocks = kind == "diff" ? _extractDiffPreviewBlocks(headline: headline) : const <Map<String, String>>[];
     final displayText = _displayText(headline: headline);
     final itemId = ((widget.message.getAttribute("item_id") as String?) ?? "").trim();
-    final showPreviewOverlay = itemId.isNotEmpty && widget.pendingItemId != null && widget.pendingItemId == itemId && inProgress;
+    final showPreviewOverlay = itemId.isNotEmpty && widget.pendingItemId != null && widget.pendingItemId == itemId;
     final canApprove = kind == "approval" && inProgress && approvalId.isNotEmpty;
     final canOpenPath = eventPath != null && widget.openFile != null && ((kind == "thread" && eventPath != widget.path) || kind == "file");
     const eventTextPadding = EdgeInsets.only(left: _chatBubbleContentHorizontalPadding);
@@ -6000,6 +6110,7 @@ class _EventLineState extends State<EventLine> {
                 languageOrFilename: eventPath ?? "command.sh",
                 fallbackLanguageId: "sh",
                 showProcessingOverlay: showPreviewOverlay,
+                logs: eventLogs,
               ),
             if (diffPreviewBlocks.isNotEmpty)
               Column(
@@ -6015,6 +6126,7 @@ class _EventLineState extends State<EventLine> {
                     ),
                 ],
               ),
+            if (eventLogs.isNotEmpty && !(kind == "exec" && execPreview != null)) _buildEventLogsBlock(context, logs: eventLogs),
             if (detailLines.isNotEmpty && (kind != "diff" || diffPreviewBlocks.isEmpty))
               Container(
                 width: double.infinity,
