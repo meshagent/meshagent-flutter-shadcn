@@ -523,7 +523,12 @@ class ChatThreadViewportBody extends StatelessWidget {
                     builder: (context, constraints) => ListView(
                       reverse: true,
                       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-                      padding: EdgeInsets.symmetric(vertical: 16, horizontal: chatThreadFeedHorizontalPadding(constraints.maxWidth)),
+                      padding: EdgeInsets.only(
+                        top: 0,
+                        bottom: 16,
+                        left: chatThreadFeedHorizontalPadding(constraints.maxWidth),
+                        right: chatThreadFeedHorizontalPadding(constraints.maxWidth),
+                      ),
                       children: children,
                     ),
                   ),
