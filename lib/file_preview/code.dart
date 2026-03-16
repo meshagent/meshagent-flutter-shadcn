@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart';
 import 'package:meshagent/room_server_client.dart';
@@ -22,6 +21,8 @@ class CodePreviewController extends ChangeNotifier {
   bool _saving = false;
   Object? _saveError;
   bool _notifyScheduled = false;
+  bool _disposed = false;
+  int _notifyGeneration = 0;
 
   bool get dirty => _dirty;
   bool get saving => _saving;
@@ -45,6 +46,7 @@ class CodePreviewController extends ChangeNotifier {
     _dirty = false;
     _saving = false;
     _saveError = null;
+    _invalidatePendingNotifications();
     _notifyListenersSafely();
   }
 
@@ -63,14 +65,7 @@ class CodePreviewController extends ChangeNotifier {
   }
 
   void _notifyListenersSafely() {
-    final phase = SchedulerBinding.instance.schedulerPhase;
-    final shouldDefer =
-        phase == SchedulerPhase.transientCallbacks ||
-        phase == SchedulerPhase.midFrameMicrotasks ||
-        phase == SchedulerPhase.persistentCallbacks;
-
-    if (!shouldDefer) {
-      notifyListeners();
+    if (_disposed) {
       return;
     }
 
@@ -79,10 +74,27 @@ class CodePreviewController extends ChangeNotifier {
     }
 
     _notifyScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    final generation = _notifyGeneration;
+    Future<void>.delayed(Duration.zero, () {
+      if (_disposed || !_notifyScheduled || generation != _notifyGeneration) {
+        return;
+      }
       _notifyScheduled = false;
       notifyListeners();
     });
+  }
+
+  void _invalidatePendingNotifications() {
+    _notifyScheduled = false;
+    _notifyGeneration++;
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _state = null;
+    _invalidatePendingNotifications();
+    super.dispose();
   }
 }
 
@@ -241,7 +253,7 @@ class _CodePreview extends State<CodePreview> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.start,
               children: [
-                ShadButton.secondary(
+                (dirty || saving ? ShadButton.destructive : ShadButton.secondary)(
                   enabled: !saving && dirty,
                   onPressed: () async {
                     await _save();
