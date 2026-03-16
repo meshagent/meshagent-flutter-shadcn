@@ -4207,16 +4207,20 @@ Widget defaultMessageHeaderBuilder(
       child: SelectionArea(
         child: Row(
           children: [
-            Text(
-              name.split("@").first,
-              style: tt.small.copyWith(color: cs.foreground),
-              overflow: .ellipsis,
+            Expanded(
+              child: Text(
+                name.split("@").first,
+                style: tt.small.copyWith(color: cs.foreground),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
-            Spacer(),
+            const SizedBox(width: 8),
             Text(
               timeAgo(createdAt),
               style: tt.small.copyWith(color: cs.mutedForeground),
-              overflow: .ellipsis,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ],
         ),
