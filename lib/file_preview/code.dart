@@ -15,14 +15,108 @@ bool isCodeFile(String filename) {
   return resolveModeForFilename(filename) != null;
 }
 
+class CodePreviewController extends ChangeNotifier {
+  _CodePreview? _state;
+  bool _dirty = false;
+  bool _saving = false;
+  Object? _saveError;
+  bool _notifyScheduled = false;
+  bool _disposed = false;
+  int _notifyGeneration = 0;
+
+  bool get dirty => _dirty;
+  bool get saving => _saving;
+  Object? get saveError => _saveError;
+  bool get canSave => !_saving && _dirty;
+
+  Future<void> save() async {
+    await _state?._save();
+  }
+
+  void _attach(_CodePreview state) {
+    _state = state;
+    _sync(state);
+  }
+
+  void _detach(_CodePreview state) {
+    if (_state != state) {
+      return;
+    }
+    _state = null;
+    _dirty = false;
+    _saving = false;
+    _saveError = null;
+    _invalidatePendingNotifications();
+    _notifyListenersSafely();
+  }
+
+  void _sync(_CodePreview state) {
+    if (_state != state) {
+      return;
+    }
+
+    final changed = _dirty != state.dirty || _saving != state.saving || _saveError != state.saveError;
+    _dirty = state.dirty;
+    _saving = state.saving;
+    _saveError = state.saveError;
+    if (changed) {
+      _notifyListenersSafely();
+    }
+  }
+
+  void _notifyListenersSafely() {
+    if (_disposed) {
+      return;
+    }
+
+    if (_notifyScheduled) {
+      return;
+    }
+
+    _notifyScheduled = true;
+    final generation = _notifyGeneration;
+    Future<void>.delayed(Duration.zero, () {
+      if (_disposed || !_notifyScheduled || generation != _notifyGeneration) {
+        return;
+      }
+      _notifyScheduled = false;
+      notifyListeners();
+    });
+  }
+
+  void _invalidatePendingNotifications() {
+    _notifyScheduled = false;
+    _notifyGeneration++;
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _state = null;
+    _invalidatePendingNotifications();
+    super.dispose();
+  }
+}
+
 class CodePreview extends StatefulWidget {
-  const CodePreview({super.key, this.room, required this.filename, this.url, this.text, this.readOnly = false});
+  const CodePreview({
+    super.key,
+    this.room,
+    required this.filename,
+    this.url,
+    this.text,
+    this.readOnly = false,
+    this.showToolbar = true,
+    this.controller,
+  });
 
   final RoomClient? room;
   final String filename;
   final Uri? url;
   final String? text;
   final bool readOnly;
+  final bool showToolbar;
+  final CodePreviewController? controller;
 
   @override
   State createState() => _CodePreview();
@@ -36,6 +130,7 @@ class _CodePreview extends State<CodePreview> {
   @override
   void initState() {
     super.initState();
+    widget.controller?._attach(this);
 
     if (widget.url != null) {
       get(widget.url!).then((response) {
@@ -62,8 +157,21 @@ class _CodePreview extends State<CodePreview> {
 
   @override
   void dispose() {
+    widget.controller?._detach(this);
     super.dispose();
     focusNode.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant CodePreview oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller?._detach(this);
+      widget.controller?._attach(this);
+    } else {
+      widget.controller?._sync(this);
+    }
   }
 
   late final focusNode = FocusNode(
@@ -71,7 +179,7 @@ class _CodePreview extends State<CodePreview> {
     onKeyEvent: (node, event) {
       if (event.logicalKey == LogicalKeyboardKey.save) {
         if (!saving && dirty) {
-          unawaited(save());
+          unawaited(_save());
           return KeyEventResult.handled;
         }
       }
@@ -81,7 +189,7 @@ class _CodePreview extends State<CodePreview> {
   var dirty = false;
   var saving = false;
 
-  Future<void> save() async {
+  Future<void> _save() async {
     final room = widget.room;
     final currentController = controller;
     if (room == null || currentController == null || saving) {
@@ -92,6 +200,7 @@ class _CodePreview extends State<CodePreview> {
       saving = true;
       saveError = null;
     });
+    widget.controller?._sync(this);
 
     final nextText = currentController.text;
     try {
@@ -104,6 +213,7 @@ class _CodePreview extends State<CodePreview> {
         dirty = false;
         text = nextText;
       });
+      widget.controller?._sync(this);
     } catch (error) {
       if (!mounted) {
         return;
@@ -111,11 +221,15 @@ class _CodePreview extends State<CodePreview> {
       setState(() {
         saveError = error;
       });
+      widget.controller?._sync(this);
+
+      ShadToaster.of(context).show(ShadToast.destructive(title: const Text("Save failed"), description: Text('$error')));
     } finally {
       if (mounted) {
         setState(() {
           saving = false;
         });
+        widget.controller?._sync(this);
       }
     }
   }
@@ -128,7 +242,7 @@ class _CodePreview extends State<CodePreview> {
 
     return Column(
       children: [
-        if (!widget.readOnly)
+        if (!widget.readOnly && widget.showToolbar)
           Container(
             decoration: BoxDecoration(
               color: ShadTheme.of(context).colorScheme.background,
@@ -139,10 +253,10 @@ class _CodePreview extends State<CodePreview> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.start,
               children: [
-                ShadButton.secondary(
+                (dirty || saving ? ShadButton.destructive : ShadButton.secondary)(
                   enabled: !saving && dirty,
                   onPressed: () async {
-                    await save();
+                    await _save();
                   },
                   leading: saving ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator()) : Icon(LucideIcons.save),
                   child: Text("Save"),
@@ -179,6 +293,7 @@ class _CodePreview extends State<CodePreview> {
                         setState(() {
                           dirty = true;
                         });
+                        widget.controller?._sync(this);
                       },
                       showCursorWhenReadOnly: false,
 
