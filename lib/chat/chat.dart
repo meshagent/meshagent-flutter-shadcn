@@ -1339,12 +1339,19 @@ class _ChatThreadInput extends State<ChatThreadInput> {
           leading: widget.leading ?? SizedBox(width: 3),
           trailing: widget.footer == null ? trailer : null,
           padding: EdgeInsets.only(left: 5, right: 5, top: widget.footer == null ? 5 : 10, bottom: 5),
-          decoration: ShadDecoration(
-            secondaryFocusedBorder: ShadBorder.none,
-            secondaryBorder: ShadBorder.none,
-            color: ShadTheme.of(context).ghostButtonTheme.hoverBackgroundColor,
-            border: ShadBorder.all(radius: BorderRadius.circular(20)),
-          ),
+          decoration: (() {
+            final theme = ShadTheme.of(context);
+            final composerRadius = theme.radius.resolve(Directionality.of(context));
+            final composerBorder = ShadBorder.all(radius: composerRadius, color: theme.colorScheme.border, width: 2);
+            final composerFocusedBorder = ShadBorder.all(radius: composerRadius, color: theme.colorScheme.foreground, width: 2);
+            return ShadDecoration(
+              color: theme.colorScheme.card,
+              border: composerBorder,
+              focusedBorder: composerFocusedBorder,
+              secondaryBorder: ShadBorder.none,
+              secondaryFocusedBorder: ShadBorder.none,
+            );
+          })(),
           maxLines: 8,
           minLines: 1,
           placeholder: widget.placeholder,
@@ -1435,6 +1442,7 @@ class ChatBubble extends StatefulWidget {
 class _ChatBubble extends State<ChatBubble> {
   static const double _actionSlotSize = 30;
   static const double _actionGap = 4;
+  static const double _bubbleRadius = 16;
 
   bool hovering = false;
 
@@ -1710,7 +1718,7 @@ class _ChatBubble extends State<ChatBubble> {
               Expanded(
                 child: Container(
                   padding: _chatBubbleContentPadding,
-                  decoration: BoxDecoration(color: theme.ghostButtonTheme.hoverBackgroundColor, borderRadius: BorderRadius.circular(8)),
+                  decoration: BoxDecoration(color: mine ? cs.background : Colors.white, borderRadius: BorderRadius.circular(_bubbleRadius)),
                   child: MediaQuery(
                     data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
                     child: MarkdownWidget(
@@ -1930,6 +1938,8 @@ class ChatThreadMessages extends StatefulWidget {
 class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   static const double _chatBubbleHorizontalInset = 5;
   static const double _chatBubbleActionRailWidth = 80;
+  static const double _chatBubbleSiblingSpacing = 6;
+  static const double _chatMessageStackSpacing = 38;
 
   static const List<String> _defaultReactionOptions = <String>[
     "👍",
@@ -2053,6 +2063,8 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     final emojiKey = _normalizeEmojiPresentationKey(emoji);
     return _reactionEmojiCanonicalByKey[emojiKey] ?? emoji;
   }
+
+  bool _isTerminalStackMessage(MeshElement? message) => message?.tagName == "exec";
 
   String? _normalizeReactionUserName(Object? value) {
     if (value is! String) {
@@ -2752,24 +2764,25 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
               ),
             ),
 
-          for (final attachment in attachments) ...[
+          for (var i = 0; i < attachments.length; i++) ...[
+            if (hasText || i > 0) const SizedBox(height: _chatBubbleSiblingSpacing),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 5),
               child: Container(
                 margin: EdgeInsets.only(top: 0),
                 child: Align(
                   alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-                  child: _buildAttachmentInThread(context, attachment, feedImages: feedImages),
+                  child: _buildAttachmentInThread(context, attachments[i], feedImages: feedImages),
                 ),
               ),
             ),
-            if (_normalizeReactionAttachmentRef(attachment.id) != null)
+            if (_normalizeReactionAttachmentRef(attachments[i].id) != null)
               _buildReactionRow(
                 context,
                 message: message,
                 mine: mine,
                 target: _reactionTargetAttachment,
-                attachmentRef: _normalizeReactionAttachmentRef(attachment.id),
+                attachmentRef: _normalizeReactionAttachmentRef(attachments[i].id),
               ),
           ],
 
@@ -2809,7 +2822,8 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
       );
 
       if (messageWidgets.isNotEmpty) {
-        messageWidgets.insert(0, const SizedBox(height: 12));
+        final stackSpacing = _isTerminalStackMessage(previous) && _isTerminalStackMessage(message.$2) ? 0.0 : _chatMessageStackSpacing;
+        messageWidgets.insert(0, SizedBox(height: stackSpacing));
       }
       messageWidgets.insert(0, messageWidget);
     }
@@ -5045,7 +5059,10 @@ class _EventLineState extends State<EventLine> {
                       Padding(
                         padding: EdgeInsets.only(bottom: line.$1 < lines.length - 1 ? 2 : 0),
                         child: Container(
-                          decoration: BoxDecoration(color: diffLineBackgroundColor(line.$2), borderRadius: BorderRadius.circular(4)),
+                          decoration: BoxDecoration(
+                            color: diffLineBackgroundColor(context, line.$2),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
                           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                           child: SelectableText.rich(
                             highlightCodeSpanWithReHighlight(
