@@ -2432,6 +2432,10 @@ class _ChatThreadState extends State<ChatThread> {
   late final ChatThreadController controller;
   OutboundEntry? _currentStatusEntry;
 
+  bool _shouldStoreLocally({required bool hasConfiguredAgent, required bool useAgentMessages}) {
+    return !hasConfiguredAgent && !useAgentMessages;
+  }
+
   List<PendingAgentMessage> _combinedPendingMessages(ChatThreadSnapshot state) {
     final combined = <String, PendingAgentMessage>{};
     for (final message in controller.pendingAgentMessagesForPath(widget.path)) {
@@ -2474,14 +2478,15 @@ class _ChatThreadState extends State<ChatThread> {
     if (widget.initialMessage != null) {
       final normalizedAgentName = widget.agentName?.trim();
       final hasConfiguredAgent = normalizedAgentName != null && normalizedAgentName.isNotEmpty;
-      final useAgentMessages =
-          hasConfiguredAgent && controller.getAgentParticipants(widget.document, participantName: normalizedAgentName).isNotEmpty;
+      final useAgentMessages = hasConfiguredAgent
+          ? controller.getAgentParticipants(widget.document, participantName: normalizedAgentName).isNotEmpty
+          : controller.getAgentParticipants(widget.document).isNotEmpty;
       controller.send(
         thread: widget.document,
         path: widget.path,
         message: widget.initialMessage!,
         remoteStoreParticipantName: hasConfiguredAgent ? normalizedAgentName : null,
-        storeLocally: !hasConfiguredAgent,
+        storeLocally: _shouldStoreLocally(hasConfiguredAgent: hasConfiguredAgent, useAgentMessages: useAgentMessages),
         useAgentMessages: useAgentMessages,
         onMessageSent: widget.onMessageSent,
       );
@@ -2668,7 +2673,10 @@ class _ChatThreadState extends State<ChatThread> {
                               ),
                               messageType: messageType,
                               remoteStoreParticipantName: hasConfiguredAgent ? normalizedAgentName : null,
-                              storeLocally: !hasConfiguredAgent,
+                              storeLocally: _shouldStoreLocally(
+                                hasConfiguredAgent: hasConfiguredAgent,
+                                useAgentMessages: state.supportsAgentMessages,
+                              ),
                               useAgentMessages: state.supportsAgentMessages,
                               turnId: state.threadTurnId,
                               onMessageSent: widget.onMessageSent,
