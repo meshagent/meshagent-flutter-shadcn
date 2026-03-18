@@ -29,12 +29,11 @@ Map<String, TextStyle> _codeTheme(BuildContext context) {
 }
 
 Color? diffLineBackgroundColor(BuildContext context, String line) {
-  final colorScheme = ShadTheme.of(context).colorScheme;
   if (line.startsWith("+") && !line.startsWith("+++")) {
-    return colorScheme.primary.withValues(alpha: 0.18);
+    return const Color(0x801B5E20);
   }
   if (line.startsWith("-") && !line.startsWith("---")) {
-    return colorScheme.destructive.withValues(alpha: 0.18);
+    return const Color(0x807F1D1D);
   }
   return null;
 }
@@ -82,9 +81,8 @@ Widget _buildHighlightedCodeBlock({
     lines.removeLast();
   }
   final normalizedCode = lines.join("\n");
-  final resolvedBackgroundColor = backgroundColor ?? theme.colorScheme.foreground;
-  final contrastColor = theme.colorScheme.background;
-  final headerTextStyle = GoogleFonts.sourceCodePro(fontSize: 11, color: contrastColor.withValues(alpha: 0.86));
+  final resolvedBackgroundColor = backgroundColor ?? theme.cardTheme.backgroundColor;
+  final headerTextStyle = GoogleFonts.sourceCodePro(fontSize: 11, color: theme.colorScheme.mutedForeground);
   final body = languageId == "diff"
       ? SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -103,7 +101,7 @@ Widget _buildHighlightedCodeBlock({
                         context: context,
                         code: line.$2,
                         languageOrFilename: "diff",
-                        textStyle: textStyle.copyWith(color: contrastColor),
+                        textStyle: textStyle.copyWith(color: const Color(0xFFE5E7EB)),
                         theme: monokaiSublimeTheme,
                         fallbackLanguageId: "diff",
                       ),
@@ -123,7 +121,11 @@ Widget _buildHighlightedCodeBlock({
 
   return Container(
     margin: const EdgeInsets.symmetric(vertical: 8.0),
-    decoration: BoxDecoration(color: resolvedBackgroundColor, borderRadius: const BorderRadius.all(Radius.circular(8.0))),
+    decoration: BoxDecoration(
+      color: resolvedBackgroundColor,
+      borderRadius: const BorderRadius.all(Radius.circular(8.0)),
+      border: Border.all(color: theme.colorScheme.border, width: 1),
+    ),
     clipBehavior: Clip.antiAlias,
     width: double.infinity,
     child: Column(
@@ -132,7 +134,7 @@ Widget _buildHighlightedCodeBlock({
       children: [
         Container(
           padding: const EdgeInsets.only(left: 12, right: 6, top: 4, bottom: 4),
-          decoration: BoxDecoration(color: contrastColor.withValues(alpha: 0.08)),
+          decoration: BoxDecoration(color: theme.colorScheme.background.withAlpha(150)),
           child: Row(
             children: [
               Expanded(
@@ -147,7 +149,7 @@ Widget _buildHighlightedCodeBlock({
                 width: 24,
                 height: 24,
                 iconSize: 14,
-                icon: Icon(LucideIcons.copy, size: 14, color: contrastColor),
+                icon: const Icon(LucideIcons.copy, size: 14),
                 onPressed: () {
                   Clipboard.setData(ClipboardData(text: normalizedCode));
                 },
@@ -172,13 +174,10 @@ MarkdownConfig buildChatBubbleMarkdownConfig(
   final theme = ShadTheme.of(context);
   final mdColor = color ?? chatBubbleMarkdownColor(context);
   final resolvedBaseFontSize = baseFontSize ?? chatBubbleMarkdownBaseFontSize(context);
-  final codeBlockTextColor = theme.colorScheme.background;
-  final inlineCodeTextColor = theme.colorScheme.foreground;
   final codeTextStyle = GoogleFonts.sourceCodePro(
     fontSize: threadTypography ? (resolvedBaseFontSize * 0.95).clamp(12.0, 16.0).toDouble() : resolvedBaseFontSize,
-    color: codeBlockTextColor,
+    color: mdColor,
   );
-  final inlineCodeTextStyle = GoogleFonts.sourceCodePro(fontSize: codeTextStyle.fontSize, color: inlineCodeTextColor);
   final paragraphStyle = TextStyle(fontSize: resolvedBaseFontSize, color: mdColor, inherit: false, height: threadTypography ? 1.45 : null);
 
   final headingBase = TextStyle(
@@ -207,7 +206,7 @@ MarkdownConfig buildChatBubbleMarkdownConfig(
       : TextStyle(fontSize: resolvedBaseFontSize * 1.0, color: mdColor, inherit: false);
   final preStyle = TextStyle(
     fontSize: codeTextStyle.fontSize,
-    color: codeBlockTextColor,
+    color: mdColor,
     inherit: false,
     fontFamily: 'SourceCodePro',
     height: threadTypography ? 1.45 : null,
@@ -215,7 +214,7 @@ MarkdownConfig buildChatBubbleMarkdownConfig(
 
   return MarkdownConfig(
     configs: [
-      HrConfig(color: horizontalRuleColor ?? mdColor.withValues(alpha: 0.39), height: horizontalRuleHeight),
+      HrConfig(color: horizontalRuleColor ?? mdColor.withAlpha(100), height: horizontalRuleHeight),
       _NoDividerH1Config(style: h1Style),
       _NoDividerH2Config(style: h2Style),
       H3Config(style: h3Style),
@@ -223,18 +222,22 @@ MarkdownConfig buildChatBubbleMarkdownConfig(
       H5Config(style: h5Style),
       H6Config(style: h6Style),
       PreConfig(
-        decoration: BoxDecoration(color: theme.colorScheme.foreground),
+        decoration: BoxDecoration(
+          color: theme.cardTheme.backgroundColor,
+          border: Border.all(color: theme.colorScheme.border, width: 1),
+          borderRadius: const BorderRadius.all(Radius.circular(8.0)),
+        ),
         textStyle: preStyle,
         builder: (code, language) => _buildHighlightedCodeBlock(
           context: context,
           code: code,
           language: language,
           textStyle: codeTextStyle,
-          backgroundColor: theme.colorScheme.foreground,
+          backgroundColor: theme.cardTheme.backgroundColor,
         ),
       ),
       PConfig(textStyle: paragraphStyle),
-      CodeConfig(style: inlineCodeTextStyle),
+      CodeConfig(style: codeTextStyle),
       BlockquoteConfig(textColor: mdColor),
       LinkConfig(
         style: TextStyle(color: theme.linkButtonTheme.foregroundColor, decoration: TextDecoration.underline),
