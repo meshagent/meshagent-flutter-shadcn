@@ -2077,6 +2077,7 @@ class ChatThread extends StatefulWidget {
     this.chatInputBoxBuilder,
     this.openFile,
     this.toolsBuilder,
+    this.inputPlaceholder,
 
     this.agentName,
   });
@@ -2090,6 +2091,7 @@ class ChatThread extends StatefulWidget {
   final ChatMessage? initialMessage;
   final void Function(ChatMessage message)? onMessageSent;
   final ChatThreadController? controller;
+  final Widget? inputPlaceholder;
 
   final Widget Function(BuildContext, MeshDocument, MeshElement)? messageHeaderBuilder;
   final Widget Function(BuildContext, List<String>)? waitingForParticipantsBuilder;
@@ -2532,6 +2534,7 @@ class _ChatThreadState extends State<ChatThread> {
     return ChatThreadInput(
       sendEnabled: !waitingForTurnStart,
       sendDisabledReason: waitingForTurnStart ? "Wait for the previous message to start before sending another one." : null,
+      placeholder: widget.inputPlaceholder,
       onClear: () {
         _clearThread(state);
       },
