@@ -2318,6 +2318,7 @@ class _ChatBubble extends State<ChatBubble> {
     final cs = theme.colorScheme;
     final text = widget.text;
     final mine = widget.mine;
+    final bubbleColor = mine ? cs.background : cs.card;
     final openOptions = optionsController.isOpen || hovering;
     final canLongPressReact =
         (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS) && widget.onReactFromMenu != null;
@@ -2406,7 +2407,7 @@ class _ChatBubble extends State<ChatBubble> {
               Expanded(
                 child: Container(
                   padding: _chatBubbleContentPadding,
-                  decoration: BoxDecoration(color: mine ? cs.background : Colors.white, borderRadius: BorderRadius.circular(_bubbleRadius)),
+                  decoration: BoxDecoration(color: bubbleColor, borderRadius: BorderRadius.circular(_bubbleRadius)),
                   child: MediaQuery(
                     data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
                     child: MarkdownWidget(
