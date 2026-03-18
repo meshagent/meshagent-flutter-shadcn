@@ -2062,6 +2062,7 @@ class ChatThread extends StatefulWidget {
     this.waitingForParticipantsBuilder,
     this.attachmentBuilder,
     this.fileInThreadBuilder,
+    this.chatInputBoxBuilder,
     this.openFile,
     this.toolsBuilder,
 
@@ -2082,6 +2083,7 @@ class ChatThread extends StatefulWidget {
   final Widget Function(BuildContext, List<String>)? waitingForParticipantsBuilder;
   final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
+  final Widget Function(BuildContext context, Widget chatBox)? chatInputBoxBuilder;
   final FutureOr<void> Function(String path)? openFile;
   final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
 
@@ -2508,6 +2510,76 @@ class _ChatThreadState extends State<ChatThread> {
     }
   }
 
+  Widget _buildInputChatBox(BuildContext context, List<PendingAgentMessage> pendingMessages, ChatThreadSnapshot state) {
+    final waitingForTurnStart = _isWaitingForTurnStart(state: state, pendingMessages: pendingMessages);
+    final waitingForOnlineMessage = pendingMessages.firstWhereOrNull((message) => message.awaitingOnline);
+    final canInterruptActiveTurn = _canInterruptActiveTurn(state: state, pendingMessages: pendingMessages);
+
+    return ChatThreadInput(
+      sendEnabled: !waitingForTurnStart,
+      sendDisabledReason: waitingForTurnStart ? "Wait for the previous message to start before sending another one." : null,
+      onClear: () {
+        _clearThread(state);
+      },
+      onInterrupt: canInterruptActiveTurn
+          ? () {
+              controller.cancel(
+                widget.path,
+                widget.document,
+                useAgentMessages: state.supportsAgentMessages,
+                turnId: state.threadTurnId,
+                participantName: widget.agentName,
+              );
+            }
+          : null,
+      onCancelSend: controller.hasPendingSendWait(widget.path)
+          ? () {
+              controller.cancelPendingSend(widget.path);
+            }
+          : null,
+      sendPendingText: waitingForOnlineMessage == null
+          ? null
+          : "Waiting for ${_displayParticipantName(widget.agentName ?? "agent")} to come online.",
+      leading: controller.toolkits.isNotEmpty
+          ? null
+          : widget.toolsBuilder == null
+          ? null
+          : widget.toolsBuilder!(context, controller, state),
+      footer: controller.toolkits.isEmpty
+          ? null
+          : widget.toolsBuilder == null
+          ? null
+          : widget.toolsBuilder!(context, controller, state),
+      trailing: null,
+      room: widget.room,
+      onSend: (value, attachments) async {
+        final messageType = state.threadStatusMode == "steerable" && state.threadTurnId != null ? "steer" : "chat";
+        final normalizedAgentName = widget.agentName?.trim();
+        final hasConfiguredAgent = normalizedAgentName != null && normalizedAgentName.isNotEmpty;
+        await controller.send(
+          thread: widget.document,
+          path: widget.path,
+          message: ChatMessage(id: const Uuid().v4(), text: value, attachments: attachments.map((x) => x.path).toList()),
+          messageType: messageType,
+          remoteStoreParticipantName: hasConfiguredAgent ? normalizedAgentName : null,
+          storeLocally: _shouldStoreLocally(hasConfiguredAgent: hasConfiguredAgent, useAgentMessages: state.supportsAgentMessages),
+          useAgentMessages: state.supportsAgentMessages,
+          turnId: state.threadTurnId,
+          onMessageSent: widget.onMessageSent,
+        );
+      },
+      onChanged: (value, attachments) {
+        for (final part in controller.getOnlineParticipants(widget.document)) {
+          if (part.id != widget.room.localParticipant?.id) {
+            widget.room.messaging.sendMessage(to: part, type: "typing", message: {"path": widget.path});
+          }
+        }
+      },
+      controller: controller,
+      attachmentBuilder: widget.attachmentBuilder,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return ChatThreadBuilder(
@@ -2562,9 +2634,8 @@ class _ChatThreadState extends State<ChatThread> {
                 listenable: controller,
                 builder: (context, _) {
                   final pendingMessages = _combinedPendingMessages(state);
-                  final waitingForTurnStart = _isWaitingForTurnStart(state: state, pendingMessages: pendingMessages);
                   final canInterruptActiveTurn = _canInterruptActiveTurn(state: state, pendingMessages: pendingMessages);
-                  final waitingForOnlineMessage = pendingMessages.firstWhereOrNull((message) => message.awaitingOnline);
+
                   return ChatThreadInputFrame(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
@@ -2620,78 +2691,10 @@ class _ChatThreadState extends State<ChatThread> {
                               ],
                             ),
                           ),
-                        ChatThreadInput(
-                          sendEnabled: !waitingForTurnStart,
-                          sendDisabledReason: waitingForTurnStart
-                              ? "Wait for the previous message to start before sending another one."
-                              : null,
-                          onClear: () {
-                            _clearThread(state);
-                          },
-                          onInterrupt: canInterruptActiveTurn
-                              ? () {
-                                  controller.cancel(
-                                    widget.path,
-                                    widget.document,
-                                    useAgentMessages: state.supportsAgentMessages,
-                                    turnId: state.threadTurnId,
-                                    participantName: widget.agentName,
-                                  );
-                                }
-                              : null,
-                          onCancelSend: controller.hasPendingSendWait(widget.path)
-                              ? () {
-                                  controller.cancelPendingSend(widget.path);
-                                }
-                              : null,
-                          sendPendingText: waitingForOnlineMessage == null
-                              ? null
-                              : "Waiting for ${_displayParticipantName(widget.agentName ?? "agent")} to come online.",
-                          leading: controller.toolkits.isNotEmpty
-                              ? null
-                              : widget.toolsBuilder == null
-                              ? null
-                              : widget.toolsBuilder!(context, controller, state),
-                          footer: controller.toolkits.isEmpty
-                              ? null
-                              : widget.toolsBuilder == null
-                              ? null
-                              : widget.toolsBuilder!(context, controller, state),
-                          trailing: null,
-                          room: widget.room,
-                          onSend: (value, attachments) async {
-                            final messageType = state.threadStatusMode == "steerable" && state.threadTurnId != null ? "steer" : "chat";
-                            final normalizedAgentName = widget.agentName?.trim();
-                            final hasConfiguredAgent = normalizedAgentName != null && normalizedAgentName.isNotEmpty;
-                            await controller.send(
-                              thread: widget.document,
-                              path: widget.path,
-                              message: ChatMessage(
-                                id: const Uuid().v4(),
-                                text: value,
-                                attachments: attachments.map((x) => x.path).toList(),
-                              ),
-                              messageType: messageType,
-                              remoteStoreParticipantName: hasConfiguredAgent ? normalizedAgentName : null,
-                              storeLocally: _shouldStoreLocally(
-                                hasConfiguredAgent: hasConfiguredAgent,
-                                useAgentMessages: state.supportsAgentMessages,
-                              ),
-                              useAgentMessages: state.supportsAgentMessages,
-                              turnId: state.threadTurnId,
-                              onMessageSent: widget.onMessageSent,
-                            );
-                          },
-                          onChanged: (value, attachments) {
-                            for (final part in controller.getOnlineParticipants(widget.document)) {
-                              if (part.id != widget.room.localParticipant?.id) {
-                                widget.room.messaging.sendMessage(to: part, type: "typing", message: {"path": widget.path});
-                              }
-                            }
-                          },
-                          controller: controller,
-                          attachmentBuilder: widget.attachmentBuilder,
-                        ),
+                        if (widget.chatInputBoxBuilder != null)
+                          widget.chatInputBoxBuilder!(context, _buildInputChatBox(context, pendingMessages, state))
+                        else
+                          _buildInputChatBox(context, pendingMessages, state),
                       ],
                     ),
                   );
