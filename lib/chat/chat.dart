@@ -5791,6 +5791,22 @@ class EventLine extends StatefulWidget {
 class _EventLineState extends State<EventLine> {
   bool sendingApprovalDecision = false;
 
+  Widget _wrapWithTooltip(BuildContext context, {required Widget child, required String? tooltipText}) {
+    final normalizedTooltipText = tooltipText?.trim() ?? "";
+    if (normalizedTooltipText.isEmpty) {
+      return child;
+    }
+
+    return ShadTooltip(
+      waitDuration: const Duration(milliseconds: 300),
+      builder: (context) => ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: Text(normalizedTooltipText, style: ShadTheme.of(context).textTheme.small),
+      ),
+      child: child,
+    );
+  }
+
   String _humanize(String value) {
     if (value.trim().isEmpty) {
       return "";
@@ -6284,6 +6300,7 @@ class _EventLineState extends State<EventLine> {
     }
     final state = ((widget.message.getAttribute("state") as String?) ?? "info").toLowerCase();
     final inProgress = state == "in_progress" || state == "running" || state == "queued";
+    final itemType = ((widget.message.getAttribute("item_type") as String?) ?? "").trim().toLowerCase();
     final summary = ((widget.message.getAttribute("summary") as String?) ?? method).trim();
     final headlineAttr = ((widget.message.getAttribute("headline") as String?) ?? "").trim();
     final detailsAttr = ((widget.message.getAttribute("details") as String?) ?? "").trim();
@@ -6301,6 +6318,12 @@ class _EventLineState extends State<EventLine> {
     if (kind == "exec") {
       detailLines = details.toList();
     }
+    final failureTooltipText = itemType == "tool_call" && (state == "failed" || state == "cancelled") && detailLines.isNotEmpty
+        ? detailLines.join("\n")
+        : null;
+    if (failureTooltipText != null) {
+      detailLines = const <String>[];
+    }
     final eventPath = _eventPath();
     final commandPreview = _commandPreviewText(kind: kind);
     final eventLogs = _eventLogs();
@@ -6314,7 +6337,7 @@ class _EventLineState extends State<EventLine> {
 
     Color textColor;
     if (state == "failed") {
-      textColor = ShadTheme.of(context).colorScheme.destructive;
+      textColor = ShadTheme.of(context).colorScheme.foreground;
     } else if (state == "cancelled") {
       textColor = ShadTheme.of(context).colorScheme.mutedForeground;
     } else if (state == "completed") {
@@ -6336,44 +6359,48 @@ class _EventLineState extends State<EventLine> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: canOpenPath
-                      ? ShadGestureDetector(
-                          cursor: SystemMouseCursors.click,
-                          onTap: () {
-                            unawaited(Future.sync(() => widget.openFile!(eventPath)));
-                          },
-                          child: Padding(
-                            padding: eventTextPadding,
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    displayText,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
-                                      color: textColor,
-                                      height: 1.3,
-                                      decoration: TextDecoration.underline,
+                  child: _wrapWithTooltip(
+                    context,
+                    tooltipText: failureTooltipText,
+                    child: canOpenPath
+                        ? ShadGestureDetector(
+                            cursor: SystemMouseCursors.click,
+                            onTap: () {
+                              unawaited(Future.sync(() => widget.openFile!(eventPath)));
+                            },
+                            child: Padding(
+                              padding: eventTextPadding,
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      displayText,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: textColor,
+                                        height: 1.3,
+                                        decoration: TextDecoration.underline,
+                                      ),
                                     ),
                                   ),
-                                ),
-                                const SizedBox(width: 6),
-                                Icon(LucideIcons.externalLink, size: 12, color: textColor),
-                              ],
+                                  const SizedBox(width: 6),
+                                  Icon(LucideIcons.externalLink, size: 12, color: textColor),
+                                ],
+                              ),
+                            ),
+                          )
+                        : Padding(
+                            padding: eventTextPadding,
+                            child: SelectionArea(
+                              child: Text(
+                                displayText,
+                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: textColor, height: 1.3),
+                              ),
                             ),
                           ),
-                        )
-                      : Padding(
-                          padding: eventTextPadding,
-                          child: SelectionArea(
-                            child: Text(
-                              displayText,
-                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: textColor, height: 1.3),
-                            ),
-                          ),
-                        ),
+                  ),
                 ),
               ],
             ),
