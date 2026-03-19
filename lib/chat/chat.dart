@@ -1868,17 +1868,19 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     if (focusNode.hasFocus) {
       final reader = await event.getClipboardReader();
 
-      final name = (await reader.getSuggestedName());
-      if (name != null) {
-        final fmt = _preferredFormats.firstWhereOrNull((f) => reader.canProvide(f));
-        final file = await _getFile(reader, fmt);
+      for (final item in reader.items) {
+        final name = (await item.getSuggestedName());
+        if (name != null) {
+          final fmt = _preferredFormats.firstWhereOrNull((f) => item.canProvide(f));
+          final file = await _getFile(item, fmt);
 
-        await onFileDrop(name, file.getStream(), file.fileSize ?? 0);
-      } else {
-        if (reader.canProvide(Formats.plainText)) {
-          final text = await reader.readValue(Formats.plainText);
-          if (text != null) {
-            onTextPaste(text);
+          await onFileDrop(name, file.getStream(), file.fileSize ?? 0);
+        } else {
+          if (item.canProvide(Formats.plainText)) {
+            final text = await item.readValue(Formats.plainText);
+            if (text != null) {
+              onTextPaste(text);
+            }
           }
         }
       }
