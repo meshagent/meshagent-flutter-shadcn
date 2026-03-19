@@ -260,6 +260,207 @@ Map<String, dynamic>? _parsePendingMessagesStatus(Participant participant, Strin
   return null;
 }
 
+class ChatThreadStatusState {
+  const ChatThreadStatusState({
+    this.text,
+    this.startedAt,
+    this.mode,
+    this.turnId,
+    this.pendingMessages = const [],
+    this.pendingItemId,
+    this.supportsAgentMessages = false,
+  });
+
+  final String? text;
+  final DateTime? startedAt;
+  final String? mode;
+  final String? turnId;
+  final List<PendingAgentMessage> pendingMessages;
+  final String? pendingItemId;
+  final bool supportsAgentMessages;
+
+  bool get hasStatus => text != null && text!.trim().isNotEmpty;
+}
+
+ChatThreadStatusState resolveChatThreadStatus({
+  required RoomClient room,
+  required String path,
+  String? agentName,
+  ChatThreadStatusState? previous,
+}) {
+  final keyCandidates = _threadStatusAttributeCandidates(path, "thread.status");
+  final textKeyCandidates = _threadStatusAttributeCandidates(path, "thread.status.text");
+  final modeKeyCandidates = _threadStatusAttributeCandidates(path, "thread.status.mode");
+  final startedAtKeyCandidates = _threadStatusAttributeCandidates(path, "thread.status.started_at");
+  final pendingItemIdKeyCandidates = _threadStatusAttributeCandidates(path, "thread.status.pending_item_id");
+
+  final candidates = <Participant>[
+    if (agentName != null)
+      ...room.messaging.remoteParticipants.where((participant) => participant.getAttribute("name") == agentName)
+    else
+      ...room.messaging.remoteParticipants.where((participant) => participant.role == "agent" || _supportsAgentMessages(participant)),
+  ];
+
+  String? nextStatus;
+  String? nextMode;
+  DateTime? nextStartedAt;
+  String? nextTurnId;
+  List<PendingAgentMessage> nextPendingMessages = const [];
+  String? nextPendingItemId;
+  bool nextSupportsAgentMessages = false;
+
+  for (final participant in candidates) {
+    if (_supportsAgentMessages(participant)) {
+      nextSupportsAgentMessages = true;
+    }
+
+    if (nextStatus == null) {
+      for (final key in textKeyCandidates) {
+        final value = participant.getAttribute(key);
+        if (value is String && value.trim().isNotEmpty) {
+          nextStatus = value.trim();
+          break;
+        }
+      }
+    }
+    if (nextStatus == null) {
+      for (final key in keyCandidates) {
+        final value = participant.getAttribute(key);
+        if (value is String && value.trim().isNotEmpty) {
+          nextStatus = value.trim();
+          break;
+        }
+      }
+    }
+
+    final pendingStatus = _parsePendingMessagesStatus(participant, path);
+    if (pendingStatus != null) {
+      if (nextTurnId == null) {
+        final turnId = pendingStatus["turn_id"];
+        if (turnId is String && turnId.trim().isNotEmpty) {
+          nextTurnId = turnId.trim();
+        }
+      }
+
+      if (nextPendingMessages.isEmpty) {
+        final messages = pendingStatus["messages"];
+        if (messages is List) {
+          nextPendingMessages = [
+            for (final item in messages)
+              if (item is Map<String, dynamic>)
+                PendingAgentMessage.fromQueueJson(item)
+              else if (item is Map)
+                PendingAgentMessage.fromQueueJson(Map<String, dynamic>.from(item)),
+          ];
+        }
+      }
+    }
+
+    if (nextMode == null) {
+      for (final key in modeKeyCandidates) {
+        final value = participant.getAttribute(key);
+        if (value is String) {
+          final normalized = value.trim().toLowerCase();
+          if (normalized == "busy" || normalized == "steerable") {
+            nextMode = normalized;
+            break;
+          }
+        }
+      }
+    }
+
+    if (nextStartedAt == null) {
+      for (final key in startedAtKeyCandidates) {
+        final value = participant.getAttribute(key);
+        if (value is! String) {
+          continue;
+        }
+
+        final normalized = value.trim();
+        if (normalized.isEmpty) {
+          continue;
+        }
+
+        final parsed = DateTime.tryParse(normalized);
+        if (parsed != null) {
+          nextStartedAt = parsed;
+          break;
+        }
+      }
+    }
+
+    if (nextPendingItemId == null) {
+      for (final key in pendingItemIdKeyCandidates) {
+        final value = participant.getAttribute(key);
+        if (value is String && value.trim().isNotEmpty) {
+          nextPendingItemId = value.trim();
+          break;
+        }
+      }
+    }
+
+    if (nextStatus != null && nextMode != null && nextStartedAt != null && nextTurnId != null && nextPendingItemId != null) {
+      break;
+    }
+  }
+
+  if (nextStatus == null) {
+    return ChatThreadStatusState(supportsAgentMessages: nextSupportsAgentMessages);
+  }
+
+  nextMode ??= "busy";
+  nextStartedAt ??= previous?.hasStatus == true ? previous?.startedAt : DateTime.now();
+
+  return ChatThreadStatusState(
+    text: nextStatus,
+    startedAt: nextStartedAt,
+    mode: nextMode,
+    turnId: nextTurnId,
+    pendingMessages: nextPendingMessages,
+    pendingItemId: nextPendingItemId,
+    supportsAgentMessages: nextSupportsAgentMessages,
+  );
+}
+
+class ChatThreadStatusIndicator extends StatelessWidget {
+  const ChatThreadStatusIndicator({
+    super.key,
+    required this.statusText,
+    this.startedAt,
+    this.reserveSpace = false,
+    this.size = 14,
+    this.strokeWidth = 2,
+  });
+
+  final String? statusText;
+  final DateTime? startedAt;
+  final bool reserveSpace;
+  final double size;
+  final double strokeWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    final normalizedStatusText = statusText?.trim() ?? "";
+    final placeholder = SizedBox(width: size, height: size);
+    if (normalizedStatusText.isEmpty) {
+      return reserveSpace ? placeholder : const SizedBox.shrink();
+    }
+
+    return SizedBox(
+      width: size,
+      height: size,
+      child: ShadTooltip(
+        waitDuration: const Duration(milliseconds: 300),
+        builder: (context) => ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 320),
+          child: Text(formatChatThreadStatusText(normalizedStatusText, startedAt: startedAt), style: ShadTheme.of(context).textTheme.small),
+        ),
+        child: _CyclingProgressIndicator(strokeWidth: strokeWidth),
+      ),
+    );
+  }
+}
+
 class FileAttachment extends ChangeNotifier {
   FileAttachment({required this.path, UploadStatus initialStatus = UploadStatus.initial}) : _status = initialStatus;
 
@@ -4871,11 +5072,115 @@ class _CyclingProgressIndicatorState extends State<_CyclingProgressIndicator> wi
   }
 }
 
-class _ProcessingStatusText extends StatefulWidget {
-  const _ProcessingStatusText({required this.text, required this.style});
+String formatChatThreadStatusText(String text, {DateTime? startedAt}) {
+  if (startedAt == null) {
+    return text;
+  }
+
+  final elapsed = DateTime.now().difference(startedAt);
+  final seconds = elapsed.inSeconds < 0 ? 0 : elapsed.inSeconds;
+  if (seconds == 0) {
+    return text;
+  }
+  return "$text (${seconds}s)";
+}
+
+LinearGradient _processingSweepGradient(BuildContext context, {required double t}) {
+  final colorScheme = ShadTheme.of(context).colorScheme;
+  final centerX = -1.4 + (t * 2.8);
+  final highlight = colorScheme.background.withAlpha(210);
+
+  return LinearGradient(
+    begin: Alignment(centerX - 0.45, 0),
+    end: Alignment(centerX + 0.45, 0),
+    colors: [Colors.transparent, highlight, Colors.transparent],
+    stops: const [0.0, 0.5, 1.0],
+  );
+}
+
+Shader _processingSweepShader(BuildContext context, Rect rect, {required double t}) {
+  return _processingSweepGradient(context, t: t).createShader(rect);
+}
+
+class _ProcessingSweepOverlay extends StatefulWidget {
+  const _ProcessingSweepOverlay();
+
+  @override
+  State<_ProcessingSweepOverlay> createState() => _ProcessingSweepOverlayState();
+}
+
+class _ProcessingSweepOverlayState extends State<_ProcessingSweepOverlay> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1700))..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) => DecoratedBox(
+        decoration: BoxDecoration(gradient: _processingSweepGradient(context, t: _controller.value)),
+      ),
+    );
+  }
+}
+
+class ChatThreadProcessingSweepText extends StatelessWidget {
+  const ChatThreadProcessingSweepText({
+    super.key,
+    required this.text,
+    required this.style,
+    this.animate = true,
+    this.maxLines,
+    this.overflow,
+    this.softWrap,
+    this.textAlign,
+  });
 
   final String text;
   final TextStyle style;
+  final bool animate;
+  final int? maxLines;
+  final TextOverflow? overflow;
+  final bool? softWrap;
+  final TextAlign? textAlign;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!animate) {
+      return Text(text, style: style, maxLines: maxLines, overflow: overflow, softWrap: softWrap, textAlign: textAlign);
+    }
+
+    return _ProcessingStatusText(
+      text: text,
+      style: style,
+      maxLines: maxLines,
+      overflow: overflow,
+      softWrap: softWrap,
+      textAlign: textAlign,
+    );
+  }
+}
+
+class _ProcessingStatusText extends StatefulWidget {
+  const _ProcessingStatusText({required this.text, required this.style, this.maxLines, this.overflow, this.softWrap, this.textAlign});
+
+  final String text;
+  final TextStyle style;
+  final int? maxLines;
+  final TextOverflow? overflow;
+  final bool? softWrap;
+  final TextAlign? textAlign;
 
   @override
   State<_ProcessingStatusText> createState() => _ProcessingStatusTextState();
@@ -4896,33 +5201,34 @@ class _ProcessingStatusTextState extends State<_ProcessingStatusText> with Singl
     super.dispose();
   }
 
-  Shader _sweepShader(BuildContext context, Rect rect, double t) {
-    final colorScheme = ShadTheme.of(context).colorScheme;
-    final centerX = -1.4 + (t * 2.8);
-    final highlight = colorScheme.background.withAlpha(210);
-
-    return LinearGradient(
-      begin: Alignment(centerX - 0.45, 0),
-      end: Alignment(centerX + 0.45, 0),
-      colors: [Colors.transparent, highlight, Colors.transparent],
-      stops: const [0.0, 0.5, 1.0],
-    ).createShader(rect);
-  }
-
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) {
-        final text = Text(widget.text, style: widget.style);
+        final text = Text(
+          widget.text,
+          style: widget.style,
+          maxLines: widget.maxLines,
+          overflow: widget.overflow,
+          softWrap: widget.softWrap,
+          textAlign: widget.textAlign,
+        );
         return Stack(
           alignment: Alignment.centerLeft,
           children: [
             text,
             ShaderMask(
               blendMode: BlendMode.srcIn,
-              shaderCallback: (rect) => _sweepShader(context, rect, _controller.value),
-              child: Text(widget.text, style: widget.style.copyWith(color: Colors.white)),
+              shaderCallback: (rect) => _processingSweepShader(context, rect, t: _controller.value),
+              child: Text(
+                widget.text,
+                style: widget.style.copyWith(color: Colors.white),
+                maxLines: widget.maxLines,
+                overflow: widget.overflow,
+                softWrap: widget.softWrap,
+                textAlign: widget.textAlign,
+              ),
             ),
           ],
         );
@@ -5003,17 +5309,7 @@ class _ChatThreadProcessingStatusRowState extends State<ChatThreadProcessingStat
   }
 
   String _displayText() {
-    final startedAt = widget.startedAt;
-    if (startedAt == null) {
-      return widget.text;
-    }
-
-    final elapsed = DateTime.now().difference(startedAt);
-    final seconds = elapsed.inSeconds < 0 ? 0 : elapsed.inSeconds;
-    if (seconds == 0) {
-      return widget.text;
-    }
-    return "${widget.text} (${seconds}s)";
+    return formatChatThreadStatusText(widget.text, startedAt: widget.startedAt);
   }
 
   @override
@@ -5063,7 +5359,7 @@ class _ChatThreadProcessingStatusRowState extends State<ChatThreadProcessingStat
           const SizedBox(width: 13, height: 13, child: _CyclingProgressIndicator(strokeWidth: 2)),
         const SizedBox(width: 10),
         Expanded(
-          child: _ProcessingStatusText(
+          child: ChatThreadProcessingSweepText(
             text: displayText,
             style: TextStyle(fontSize: 13, color: theme.colorScheme.mutedForeground),
           ),
@@ -5387,188 +5683,57 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
   }
 
   void _getThreadStatus() {
-    final keyCandidates = <String>{"thread.status.${widget.path}"};
-    final textKeyCandidates = <String>{"thread.status.text.${widget.path}"};
-    final modeKeyCandidates = <String>{"thread.status.mode.${widget.path}"};
-    final startedAtKeyCandidates = <String>{"thread.status.started_at.${widget.path}"};
-    final pendingItemIdKeyCandidates = <String>{"thread.status.pending_item_id.${widget.path}"};
-    if (widget.path.startsWith("/")) {
-      keyCandidates.add("thread.status.${widget.path.substring(1)}");
-      textKeyCandidates.add("thread.status.text.${widget.path.substring(1)}");
-      modeKeyCandidates.add("thread.status.mode.${widget.path.substring(1)}");
-      startedAtKeyCandidates.add("thread.status.started_at.${widget.path.substring(1)}");
-      pendingItemIdKeyCandidates.add("thread.status.pending_item_id.${widget.path.substring(1)}");
-    } else {
-      keyCandidates.add("thread.status./${widget.path}");
-      textKeyCandidates.add("thread.status.text./${widget.path}");
-      modeKeyCandidates.add("thread.status.mode./${widget.path}");
-      startedAtKeyCandidates.add("thread.status.started_at./${widget.path}");
-      pendingItemIdKeyCandidates.add("thread.status.pending_item_id./${widget.path}");
-    }
+    final nextState = resolveChatThreadStatus(
+      room: widget.room,
+      path: widget.path,
+      agentName: widget.agentName,
+      previous: ChatThreadStatusState(
+        text: threadStatus,
+        startedAt: threadStatusStartedAt,
+        mode: threadStatusMode,
+        turnId: threadTurnId,
+        pendingMessages: pendingMessages,
+        pendingItemId: pendingItemId,
+        supportsAgentMessages: supportsAgentMessages,
+      ),
+    );
 
-    final candidates = <Participant>[];
-    if (widget.agentName != null) {
-      candidates.addAll(
-        widget.room.messaging.remoteParticipants.where((participant) => participant.getAttribute("name") == widget.agentName),
-      );
-    } else {
-      candidates.addAll(
-        widget.room.messaging.remoteParticipants.where((participant) => participant.role == "agent" || _supportsAgentMessages(participant)),
-      );
-    }
-
-    String? nextStatus;
-    String? nextMode;
-    DateTime? nextStartedAt;
-    String? nextTurnId;
-    List<PendingAgentMessage> nextPendingMessages = const [];
-    String? nextPendingItemId;
-    bool nextSupportsAgentMessages = false;
-    for (final participant in candidates) {
-      if (_supportsAgentMessages(participant)) {
-        nextSupportsAgentMessages = true;
-      }
-
-      if (nextStatus == null) {
-        for (final key in textKeyCandidates) {
-          final value = participant.getAttribute(key);
-          if (value is String && value.trim().isNotEmpty) {
-            nextStatus = value.trim();
-            break;
-          }
-        }
-      }
-      if (nextStatus == null) {
-        for (final key in keyCandidates) {
-          final value = participant.getAttribute(key);
-          if (value is String && value.trim().isNotEmpty) {
-            nextStatus = value.trim();
-            break;
-          }
-        }
-      }
-
-      final pendingStatus = _parsePendingMessagesStatus(participant, widget.path);
-      if (pendingStatus != null) {
-        if (nextTurnId == null) {
-          final turnId = pendingStatus["turn_id"];
-          if (turnId is String && turnId.trim().isNotEmpty) {
-            nextTurnId = turnId.trim();
-          }
-        }
-
-        if (nextPendingMessages.isEmpty) {
-          final messages = pendingStatus["messages"];
-          if (messages is List) {
-            nextPendingMessages = [
-              for (final item in messages)
-                if (item is Map<String, dynamic>)
-                  PendingAgentMessage.fromQueueJson(item)
-                else if (item is Map)
-                  PendingAgentMessage.fromQueueJson(Map<String, dynamic>.from(item)),
-            ];
-          }
-        }
-      }
-
-      if (nextMode == null) {
-        for (final key in modeKeyCandidates) {
-          final value = participant.getAttribute(key);
-          if (value is String) {
-            final normalized = value.trim().toLowerCase();
-            if (normalized == "busy" || normalized == "steerable") {
-              nextMode = normalized;
-              break;
-            }
-          }
-        }
-      }
-
-      if (nextStartedAt == null) {
-        for (final key in startedAtKeyCandidates) {
-          final value = participant.getAttribute(key);
-          if (value is! String) {
-            continue;
-          }
-
-          final normalized = value.trim();
-          if (normalized.isEmpty) {
-            continue;
-          }
-
-          final parsed = DateTime.tryParse(normalized);
-          if (parsed != null) {
-            nextStartedAt = parsed;
-            break;
-          }
-        }
-      }
-
-      if (nextPendingItemId == null) {
-        for (final key in pendingItemIdKeyCandidates) {
-          final value = participant.getAttribute(key);
-          if (value is String && value.trim().isNotEmpty) {
-            nextPendingItemId = value.trim();
-            break;
-          }
-        }
-      }
-
-      if (nextStatus != null && nextMode != null && nextStartedAt != null && nextTurnId != null && nextPendingItemId != null) {
-        break;
-      }
-    }
-
-    if (nextStatus == null) {
-      nextMode = null;
-      nextStartedAt = null;
-      nextTurnId = null;
-      nextPendingMessages = const [];
-      nextPendingItemId = null;
-    } else {
-      nextMode ??= "busy";
-    }
-
-    if (nextStatus != null) {
-      nextStartedAt ??= (threadStatusStartedAt != null && threadStatus != null) ? threadStatusStartedAt : DateTime.now();
-    }
-
-    final sameStartedAt = nextStartedAt?.millisecondsSinceEpoch == threadStatusStartedAt?.millisecondsSinceEpoch;
+    final sameStartedAt = nextState.startedAt?.millisecondsSinceEpoch == threadStatusStartedAt?.millisecondsSinceEpoch;
     final samePendingMessages =
-        nextPendingMessages.length == pendingMessages.length &&
+        nextState.pendingMessages.length == pendingMessages.length &&
         const DeepCollectionEquality().equals(
-          nextPendingMessages.map((x) => [x.messageId, x.messageType, x.text, x.attachments, x.senderName]).toList(),
+          nextState.pendingMessages.map((x) => [x.messageId, x.messageType, x.text, x.attachments, x.senderName]).toList(),
           pendingMessages.map((x) => [x.messageId, x.messageType, x.text, x.attachments, x.senderName]).toList(),
         );
-    if (nextStatus == threadStatus &&
-        nextMode == threadStatusMode &&
+    if (nextState.text == threadStatus &&
+        nextState.mode == threadStatusMode &&
         sameStartedAt &&
-        nextTurnId == threadTurnId &&
-        nextPendingItemId == pendingItemId &&
-        nextSupportsAgentMessages == supportsAgentMessages &&
+        nextState.turnId == threadTurnId &&
+        nextState.pendingItemId == pendingItemId &&
+        nextState.supportsAgentMessages == supportsAgentMessages &&
         samePendingMessages) {
       return;
     }
 
     if (!mounted) {
-      threadStatus = nextStatus;
-      threadStatusStartedAt = nextStartedAt;
-      threadStatusMode = nextMode;
-      threadTurnId = nextTurnId;
-      supportsAgentMessages = nextSupportsAgentMessages;
-      pendingMessages = nextPendingMessages;
-      pendingItemId = nextPendingItemId;
+      threadStatus = nextState.text;
+      threadStatusStartedAt = nextState.startedAt;
+      threadStatusMode = nextState.mode;
+      threadTurnId = nextState.turnId;
+      supportsAgentMessages = nextState.supportsAgentMessages;
+      pendingMessages = nextState.pendingMessages;
+      pendingItemId = nextState.pendingItemId;
       return;
     }
 
     setState(() {
-      threadStatus = nextStatus;
-      threadStatusStartedAt = nextStartedAt;
-      threadStatusMode = nextMode;
-      threadTurnId = nextTurnId;
-      supportsAgentMessages = nextSupportsAgentMessages;
-      pendingMessages = nextPendingMessages;
-      pendingItemId = nextPendingItemId;
+      threadStatus = nextState.text;
+      threadStatusStartedAt = nextState.startedAt;
+      threadStatusMode = nextState.mode;
+      threadTurnId = nextState.turnId;
+      supportsAgentMessages = nextState.supportsAgentMessages;
+      pendingMessages = nextState.pendingMessages;
+      pendingItemId = nextState.pendingItemId;
     });
   }
 
