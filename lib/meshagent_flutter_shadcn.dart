@@ -1,4 +1,5 @@
 export "chat/chat.dart";
+export "chat/file_prompt_actions.dart";
 export "chat/new_chat_thread.dart";
 export "voice/voice.dart";
 export "toolkits/ui.dart";
