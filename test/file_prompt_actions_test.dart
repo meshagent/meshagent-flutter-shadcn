@@ -12,8 +12,8 @@ void main() {
             AgentSpec(
               name: 'Reviewer',
               channels: ChannelsSpec(
-                chat: [
-                  ChatChannel(
+                messaging: [
+                  MessagingChannel(
                     prompts: [
                       PromptTemplate(
                         name: 'Summarize',
@@ -34,8 +34,8 @@ void main() {
             AgentSpec(
               name: 'Refactor Bot',
               channels: ChannelsSpec(
-                chat: [
-                  ChatChannel(
+                messaging: [
+                  MessagingChannel(
                     prompts: [
                       PromptTemplate(
                         name: 'Refactor',
@@ -72,8 +72,8 @@ void main() {
             AgentSpec(
               name: 'Beta',
               channels: ChannelsSpec(
-                chat: [
-                  ChatChannel(
+                messaging: [
+                  MessagingChannel(
                     prompts: [
                       PromptTemplate(
                         name: 'Summarize',
@@ -94,8 +94,8 @@ void main() {
             AgentSpec(
               name: 'Alpha',
               channels: ChannelsSpec(
-                chat: [
-                  ChatChannel(
+                messaging: [
+                  MessagingChannel(
                     prompts: [
                       PromptTemplate(
                         name: 'Explain',
@@ -125,8 +125,8 @@ void main() {
             AgentSpec(
               name: 'Reviewer',
               channels: ChannelsSpec(
-                chat: [
-                  ChatChannel(
+                messaging: [
+                  MessagingChannel(
                     prompts: [PromptTemplate(name: 'Review docs', description: 'Review a docs file', prompt: 'Review {{file}}')],
                   ),
                 ],
@@ -149,8 +149,8 @@ void main() {
             AgentSpec(
               name: 'Reviewer',
               channels: ChannelsSpec(
-                chat: [
-                  ChatChannel(
+                messaging: [
+                  MessagingChannel(
                     prompts: [
                       PromptTemplate(
                         name: ' ',

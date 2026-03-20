@@ -40,7 +40,7 @@ List<ChatFilePromptAction> resolveChatFilePromptActions({required Iterable<Servi
         continue;
       }
 
-      for (final channel in channels.chat) {
+      for (final channel in channels.messaging) {
         final channelPattern = _stringAnnotation(channel.annotations, annotationFilePrompt);
         for (final prompt in channel.prompts) {
           final pattern =
