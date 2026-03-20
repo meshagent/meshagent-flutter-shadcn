@@ -60,7 +60,7 @@ void main() {
 
       final actions = resolveChatFilePromptActions(services: services, filePath: 'src/app.dart');
 
-      expect(actions.map((action) => action.menuLabel).toList(), ['Refactor (Refactor Bot)']);
+      expect(actions.map((action) => action.menuLabel).toList(), ['Refactor']);
       expect(actions.single.renderPrompt('src/app.dart'), 'Refactor src/app.dart');
     });
 
@@ -114,7 +114,7 @@ void main() {
 
       final actions = resolveChatFilePromptActions(services: services, filePath: 'docs/guide.md');
 
-      expect(actions.map((action) => action.menuLabel).toList(), ['Explain (Alpha)', 'Summarize (Beta)']);
+      expect(actions.map((action) => action.menuLabel).toList(), ['Explain', 'Summarize']);
     });
 
     test('inherits file regex annotations from the service metadata', () {
@@ -138,7 +138,38 @@ void main() {
 
       final actions = resolveChatFilePromptActions(services: services, filePath: 'docs/guide.md');
 
-      expect(actions.map((action) => action.menuLabel).toList(), ['Review docs (Reviewer)']);
+      expect(actions.map((action) => action.menuLabel).toList(), ['Review docs']);
+    });
+
+    test('uses a generic label when the prompt name is blank', () {
+      final services = [
+        ServiceSpec(
+          metadata: ServiceMetadata(name: 'Docs'),
+          agents: [
+            AgentSpec(
+              name: 'Reviewer',
+              channels: ChannelsSpec(
+                chat: [
+                  ChatChannel(
+                    prompts: [
+                      PromptTemplate(
+                        name: ' ',
+                        description: 'Review a docs file',
+                        prompt: 'Review {{file}}',
+                        annotations: {annotationFilePrompt: r'^docs/.*\.md$'},
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ];
+
+      final actions = resolveChatFilePromptActions(services: services, filePath: 'docs/guide.md');
+
+      expect(actions.map((action) => action.menuLabel).toList(), ['New chat']);
     });
   });
 }
