@@ -1626,6 +1626,7 @@ class ChatThreadInput extends StatefulWidget {
     required this.onSend,
     required this.controller,
     this.autoFocus = true,
+    this.focusTrigger,
     this.sendEnabled = true,
     this.sendDisabledReason,
     this.placeholder,
@@ -1643,6 +1644,7 @@ class ChatThreadInput extends StatefulWidget {
 
   final Widget? placeholder;
   final bool autoFocus;
+  final Object? focusTrigger;
   final bool sendEnabled;
   final String? sendDisabledReason;
 
@@ -1840,7 +1842,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   @override
   void didUpdateWidget(covariant ChatThreadInput oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!oldWidget.autoFocus && widget.autoFocus) {
+    if ((!oldWidget.autoFocus && widget.autoFocus) || oldWidget.focusTrigger != widget.focusTrigger) {
       _scheduleAutoFocus();
     }
   }
@@ -2542,6 +2544,7 @@ class _ChatThreadState extends State<ChatThread> {
     final canInterruptActiveTurn = _canInterruptActiveTurn(state: state, pendingMessages: pendingMessages);
 
     return ChatThreadInput(
+      focusTrigger: widget.path,
       sendEnabled: !waitingForTurnStart,
       sendDisabledReason: waitingForTurnStart ? "Wait for the previous message to start before sending another one." : null,
       placeholder: widget.inputPlaceholder,
@@ -3732,10 +3735,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
       centerContent: messages.isEmpty && centeredTitle != null
           ? Padding(
               padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
-              child: _ThreadEmptyStateContent(
-                title: centeredTitle,
-                description: centeredDescription,
-              ),
+              child: _ThreadEmptyStateContent(title: centeredTitle, description: centeredDescription),
             )
           : null,
       bottomSpacer: showTyping ? 20 : 0,
@@ -3853,10 +3853,7 @@ class _ThreadEmptyStateContent extends StatelessWidget {
                 textAlign: TextAlign.center,
                 style: titleStyle.copyWith(fontSize: titleFontSize),
               ),
-              if (showDescription) ...[
-                const SizedBox(height: 8),
-                Text(description!, textAlign: TextAlign.center, style: descriptionStyle),
-              ],
+              if (showDescription) ...[const SizedBox(height: 8), Text(description!, textAlign: TextAlign.center, style: descriptionStyle)],
             ],
           ),
         );
