@@ -2332,7 +2332,7 @@ class _ChatBubble extends State<ChatBubble> {
     final cs = theme.colorScheme;
     final text = widget.text;
     final mine = widget.mine;
-    final bubbleColor = mine ? cs.background : cs.card;
+    final bubbleColor = cs.background;
     final openOptions = optionsController.isOpen || hovering;
     final canLongPressReact =
         (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS) && widget.onReactFromMenu != null;
@@ -5213,6 +5213,7 @@ Widget defaultMessageHeaderBuilder(
   final theme = ShadTheme.of(context);
   final tt = theme.textTheme;
   final cs = theme.colorScheme;
+  final isDesktopScreen = MediaQuery.sizeOf(context).width >= 600;
 
   final name = message.getAttribute("author_name") ?? "";
   final createdAt = message.getAttribute("created_at") == null ? DateTime.now() : DateTime.parse(message.getAttribute("created_at"));
@@ -5228,7 +5229,9 @@ Widget defaultMessageHeaderBuilder(
             Expanded(
               child: Text(
                 _displayParticipantName(name),
-                style: tt.small.copyWith(color: cs.foreground),
+                style: isDesktopScreen
+                    ? GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700, color: cs.foreground)
+                    : tt.small.copyWith(color: cs.foreground),
                 maxLines: 1,
                 overflow: .ellipsis,
               ),
