@@ -22,6 +22,8 @@ class NewChatThread extends StatefulWidget {
     this.tool = "new_thread",
     this.toolsBuilder,
     this.onThreadPathChanged,
+    this.centerComposer = true,
+    this.emptyState,
   });
 
   final RoomClient room;
@@ -32,6 +34,8 @@ class NewChatThread extends StatefulWidget {
   final String tool;
   final NewChatThreadToolsBuilder? toolsBuilder;
   final ValueChanged<String?>? onThreadPathChanged;
+  final bool centerComposer;
+  final Widget? emptyState;
 
   @override
   State<NewChatThread> createState() => _NewChatThreadState();
@@ -600,59 +604,76 @@ class _NewChatThreadState extends State<NewChatThread> {
     final snapshot = _buildSnapshot();
     final toolsBuilder = widget.toolsBuilder;
     final headingStyle = ShadTheme.of(context).textTheme.h4;
-    return _buildComposerDropArea(
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 912),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              spacing: 12,
-              children: [
-                Text("Start a new thread", style: headingStyle),
-                ChatThreadInput(
-                  room: widget.room,
-                  controller: _controller,
-                  sendEnabled: !_creatingNewThread && !_waitingForAgent,
-                  sendDisabledReason: _waitingForAgent
-                      ? "Waiting for ${widget.agentName} to be ready."
-                      : "Wait for the message to be accepted.",
-                  sendPendingText: _waitingForAgent ? "Waiting for ${widget.agentName} to be ready." : null,
-                  onCancelSend: _waitingForAgent ? _cancelPendingNewThread : null,
-                  placeholder: const Text("Type a message"),
-                  leading: toolsBuilder == null
-                      ? null
-                      : _controller.toolkits.isNotEmpty
-                      ? null
-                      : toolsBuilder(context, _controller, snapshot),
-                  footer: toolsBuilder == null
-                      ? null
-                      : _controller.toolkits.isEmpty
-                      ? null
-                      : Padding(padding: const EdgeInsets.only(top: 8), child: toolsBuilder(context, _controller, snapshot)),
-                  trailing: null,
-                  onSend: (value, attachments) async {
-                    if (value.isEmpty && attachments.isEmpty) {
-                      return;
-                    }
-                    if (!_creatingNewThread && !_waitingForAgent) {
-                      await _startNewThread();
-                    }
-                  },
-                ),
-                if (_newThreadError != null) ...[
-                  ShadAlert.destructive(title: const Text("Unable to start thread"), description: Text(_newThreadError!)),
-                ] else ...[
-                  // Reserve matching space below the composer so the heading above
-                  // doesn't visually push the input downward in the centered state.
-                  Opacity(opacity: 0, child: Text("Start a new thread", style: headingStyle)),
-                ],
-              ],
-            ),
-          ),
-        ),
-      ),
+    final input = ChatThreadInput(
+      room: widget.room,
+      controller: _controller,
+      sendEnabled: !_creatingNewThread && !_waitingForAgent,
+      sendDisabledReason: _waitingForAgent ? "Waiting for ${widget.agentName} to be ready." : "Wait for the message to be accepted.",
+      sendPendingText: _waitingForAgent ? "Waiting for ${widget.agentName} to be ready." : null,
+      onCancelSend: _waitingForAgent ? _cancelPendingNewThread : null,
+      placeholder: const Text("Type a message"),
+      leading: toolsBuilder == null
+          ? null
+          : _controller.toolkits.isNotEmpty
+          ? null
+          : toolsBuilder(context, _controller, snapshot),
+      footer: toolsBuilder == null
+          ? null
+          : _controller.toolkits.isEmpty
+          ? null
+          : Padding(padding: const EdgeInsets.only(top: 8), child: toolsBuilder(context, _controller, snapshot)),
+      trailing: null,
+      onSend: (value, attachments) async {
+        if (value.isEmpty && attachments.isEmpty) {
+          return;
+        }
+        if (!_creatingNewThread && !_waitingForAgent) {
+          await _startNewThread();
+        }
+      },
     );
+
+    final content = !widget.centerComposer
+        ? Column(
+            children: [
+              Expanded(child: Center(child: widget.emptyState ?? const SizedBox.shrink())),
+              if (_newThreadError != null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 15),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 912),
+                      child: ShadAlert.destructive(title: const Text("Unable to start thread"), description: Text(_newThreadError!)),
+                    ),
+                  ),
+                ),
+              ChatThreadInputFrame(child: input),
+            ],
+          )
+        : Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 912),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  spacing: 12,
+                  children: [
+                    Text("Start a new thread", style: headingStyle),
+                    input,
+                    if (_newThreadError != null) ...[
+                      ShadAlert.destructive(title: const Text("Unable to start thread"), description: Text(_newThreadError!)),
+                    ] else ...[
+                      // Reserve matching space below the composer so the heading above
+                      // doesn't visually push the input downward in the centered state.
+                      Opacity(opacity: 0, child: Text("Start a new thread", style: headingStyle)),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          );
+
+    return _buildComposerDropArea(child: content);
   }
 }

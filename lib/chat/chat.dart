@@ -1263,6 +1263,10 @@ class ChatThreadViewportBody extends StatelessWidget {
     return Center(
       child: Stack(
         children: [
+          if (bottomAlign && centerContent != null && children.isEmpty)
+            Positioned.fill(
+              child: IgnorePointer(child: Center(child: centerContent!)),
+            ),
           Positioned.fill(
             child: Column(
               mainAxisAlignment: bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
@@ -1823,6 +1827,7 @@ class ChatThreadInput extends StatefulWidget {
     required this.onSend,
     required this.controller,
     this.autoFocus = true,
+    this.focusTrigger,
     this.sendEnabled = true,
     this.sendDisabledReason,
     this.placeholder,
@@ -1840,6 +1845,7 @@ class ChatThreadInput extends StatefulWidget {
 
   final Widget? placeholder;
   final bool autoFocus;
+  final Object? focusTrigger;
   final bool sendEnabled;
   final String? sendDisabledReason;
 
@@ -2037,7 +2043,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   @override
   void didUpdateWidget(covariant ChatThreadInput oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!oldWidget.autoFocus && widget.autoFocus) {
+    if ((!oldWidget.autoFocus && widget.autoFocus) || oldWidget.focusTrigger != widget.focusTrigger) {
       _scheduleAutoFocus();
     }
   }
@@ -2281,6 +2287,8 @@ class ChatThread extends StatefulWidget {
     this.openFile,
     this.toolsBuilder,
     this.inputPlaceholder,
+    this.emptyStateTitle,
+    this.emptyStateDescription,
 
     this.agentName,
   });
@@ -2295,6 +2303,8 @@ class ChatThread extends StatefulWidget {
   final void Function(ChatMessage message)? onMessageSent;
   final ChatThreadController? controller;
   final Widget? inputPlaceholder;
+  final String? emptyStateTitle;
+  final String? emptyStateDescription;
 
   final Widget Function(BuildContext, MeshDocument, MeshElement)? messageHeaderBuilder;
   final Widget Function(BuildContext, List<String>)? waitingForParticipantsBuilder;
@@ -2523,7 +2533,7 @@ class _ChatBubble extends State<ChatBubble> {
     final cs = theme.colorScheme;
     final text = widget.text;
     final mine = widget.mine;
-    final bubbleColor = mine ? cs.background : cs.card;
+    final bubbleColor = cs.background;
     final openOptions = optionsController.isOpen || hovering;
     final canLongPressReact =
         (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS) && widget.onReactFromMenu != null;
@@ -2735,6 +2745,7 @@ class _ChatThreadState extends State<ChatThread> {
     final canInterruptActiveTurn = _canInterruptActiveTurn(state: state, pendingMessages: pendingMessages);
 
     return ChatThreadInput(
+      focusTrigger: widget.path,
       sendEnabled: !waitingForTurnStart,
       sendDisabledReason: waitingForTurnStart ? "Wait for the previous message to start before sending another one." : null,
       placeholder: widget.inputPlaceholder,
@@ -2849,6 +2860,8 @@ class _ChatThreadState extends State<ChatThread> {
                 fileInThreadBuilder: widget.fileInThreadBuilder,
                 openFile: widget.openFile,
                 currentStatusEntry: _currentStatusEntry,
+                emptyStateTitle: widget.emptyStateTitle,
+                emptyStateDescription: widget.emptyStateDescription,
               ),
               ListenableBuilder(
                 listenable: controller,
@@ -2959,6 +2972,8 @@ class ChatThreadMessages extends StatefulWidget {
     this.openFile,
     this.currentStatusEntry,
     this.messageBuilders,
+    this.emptyStateTitle,
+    this.emptyStateDescription,
   });
 
   final Map<String, MessageBuilder>? messageBuilders;
@@ -2977,6 +2992,8 @@ class ChatThreadMessages extends StatefulWidget {
   final List<MeshElement> messages;
   final List<Participant> online;
   final OutboundEntry? currentStatusEntry;
+  final String? emptyStateTitle;
+  final String? emptyStateDescription;
 
   final Widget Function(BuildContext, MeshDocument, MeshElement)? messageHeaderBuilder;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
@@ -3079,6 +3096,8 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   List<MeshElement> get messages => widget.messages;
   List<Participant> get online => widget.online;
   OutboundEntry? get currentStatusEntry => widget.currentStatusEntry;
+  String? get emptyStateTitle => widget.emptyStateTitle;
+  String? get emptyStateDescription => widget.emptyStateDescription;
   Map<String, MessageBuilder>? get messageBuilders => widget.messageBuilders;
   Widget Function(BuildContext, MeshDocument, MeshElement)? get messageHeaderBuilder => widget.messageHeaderBuilder;
   Widget Function(BuildContext context, String path)? get fileInThreadBuilder => widget.fileInThreadBuilder;
@@ -3879,6 +3898,22 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   Widget build(BuildContext context) {
     bool bottomAlign = !startChatCentered || messages.isNotEmpty;
     final feedImages = _collectThreadImages();
+    final rawCenteredTitle = emptyStateTitle?.trim();
+    final participantCenteredTitle = online.firstOrNull?.getAttribute("empty_state_title");
+    final participantCenteredDescription = online.firstOrNull?.getAttribute("empty_state_description");
+    final centeredTitle = rawCenteredTitle != null && rawCenteredTitle.isNotEmpty
+        ? rawCenteredTitle
+        : participantCenteredTitle is String && participantCenteredTitle.trim().isNotEmpty
+        ? participantCenteredTitle.trim()
+        : startChatCentered
+        ? "How can I help you?"
+        : null;
+    final rawCenteredDescription = emptyStateDescription?.trim();
+    final centeredDescription = rawCenteredDescription != null && rawCenteredDescription.isNotEmpty
+        ? rawCenteredDescription
+        : participantCenteredDescription is String && participantCenteredDescription.trim().isNotEmpty
+        ? participantCenteredDescription.trim()
+        : null;
 
     final messageWidgets = <Widget>[];
     for (var message in messages.indexed) {
@@ -3898,13 +3933,10 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     }
     final threadView = ChatThreadViewportBody(
       bottomAlign: bottomAlign,
-      centerContent: !bottomAlign && online.firstOrNull != null
+      centerContent: messages.isEmpty && centeredTitle != null
           ? Padding(
-              padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 50),
-              child: Text(
-                online.first.getAttribute("empty_state_title") ?? "How can I help you?",
-                style: ShadTheme.of(context).textTheme.h3,
-              ),
+              padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
+              child: _ThreadEmptyStateContent(title: centeredTitle, description: centeredDescription),
             )
           : null,
       bottomSpacer: showTyping ? 20 : 0,
@@ -3973,6 +4005,60 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
         },
         child: threadView,
       ),
+    );
+  }
+}
+
+class _ThreadEmptyStateContent extends StatelessWidget {
+  const _ThreadEmptyStateContent({required this.title, this.description});
+
+  static const double _descriptionVisibilityMinWidth = 480;
+  static const double _mobileScreenWidthMax = 600;
+
+  final String title;
+  final String? description;
+
+  double _titleScale(double width) {
+    if (width >= 820) {
+      return 1;
+    }
+    if (width <= 440) {
+      return 0.72;
+    }
+    return 0.72 + ((width - 440) / 380) * 0.28;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final isMobileScreen = MediaQuery.sizeOf(context).width < _mobileScreenWidthMax;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final scale = _titleScale(constraints.maxWidth);
+        final titleStyle = theme.textTheme.h1;
+        final descriptionStyle = theme.textTheme.p;
+        final titleFontSize = (titleStyle.fontSize ?? 64) * scale;
+        final showDescription =
+            description != null &&
+            description!.trim().isNotEmpty &&
+            (constraints.maxWidth >= _descriptionVisibilityMinWidth || isMobileScreen);
+
+        return ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 640),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: titleStyle.copyWith(fontSize: titleFontSize),
+              ),
+              if (showDescription) ...[const SizedBox(height: 8), Text(description!, textAlign: TextAlign.center, style: descriptionStyle)],
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -5423,6 +5509,7 @@ Widget defaultMessageHeaderBuilder(
   final theme = ShadTheme.of(context);
   final tt = theme.textTheme;
   final cs = theme.colorScheme;
+  final isDesktopScreen = MediaQuery.sizeOf(context).width >= 600;
 
   final name = message.getAttribute("author_name") ?? "";
   final createdAt = message.getAttribute("created_at") == null ? DateTime.now() : DateTime.parse(message.getAttribute("created_at"));
@@ -5438,7 +5525,9 @@ Widget defaultMessageHeaderBuilder(
             Expanded(
               child: Text(
                 _displayParticipantName(name),
-                style: tt.small.copyWith(color: cs.foreground),
+                style: isDesktopScreen
+                    ? GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700, color: cs.foreground)
+                    : tt.small.copyWith(color: cs.foreground),
                 maxLines: 1,
                 overflow: .ellipsis,
               ),
