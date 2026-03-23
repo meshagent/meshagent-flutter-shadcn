@@ -97,6 +97,90 @@ bool _shouldShowAuthorNames({required MeshDocument thread, String? localParticip
   return true;
 }
 
+class _ImageMime {
+  static String normalize(String mimeType) {
+    return mimeType.trim().toLowerCase();
+  }
+
+  static bool isSvg(String mimeType) {
+    switch (normalize(mimeType)) {
+      case "image/svg+xml":
+      case "image/svg":
+      case "public.svg-image":
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  static String defaultExtension(String mimeType) {
+    switch (normalize(mimeType)) {
+      case "image/jpeg":
+      case "image/jpg":
+        return "jpg";
+      case "image/gif":
+        return "gif";
+      case "image/webp":
+        return "webp";
+      case "image/svg+xml":
+      case "image/svg":
+      case "public.svg-image":
+        return "svg";
+      case "image/tiff":
+      case "image/tif":
+        return "tiff";
+      case "image/bmp":
+        return "bmp";
+      case "image/heic":
+        return "heic";
+      case "image/heif":
+        return "heif";
+      case "image/x-icon":
+      case "image/vnd.microsoft.icon":
+        return "ico";
+      case "image/png":
+      default:
+        return "png";
+    }
+  }
+
+  static String suggestedFileName(String mimeType) {
+    return "image.${defaultExtension(mimeType)}";
+  }
+
+  static FileFormat? clipboardFormat(String mimeType) {
+    switch (normalize(mimeType)) {
+      case "image/jpeg":
+      case "image/jpg":
+        return Formats.jpeg;
+      case "image/gif":
+        return Formats.gif;
+      case "image/webp":
+        return Formats.webp;
+      case "image/svg+xml":
+      case "image/svg":
+      case "public.svg-image":
+        return Formats.svg;
+      case "image/tiff":
+      case "image/tif":
+        return Formats.tiff;
+      case "image/bmp":
+        return Formats.bmp;
+      case "image/heic":
+        return Formats.heic;
+      case "image/heif":
+        return Formats.heif;
+      case "image/x-icon":
+      case "image/vnd.microsoft.icon":
+        return Formats.ico;
+      case "image/png":
+        return Formats.png;
+      default:
+        return null;
+    }
+  }
+}
+
 bool _supportsAgentMessages(Participant participant) {
   if (participant is! RemoteParticipant) {
     return false;
@@ -2344,7 +2428,7 @@ class ChatBubble extends StatefulWidget {
 
 class _ChatBubble extends State<ChatBubble> {
   static const double _actionSlotSize = 30;
-  static const double _actionGap = 4;
+  static const double _actionGap = 6;
   static const double _bubbleRadius = 16;
 
   bool hovering = false;
@@ -3008,6 +3092,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   static const double _chatBubbleActionRailWidth = 80;
   static const double _chatBubbleSiblingSpacing = 6;
   static const double _chatMessageStackSpacing = 38;
+  static const int _maxImageCacheBytes = 64 * 1024 * 1024;
 
   static const List<String> _defaultReactionOptions = <String>[
     "👍",
@@ -3107,6 +3192,10 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   List<_ThreadFeedImage> _overlayImages = const <_ThreadFeedImage>[];
   int _overlayInitialIndex = 0;
   LocalHistoryEntry? _imageViewerHistoryEntry;
+  final LinkedHashMap<String, _ThreadImageRecord> _imageCache = LinkedHashMap<String, _ThreadImageRecord>();
+  final LinkedHashMap<String, int> _imageCacheSizes = LinkedHashMap<String, int>();
+  final Map<String, Future<_ThreadImageRecord?>> _imageInFlight = <String, Future<_ThreadImageRecord?>>{};
+  int _imageCacheBytes = 0;
 
   String? _localParticipantName() {
     final name = room.localParticipant?.getAttribute("name");
@@ -3395,6 +3484,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     String target = _reactionTargetMessage,
     String? attachmentRef,
     bool showAddWhenEmpty = true,
+    List<Widget> leadingActions = const <Widget>[],
   }) {
     final localUserName = _localParticipantName();
     final normalizedLocalUserName = _normalizeReactionUserName(localUserName);
@@ -3433,7 +3523,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     selectedReaction = entries.firstWhereOrNull((entry) => mineValues.contains(entry.key))?.key;
     final hasSelectedReaction = selectedReaction != null;
     final showAddButton = localUserName != null && !hasSelectedReaction && (showAddWhenEmpty || grouped.isNotEmpty);
-    if (grouped.isEmpty && !showAddButton) {
+    if (grouped.isEmpty && !showAddButton && leadingActions.isEmpty) {
       return const SizedBox.shrink();
     }
     final alignment = mine ? Alignment.centerRight : Alignment.centerLeft;
@@ -3448,6 +3538,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
           runSpacing: 6,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
+            ...leadingActions,
             for (final entry in entries)
               Builder(
                 builder: (context) {
@@ -3577,6 +3668,10 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     final historyEntry = _imageViewerHistoryEntry;
     _imageViewerHistoryEntry = null;
     historyEntry?.remove();
+    _imageCache.clear();
+    _imageCacheSizes.clear();
+    _imageInFlight.clear();
+    _imageCacheBytes = 0;
     super.dispose();
   }
 
@@ -3629,39 +3724,190 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     return path.replaceFirst(RegExp(r'^/'), '');
   }
 
-  Widget _buildFileInThread(BuildContext context, String path) {
-    path = _sanitizePath(path);
+  bool _isImageFilePath(String path) {
+    final lower = _sanitizePath(path).toLowerCase();
+    final dot = lower.lastIndexOf('.');
+    if (dot <= 0 || dot == lower.length - 1) {
+      return false;
+    }
+    final ext = lower.substring(dot + 1);
+    return imageExtensions.contains(ext);
+  }
 
+  _ThreadImageRecord? _readCachedImageRecord(String path) {
+    final record = _imageCache.remove(path);
+    if (record == null) {
+      return null;
+    }
+
+    final size = _imageCacheSizes.remove(path) ?? record.data.length;
+    _imageCache[path] = record;
+    _imageCacheSizes[path] = size;
+    return record;
+  }
+
+  void _trimImageCache() {
+    while (_imageCacheBytes > _maxImageCacheBytes && _imageCache.isNotEmpty) {
+      final oldestPath = _imageCache.keys.first;
+      _imageCache.remove(oldestPath);
+      final removedSize = _imageCacheSizes.remove(oldestPath) ?? 0;
+      _imageCacheBytes -= removedSize;
+    }
+
+    if (_imageCacheBytes < 0) {
+      _imageCacheBytes = 0;
+    }
+  }
+
+  void _cacheImageRecord(String path, _ThreadImageRecord record) {
+    final size = record.data.length;
+
+    final existingRecord = _imageCache.remove(path);
+    if (existingRecord != null) {
+      _imageCacheBytes -= _imageCacheSizes.remove(path) ?? existingRecord.data.length;
+    }
+
+    if (size > _maxImageCacheBytes) {
+      _trimImageCache();
+      return;
+    }
+
+    _imageCache[path] = record;
+    _imageCacheSizes[path] = size;
+    _imageCacheBytes += size;
+    _trimImageCache();
+  }
+
+  Future<_ThreadImageRecord?> _loadImageRecord(String path) async {
+    final cached = _readCachedImageRecord(path);
+    if (cached != null) {
+      return cached;
+    }
+
+    final inFlight = _imageInFlight[path];
+    if (inFlight != null) {
+      return inFlight;
+    }
+
+    final lookup = () async {
+      final file = await room.storage.download(path);
+      final mimeType = file.mimeType.trim().isNotEmpty ? file.mimeType.trim() : "image/png";
+      final record = _ThreadImageRecord(data: file.data, mimeType: mimeType);
+      _cacheImageRecord(path, record);
+      return record;
+    }();
+
+    _imageInFlight[path] = lookup;
+    try {
+      return await lookup;
+    } finally {
+      if (identical(_imageInFlight[path], lookup)) {
+        _imageInFlight.remove(path);
+      }
+    }
+  }
+
+  Future<void> _copyImageRecord(_ThreadImageRecord image) async {
+    final clipboard = SystemClipboard.instance;
+    if (clipboard == null) {
+      return;
+    }
+
+    final mimeType = image.mimeType.trim().toLowerCase();
+    final format = _ImageMime.clipboardFormat(mimeType);
+    final item = DataWriterItem(suggestedName: _ImageMime.suggestedFileName(mimeType));
+    if (format != null) {
+      item.add(format(image.data));
+    } else {
+      item.add(EncodedData([raw.DataRepresentation.simple(format: mimeType, data: image.data)]));
+    }
+
+    await clipboard.write([item]);
+  }
+
+  Future<void> _downloadPath(String path) async {
+    final url = await room.storage.downloadUrl(path);
+    await launchUrl(Uri.parse(url));
+  }
+
+  Future<void> _openPath(String path) async {
+    if (widget.openFile != null) {
+      await widget.openFile!(path);
+      return;
+    }
+
+    showShadDialog(
+      context: context,
+      builder: (context) {
+        return ShadDialog(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          title: Text("File: $path"),
+          actions: [
+            ShadButton(
+              onPressed: () async {
+                await _downloadPath(path);
+              },
+              child: Text("Download"),
+            ),
+          ],
+          child: FilePreview(room: room, path: path, fit: BoxFit.contain),
+        );
+      },
+    );
+  }
+
+  Widget _wrapWithCorners(Widget child) {
+    return ClipRRect(borderRadius: BorderRadius.circular(16), child: child);
+  }
+
+  Widget _wrapTapTarget(Widget child, String path) {
     return ShadGestureDetector(
       cursor: SystemMouseCursors.click,
       onTap: () async {
-        if (openFile != null) {
-          await Future.sync(() => openFile!(path));
-          return;
-        }
-
-        showShadDialog(
-          context: context,
-          builder: (context) {
-            return ShadDialog(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              title: Text("File: $path"),
-              actions: [
-                ShadButton(
-                  onPressed: () async {
-                    final url = await room.storage.downloadUrl(path);
-
-                    launchUrl(Uri.parse(url));
-                  },
-                  child: Text("Download"),
-                ),
-              ],
-              child: FilePreview(room: room, path: path, fit: BoxFit.cover),
-            );
-          },
-        );
+        await _openPath(path);
       },
-      child: fileInThreadBuilder != null ? fileInThreadBuilder!(context, path) : ChatThreadPreview(room: room, path: path),
+      child: child,
+    );
+  }
+
+  Widget _buildFileImageInThread(BuildContext context, String path, _ThreadImageRecord? imageRecord, bool loading) {
+    final items = _buildAttachmentOptions(imageRecord: imageRecord, path: path);
+
+    return ShadContextMenuRegion(
+      items: items,
+      child: _wrapTapTarget(
+        SizedBox(
+          width: 312.5,
+          height: 312.5,
+          child: _wrapWithCorners(
+            ColoredBox(
+              color: ShadTheme.of(context).colorScheme.background,
+              child: imageRecord == null
+                  ? Center(
+                      child: loading
+                          ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                          : Icon(LucideIcons.imageOff, size: 20, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                    )
+                  : _ImageMime.isSvg(imageRecord.mimeType)
+                  ? SvgPicture.memory(imageRecord.data, fit: BoxFit.cover)
+                  : UniversalImage(imageRecord.data, fit: BoxFit.cover),
+            ),
+          ),
+        ),
+        path,
+      ),
+    );
+  }
+
+  Widget _buildFileInThread(BuildContext context, String path) {
+    final items = _buildAttachmentOptions(path: path);
+
+    return ShadContextMenuRegion(
+      items: items,
+      child: _wrapTapTarget(
+        fileInThreadBuilder != null ? fileInThreadBuilder!(context, path) : ChatThreadPreview(room: room, path: path),
+        path,
+      ),
     );
   }
 
@@ -3715,9 +3961,30 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     return null;
   }
 
-  Widget _buildAttachmentInThread(BuildContext context, MeshElement attachment, {required List<_ThreadFeedImage> feedImages}) {
+  Widget _buildAttachmentInThread(
+    BuildContext context,
+    MeshElement message,
+    bool mine,
+    MeshElement attachment, {
+    required List<_ThreadFeedImage> feedImages,
+  }) {
+    final normalizedAttachmentRef = _normalizeReactionAttachmentRef(attachment.id);
+
     if (attachment.tagName == "image") {
-      return _buildImageInThread(context, attachment, feedImages: feedImages);
+      return Column(
+        crossAxisAlignment: mine ? .end : .start,
+        children: [
+          _buildImageInThread(context, attachment, feedImages: feedImages),
+          if (normalizedAttachmentRef != null)
+            _buildReactionRow(
+              context,
+              message: message,
+              mine: mine,
+              target: _reactionTargetAttachment,
+              attachmentRef: normalizedAttachmentRef,
+            ),
+        ],
+      );
     }
 
     final pathAttribute = attachment.getAttribute("path");
@@ -3725,7 +3992,88 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
       return const SizedBox.shrink();
     }
 
-    return _buildFileInThread(context, pathAttribute);
+    final normalizedPath = _sanitizePath(pathAttribute);
+
+    if (attachment.tagName == "file" && _isImageFilePath(normalizedPath)) {
+      return _ThreadImageLookup(
+        lookupKey: normalizedPath,
+        readCached: () => _readCachedImageRecord(normalizedPath),
+        lookupImage: () => _loadImageRecord(normalizedPath),
+        builder: (context, snapshot) {
+          final imageRecord = snapshot.data;
+          final loading = snapshot.connectionState != ConnectionState.done;
+
+          return Column(
+            crossAxisAlignment: mine ? .end : .start,
+            children: [
+              _buildFileImageInThread(context, normalizedPath, imageRecord, loading),
+              if (normalizedAttachmentRef != null)
+                _buildReactionRow(
+                  context,
+                  message: message,
+                  mine: mine,
+                  target: _reactionTargetAttachment,
+                  attachmentRef: normalizedAttachmentRef,
+                  leadingActions: _buildAttachmentActions(imageRecord: imageRecord, path: normalizedPath),
+                ),
+            ],
+          );
+        },
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: mine ? .end : .start,
+      children: [
+        _buildFileInThread(context, normalizedPath),
+        if (normalizedAttachmentRef != null)
+          _buildReactionRow(
+            context,
+            message: message,
+            mine: mine,
+            target: _reactionTargetAttachment,
+            attachmentRef: normalizedAttachmentRef,
+            leadingActions: _buildAttachmentActions(path: normalizedPath),
+          ),
+      ],
+    );
+  }
+
+  List<ShadContextMenuItem> _buildAttachmentOptions({_ThreadImageRecord? imageRecord, String? path}) {
+    return [
+      if (path != null)
+        ShadContextMenuItem(
+          height: 40,
+          onPressed: () async {
+            await _openPath(path);
+          },
+          leading: const Icon(LucideIcons.externalLink, size: 14),
+          child: const Text("Open"),
+        ),
+      if (imageRecord != null)
+        ShadContextMenuItem(
+          height: 40,
+          onPressed: () async {
+            await _copyImageRecord(imageRecord);
+          },
+          leading: const Icon(LucideIcons.copy, size: 14),
+          child: const Text("Copy"),
+        ),
+      if (path != null)
+        ShadContextMenuItem(
+          height: 40,
+          onPressed: () async {
+            await _downloadPath(path);
+          },
+          leading: const Icon(LucideIcons.download, size: 14),
+          child: const Text("Download"),
+        ),
+    ];
+  }
+
+  List<Widget> _buildAttachmentActions({_ThreadImageRecord? imageRecord, String? path}) {
+    final items = _buildAttachmentOptions(imageRecord: imageRecord, path: path);
+    return [_AttachmentOptionsButton(items: items)];
   }
 
   bool _defaultHeaderWillRender({required MeshElement message}) {
@@ -3856,22 +4204,8 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
             if (hasText || i > 0) const SizedBox(height: _chatBubbleSiblingSpacing),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 5),
-              child: Container(
-                margin: EdgeInsets.only(top: 0),
-                child: Align(
-                  alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-                  child: _buildAttachmentInThread(context, attachments[i], feedImages: feedImages),
-                ),
-              ),
+              child: _buildAttachmentInThread(context, message, mine, attachments[i], feedImages: feedImages),
             ),
-            if (_normalizeReactionAttachmentRef(attachments[i].id) != null)
-              _buildReactionRow(
-                context,
-                message: message,
-                mine: mine,
-                target: _reactionTargetAttachment,
-                attachmentRef: _normalizeReactionAttachmentRef(attachments[i].id),
-              ),
           ],
 
           _buildReactionRow(context, message: message, mine: mine, target: _reactionTargetMessage, showAddWhenEmpty: false),
@@ -4148,11 +4482,99 @@ class _ReactionPickerButtonState extends State<_ReactionPickerButton> {
   }
 }
 
+class _AttachmentOptionsButton extends StatefulWidget {
+  const _AttachmentOptionsButton({required this.items});
+
+  final List<Widget> items;
+
+  @override
+  State<_AttachmentOptionsButton> createState() => _AttachmentOptionsButtonState();
+}
+
+class _AttachmentOptionsButtonState extends State<_AttachmentOptionsButton> {
+  final ShadContextMenuController _controller = ShadContextMenuController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.items.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final theme = ShadTheme.of(context);
+    final cs = theme.colorScheme;
+
+    return ShadContextMenuRegion(
+      controller: _controller,
+      constraints: const BoxConstraints(minWidth: 180),
+      items: widget.items,
+      child: Tooltip(
+        message: "Attachment options",
+        child: ShadIconButton.ghost(
+          width: 30,
+          height: 30,
+          padding: EdgeInsets.zero,
+          icon: Icon(LucideIcons.ellipsis, size: 18, color: cs.mutedForeground),
+          onPressed: _controller.show,
+        ),
+      ),
+    );
+  }
+}
+
 class _ThreadImageRecord {
   const _ThreadImageRecord({required this.data, required this.mimeType});
 
   final Uint8List data;
   final String mimeType;
+}
+
+class _ThreadImageLookup extends StatefulWidget {
+  const _ThreadImageLookup({required this.lookupKey, required this.readCached, required this.lookupImage, required this.builder});
+
+  final Object lookupKey;
+  final _ThreadImageRecord? Function() readCached;
+  final Future<_ThreadImageRecord?> Function() lookupImage;
+  final Widget Function(BuildContext context, AsyncSnapshot<_ThreadImageRecord?> snapshot) builder;
+
+  @override
+  State<_ThreadImageLookup> createState() => _ThreadImageLookupState();
+}
+
+class _ThreadImageLookupState extends State<_ThreadImageLookup> {
+  late Future<_ThreadImageRecord?> _lookup;
+
+  Future<_ThreadImageRecord?> _resolveLookup() {
+    final cached = widget.readCached();
+    if (cached != null) {
+      return SynchronousFuture<_ThreadImageRecord?>(cached);
+    }
+    return widget.lookupImage();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _lookup = _resolveLookup();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ThreadImageLookup oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.lookupKey != widget.lookupKey) {
+      _lookup = _resolveLookup();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<_ThreadImageRecord?>(future: _lookup, builder: widget.builder);
+  }
 }
 
 class _ThreadFeedImage {
@@ -4243,11 +4665,6 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
     return _ThreadImageRecord(data: data, mimeType: mimeType);
   }
 
-  bool _isSvg(String mimeType) {
-    final normalized = mimeType.toLowerCase();
-    return normalized == "image/svg+xml" || normalized == "image/svg";
-  }
-
   bool _isGeneratingStatus(String? status) {
     if (status == null || status.trim().isEmpty) {
       return false;
@@ -4288,52 +4705,17 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
     return Size(rawWidth * scale, rawHeight * scale);
   }
 
-  String _defaultImageExtension(String mimeType) {
-    switch (mimeType.trim().toLowerCase()) {
-      case "image/jpeg":
-      case "image/jpg":
-        return "jpg";
-      case "image/gif":
-        return "gif";
-      case "image/webp":
-        return "webp";
-      case "image/svg+xml":
-      case "image/svg":
-      case "public.svg-image":
-        return "svg";
-      case "image/tiff":
-      case "image/tif":
-        return "tiff";
-      case "image/bmp":
-        return "bmp";
-      case "image/heic":
-        return "heic";
-      case "image/heif":
-        return "heif";
-      case "image/x-icon":
-      case "image/vnd.microsoft.icon":
-        return "ico";
-      case "image/png":
-      default:
-        return "png";
-    }
-  }
-
-  String _suggestedFileName(String mimeType) {
-    return "image.${_defaultImageExtension(mimeType)}";
-  }
-
   String _ensureFileNameExtension(String rawPath, String mimeType) {
     final trimmed = rawPath.trim();
     if (trimmed.isEmpty) {
-      return _suggestedFileName(mimeType);
+      return _ImageMime.suggestedFileName(mimeType);
     }
 
     final slash = trimmed.lastIndexOf("/");
     final fileName = slash == -1 ? trimmed : trimmed.substring(slash + 1);
 
     if (fileName.isEmpty) {
-      final suggested = _suggestedFileName(mimeType);
+      final suggested = _ImageMime.suggestedFileName(mimeType);
       return trimmed.endsWith("/") ? "$trimmed$suggested" : "$trimmed/$suggested";
     }
 
@@ -4341,39 +4723,7 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
       return trimmed;
     }
 
-    return "$trimmed.${_defaultImageExtension(mimeType)}";
-  }
-
-  FileFormat? _clipboardImageFormat(String mimeType) {
-    switch (mimeType.trim().toLowerCase()) {
-      case "image/jpeg":
-      case "image/jpg":
-        return Formats.jpeg;
-      case "image/gif":
-        return Formats.gif;
-      case "image/webp":
-        return Formats.webp;
-      case "image/svg+xml":
-      case "image/svg":
-      case "public.svg-image":
-        return Formats.svg;
-      case "image/tiff":
-      case "image/tif":
-        return Formats.tiff;
-      case "image/bmp":
-        return Formats.bmp;
-      case "image/heic":
-        return Formats.heic;
-      case "image/heif":
-        return Formats.heif;
-      case "image/x-icon":
-      case "image/vnd.microsoft.icon":
-        return Formats.ico;
-      case "image/png":
-        return Formats.png;
-      default:
-        return null;
-    }
+    return "$trimmed.${_ImageMime.defaultExtension(mimeType)}";
   }
 
   Future<void> _onCopyImage(_ThreadImageRecord image) async {
@@ -4383,8 +4733,8 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
     }
 
     final mimeType = image.mimeType.trim().toLowerCase();
-    final format = _clipboardImageFormat(mimeType);
-    final item = DataWriterItem(suggestedName: _suggestedFileName(mimeType));
+    final format = _ImageMime.clipboardFormat(mimeType);
+    final item = DataWriterItem(suggestedName: _ImageMime.suggestedFileName(mimeType));
     if (format != null) {
       item.add(format(image.data));
     } else {
@@ -4395,7 +4745,7 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
   }
 
   Future<void> _onSaveImage(_ThreadImageRecord image) async {
-    final fileNameController = TextEditingController(text: _suggestedFileName(image.mimeType));
+    final fileNameController = TextEditingController(text: _ImageMime.suggestedFileName(image.mimeType));
     String selectedFolder = "";
 
     await showShadDialog<void>(
@@ -4419,7 +4769,7 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
             ShadButton(
               onPressed: () async {
                 final value = fileNameController.text.trim();
-                var fullPath = value.isEmpty ? _suggestedFileName(image.mimeType) : value;
+                var fullPath = value.isEmpty ? _ImageMime.suggestedFileName(image.mimeType) : value;
 
                 if (!fullPath.contains("/")) {
                   fullPath = selectedFolder.isEmpty ? fullPath : "$selectedFolder/$fullPath";
@@ -4483,7 +4833,7 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
                 padding: const EdgeInsets.only(top: 12),
                 child: ShadInputFormField(
                   label: Text("File name or path", style: tt.small.copyWith(fontWeight: FontWeight.bold)),
-                  placeholder: Text(_suggestedFileName(image.mimeType)),
+                  placeholder: Text(_ImageMime.suggestedFileName(image.mimeType)),
                   controller: fileNameController,
                 ),
               ),
@@ -4598,7 +4948,7 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
           return const FileDefaultPreviewCard(icon: LucideIcons.imageOff, text: "Image unavailable");
         }
 
-        final imageWidget = _isSvg(image.mimeType)
+        final imageWidget = _ImageMime.isSvg(image.mimeType)
             ? SvgPicture.memory(image.data, fit: (widget.widthPx != null && widget.heightPx != null) ? BoxFit.contain : BoxFit.cover)
             : Image.memory(image.data, fit: (widget.widthPx != null && widget.heightPx != null) ? BoxFit.contain : BoxFit.cover);
         final size = _displaySize();
@@ -4646,52 +4996,17 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
     _controller.animateToPage(nextIndex, duration: const Duration(milliseconds: 180), curve: Curves.easeInOut);
   }
 
-  String _defaultImageExtension(String mimeType) {
-    switch (mimeType.trim().toLowerCase()) {
-      case "image/jpeg":
-      case "image/jpg":
-        return "jpg";
-      case "image/gif":
-        return "gif";
-      case "image/webp":
-        return "webp";
-      case "image/svg+xml":
-      case "image/svg":
-      case "public.svg-image":
-        return "svg";
-      case "image/tiff":
-      case "image/tif":
-        return "tiff";
-      case "image/bmp":
-        return "bmp";
-      case "image/heic":
-        return "heic";
-      case "image/heif":
-        return "heif";
-      case "image/x-icon":
-      case "image/vnd.microsoft.icon":
-        return "ico";
-      case "image/png":
-      default:
-        return "png";
-    }
-  }
-
-  String _suggestedFileName(String mimeType) {
-    return "image.${_defaultImageExtension(mimeType)}";
-  }
-
   String _ensureFileNameExtension(String rawPath, String mimeType) {
     final trimmed = rawPath.trim();
     if (trimmed.isEmpty) {
-      return _suggestedFileName(mimeType);
+      return _ImageMime.suggestedFileName(mimeType);
     }
 
     final slash = trimmed.lastIndexOf("/");
     final fileName = slash == -1 ? trimmed : trimmed.substring(slash + 1);
 
     if (fileName.isEmpty) {
-      final suggested = _suggestedFileName(mimeType);
+      final suggested = _ImageMime.suggestedFileName(mimeType);
       return trimmed.endsWith("/") ? "$trimmed$suggested" : "$trimmed/$suggested";
     }
 
@@ -4699,39 +5014,7 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
       return trimmed;
     }
 
-    return "$trimmed.${_defaultImageExtension(mimeType)}";
-  }
-
-  FileFormat? _clipboardImageFormat(String mimeType) {
-    switch (mimeType.trim().toLowerCase()) {
-      case "image/jpeg":
-      case "image/jpg":
-        return Formats.jpeg;
-      case "image/gif":
-        return Formats.gif;
-      case "image/webp":
-        return Formats.webp;
-      case "image/svg+xml":
-      case "image/svg":
-      case "public.svg-image":
-        return Formats.svg;
-      case "image/tiff":
-      case "image/tif":
-        return Formats.tiff;
-      case "image/bmp":
-        return Formats.bmp;
-      case "image/heic":
-        return Formats.heic;
-      case "image/heif":
-        return Formats.heif;
-      case "image/x-icon":
-      case "image/vnd.microsoft.icon":
-        return Formats.ico;
-      case "image/png":
-        return Formats.png;
-      default:
-        return null;
-    }
+    return "$trimmed.${_ImageMime.defaultExtension(mimeType)}";
   }
 
   Future<_ThreadImageRecord?> _loadCurrentImage() async {
@@ -4759,8 +5042,8 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
     }
 
     final mimeType = image.mimeType.trim().toLowerCase();
-    final format = _clipboardImageFormat(mimeType);
-    final item = DataWriterItem(suggestedName: _suggestedFileName(mimeType));
+    final format = _ImageMime.clipboardFormat(mimeType);
+    final item = DataWriterItem(suggestedName: _ImageMime.suggestedFileName(mimeType));
     if (format != null) {
       item.add(format(image.data));
     } else {
@@ -4782,7 +5065,7 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
     if (!mounted) {
       return;
     }
-    final fileNameController = TextEditingController(text: _suggestedFileName(image.mimeType));
+    final fileNameController = TextEditingController(text: _ImageMime.suggestedFileName(image.mimeType));
     String selectedFolder = "";
 
     await showShadDialog<void>(
@@ -4806,7 +5089,7 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
             ShadButton(
               onPressed: () async {
                 final value = fileNameController.text.trim();
-                var fullPath = value.isEmpty ? _suggestedFileName(image.mimeType) : value;
+                var fullPath = value.isEmpty ? _ImageMime.suggestedFileName(image.mimeType) : value;
 
                 if (!fullPath.contains("/")) {
                   fullPath = selectedFolder.isEmpty ? fullPath : "$selectedFolder/$fullPath";
@@ -4870,7 +5153,7 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
                 padding: const EdgeInsets.only(top: 12),
                 child: ShadInputFormField(
                   label: Text("File name or path", style: tt.small.copyWith(fontWeight: FontWeight.bold)),
-                  placeholder: Text(_suggestedFileName(image.mimeType)),
+                  placeholder: Text(_ImageMime.suggestedFileName(image.mimeType)),
                   controller: fileNameController,
                 ),
               ),
@@ -5030,11 +5313,6 @@ class _ThreadFullscreenImage extends StatelessWidget {
     return _ThreadImageRecord(data: data, mimeType: mimeType);
   }
 
-  bool _isSvg(String mimeType) {
-    final normalized = mimeType.toLowerCase();
-    return normalized == "image/svg+xml" || normalized == "image/svg";
-  }
-
   bool _isGeneratingStatus(String? value) {
     if (value == null || value.trim().isEmpty) {
       return false;
@@ -5085,7 +5363,7 @@ class _ThreadFullscreenImage extends StatelessWidget {
           );
         }
 
-        final imageWidget = _isSvg(image.mimeType)
+        final imageWidget = _ImageMime.isSvg(image.mimeType)
             ? SvgPicture.memory(image.data, fit: BoxFit.contain)
             : Image.memory(image.data, fit: BoxFit.contain);
 
