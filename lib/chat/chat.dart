@@ -2289,6 +2289,7 @@ class ChatThread extends StatefulWidget {
     this.inputPlaceholder,
     this.emptyStateTitle,
     this.emptyStateDescription,
+    this.emptyState,
 
     this.agentName,
   });
@@ -2305,6 +2306,7 @@ class ChatThread extends StatefulWidget {
   final Widget? inputPlaceholder;
   final String? emptyStateTitle;
   final String? emptyStateDescription;
+  final Widget? emptyState;
 
   final Widget Function(BuildContext, MeshDocument, MeshElement)? messageHeaderBuilder;
   final Widget Function(BuildContext, List<String>)? waitingForParticipantsBuilder;
@@ -2862,6 +2864,7 @@ class _ChatThreadState extends State<ChatThread> {
                 currentStatusEntry: _currentStatusEntry,
                 emptyStateTitle: widget.emptyStateTitle,
                 emptyStateDescription: widget.emptyStateDescription,
+                emptyState: widget.emptyState,
               ),
               ListenableBuilder(
                 listenable: controller,
@@ -2974,6 +2977,7 @@ class ChatThreadMessages extends StatefulWidget {
     this.messageBuilders,
     this.emptyStateTitle,
     this.emptyStateDescription,
+    this.emptyState,
   });
 
   final Map<String, MessageBuilder>? messageBuilders;
@@ -2994,6 +2998,7 @@ class ChatThreadMessages extends StatefulWidget {
   final OutboundEntry? currentStatusEntry;
   final String? emptyStateTitle;
   final String? emptyStateDescription;
+  final Widget? emptyState;
 
   final Widget Function(BuildContext, MeshDocument, MeshElement)? messageHeaderBuilder;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
@@ -3098,6 +3103,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   OutboundEntry? get currentStatusEntry => widget.currentStatusEntry;
   String? get emptyStateTitle => widget.emptyStateTitle;
   String? get emptyStateDescription => widget.emptyStateDescription;
+  Widget? get emptyState => widget.emptyState;
   Map<String, MessageBuilder>? get messageBuilders => widget.messageBuilders;
   Widget Function(BuildContext, MeshDocument, MeshElement)? get messageHeaderBuilder => widget.messageHeaderBuilder;
   Widget Function(BuildContext context, String path)? get fileInThreadBuilder => widget.fileInThreadBuilder;
@@ -3933,11 +3939,14 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     }
     final threadView = ChatThreadViewportBody(
       bottomAlign: bottomAlign,
-      centerContent: messages.isEmpty && centeredTitle != null
-          ? Padding(
-              padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
-              child: _ThreadEmptyStateContent(title: centeredTitle, description: centeredDescription),
-            )
+      centerContent: messages.isEmpty
+          ? emptyState ??
+                (centeredTitle != null
+                    ? Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
+                        child: _ThreadEmptyStateContent(title: centeredTitle, description: centeredDescription),
+                      )
+                    : null)
           : null,
       bottomSpacer: showTyping ? 20 : 0,
       overlays: [
