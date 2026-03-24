@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:meshagent/meshagent.dart';
+import 'package:meshagent_flutter_shadcn/chat/chat.dart';
 import 'package:meshagent_flutter_shadcn/viewers/viewers.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
@@ -29,6 +30,10 @@ class _Transcript extends State<TranscriptViewer> {
       source: widget.document,
       builder: (context) {
         final segments = widget.document.root.getElementsByTagName("segment");
+        if (segments.isEmpty) {
+          return const _TranscriptEmptyState();
+        }
+
         return SelectionArea(
           child: ListView(
             padding: EdgeInsets.all(16),
@@ -36,6 +41,31 @@ class _Transcript extends State<TranscriptViewer> {
           ),
         );
       },
+    );
+  }
+}
+
+class _TranscriptEmptyState extends StatelessWidget {
+  const _TranscriptEmptyState();
+
+  static const double _verticalOffset = -48;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Transform.translate(
+        offset: const Offset(0, _verticalOffset),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 640),
+          child: const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [ChatThreadEmptyStateContent(title: "No transcript available", titleScaleOverride: 0.72)],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -3944,7 +3944,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                 (centeredTitle != null
                     ? Padding(
                         padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
-                        child: _ThreadEmptyStateContent(title: centeredTitle, description: centeredDescription),
+                        child: ChatThreadEmptyStateContent(title: centeredTitle, description: centeredDescription),
                       )
                     : null)
           : null,
@@ -4018,14 +4018,15 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   }
 }
 
-class _ThreadEmptyStateContent extends StatelessWidget {
-  const _ThreadEmptyStateContent({required this.title, this.description});
+class ChatThreadEmptyStateContent extends StatelessWidget {
+  const ChatThreadEmptyStateContent({super.key, required this.title, this.description, this.titleScaleOverride});
 
   static const double _descriptionVisibilityMinWidth = 480;
   static const double _mobileScreenWidthMax = 600;
 
   final String title;
   final String? description;
+  final double? titleScaleOverride;
 
   double _titleScale(double width) {
     if (width >= 820) {
@@ -4044,7 +4045,7 @@ class _ThreadEmptyStateContent extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final scale = _titleScale(constraints.maxWidth);
+        final scale = titleScaleOverride ?? _titleScale(constraints.maxWidth);
         final titleStyle = theme.textTheme.h1;
         final descriptionStyle = theme.textTheme.p;
         final titleFontSize = (titleStyle.fontSize ?? 64) * scale;
