@@ -157,7 +157,7 @@ class _VoiceAgentCaller extends State<VoiceAgentCaller> {
                             child: AudioWave(
                               room: meeting.livekitRoom,
                               participant: participant,
-                              backgroundColor: ShadTheme.of(context).colorScheme.background,
+                              backgroundColor: Colors.transparent,
                               speakingColor: Colors.green,
                               notSpeakingColor: Colors.green.withAlpha(50),
                             ),
