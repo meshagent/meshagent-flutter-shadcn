@@ -35,7 +35,6 @@ class VoiceAgentCaller extends StatefulWidget {
 }
 
 class _VoiceAgentCaller extends State<VoiceAgentCaller> {
-  static const double _disconnectedStateVerticalOffset = -40;
   static const double _horizontalControlsMinWidth = 520;
   static const double _mobilePrimaryButtonMaxWidth = 360;
   static const double _mobileScreenWidthMax = 600;
@@ -62,83 +61,65 @@ class _VoiceAgentCaller extends State<VoiceAgentCaller> {
           children: [
             if (meeting.livekitRoom.connectionState == livekit.ConnectionState.disconnected) ...[
               LayoutBuilder(
-                builder: (context, constraints) => Transform.translate(
-                  offset: const Offset(0, _disconnectedStateVerticalOffset),
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 640),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: SizedBox(
-                        width: double.infinity,
-                        child: Column(
+                builder: (context, constraints) => AudioAgentEmptyState(
+                  title: emptyStateTitle,
+                  description: emptyStateDescription,
+                  availableWidth: emptyStateAvailableWidth ?? constraints.maxWidth,
+                  action: LayoutBuilder(
+                    builder: (context, controlsConstraints) {
+                      final controlsAvailableWidth = emptyStateAvailableWidth ?? controlsConstraints.maxWidth;
+                      final horizontalControls = allowToggleTranscribe && controlsAvailableWidth >= _horizontalControlsMinWidth;
+                      final mobileButtonWidth = controlsAvailableWidth.clamp(220.0, _mobilePrimaryButtonMaxWidth).toDouble();
+
+                      final startButton = ShadButton(
+                        width: isMobileScreen && !horizontalControls ? mobileButtonWidth : null,
+                        onPressed: () async {
+                          final breakout = getBreakoutRoom != null ? await getBreakoutRoom(context) : const Uuid().v4();
+                          if (breakout == null) {
+                            return;
+                          }
+                          await meeting.configure(breakoutRoom: breakout);
+                          await meeting.connect(livekit.FastConnectOptions(microphone: livekit.TrackOption(enabled: true)));
+                          await meeting.room.messaging.sendMessage(
+                            to: participant,
+                            type: "voice_call",
+                            message: {
+                              "breakout_room": breakout,
+                              if (transcribe)
+                                "transcript_path":
+                                    "transcripts/${participant.getAttribute("name")}/${meeting.room.localParticipant!.getAttribute("name")}/${DateTime.now().toIso8601String()}.transcript",
+                            },
+                          );
+                        },
+                        child: const Text("Start session"),
+                      );
+
+                      final transcribeCheckbox = ShadCheckbox(
+                        onChanged: (value) {
+                          setState(() {
+                            transcribe = value;
+                          });
+                        },
+                        label: Text("Transcribe", style: ShadTheme.of(context).textTheme.small),
+                        value: transcribe,
+                      );
+
+                      if (horizontalControls) {
+                        return Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
                           mainAxisSize: MainAxisSize.min,
-                          children: [
-                            _VoiceEmptyStateContent(
-                              title: emptyStateTitle,
-                              description: emptyStateDescription,
-                              availableWidth: emptyStateAvailableWidth ?? constraints.maxWidth,
-                            ),
-                            const SizedBox(height: 24),
-                            LayoutBuilder(
-                              builder: (context, controlsConstraints) {
-                                final controlsAvailableWidth = emptyStateAvailableWidth ?? controlsConstraints.maxWidth;
-                                final horizontalControls = allowToggleTranscribe && controlsAvailableWidth >= _horizontalControlsMinWidth;
-                                final mobileButtonWidth = controlsAvailableWidth.clamp(220.0, _mobilePrimaryButtonMaxWidth).toDouble();
+                          children: [startButton, const SizedBox(width: 32), transcribeCheckbox],
+                        );
+                      }
 
-                                final startButton = ShadButton(
-                                  width: isMobileScreen && !horizontalControls ? mobileButtonWidth : null,
-                                  onPressed: () async {
-                                    final breakout = getBreakoutRoom != null ? await getBreakoutRoom(context) : const Uuid().v4();
-                                    if (breakout == null) {
-                                      return;
-                                    }
-                                    await meeting.configure(breakoutRoom: breakout);
-                                    await meeting.connect(livekit.FastConnectOptions(microphone: livekit.TrackOption(enabled: true)));
-                                    await meeting.room.messaging.sendMessage(
-                                      to: participant,
-                                      type: "voice_call",
-                                      message: {
-                                        "breakout_room": breakout,
-                                        if (transcribe)
-                                          "transcript_path":
-                                              "transcripts/${participant.getAttribute("name")}/${meeting.room.localParticipant!.getAttribute("name")}/${DateTime.now().toIso8601String()}.transcript",
-                                      },
-                                    );
-                                  },
-                                  child: const Text("Start session"),
-                                );
-
-                                final transcribeCheckbox = ShadCheckbox(
-                                  onChanged: (value) {
-                                    setState(() {
-                                      transcribe = value;
-                                    });
-                                  },
-                                  label: Text("Transcribe", style: ShadTheme.of(context).textTheme.small),
-                                  value: transcribe,
-                                );
-
-                                if (horizontalControls) {
-                                  return Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [startButton, const SizedBox(width: 32), transcribeCheckbox],
-                                  );
-                                }
-
-                                return Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    startButton,
-                                    if (allowToggleTranscribe) ...[const SizedBox(height: 16), transcribeCheckbox],
-                                  ],
-                                );
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          startButton,
+                          if (allowToggleTranscribe) ...[const SizedBox(height: 16), transcribeCheckbox],
+                        ],
+                      );
+                    },
                   ),
                 ),
               ),
@@ -174,8 +155,52 @@ class _VoiceAgentCaller extends State<VoiceAgentCaller> {
   }
 }
 
-class _VoiceEmptyStateContent extends StatelessWidget {
-  const _VoiceEmptyStateContent({required this.title, required this.description, required this.availableWidth});
+class AudioAgentEmptyState extends StatelessWidget {
+  const AudioAgentEmptyState({
+    super.key,
+    required this.title,
+    required this.description,
+    required this.availableWidth,
+    this.action,
+    this.verticalOffset = defaultVerticalOffset,
+  });
+
+  static const double defaultVerticalOffset = -40;
+  static const double _contentMaxWidth = 640;
+  static const double _horizontalPadding = 24;
+
+  final String title;
+  final String description;
+  final double availableWidth;
+  final Widget? action;
+  final double verticalOffset;
+
+  @override
+  Widget build(BuildContext context) {
+    return Transform.translate(
+      offset: Offset(0, verticalOffset),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: _contentMaxWidth),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: _horizontalPadding),
+          child: SizedBox(
+            width: double.infinity,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AudioAgentEmptyStateContent(title: title, description: description, availableWidth: availableWidth),
+                if (action != null) ...[const SizedBox(height: 24), action!],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class AudioAgentEmptyStateContent extends StatelessWidget {
+  const AudioAgentEmptyStateContent({super.key, required this.title, required this.description, required this.availableWidth});
 
   static const double _descriptionVisibilityMinWidth = 480;
   static const double _mobileScreenWidthMax = 600;
