@@ -97,6 +97,90 @@ bool _shouldShowAuthorNames({required MeshDocument thread, String? localParticip
   return true;
 }
 
+class _ImageMime {
+  static String normalize(String mimeType) {
+    return mimeType.trim().toLowerCase();
+  }
+
+  static bool isSvg(String mimeType) {
+    switch (normalize(mimeType)) {
+      case "image/svg+xml":
+      case "image/svg":
+      case "public.svg-image":
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  static String defaultExtension(String mimeType) {
+    switch (normalize(mimeType)) {
+      case "image/jpeg":
+      case "image/jpg":
+        return "jpg";
+      case "image/gif":
+        return "gif";
+      case "image/webp":
+        return "webp";
+      case "image/svg+xml":
+      case "image/svg":
+      case "public.svg-image":
+        return "svg";
+      case "image/tiff":
+      case "image/tif":
+        return "tiff";
+      case "image/bmp":
+        return "bmp";
+      case "image/heic":
+        return "heic";
+      case "image/heif":
+        return "heif";
+      case "image/x-icon":
+      case "image/vnd.microsoft.icon":
+        return "ico";
+      case "image/png":
+      default:
+        return "png";
+    }
+  }
+
+  static String suggestedFileName(String mimeType) {
+    return "image.${defaultExtension(mimeType)}";
+  }
+
+  static FileFormat? clipboardFormat(String mimeType) {
+    switch (normalize(mimeType)) {
+      case "image/jpeg":
+      case "image/jpg":
+        return Formats.jpeg;
+      case "image/gif":
+        return Formats.gif;
+      case "image/webp":
+        return Formats.webp;
+      case "image/svg+xml":
+      case "image/svg":
+      case "public.svg-image":
+        return Formats.svg;
+      case "image/tiff":
+      case "image/tif":
+        return Formats.tiff;
+      case "image/bmp":
+        return Formats.bmp;
+      case "image/heic":
+        return Formats.heic;
+      case "image/heif":
+        return Formats.heif;
+      case "image/x-icon":
+      case "image/vnd.microsoft.icon":
+        return Formats.ico;
+      case "image/png":
+        return Formats.png;
+      default:
+        return null;
+    }
+  }
+}
+
 bool _supportsAgentMessages(Participant participant) {
   if (participant is! RemoteParticipant) {
     return false;
@@ -1307,6 +1391,8 @@ class ChatThreadAttachButton extends StatefulWidget {
     this.availableConnectors,
     this.onConnectorSetup,
     this.agentName,
+    this.availableRooms,
+    this.connectRoomClient,
   });
 
   final String? agentName;
@@ -1320,11 +1406,45 @@ class ChatThreadAttachButton extends StatefulWidget {
 
   final Future<void> Function(Connector connector)? onConnectorSetup;
 
+  final Future<List<Room>> Function()? availableRooms;
+  final Future<RoomClient> Function(String roomName)? connectRoomClient;
+
   @override
   State createState() => _ChatThreadAttachButton();
 }
 
 class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
+  Future<String> _resolveImportedPath(String requestedPath) async {
+    String candidate = requestedPath.split("/").last;
+    final dotIndex = candidate.lastIndexOf('.');
+    final stem = dotIndex > 0 ? candidate.substring(0, dotIndex) : candidate;
+    final extension = dotIndex > 0 ? candidate.substring(dotIndex) : '';
+
+    for (var i = 1; ; i++) {
+      final candidateExists = await widget.controller.room.storage.exists(candidate);
+      if (!candidateExists) {
+        return candidate;
+      }
+
+      final suffix = i == 1 ? ' copy' : ' copy $i';
+      candidate = '$stem$suffix$extension';
+    }
+  }
+
+  Future<String> _importFile({required RoomClient sourceRoom, required String sourcePath}) async {
+    final content = await sourceRoom.storage.download(sourcePath);
+    final destinationPath = await _resolveImportedPath(sourcePath);
+
+    await widget.controller.room.storage.uploadStream(
+      destinationPath,
+      Stream.value(content.data),
+      overwrite: true,
+      size: content.data.length,
+    );
+
+    return destinationPath;
+  }
+
   Future<void> _onSelectAttachment(ToolkitBuilderOption? storage) async {
     final picked = await FilePicker.platform.pickFiles(dialogTitle: "Select files", allowMultiple: true, withReadStream: true);
 
@@ -1384,39 +1504,121 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
   }
 
   Future<void> _onBrowseFiles(ToolkitBuilderOption? storage) async {
+    final currentRoomName = widget.controller.room.roomName?.trim() ?? "";
+    String selectedRoomName = currentRoomName;
+    RoomClient selectedRoomClient = widget.controller.room;
+    bool resolvingRoom = false;
+    bool resolveError = false;
     List<String> picked = [];
+
+    var roomOptions = [selectedRoomName];
+    if (widget.availableRooms != null) {
+      try {
+        final loaded = await widget.availableRooms!();
+        roomOptions = {selectedRoomName, ...loaded.map((r) => r.name).where((n) => n.isNotEmpty)}.toList()
+          ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+      } catch (_) {}
+    }
+
+    if (!mounted) {
+      return;
+    }
+
     await showShadDialog(
       context: context,
 
-      builder: (context) => ShadDialog(
-        title: Text("Select files"),
-        scrollable: false,
-        description: Text("Attach files from this room"),
-        actions: [
-          ShadButton.secondary(
-            onPressed: () {
-              picked.clear();
-              Navigator.of(context).pop([]);
-            },
-            child: Text("Cancel"),
-          ),
-          ShadButton.secondary(
-            onPressed: () {
-              Navigator.of(context).pop(picked);
-            },
-            child: Text("OK"),
-          ),
-        ],
-        child: SizedBox(
-          width: 500,
-          height: 400,
-          child: ShadCard(
-            child: FileBrowser(
-              onSelectionChanged: (selection) {
-                picked = selection;
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => ShadDialog(
+          title: Text("Select files"),
+          scrollable: false,
+          description: Text("Attach files from this room"),
+          actions: [
+            ShadButton.secondary(
+              onPressed: () {
+                picked.clear();
+                Navigator.of(context).pop([]);
               },
-              room: widget.controller.room,
-              multiple: true,
+              child: Text("Cancel"),
+            ),
+            ShadButton.secondary(
+              onPressed: () {
+                Navigator.of(context).pop(picked);
+              },
+              child: Text("OK"),
+            ),
+          ],
+          child: SizedBox(
+            width: 500,
+            height: 450,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (roomOptions.length > 1)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: ShadSelect<String>(
+                        initialValue: selectedRoomName,
+                        selectedOptionBuilder: (context, value) => Text(value),
+                        options: [for (final option in roomOptions) ShadOption<String>(value: option, child: Text(option))],
+                        onChanged: (value) async {
+                          if (value == null || value == selectedRoomName || widget.connectRoomClient == null) {
+                            return;
+                          }
+
+                          setDialogState(() {
+                            resolvingRoom = true;
+                            resolveError = false;
+                          });
+
+                          RoomClient? nextRoomClient;
+                          if (value == currentRoomName) {
+                            nextRoomClient = widget.controller.room;
+                          } else {
+                            try {
+                              nextRoomClient = await widget.connectRoomClient!(value);
+                            } catch (_) {}
+                          }
+
+                          if (nextRoomClient == null) {
+                            setDialogState(() {
+                              resolvingRoom = false;
+                              resolveError = true;
+                            });
+                          } else {
+                            if (!identical(widget.controller.room, selectedRoomClient) && !identical(nextRoomClient, selectedRoomClient)) {
+                              selectedRoomClient.dispose();
+                            }
+
+                            setDialogState(() {
+                              selectedRoomName = value;
+                              selectedRoomClient = nextRoomClient!;
+                              picked = [];
+                              resolvingRoom = false;
+                            });
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+                Expanded(
+                  child: ShadCard(
+                    child: resolvingRoom
+                        ? const Center(child: CircularProgressIndicator())
+                        : resolveError
+                        ? const Center(child: Text("Room failed to connect"))
+                        : FileBrowser(
+                            key: ValueKey(selectedRoomName),
+                            onSelectionChanged: (selection) {
+                              picked = selection;
+                            },
+                            room: selectedRoomClient,
+                            multiple: true,
+                          ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -1424,7 +1626,12 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
     );
 
     for (final f in picked) {
-      widget.controller.attachFile(f);
+      if (identical(selectedRoomClient, widget.controller.room)) {
+        widget.controller.attachFile(f);
+      } else {
+        final importedPath = await _importFile(sourceRoom: selectedRoomClient, sourcePath: f);
+        widget.controller.attachFile(importedPath);
+      }
     }
   }
 
@@ -2289,8 +2496,10 @@ class ChatThread extends StatefulWidget {
     this.inputPlaceholder,
     this.emptyStateTitle,
     this.emptyStateDescription,
+    this.emptyState,
 
     this.agentName,
+    this.onVisibleMessagesEmpty,
   });
 
   final String? agentName;
@@ -2305,6 +2514,8 @@ class ChatThread extends StatefulWidget {
   final Widget? inputPlaceholder;
   final String? emptyStateTitle;
   final String? emptyStateDescription;
+  final Widget? emptyState;
+  final FutureOr<void> Function()? onVisibleMessagesEmpty;
 
   final Widget Function(BuildContext, MeshDocument, MeshElement)? messageHeaderBuilder;
   final Widget Function(BuildContext, List<String>)? waitingForParticipantsBuilder;
@@ -2344,7 +2555,7 @@ class ChatBubble extends StatefulWidget {
 
 class _ChatBubble extends State<ChatBubble> {
   static const double _actionSlotSize = 30;
-  static const double _actionGap = 4;
+  static const double _actionGap = 6;
   static const double _bubbleRadius = 16;
 
   bool hovering = false;
@@ -2662,6 +2873,7 @@ class ChatMessage {
 class _ChatThreadState extends State<ChatThread> {
   late final ChatThreadController controller;
   OutboundEntry? _currentStatusEntry;
+  bool _didNotifyVisibleMessagesEmpty = false;
 
   bool _shouldStoreLocally({required bool hasConfiguredAgent, required bool useAgentMessages}) {
     return !hasConfiguredAgent && !useAgentMessages;
@@ -2737,6 +2949,90 @@ class _ChatThreadState extends State<ChatThread> {
     if (widget.controller == null) {
       controller.dispose();
     }
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatThread oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.path != widget.path || oldWidget.document != widget.document) {
+      _didNotifyVisibleMessagesEmpty = false;
+    }
+  }
+
+  void _handleVisibleMessages(List<MeshElement> messages) {
+    final onVisibleMessagesEmpty = widget.onVisibleMessagesEmpty;
+    if (onVisibleMessagesEmpty == null) {
+      return;
+    }
+
+    final hasVisibleMessages = messages.any(_shouldRenderThreadMessageForVisibility);
+    if (hasVisibleMessages) {
+      _didNotifyVisibleMessagesEmpty = false;
+      return;
+    }
+
+    if (_didNotifyVisibleMessagesEmpty) {
+      return;
+    }
+
+    _didNotifyVisibleMessagesEmpty = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      unawaited(Future.sync(onVisibleMessagesEmpty));
+    });
+  }
+
+  bool _shouldRenderThreadMessageForVisibility(MeshElement message) {
+    if (message.tagName == "reasoning") {
+      final summary = (message.getAttribute("summary") ?? "").toString().trim();
+      return summary.isNotEmpty;
+    }
+
+    if (message.tagName != "event") {
+      return true;
+    }
+
+    const supportedKinds = {"exec", "tool", "web", "search", "diff", "image", "approval", "collab", "plan", "thread", "file"};
+    final kind = ((message.getAttribute("kind") as String?) ?? "").trim().toLowerCase();
+    if (!supportedKinds.contains(kind)) {
+      return false;
+    }
+
+    final state = ((message.getAttribute("state") as String?) ?? "info").toLowerCase();
+    final itemType = ((message.getAttribute("item_type") as String?) ?? "").trim().toLowerCase();
+    final method = (message.getAttribute("method") as String?) ?? "agent/event";
+    final summary = ((message.getAttribute("summary") as String?) ?? method).trim();
+    final headlineAttr = ((message.getAttribute("headline") as String?) ?? "").trim();
+    final detailsAttr = ((message.getAttribute("details") as String?) ?? "").trim();
+    final detailLines = _detailLinesForVisibility(detailsAttr);
+    final resolvedHeadlineForFiltering = (headlineAttr.isNotEmpty ? headlineAttr : summary).trim().toLowerCase();
+
+    return !(kind == "tool" &&
+        state == "completed" &&
+        (itemType == "tool_call" ||
+            (resolvedHeadlineForFiltering == "called tool" &&
+                detailLines.isNotEmpty &&
+                detailLines.every((line) => line.trimLeft().toLowerCase().startsWith("tool:")))));
+  }
+
+  List<String> _detailLinesForVisibility(String raw) {
+    final value = raw.trim();
+    if (value.isEmpty) {
+      return const [];
+    }
+
+    if (value.startsWith("[") && value.endsWith("]")) {
+      try {
+        final decoded = jsonDecode(value);
+        if (decoded is List) {
+          return decoded.whereType<String>().map((line) => line.trim()).where((line) => line.isNotEmpty).toList();
+        }
+      } catch (_) {}
+    }
+
+    return value.split(RegExp(r"\r?\n")).map((line) => line.trim()).where((line) => line.isNotEmpty).toList();
   }
 
   Widget _buildInputChatBox(BuildContext context, List<PendingAgentMessage> pendingMessages, ChatThreadSnapshot state) {
@@ -2824,6 +3120,8 @@ class _ChatThreadState extends State<ChatThread> {
           return widget.waitingForParticipantsBuilder!(context, state.offline.toList());
         }
 
+        _handleVisibleMessages(state.messages);
+
         bool bottomAlign = !widget.startChatCentered || state.messages.isNotEmpty;
 
         return FileDropArea(
@@ -2862,6 +3160,7 @@ class _ChatThreadState extends State<ChatThread> {
                 currentStatusEntry: _currentStatusEntry,
                 emptyStateTitle: widget.emptyStateTitle,
                 emptyStateDescription: widget.emptyStateDescription,
+                emptyState: widget.emptyState,
               ),
               ListenableBuilder(
                 listenable: controller,
@@ -2974,6 +3273,7 @@ class ChatThreadMessages extends StatefulWidget {
     this.messageBuilders,
     this.emptyStateTitle,
     this.emptyStateDescription,
+    this.emptyState,
   });
 
   final Map<String, MessageBuilder>? messageBuilders;
@@ -2994,6 +3294,7 @@ class ChatThreadMessages extends StatefulWidget {
   final OutboundEntry? currentStatusEntry;
   final String? emptyStateTitle;
   final String? emptyStateDescription;
+  final Widget? emptyState;
 
   final Widget Function(BuildContext, MeshDocument, MeshElement)? messageHeaderBuilder;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
@@ -3008,6 +3309,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   static const double _chatBubbleActionRailWidth = 80;
   static const double _chatBubbleSiblingSpacing = 6;
   static const double _chatMessageStackSpacing = 38;
+  static const int _maxImageCacheBytes = 64 * 1024 * 1024;
 
   static const List<String> _defaultReactionOptions = <String>[
     "👍",
@@ -3098,6 +3400,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   OutboundEntry? get currentStatusEntry => widget.currentStatusEntry;
   String? get emptyStateTitle => widget.emptyStateTitle;
   String? get emptyStateDescription => widget.emptyStateDescription;
+  Widget? get emptyState => widget.emptyState;
   Map<String, MessageBuilder>? get messageBuilders => widget.messageBuilders;
   Widget Function(BuildContext, MeshDocument, MeshElement)? get messageHeaderBuilder => widget.messageHeaderBuilder;
   Widget Function(BuildContext context, String path)? get fileInThreadBuilder => widget.fileInThreadBuilder;
@@ -3107,6 +3410,10 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   List<_ThreadFeedImage> _overlayImages = const <_ThreadFeedImage>[];
   int _overlayInitialIndex = 0;
   LocalHistoryEntry? _imageViewerHistoryEntry;
+  final LinkedHashMap<String, _ThreadImageRecord> _imageCache = LinkedHashMap<String, _ThreadImageRecord>();
+  final LinkedHashMap<String, int> _imageCacheSizes = LinkedHashMap<String, int>();
+  final Map<String, Future<_ThreadImageRecord?>> _imageInFlight = <String, Future<_ThreadImageRecord?>>{};
+  int _imageCacheBytes = 0;
 
   String? _localParticipantName() {
     final name = room.localParticipant?.getAttribute("name");
@@ -3395,6 +3702,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     String target = _reactionTargetMessage,
     String? attachmentRef,
     bool showAddWhenEmpty = true,
+    List<Widget> leadingActions = const <Widget>[],
   }) {
     final localUserName = _localParticipantName();
     final normalizedLocalUserName = _normalizeReactionUserName(localUserName);
@@ -3433,7 +3741,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     selectedReaction = entries.firstWhereOrNull((entry) => mineValues.contains(entry.key))?.key;
     final hasSelectedReaction = selectedReaction != null;
     final showAddButton = localUserName != null && !hasSelectedReaction && (showAddWhenEmpty || grouped.isNotEmpty);
-    if (grouped.isEmpty && !showAddButton) {
+    if (grouped.isEmpty && !showAddButton && leadingActions.isEmpty) {
       return const SizedBox.shrink();
     }
     final alignment = mine ? Alignment.centerRight : Alignment.centerLeft;
@@ -3448,6 +3756,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
           runSpacing: 6,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
+            ...leadingActions,
             for (final entry in entries)
               Builder(
                 builder: (context) {
@@ -3577,6 +3886,10 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     final historyEntry = _imageViewerHistoryEntry;
     _imageViewerHistoryEntry = null;
     historyEntry?.remove();
+    _imageCache.clear();
+    _imageCacheSizes.clear();
+    _imageInFlight.clear();
+    _imageCacheBytes = 0;
     super.dispose();
   }
 
@@ -3629,39 +3942,190 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     return path.replaceFirst(RegExp(r'^/'), '');
   }
 
-  Widget _buildFileInThread(BuildContext context, String path) {
-    path = _sanitizePath(path);
+  bool _isImageFilePath(String path) {
+    final lower = _sanitizePath(path).toLowerCase();
+    final dot = lower.lastIndexOf('.');
+    if (dot <= 0 || dot == lower.length - 1) {
+      return false;
+    }
+    final ext = lower.substring(dot + 1);
+    return imageExtensions.contains(ext);
+  }
 
+  _ThreadImageRecord? _readCachedImageRecord(String path) {
+    final record = _imageCache.remove(path);
+    if (record == null) {
+      return null;
+    }
+
+    final size = _imageCacheSizes.remove(path) ?? record.data.length;
+    _imageCache[path] = record;
+    _imageCacheSizes[path] = size;
+    return record;
+  }
+
+  void _trimImageCache() {
+    while (_imageCacheBytes > _maxImageCacheBytes && _imageCache.isNotEmpty) {
+      final oldestPath = _imageCache.keys.first;
+      _imageCache.remove(oldestPath);
+      final removedSize = _imageCacheSizes.remove(oldestPath) ?? 0;
+      _imageCacheBytes -= removedSize;
+    }
+
+    if (_imageCacheBytes < 0) {
+      _imageCacheBytes = 0;
+    }
+  }
+
+  void _cacheImageRecord(String path, _ThreadImageRecord record) {
+    final size = record.data.length;
+
+    final existingRecord = _imageCache.remove(path);
+    if (existingRecord != null) {
+      _imageCacheBytes -= _imageCacheSizes.remove(path) ?? existingRecord.data.length;
+    }
+
+    if (size > _maxImageCacheBytes) {
+      _trimImageCache();
+      return;
+    }
+
+    _imageCache[path] = record;
+    _imageCacheSizes[path] = size;
+    _imageCacheBytes += size;
+    _trimImageCache();
+  }
+
+  Future<_ThreadImageRecord?> _loadImageRecord(String path) async {
+    final cached = _readCachedImageRecord(path);
+    if (cached != null) {
+      return cached;
+    }
+
+    final inFlight = _imageInFlight[path];
+    if (inFlight != null) {
+      return inFlight;
+    }
+
+    final lookup = () async {
+      final file = await room.storage.download(path);
+      final mimeType = file.mimeType.trim().isNotEmpty ? file.mimeType.trim() : "image/png";
+      final record = _ThreadImageRecord(data: file.data, mimeType: mimeType);
+      _cacheImageRecord(path, record);
+      return record;
+    }();
+
+    _imageInFlight[path] = lookup;
+    try {
+      return await lookup;
+    } finally {
+      if (identical(_imageInFlight[path], lookup)) {
+        _imageInFlight.remove(path);
+      }
+    }
+  }
+
+  Future<void> _copyImageRecord(_ThreadImageRecord image) async {
+    final clipboard = SystemClipboard.instance;
+    if (clipboard == null) {
+      return;
+    }
+
+    final mimeType = image.mimeType.trim().toLowerCase();
+    final format = _ImageMime.clipboardFormat(mimeType);
+    final item = DataWriterItem(suggestedName: _ImageMime.suggestedFileName(mimeType));
+    if (format != null) {
+      item.add(format(image.data));
+    } else {
+      item.add(EncodedData([raw.DataRepresentation.simple(format: mimeType, data: image.data)]));
+    }
+
+    await clipboard.write([item]);
+  }
+
+  Future<void> _downloadPath(String path) async {
+    final url = await room.storage.downloadUrl(path);
+    await launchUrl(Uri.parse(url));
+  }
+
+  Future<void> _openPath(String path) async {
+    if (widget.openFile != null) {
+      await widget.openFile!(path);
+      return;
+    }
+
+    showShadDialog(
+      context: context,
+      builder: (context) {
+        return ShadDialog(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          title: Text("File: $path"),
+          actions: [
+            ShadButton(
+              onPressed: () async {
+                await _downloadPath(path);
+              },
+              child: Text("Download"),
+            ),
+          ],
+          child: FilePreview(room: room, path: path, fit: BoxFit.contain),
+        );
+      },
+    );
+  }
+
+  Widget _wrapWithCorners(Widget child) {
+    return ClipRRect(borderRadius: BorderRadius.circular(16), child: child);
+  }
+
+  Widget _wrapTapTarget(Widget child, String path) {
     return ShadGestureDetector(
       cursor: SystemMouseCursors.click,
       onTap: () async {
-        if (openFile != null) {
-          await Future.sync(() => openFile!(path));
-          return;
-        }
-
-        showShadDialog(
-          context: context,
-          builder: (context) {
-            return ShadDialog(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              title: Text("File: $path"),
-              actions: [
-                ShadButton(
-                  onPressed: () async {
-                    final url = await room.storage.downloadUrl(path);
-
-                    launchUrl(Uri.parse(url));
-                  },
-                  child: Text("Download"),
-                ),
-              ],
-              child: FilePreview(room: room, path: path, fit: BoxFit.cover),
-            );
-          },
-        );
+        await _openPath(path);
       },
-      child: fileInThreadBuilder != null ? fileInThreadBuilder!(context, path) : ChatThreadPreview(room: room, path: path),
+      child: child,
+    );
+  }
+
+  Widget _buildFileImageInThread(BuildContext context, String path, _ThreadImageRecord? imageRecord, bool loading) {
+    final items = _buildAttachmentOptions(imageRecord: imageRecord, path: path);
+
+    return ShadContextMenuRegion(
+      items: items,
+      child: _wrapTapTarget(
+        SizedBox(
+          width: 312.5,
+          height: 312.5,
+          child: _wrapWithCorners(
+            ColoredBox(
+              color: ShadTheme.of(context).colorScheme.background,
+              child: imageRecord == null
+                  ? Center(
+                      child: loading
+                          ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                          : Icon(LucideIcons.imageOff, size: 20, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                    )
+                  : _ImageMime.isSvg(imageRecord.mimeType)
+                  ? SvgPicture.memory(imageRecord.data, fit: BoxFit.cover)
+                  : UniversalImage(imageRecord.data, fit: BoxFit.cover),
+            ),
+          ),
+        ),
+        path,
+      ),
+    );
+  }
+
+  Widget _buildFileInThread(BuildContext context, String path) {
+    final items = _buildAttachmentOptions(path: path);
+
+    return ShadContextMenuRegion(
+      items: items,
+      child: _wrapTapTarget(
+        fileInThreadBuilder != null ? fileInThreadBuilder!(context, path) : ChatThreadPreview(room: room, path: path),
+        path,
+      ),
     );
   }
 
@@ -3715,9 +4179,30 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     return null;
   }
 
-  Widget _buildAttachmentInThread(BuildContext context, MeshElement attachment, {required List<_ThreadFeedImage> feedImages}) {
+  Widget _buildAttachmentInThread(
+    BuildContext context,
+    MeshElement message,
+    bool mine,
+    MeshElement attachment, {
+    required List<_ThreadFeedImage> feedImages,
+  }) {
+    final normalizedAttachmentRef = _normalizeReactionAttachmentRef(attachment.id);
+
     if (attachment.tagName == "image") {
-      return _buildImageInThread(context, attachment, feedImages: feedImages);
+      return Column(
+        crossAxisAlignment: mine ? .end : .start,
+        children: [
+          _buildImageInThread(context, attachment, feedImages: feedImages),
+          if (normalizedAttachmentRef != null)
+            _buildReactionRow(
+              context,
+              message: message,
+              mine: mine,
+              target: _reactionTargetAttachment,
+              attachmentRef: normalizedAttachmentRef,
+            ),
+        ],
+      );
     }
 
     final pathAttribute = attachment.getAttribute("path");
@@ -3725,7 +4210,140 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
       return const SizedBox.shrink();
     }
 
-    return _buildFileInThread(context, pathAttribute);
+    final normalizedPath = _sanitizePath(pathAttribute);
+
+    if (attachment.tagName == "file" && _isImageFilePath(normalizedPath)) {
+      return _ThreadImageLookup(
+        lookupKey: normalizedPath,
+        readCached: () => _readCachedImageRecord(normalizedPath),
+        lookupImage: () => _loadImageRecord(normalizedPath),
+        builder: (context, snapshot) {
+          final imageRecord = snapshot.data;
+          final loading = snapshot.connectionState != ConnectionState.done;
+
+          return Column(
+            crossAxisAlignment: mine ? .end : .start,
+            children: [
+              _buildFileImageInThread(context, normalizedPath, imageRecord, loading),
+              if (normalizedAttachmentRef != null)
+                _buildReactionRow(
+                  context,
+                  message: message,
+                  mine: mine,
+                  target: _reactionTargetAttachment,
+                  attachmentRef: normalizedAttachmentRef,
+                  leadingActions: _buildAttachmentActions(imageRecord: imageRecord, path: normalizedPath),
+                ),
+            ],
+          );
+        },
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: mine ? .end : .start,
+      children: [
+        _buildFileInThread(context, normalizedPath),
+        if (normalizedAttachmentRef != null)
+          _buildReactionRow(
+            context,
+            message: message,
+            mine: mine,
+            target: _reactionTargetAttachment,
+            attachmentRef: normalizedAttachmentRef,
+            leadingActions: _buildAttachmentActions(path: normalizedPath),
+          ),
+      ],
+    );
+  }
+
+  List<ShadContextMenuItem> _buildAttachmentOptions({_ThreadImageRecord? imageRecord, String? path}) {
+    return [
+      if (path != null)
+        ShadContextMenuItem(
+          height: 40,
+          onPressed: () async {
+            await _openPath(path);
+          },
+          leading: const Icon(LucideIcons.externalLink, size: 14),
+          child: const Text("Open"),
+        ),
+      if (imageRecord != null)
+        ShadContextMenuItem(
+          height: 40,
+          onPressed: () async {
+            await _copyImageRecord(imageRecord);
+          },
+          leading: const Icon(LucideIcons.copy, size: 14),
+          child: const Text("Copy"),
+        ),
+      if (path != null)
+        ShadContextMenuItem(
+          height: 40,
+          onPressed: () async {
+            await _downloadPath(path);
+          },
+          leading: const Icon(LucideIcons.download, size: 14),
+          child: const Text("Download"),
+        ),
+    ];
+  }
+
+  List<Widget> _buildAttachmentActions({_ThreadImageRecord? imageRecord, String? path}) {
+    final items = _buildAttachmentOptions(imageRecord: imageRecord, path: path);
+    return [_AttachmentOptionsButton(items: items)];
+  }
+
+  List<String> _eventDetailLines(String raw) {
+    final value = raw.trim();
+    if (value.isEmpty) {
+      return const [];
+    }
+
+    if (value.startsWith("[") && value.endsWith("]")) {
+      try {
+        final decoded = jsonDecode(value);
+        if (decoded is List) {
+          return decoded.whereType<String>().map((line) => line.trim()).where((line) => line.isNotEmpty).toList();
+        }
+      } catch (_) {}
+    }
+
+    return value.split(RegExp(r"\r?\n")).map((line) => line.trim()).where((line) => line.isNotEmpty).toList();
+  }
+
+  bool _shouldRenderThreadMessage(MeshElement message) {
+    if (message.tagName == "reasoning") {
+      final summary = (message.getAttribute("summary") ?? "").toString().trim();
+      return summary.isNotEmpty;
+    }
+
+    if (message.tagName != "event") {
+      return true;
+    }
+
+    const supportedKinds = {"exec", "tool", "web", "search", "diff", "image", "approval", "collab", "plan", "thread", "file"};
+    final kind = ((message.getAttribute("kind") as String?) ?? "").trim().toLowerCase();
+    if (!supportedKinds.contains(kind)) {
+      return false;
+    }
+
+    final state = ((message.getAttribute("state") as String?) ?? "info").toLowerCase();
+    final itemType = ((message.getAttribute("item_type") as String?) ?? "").trim().toLowerCase();
+    final method = (message.getAttribute("method") as String?) ?? "agent/event";
+    final summary = ((message.getAttribute("summary") as String?) ?? method).trim();
+    final headlineAttr = ((message.getAttribute("headline") as String?) ?? "").trim();
+    final detailLines = _eventDetailLines(((message.getAttribute("details") as String?) ?? "").trim());
+    final resolvedHeadlineForFiltering = (headlineAttr.isNotEmpty ? headlineAttr : summary).trim().toLowerCase();
+    final hideCompletedToolCall =
+        kind == "tool" &&
+        state == "completed" &&
+        (itemType == "tool_call" ||
+            (resolvedHeadlineForFiltering == "called tool" &&
+                detailLines.isNotEmpty &&
+                detailLines.every((line) => line.trimLeft().toLowerCase().startsWith("tool:"))));
+
+    return !hideCompletedToolCall;
   }
 
   bool _defaultHeaderWillRender({required MeshElement message}) {
@@ -3750,8 +4368,9 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     final localParticipantReactionName = _localParticipantName();
     final mine = message.getAttribute("author_name") == localParticipantName;
     final useDefaultHeaderBuilder = messageHeaderBuilder == null;
+    final isLastVisibleMessage = next == null;
     final shouldShowHeader =
-        (!isSameAuthor && (!useDefaultHeaderBuilder || _defaultHeaderWillRender(message: message))) || (message == messages.last);
+        (!isSameAuthor && (!useDefaultHeaderBuilder || _defaultHeaderWillRender(message: message))) || isLastVisibleMessage;
 
     final id = message.getAttribute("id");
     final text = message.getAttribute("text");
@@ -3815,7 +4434,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                       message.doc as MeshDocument,
                       message,
                       localParticipantName: localParticipantName is String ? localParticipantName : null,
-                      isLastMessage: message == messages.last,
+                      isLastMessage: isLastVisibleMessage,
                     ),
               ),
             ),
@@ -3856,22 +4475,8 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
             if (hasText || i > 0) const SizedBox(height: _chatBubbleSiblingSpacing),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 5),
-              child: Container(
-                margin: EdgeInsets.only(top: 0),
-                child: Align(
-                  alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-                  child: _buildAttachmentInThread(context, attachments[i], feedImages: feedImages),
-                ),
-              ),
+              child: _buildAttachmentInThread(context, message, mine, attachments[i], feedImages: feedImages),
             ),
-            if (_normalizeReactionAttachmentRef(attachments[i].id) != null)
-              _buildReactionRow(
-                context,
-                message: message,
-                mine: mine,
-                target: _reactionTargetAttachment,
-                attachmentRef: _normalizeReactionAttachmentRef(attachments[i].id),
-              ),
           ],
 
           _buildReactionRow(context, message: message, mine: mine, target: _reactionTargetMessage, showAddWhenEmpty: false),
@@ -3896,7 +4501,8 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
 
   @override
   Widget build(BuildContext context) {
-    bool bottomAlign = !startChatCentered || messages.isNotEmpty;
+    final visibleMessages = messages.where(_shouldRenderThreadMessage).toList();
+    bool bottomAlign = !startChatCentered || visibleMessages.isNotEmpty;
     final feedImages = _collectThreadImages();
     final rawCenteredTitle = emptyStateTitle?.trim();
     final participantCenteredTitle = online.firstOrNull?.getAttribute("empty_state_title");
@@ -3916,9 +4522,9 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
         : null;
 
     final messageWidgets = <Widget>[];
-    for (var message in messages.indexed) {
-      final previous = message.$1 > 0 ? messages[message.$1 - 1] : null;
-      final next = message.$1 < messages.length - 1 ? messages[message.$1 + 1] : null;
+    for (var message in visibleMessages.indexed) {
+      final previous = message.$1 > 0 ? visibleMessages[message.$1 - 1] : null;
+      final next = message.$1 < visibleMessages.length - 1 ? visibleMessages[message.$1 + 1] : null;
 
       final messageWidget = Container(
         key: ValueKey(message.$2.id),
@@ -3933,11 +4539,14 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     }
     final threadView = ChatThreadViewportBody(
       bottomAlign: bottomAlign,
-      centerContent: messages.isEmpty && centeredTitle != null
-          ? Padding(
-              padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
-              child: _ThreadEmptyStateContent(title: centeredTitle, description: centeredDescription),
-            )
+      centerContent: visibleMessages.isEmpty
+          ? emptyState ??
+                (centeredTitle != null
+                    ? Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
+                        child: ChatThreadEmptyStateContent(title: centeredTitle, description: centeredDescription),
+                      )
+                    : null)
           : null,
       bottomSpacer: showTyping ? 20 : 0,
       overlays: [
@@ -4009,14 +4618,15 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   }
 }
 
-class _ThreadEmptyStateContent extends StatelessWidget {
-  const _ThreadEmptyStateContent({required this.title, this.description});
+class ChatThreadEmptyStateContent extends StatelessWidget {
+  const ChatThreadEmptyStateContent({super.key, required this.title, this.description, this.titleScaleOverride});
 
   static const double _descriptionVisibilityMinWidth = 480;
   static const double _mobileScreenWidthMax = 600;
 
   final String title;
   final String? description;
+  final double? titleScaleOverride;
 
   double _titleScale(double width) {
     if (width >= 820) {
@@ -4035,7 +4645,7 @@ class _ThreadEmptyStateContent extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final scale = _titleScale(constraints.maxWidth);
+        final scale = titleScaleOverride ?? _titleScale(constraints.maxWidth);
         final titleStyle = theme.textTheme.h1;
         final descriptionStyle = theme.textTheme.p;
         final titleFontSize = (titleStyle.fontSize ?? 64) * scale;
@@ -4148,11 +4758,99 @@ class _ReactionPickerButtonState extends State<_ReactionPickerButton> {
   }
 }
 
+class _AttachmentOptionsButton extends StatefulWidget {
+  const _AttachmentOptionsButton({required this.items});
+
+  final List<Widget> items;
+
+  @override
+  State<_AttachmentOptionsButton> createState() => _AttachmentOptionsButtonState();
+}
+
+class _AttachmentOptionsButtonState extends State<_AttachmentOptionsButton> {
+  final ShadContextMenuController _controller = ShadContextMenuController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.items.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final theme = ShadTheme.of(context);
+    final cs = theme.colorScheme;
+
+    return ShadContextMenuRegion(
+      controller: _controller,
+      constraints: const BoxConstraints(minWidth: 180),
+      items: widget.items,
+      child: Tooltip(
+        message: "Attachment options",
+        child: ShadIconButton.ghost(
+          width: 30,
+          height: 30,
+          padding: EdgeInsets.zero,
+          icon: Icon(LucideIcons.ellipsis, size: 18, color: cs.mutedForeground),
+          onPressed: _controller.show,
+        ),
+      ),
+    );
+  }
+}
+
 class _ThreadImageRecord {
   const _ThreadImageRecord({required this.data, required this.mimeType});
 
   final Uint8List data;
   final String mimeType;
+}
+
+class _ThreadImageLookup extends StatefulWidget {
+  const _ThreadImageLookup({required this.lookupKey, required this.readCached, required this.lookupImage, required this.builder});
+
+  final Object lookupKey;
+  final _ThreadImageRecord? Function() readCached;
+  final Future<_ThreadImageRecord?> Function() lookupImage;
+  final Widget Function(BuildContext context, AsyncSnapshot<_ThreadImageRecord?> snapshot) builder;
+
+  @override
+  State<_ThreadImageLookup> createState() => _ThreadImageLookupState();
+}
+
+class _ThreadImageLookupState extends State<_ThreadImageLookup> {
+  late Future<_ThreadImageRecord?> _lookup;
+
+  Future<_ThreadImageRecord?> _resolveLookup() {
+    final cached = widget.readCached();
+    if (cached != null) {
+      return SynchronousFuture<_ThreadImageRecord?>(cached);
+    }
+    return widget.lookupImage();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _lookup = _resolveLookup();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ThreadImageLookup oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.lookupKey != widget.lookupKey) {
+      _lookup = _resolveLookup();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<_ThreadImageRecord?>(future: _lookup, builder: widget.builder);
+  }
 }
 
 class _ThreadFeedImage {
@@ -4243,11 +4941,6 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
     return _ThreadImageRecord(data: data, mimeType: mimeType);
   }
 
-  bool _isSvg(String mimeType) {
-    final normalized = mimeType.toLowerCase();
-    return normalized == "image/svg+xml" || normalized == "image/svg";
-  }
-
   bool _isGeneratingStatus(String? status) {
     if (status == null || status.trim().isEmpty) {
       return false;
@@ -4288,52 +4981,17 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
     return Size(rawWidth * scale, rawHeight * scale);
   }
 
-  String _defaultImageExtension(String mimeType) {
-    switch (mimeType.trim().toLowerCase()) {
-      case "image/jpeg":
-      case "image/jpg":
-        return "jpg";
-      case "image/gif":
-        return "gif";
-      case "image/webp":
-        return "webp";
-      case "image/svg+xml":
-      case "image/svg":
-      case "public.svg-image":
-        return "svg";
-      case "image/tiff":
-      case "image/tif":
-        return "tiff";
-      case "image/bmp":
-        return "bmp";
-      case "image/heic":
-        return "heic";
-      case "image/heif":
-        return "heif";
-      case "image/x-icon":
-      case "image/vnd.microsoft.icon":
-        return "ico";
-      case "image/png":
-      default:
-        return "png";
-    }
-  }
-
-  String _suggestedFileName(String mimeType) {
-    return "image.${_defaultImageExtension(mimeType)}";
-  }
-
   String _ensureFileNameExtension(String rawPath, String mimeType) {
     final trimmed = rawPath.trim();
     if (trimmed.isEmpty) {
-      return _suggestedFileName(mimeType);
+      return _ImageMime.suggestedFileName(mimeType);
     }
 
     final slash = trimmed.lastIndexOf("/");
     final fileName = slash == -1 ? trimmed : trimmed.substring(slash + 1);
 
     if (fileName.isEmpty) {
-      final suggested = _suggestedFileName(mimeType);
+      final suggested = _ImageMime.suggestedFileName(mimeType);
       return trimmed.endsWith("/") ? "$trimmed$suggested" : "$trimmed/$suggested";
     }
 
@@ -4341,39 +4999,7 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
       return trimmed;
     }
 
-    return "$trimmed.${_defaultImageExtension(mimeType)}";
-  }
-
-  FileFormat? _clipboardImageFormat(String mimeType) {
-    switch (mimeType.trim().toLowerCase()) {
-      case "image/jpeg":
-      case "image/jpg":
-        return Formats.jpeg;
-      case "image/gif":
-        return Formats.gif;
-      case "image/webp":
-        return Formats.webp;
-      case "image/svg+xml":
-      case "image/svg":
-      case "public.svg-image":
-        return Formats.svg;
-      case "image/tiff":
-      case "image/tif":
-        return Formats.tiff;
-      case "image/bmp":
-        return Formats.bmp;
-      case "image/heic":
-        return Formats.heic;
-      case "image/heif":
-        return Formats.heif;
-      case "image/x-icon":
-      case "image/vnd.microsoft.icon":
-        return Formats.ico;
-      case "image/png":
-        return Formats.png;
-      default:
-        return null;
-    }
+    return "$trimmed.${_ImageMime.defaultExtension(mimeType)}";
   }
 
   Future<void> _onCopyImage(_ThreadImageRecord image) async {
@@ -4383,8 +5009,8 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
     }
 
     final mimeType = image.mimeType.trim().toLowerCase();
-    final format = _clipboardImageFormat(mimeType);
-    final item = DataWriterItem(suggestedName: _suggestedFileName(mimeType));
+    final format = _ImageMime.clipboardFormat(mimeType);
+    final item = DataWriterItem(suggestedName: _ImageMime.suggestedFileName(mimeType));
     if (format != null) {
       item.add(format(image.data));
     } else {
@@ -4395,7 +5021,7 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
   }
 
   Future<void> _onSaveImage(_ThreadImageRecord image) async {
-    final fileNameController = TextEditingController(text: _suggestedFileName(image.mimeType));
+    final fileNameController = TextEditingController(text: _ImageMime.suggestedFileName(image.mimeType));
     String selectedFolder = "";
 
     await showShadDialog<void>(
@@ -4419,7 +5045,7 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
             ShadButton(
               onPressed: () async {
                 final value = fileNameController.text.trim();
-                var fullPath = value.isEmpty ? _suggestedFileName(image.mimeType) : value;
+                var fullPath = value.isEmpty ? _ImageMime.suggestedFileName(image.mimeType) : value;
 
                 if (!fullPath.contains("/")) {
                   fullPath = selectedFolder.isEmpty ? fullPath : "$selectedFolder/$fullPath";
@@ -4483,7 +5109,7 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
                 padding: const EdgeInsets.only(top: 12),
                 child: ShadInputFormField(
                   label: Text("File name or path", style: tt.small.copyWith(fontWeight: FontWeight.bold)),
-                  placeholder: Text(_suggestedFileName(image.mimeType)),
+                  placeholder: Text(_ImageMime.suggestedFileName(image.mimeType)),
                   controller: fileNameController,
                 ),
               ),
@@ -4598,7 +5224,7 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
           return const FileDefaultPreviewCard(icon: LucideIcons.imageOff, text: "Image unavailable");
         }
 
-        final imageWidget = _isSvg(image.mimeType)
+        final imageWidget = _ImageMime.isSvg(image.mimeType)
             ? SvgPicture.memory(image.data, fit: (widget.widthPx != null && widget.heightPx != null) ? BoxFit.contain : BoxFit.cover)
             : Image.memory(image.data, fit: (widget.widthPx != null && widget.heightPx != null) ? BoxFit.contain : BoxFit.cover);
         final size = _displaySize();
@@ -4646,52 +5272,17 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
     _controller.animateToPage(nextIndex, duration: const Duration(milliseconds: 180), curve: Curves.easeInOut);
   }
 
-  String _defaultImageExtension(String mimeType) {
-    switch (mimeType.trim().toLowerCase()) {
-      case "image/jpeg":
-      case "image/jpg":
-        return "jpg";
-      case "image/gif":
-        return "gif";
-      case "image/webp":
-        return "webp";
-      case "image/svg+xml":
-      case "image/svg":
-      case "public.svg-image":
-        return "svg";
-      case "image/tiff":
-      case "image/tif":
-        return "tiff";
-      case "image/bmp":
-        return "bmp";
-      case "image/heic":
-        return "heic";
-      case "image/heif":
-        return "heif";
-      case "image/x-icon":
-      case "image/vnd.microsoft.icon":
-        return "ico";
-      case "image/png":
-      default:
-        return "png";
-    }
-  }
-
-  String _suggestedFileName(String mimeType) {
-    return "image.${_defaultImageExtension(mimeType)}";
-  }
-
   String _ensureFileNameExtension(String rawPath, String mimeType) {
     final trimmed = rawPath.trim();
     if (trimmed.isEmpty) {
-      return _suggestedFileName(mimeType);
+      return _ImageMime.suggestedFileName(mimeType);
     }
 
     final slash = trimmed.lastIndexOf("/");
     final fileName = slash == -1 ? trimmed : trimmed.substring(slash + 1);
 
     if (fileName.isEmpty) {
-      final suggested = _suggestedFileName(mimeType);
+      final suggested = _ImageMime.suggestedFileName(mimeType);
       return trimmed.endsWith("/") ? "$trimmed$suggested" : "$trimmed/$suggested";
     }
 
@@ -4699,39 +5290,7 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
       return trimmed;
     }
 
-    return "$trimmed.${_defaultImageExtension(mimeType)}";
-  }
-
-  FileFormat? _clipboardImageFormat(String mimeType) {
-    switch (mimeType.trim().toLowerCase()) {
-      case "image/jpeg":
-      case "image/jpg":
-        return Formats.jpeg;
-      case "image/gif":
-        return Formats.gif;
-      case "image/webp":
-        return Formats.webp;
-      case "image/svg+xml":
-      case "image/svg":
-      case "public.svg-image":
-        return Formats.svg;
-      case "image/tiff":
-      case "image/tif":
-        return Formats.tiff;
-      case "image/bmp":
-        return Formats.bmp;
-      case "image/heic":
-        return Formats.heic;
-      case "image/heif":
-        return Formats.heif;
-      case "image/x-icon":
-      case "image/vnd.microsoft.icon":
-        return Formats.ico;
-      case "image/png":
-        return Formats.png;
-      default:
-        return null;
-    }
+    return "$trimmed.${_ImageMime.defaultExtension(mimeType)}";
   }
 
   Future<_ThreadImageRecord?> _loadCurrentImage() async {
@@ -4759,8 +5318,8 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
     }
 
     final mimeType = image.mimeType.trim().toLowerCase();
-    final format = _clipboardImageFormat(mimeType);
-    final item = DataWriterItem(suggestedName: _suggestedFileName(mimeType));
+    final format = _ImageMime.clipboardFormat(mimeType);
+    final item = DataWriterItem(suggestedName: _ImageMime.suggestedFileName(mimeType));
     if (format != null) {
       item.add(format(image.data));
     } else {
@@ -4782,7 +5341,7 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
     if (!mounted) {
       return;
     }
-    final fileNameController = TextEditingController(text: _suggestedFileName(image.mimeType));
+    final fileNameController = TextEditingController(text: _ImageMime.suggestedFileName(image.mimeType));
     String selectedFolder = "";
 
     await showShadDialog<void>(
@@ -4806,7 +5365,7 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
             ShadButton(
               onPressed: () async {
                 final value = fileNameController.text.trim();
-                var fullPath = value.isEmpty ? _suggestedFileName(image.mimeType) : value;
+                var fullPath = value.isEmpty ? _ImageMime.suggestedFileName(image.mimeType) : value;
 
                 if (!fullPath.contains("/")) {
                   fullPath = selectedFolder.isEmpty ? fullPath : "$selectedFolder/$fullPath";
@@ -4870,7 +5429,7 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
                 padding: const EdgeInsets.only(top: 12),
                 child: ShadInputFormField(
                   label: Text("File name or path", style: tt.small.copyWith(fontWeight: FontWeight.bold)),
-                  placeholder: Text(_suggestedFileName(image.mimeType)),
+                  placeholder: Text(_ImageMime.suggestedFileName(image.mimeType)),
                   controller: fileNameController,
                 ),
               ),
@@ -5030,11 +5589,6 @@ class _ThreadFullscreenImage extends StatelessWidget {
     return _ThreadImageRecord(data: data, mimeType: mimeType);
   }
 
-  bool _isSvg(String mimeType) {
-    final normalized = mimeType.toLowerCase();
-    return normalized == "image/svg+xml" || normalized == "image/svg";
-  }
-
   bool _isGeneratingStatus(String? value) {
     if (value == null || value.trim().isEmpty) {
       return false;
@@ -5085,7 +5639,7 @@ class _ThreadFullscreenImage extends StatelessWidget {
           );
         }
 
-        final imageWidget = _isSvg(image.mimeType)
+        final imageWidget = _ImageMime.isSvg(image.mimeType)
             ? SvgPicture.memory(image.data, fit: BoxFit.contain)
             : Image.memory(image.data, fit: BoxFit.contain);
 
@@ -6558,6 +7112,18 @@ class _EventLineState extends State<EventLine> {
     final summary = ((widget.message.getAttribute("summary") as String?) ?? method).trim();
     final headlineAttr = ((widget.message.getAttribute("headline") as String?) ?? "").trim();
     final detailsAttr = ((widget.message.getAttribute("details") as String?) ?? "").trim();
+    final detailLines = _detailLines(detailsAttr);
+    final resolvedHeadlineForFiltering = (headlineAttr.isNotEmpty ? headlineAttr : summary).trim().toLowerCase();
+    final hideCompletedToolCall =
+        kind == "tool" &&
+        state == "completed" &&
+        (itemType == "tool_call" ||
+            (resolvedHeadlineForFiltering == "called tool" &&
+                detailLines.isNotEmpty &&
+                detailLines.every((line) => line.trimLeft().toLowerCase().startsWith("tool:"))));
+    if (hideCompletedToolCall) {
+      return const SizedBox.shrink();
+    }
     final approvalId =
         (((widget.message.getAttribute("item_id") as String?) ?? (widget.message.getAttribute("approval_id") as String?) ?? "")).trim();
     final useSummaryAsHeadline = _useSummaryAsHeadline(summary: summary, method: method, eventName: eventName);
@@ -6567,16 +7133,15 @@ class _EventLineState extends State<EventLine> {
     if (headline.trim().isEmpty) {
       return SizedBox.shrink();
     }
-    final details = _detailLines(detailsAttr);
-    var detailLines = details;
+    var renderedDetailLines = detailLines;
     if (kind == "exec") {
-      detailLines = details.toList();
+      renderedDetailLines = detailLines.toList();
     }
-    final failureTooltipText = itemType == "tool_call" && (state == "failed" || state == "cancelled") && detailLines.isNotEmpty
-        ? detailLines.join("\n")
+    final failureTooltipText = itemType == "tool_call" && (state == "failed" || state == "cancelled") && renderedDetailLines.isNotEmpty
+        ? renderedDetailLines.join("\n")
         : null;
     if (failureTooltipText != null) {
-      detailLines = const <String>[];
+      renderedDetailLines = const <String>[];
     }
     final eventPath = _eventPath();
     final commandPreview = _commandPreviewText(kind: kind);
@@ -6684,14 +7249,14 @@ class _EventLineState extends State<EventLine> {
               ),
             if (eventLogs.isNotEmpty && !((kind == "exec" || kind == "file") && commandPreview != null))
               _buildEventLogsBlock(context, logs: eventLogs),
-            if (detailLines.isNotEmpty && (kind != "diff" || diffPreviewBlocks.isEmpty))
+            if (renderedDetailLines.isNotEmpty && (kind != "diff" || diffPreviewBlocks.isEmpty))
               Container(
                 width: double.infinity,
                 margin: EdgeInsets.only(top: 0),
                 child: Padding(
                   padding: eventTextPadding,
                   child: SelectionArea(
-                    child: Text(detailLines.join("\n"), style: TextStyle(color: textColor.withAlpha(220), height: 1.3)),
+                    child: Text(renderedDetailLines.join("\n"), style: TextStyle(color: textColor.withAlpha(220), height: 1.3)),
                   ),
                 ),
               ),

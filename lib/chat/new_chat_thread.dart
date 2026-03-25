@@ -62,6 +62,15 @@ class _NewChatThreadState extends State<NewChatThread> {
   Completer<void>? _waitForAgentReadyCompleter;
   final GlobalKey _sendingStatusKey = GlobalKey();
 
+  String _chatPlaceholderText() {
+    final normalizedAgentName = widget.agentName.trim();
+    if (normalizedAgentName.isEmpty) {
+      return "Type a message";
+    }
+
+    return "Type a message or @$normalizedAgentName";
+  }
+
   void _notifyThreadPathChanged() {
     widget.onThreadPathChanged?.call(_threadPath);
   }
@@ -611,7 +620,7 @@ class _NewChatThreadState extends State<NewChatThread> {
       sendDisabledReason: _waitingForAgent ? "Waiting for ${widget.agentName} to be ready." : "Wait for the message to be accepted.",
       sendPendingText: _waitingForAgent ? "Waiting for ${widget.agentName} to be ready." : null,
       onCancelSend: _waitingForAgent ? _cancelPendingNewThread : null,
-      placeholder: const Text("Type a message"),
+      placeholder: Text(_chatPlaceholderText()),
       leading: toolsBuilder == null
           ? null
           : _controller.toolkits.isNotEmpty
