@@ -3734,6 +3734,58 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     return _buildFileInThread(context, pathAttribute);
   }
 
+  List<String> _eventDetailLines(String raw) {
+    final value = raw.trim();
+    if (value.isEmpty) {
+      return const [];
+    }
+
+    if (value.startsWith("[") && value.endsWith("]")) {
+      try {
+        final decoded = jsonDecode(value);
+        if (decoded is List) {
+          return decoded.whereType<String>().map((line) => line.trim()).where((line) => line.isNotEmpty).toList();
+        }
+      } catch (_) {}
+    }
+
+    return value.split(RegExp(r"\r?\n")).map((line) => line.trim()).where((line) => line.isNotEmpty).toList();
+  }
+
+  bool _shouldRenderThreadMessage(MeshElement message) {
+    if (message.tagName == "reasoning") {
+      final summary = (message.getAttribute("summary") ?? "").toString().trim();
+      return summary.isNotEmpty;
+    }
+
+    if (message.tagName != "event") {
+      return true;
+    }
+
+    const supportedKinds = {"exec", "tool", "web", "search", "diff", "image", "approval", "collab", "plan", "thread", "file"};
+    final kind = ((message.getAttribute("kind") as String?) ?? "").trim().toLowerCase();
+    if (!supportedKinds.contains(kind)) {
+      return false;
+    }
+
+    final state = ((message.getAttribute("state") as String?) ?? "info").toLowerCase();
+    final itemType = ((message.getAttribute("item_type") as String?) ?? "").trim().toLowerCase();
+    final method = (message.getAttribute("method") as String?) ?? "agent/event";
+    final summary = ((message.getAttribute("summary") as String?) ?? method).trim();
+    final headlineAttr = ((message.getAttribute("headline") as String?) ?? "").trim();
+    final detailLines = _eventDetailLines(((message.getAttribute("details") as String?) ?? "").trim());
+    final resolvedHeadlineForFiltering = (headlineAttr.isNotEmpty ? headlineAttr : summary).trim().toLowerCase();
+    final hideCompletedToolCall =
+        kind == "tool" &&
+        state == "completed" &&
+        (itemType == "tool_call" ||
+            (resolvedHeadlineForFiltering == "called tool" &&
+                detailLines.isNotEmpty &&
+                detailLines.every((line) => line.trimLeft().toLowerCase().startsWith("tool:"))));
+
+    return !hideCompletedToolCall;
+  }
+
   bool _defaultHeaderWillRender({required MeshElement message}) {
     final doc = message.doc;
     if (doc is! MeshDocument) {
@@ -3756,8 +3808,9 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     final localParticipantReactionName = _localParticipantName();
     final mine = message.getAttribute("author_name") == localParticipantName;
     final useDefaultHeaderBuilder = messageHeaderBuilder == null;
+    final isLastVisibleMessage = next == null;
     final shouldShowHeader =
-        (!isSameAuthor && (!useDefaultHeaderBuilder || _defaultHeaderWillRender(message: message))) || (message == messages.last);
+        (!isSameAuthor && (!useDefaultHeaderBuilder || _defaultHeaderWillRender(message: message))) || isLastVisibleMessage;
 
     final id = message.getAttribute("id");
     final text = message.getAttribute("text");
@@ -3821,7 +3874,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                       message.doc as MeshDocument,
                       message,
                       localParticipantName: localParticipantName is String ? localParticipantName : null,
-                      isLastMessage: message == messages.last,
+                      isLastMessage: isLastVisibleMessage,
                     ),
               ),
             ),
@@ -3902,7 +3955,8 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
 
   @override
   Widget build(BuildContext context) {
-    bool bottomAlign = !startChatCentered || messages.isNotEmpty;
+    final visibleMessages = messages.where(_shouldRenderThreadMessage).toList();
+    bool bottomAlign = !startChatCentered || visibleMessages.isNotEmpty;
     final feedImages = _collectThreadImages();
     final rawCenteredTitle = emptyStateTitle?.trim();
     final participantCenteredTitle = online.firstOrNull?.getAttribute("empty_state_title");
@@ -3922,9 +3976,9 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
         : null;
 
     final messageWidgets = <Widget>[];
-    for (var message in messages.indexed) {
-      final previous = message.$1 > 0 ? messages[message.$1 - 1] : null;
-      final next = message.$1 < messages.length - 1 ? messages[message.$1 + 1] : null;
+    for (var message in visibleMessages.indexed) {
+      final previous = message.$1 > 0 ? visibleMessages[message.$1 - 1] : null;
+      final next = message.$1 < visibleMessages.length - 1 ? visibleMessages[message.$1 + 1] : null;
 
       final messageWidget = Container(
         key: ValueKey(message.$2.id),
@@ -3939,7 +3993,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     }
     final threadView = ChatThreadViewportBody(
       bottomAlign: bottomAlign,
-      centerContent: messages.isEmpty
+      centerContent: visibleMessages.isEmpty
           ? emptyState ??
                 (centeredTitle != null
                     ? Padding(
@@ -6568,6 +6622,18 @@ class _EventLineState extends State<EventLine> {
     final summary = ((widget.message.getAttribute("summary") as String?) ?? method).trim();
     final headlineAttr = ((widget.message.getAttribute("headline") as String?) ?? "").trim();
     final detailsAttr = ((widget.message.getAttribute("details") as String?) ?? "").trim();
+    final detailLines = _detailLines(detailsAttr);
+    final resolvedHeadlineForFiltering = (headlineAttr.isNotEmpty ? headlineAttr : summary).trim().toLowerCase();
+    final hideCompletedToolCall =
+        kind == "tool" &&
+        state == "completed" &&
+        (itemType == "tool_call" ||
+            (resolvedHeadlineForFiltering == "called tool" &&
+                detailLines.isNotEmpty &&
+                detailLines.every((line) => line.trimLeft().toLowerCase().startsWith("tool:"))));
+    if (hideCompletedToolCall) {
+      return const SizedBox.shrink();
+    }
     final approvalId =
         (((widget.message.getAttribute("item_id") as String?) ?? (widget.message.getAttribute("approval_id") as String?) ?? "")).trim();
     final useSummaryAsHeadline = _useSummaryAsHeadline(summary: summary, method: method, eventName: eventName);
@@ -6577,16 +6643,15 @@ class _EventLineState extends State<EventLine> {
     if (headline.trim().isEmpty) {
       return SizedBox.shrink();
     }
-    final details = _detailLines(detailsAttr);
-    var detailLines = details;
+    var renderedDetailLines = detailLines;
     if (kind == "exec") {
-      detailLines = details.toList();
+      renderedDetailLines = detailLines.toList();
     }
-    final failureTooltipText = itemType == "tool_call" && (state == "failed" || state == "cancelled") && detailLines.isNotEmpty
-        ? detailLines.join("\n")
+    final failureTooltipText = itemType == "tool_call" && (state == "failed" || state == "cancelled") && renderedDetailLines.isNotEmpty
+        ? renderedDetailLines.join("\n")
         : null;
     if (failureTooltipText != null) {
-      detailLines = const <String>[];
+      renderedDetailLines = const <String>[];
     }
     final eventPath = _eventPath();
     final commandPreview = _commandPreviewText(kind: kind);
@@ -6694,14 +6759,14 @@ class _EventLineState extends State<EventLine> {
               ),
             if (eventLogs.isNotEmpty && !((kind == "exec" || kind == "file") && commandPreview != null))
               _buildEventLogsBlock(context, logs: eventLogs),
-            if (detailLines.isNotEmpty && (kind != "diff" || diffPreviewBlocks.isEmpty))
+            if (renderedDetailLines.isNotEmpty && (kind != "diff" || diffPreviewBlocks.isEmpty))
               Container(
                 width: double.infinity,
                 margin: EdgeInsets.only(top: 0),
                 child: Padding(
                   padding: eventTextPadding,
                   child: SelectionArea(
-                    child: Text(detailLines.join("\n"), style: TextStyle(color: textColor.withAlpha(220), height: 1.3)),
+                    child: Text(renderedDetailLines.join("\n"), style: TextStyle(color: textColor.withAlpha(220), height: 1.3)),
                   ),
                 ),
               ),
