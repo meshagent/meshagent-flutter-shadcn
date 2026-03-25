@@ -2292,6 +2292,7 @@ class ChatThread extends StatefulWidget {
     this.emptyState,
 
     this.agentName,
+    this.onVisibleMessagesEmpty,
   });
 
   final String? agentName;
@@ -2307,6 +2308,7 @@ class ChatThread extends StatefulWidget {
   final String? emptyStateTitle;
   final String? emptyStateDescription;
   final Widget? emptyState;
+  final FutureOr<void> Function()? onVisibleMessagesEmpty;
 
   final Widget Function(BuildContext, MeshDocument, MeshElement)? messageHeaderBuilder;
   final Widget Function(BuildContext, List<String>)? waitingForParticipantsBuilder;
@@ -2664,6 +2666,7 @@ class ChatMessage {
 class _ChatThreadState extends State<ChatThread> {
   late final ChatThreadController controller;
   OutboundEntry? _currentStatusEntry;
+  bool _didNotifyVisibleMessagesEmpty = false;
 
   bool _shouldStoreLocally({required bool hasConfiguredAgent, required bool useAgentMessages}) {
     return !hasConfiguredAgent && !useAgentMessages;
@@ -2739,6 +2742,90 @@ class _ChatThreadState extends State<ChatThread> {
     if (widget.controller == null) {
       controller.dispose();
     }
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatThread oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.path != widget.path || oldWidget.document != widget.document) {
+      _didNotifyVisibleMessagesEmpty = false;
+    }
+  }
+
+  void _handleVisibleMessages(List<MeshElement> messages) {
+    final onVisibleMessagesEmpty = widget.onVisibleMessagesEmpty;
+    if (onVisibleMessagesEmpty == null) {
+      return;
+    }
+
+    final hasVisibleMessages = messages.any(_shouldRenderThreadMessageForVisibility);
+    if (hasVisibleMessages) {
+      _didNotifyVisibleMessagesEmpty = false;
+      return;
+    }
+
+    if (_didNotifyVisibleMessagesEmpty) {
+      return;
+    }
+
+    _didNotifyVisibleMessagesEmpty = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      unawaited(Future.sync(onVisibleMessagesEmpty));
+    });
+  }
+
+  bool _shouldRenderThreadMessageForVisibility(MeshElement message) {
+    if (message.tagName == "reasoning") {
+      final summary = (message.getAttribute("summary") ?? "").toString().trim();
+      return summary.isNotEmpty;
+    }
+
+    if (message.tagName != "event") {
+      return true;
+    }
+
+    const supportedKinds = {"exec", "tool", "web", "search", "diff", "image", "approval", "collab", "plan", "thread", "file"};
+    final kind = ((message.getAttribute("kind") as String?) ?? "").trim().toLowerCase();
+    if (!supportedKinds.contains(kind)) {
+      return false;
+    }
+
+    final state = ((message.getAttribute("state") as String?) ?? "info").toLowerCase();
+    final itemType = ((message.getAttribute("item_type") as String?) ?? "").trim().toLowerCase();
+    final method = (message.getAttribute("method") as String?) ?? "agent/event";
+    final summary = ((message.getAttribute("summary") as String?) ?? method).trim();
+    final headlineAttr = ((message.getAttribute("headline") as String?) ?? "").trim();
+    final detailsAttr = ((message.getAttribute("details") as String?) ?? "").trim();
+    final detailLines = _detailLinesForVisibility(detailsAttr);
+    final resolvedHeadlineForFiltering = (headlineAttr.isNotEmpty ? headlineAttr : summary).trim().toLowerCase();
+
+    return !(kind == "tool" &&
+        state == "completed" &&
+        (itemType == "tool_call" ||
+            (resolvedHeadlineForFiltering == "called tool" &&
+                detailLines.isNotEmpty &&
+                detailLines.every((line) => line.trimLeft().toLowerCase().startsWith("tool:")))));
+  }
+
+  List<String> _detailLinesForVisibility(String raw) {
+    final value = raw.trim();
+    if (value.isEmpty) {
+      return const [];
+    }
+
+    if (value.startsWith("[") && value.endsWith("]")) {
+      try {
+        final decoded = jsonDecode(value);
+        if (decoded is List) {
+          return decoded.whereType<String>().map((line) => line.trim()).where((line) => line.isNotEmpty).toList();
+        }
+      } catch (_) {}
+    }
+
+    return value.split(RegExp(r"\r?\n")).map((line) => line.trim()).where((line) => line.isNotEmpty).toList();
   }
 
   Widget _buildInputChatBox(BuildContext context, List<PendingAgentMessage> pendingMessages, ChatThreadSnapshot state) {
@@ -2825,6 +2912,8 @@ class _ChatThreadState extends State<ChatThread> {
         if (state.offline.isNotEmpty && widget.waitingForParticipantsBuilder != null) {
           return widget.waitingForParticipantsBuilder!(context, state.offline.toList());
         }
+
+        _handleVisibleMessages(state.messages);
 
         bool bottomAlign = !widget.startChatCentered || state.messages.isNotEmpty;
 
