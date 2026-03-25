@@ -41,7 +41,7 @@ class _FileBrowser extends State<FileBrowser> {
   }
 
   void load() async {
-    files = (await widget.room.storage.list(path)).where((x) => !x.name.startsWith(".")).toList();
+    files = (await widget.room.storage.list(path)).where((x) => !x.name.startsWith(".")).toList()..sort(compare);
 
     if (mounted) {
       setState(() {});
@@ -54,6 +54,13 @@ class _FileBrowser extends State<FileBrowser> {
     } else {
       return "$path1/$path2";
     }
+  }
+
+  int compare(StorageEntry a, StorageEntry b) {
+    // folders before files
+    if (a.isFolder != b.isFolder) return a.isFolder ? -1 : 1;
+
+    return a.name.toLowerCase().compareTo(b.name.toLowerCase());
   }
 
   @override

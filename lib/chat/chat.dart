@@ -1391,6 +1391,8 @@ class ChatThreadAttachButton extends StatefulWidget {
     this.availableConnectors,
     this.onConnectorSetup,
     this.agentName,
+    this.availableRooms,
+    this.connectRoomClient,
   });
 
   final String? agentName;
@@ -1404,11 +1406,45 @@ class ChatThreadAttachButton extends StatefulWidget {
 
   final Future<void> Function(Connector connector)? onConnectorSetup;
 
+  final Future<List<Room>> Function()? availableRooms;
+  final Future<RoomClient> Function(String roomName)? connectRoomClient;
+
   @override
   State createState() => _ChatThreadAttachButton();
 }
 
 class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
+  Future<String> _resolveImportedPath(String requestedPath) async {
+    String candidate = requestedPath.split("/").last;
+    final dotIndex = candidate.lastIndexOf('.');
+    final stem = dotIndex > 0 ? candidate.substring(0, dotIndex) : candidate;
+    final extension = dotIndex > 0 ? candidate.substring(dotIndex) : '';
+
+    for (var i = 1; ; i++) {
+      final candidateExists = await widget.controller.room.storage.exists(candidate);
+      if (!candidateExists) {
+        return candidate;
+      }
+
+      final suffix = i == 1 ? ' copy' : ' copy $i';
+      candidate = '$stem$suffix$extension';
+    }
+  }
+
+  Future<String> _importFile({required RoomClient sourceRoom, required String sourcePath}) async {
+    final content = await sourceRoom.storage.download(sourcePath);
+    final destinationPath = await _resolveImportedPath(sourcePath);
+
+    await widget.controller.room.storage.uploadStream(
+      destinationPath,
+      Stream.value(content.data),
+      overwrite: true,
+      size: content.data.length,
+    );
+
+    return destinationPath;
+  }
+
   Future<void> _onSelectAttachment(ToolkitBuilderOption? storage) async {
     final picked = await FilePicker.platform.pickFiles(dialogTitle: "Select files", allowMultiple: true, withReadStream: true);
 
@@ -1468,39 +1504,121 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
   }
 
   Future<void> _onBrowseFiles(ToolkitBuilderOption? storage) async {
+    final currentRoomName = widget.controller.room.roomName?.trim() ?? "";
+    String selectedRoomName = currentRoomName;
+    RoomClient selectedRoomClient = widget.controller.room;
+    bool resolvingRoom = false;
+    bool resolveError = false;
     List<String> picked = [];
+
+    var roomOptions = [selectedRoomName];
+    if (widget.availableRooms != null) {
+      try {
+        final loaded = await widget.availableRooms!();
+        roomOptions = {selectedRoomName, ...loaded.map((r) => r.name).where((n) => n.isNotEmpty)}.toList()
+          ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+      } catch (_) {}
+    }
+
+    if (!mounted) {
+      return;
+    }
+
     await showShadDialog(
       context: context,
 
-      builder: (context) => ShadDialog(
-        title: Text("Select files"),
-        scrollable: false,
-        description: Text("Attach files from this room"),
-        actions: [
-          ShadButton.secondary(
-            onPressed: () {
-              picked.clear();
-              Navigator.of(context).pop([]);
-            },
-            child: Text("Cancel"),
-          ),
-          ShadButton.secondary(
-            onPressed: () {
-              Navigator.of(context).pop(picked);
-            },
-            child: Text("OK"),
-          ),
-        ],
-        child: SizedBox(
-          width: 500,
-          height: 400,
-          child: ShadCard(
-            child: FileBrowser(
-              onSelectionChanged: (selection) {
-                picked = selection;
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => ShadDialog(
+          title: Text("Select files"),
+          scrollable: false,
+          description: Text("Attach files from this room"),
+          actions: [
+            ShadButton.secondary(
+              onPressed: () {
+                picked.clear();
+                Navigator.of(context).pop([]);
               },
-              room: widget.controller.room,
-              multiple: true,
+              child: Text("Cancel"),
+            ),
+            ShadButton.secondary(
+              onPressed: () {
+                Navigator.of(context).pop(picked);
+              },
+              child: Text("OK"),
+            ),
+          ],
+          child: SizedBox(
+            width: 500,
+            height: 450,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (roomOptions.length > 1)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: ShadSelect<String>(
+                        initialValue: selectedRoomName,
+                        selectedOptionBuilder: (context, value) => Text(value),
+                        options: [for (final option in roomOptions) ShadOption<String>(value: option, child: Text(option))],
+                        onChanged: (value) async {
+                          if (value == null || value == selectedRoomName || widget.connectRoomClient == null) {
+                            return;
+                          }
+
+                          setDialogState(() {
+                            resolvingRoom = true;
+                            resolveError = false;
+                          });
+
+                          RoomClient? nextRoomClient;
+                          if (value == currentRoomName) {
+                            nextRoomClient = widget.controller.room;
+                          } else {
+                            try {
+                              nextRoomClient = await widget.connectRoomClient!(value);
+                            } catch (_) {}
+                          }
+
+                          if (nextRoomClient == null) {
+                            setDialogState(() {
+                              resolvingRoom = false;
+                              resolveError = true;
+                            });
+                          } else {
+                            if (!identical(widget.controller.room, selectedRoomClient) && !identical(nextRoomClient, selectedRoomClient)) {
+                              selectedRoomClient.dispose();
+                            }
+
+                            setDialogState(() {
+                              selectedRoomName = value;
+                              selectedRoomClient = nextRoomClient!;
+                              picked = [];
+                              resolvingRoom = false;
+                            });
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+                Expanded(
+                  child: ShadCard(
+                    child: resolvingRoom
+                        ? const Center(child: CircularProgressIndicator())
+                        : resolveError
+                        ? const Center(child: Text("Room failed to connect"))
+                        : FileBrowser(
+                            key: ValueKey(selectedRoomName),
+                            onSelectionChanged: (selection) {
+                              picked = selection;
+                            },
+                            room: selectedRoomClient,
+                            multiple: true,
+                          ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -1508,7 +1626,12 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
     );
 
     for (final f in picked) {
-      widget.controller.attachFile(f);
+      if (identical(selectedRoomClient, widget.controller.room)) {
+        widget.controller.attachFile(f);
+      } else {
+        final importedPath = await _importFile(sourceRoom: selectedRoomClient, sourcePath: f);
+        widget.controller.attachFile(importedPath);
+      }
     }
   }
 
