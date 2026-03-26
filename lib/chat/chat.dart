@@ -97,6 +97,59 @@ bool _shouldShowAuthorNames({required MeshDocument thread, String? localParticip
   return true;
 }
 
+List<String> _parseEventDetailLines(String raw) {
+  final value = raw.trim();
+  if (value.isEmpty) {
+    return const [];
+  }
+
+  if (value.startsWith("[") && value.endsWith("]")) {
+    try {
+      final decoded = jsonDecode(value);
+      if (decoded is List) {
+        return decoded.whereType<String>().map((line) => line.trim()).where((line) => line.isNotEmpty).toList();
+      }
+    } catch (_) {}
+  }
+
+  return value.split(RegExp(r"\r?\n")).map((line) => line.trim()).where((line) => line.isNotEmpty).toList();
+}
+
+bool _isCompletedToolCallEvent(MeshElement message) {
+  if (message.tagName != "event") {
+    return false;
+  }
+
+  final kind = ((message.getAttribute("kind") as String?) ?? "").trim().toLowerCase();
+  if (kind != "tool") {
+    return false;
+  }
+
+  final state = ((message.getAttribute("state") as String?) ?? "info").toLowerCase();
+  if (state != "completed") {
+    return false;
+  }
+
+  final itemType = ((message.getAttribute("item_type") as String?) ?? "").trim().toLowerCase();
+  if (itemType == "tool_call") {
+    return true;
+  }
+
+  final method = (message.getAttribute("method") as String?) ?? "agent/event";
+  final summary = ((message.getAttribute("summary") as String?) ?? method).trim();
+  final headlineAttr = ((message.getAttribute("headline") as String?) ?? "").trim();
+  final detailLines = _parseEventDetailLines(((message.getAttribute("details") as String?) ?? "").trim());
+  final resolvedHeadlineForFiltering = (headlineAttr.isNotEmpty ? headlineAttr : summary).trim().toLowerCase();
+
+  return resolvedHeadlineForFiltering == "called tool" &&
+      detailLines.isNotEmpty &&
+      detailLines.every((line) => line.trimLeft().toLowerCase().startsWith("tool:"));
+}
+
+bool _shouldHideCompletedToolCallEvent(MeshElement message, {required bool showCompletedToolCalls}) {
+  return !showCompletedToolCalls && _isCompletedToolCallEvent(message);
+}
+
 class _ImageMime {
   static String normalize(String mimeType) {
     return mimeType.trim().toLowerCase();
@@ -2500,6 +2553,7 @@ class ChatThread extends StatefulWidget {
 
     this.agentName,
     this.onVisibleMessagesEmpty,
+    this.initialShowCompletedToolCalls = false,
   });
 
   final String? agentName;
@@ -2516,6 +2570,7 @@ class ChatThread extends StatefulWidget {
   final String? emptyStateDescription;
   final Widget? emptyState;
   final FutureOr<void> Function()? onVisibleMessagesEmpty;
+  final bool initialShowCompletedToolCalls;
 
   final Widget Function(BuildContext, MeshDocument, MeshElement)? messageHeaderBuilder;
   final Widget Function(BuildContext, List<String>)? waitingForParticipantsBuilder;
@@ -2874,6 +2929,7 @@ class _ChatThreadState extends State<ChatThread> {
   late final ChatThreadController controller;
   OutboundEntry? _currentStatusEntry;
   bool _didNotifyVisibleMessagesEmpty = false;
+  late bool _showCompletedToolCalls;
 
   bool _shouldStoreLocally({required bool hasConfiguredAgent, required bool useAgentMessages}) {
     return !hasConfiguredAgent && !useAgentMessages;
@@ -2917,6 +2973,7 @@ class _ChatThreadState extends State<ChatThread> {
     super.initState();
 
     controller = widget.controller ?? ChatThreadController(room: widget.room);
+    _showCompletedToolCalls = widget.initialShowCompletedToolCalls;
 
     if (widget.initialMessage != null) {
       final normalizedAgentName = widget.agentName?.trim();
@@ -2999,40 +3056,7 @@ class _ChatThreadState extends State<ChatThread> {
     if (!supportedKinds.contains(kind)) {
       return false;
     }
-
-    final state = ((message.getAttribute("state") as String?) ?? "info").toLowerCase();
-    final itemType = ((message.getAttribute("item_type") as String?) ?? "").trim().toLowerCase();
-    final method = (message.getAttribute("method") as String?) ?? "agent/event";
-    final summary = ((message.getAttribute("summary") as String?) ?? method).trim();
-    final headlineAttr = ((message.getAttribute("headline") as String?) ?? "").trim();
-    final detailsAttr = ((message.getAttribute("details") as String?) ?? "").trim();
-    final detailLines = _detailLinesForVisibility(detailsAttr);
-    final resolvedHeadlineForFiltering = (headlineAttr.isNotEmpty ? headlineAttr : summary).trim().toLowerCase();
-
-    return !(kind == "tool" &&
-        state == "completed" &&
-        (itemType == "tool_call" ||
-            (resolvedHeadlineForFiltering == "called tool" &&
-                detailLines.isNotEmpty &&
-                detailLines.every((line) => line.trimLeft().toLowerCase().startsWith("tool:")))));
-  }
-
-  List<String> _detailLinesForVisibility(String raw) {
-    final value = raw.trim();
-    if (value.isEmpty) {
-      return const [];
-    }
-
-    if (value.startsWith("[") && value.endsWith("]")) {
-      try {
-        final decoded = jsonDecode(value);
-        if (decoded is List) {
-          return decoded.whereType<String>().map((line) => line.trim()).where((line) => line.isNotEmpty).toList();
-        }
-      } catch (_) {}
-    }
-
-    return value.split(RegExp(r"\r?\n")).map((line) => line.trim()).where((line) => line.isNotEmpty).toList();
+    return !_shouldHideCompletedToolCallEvent(message, showCompletedToolCalls: _showCompletedToolCalls);
   }
 
   Widget _buildInputChatBox(BuildContext context, List<PendingAgentMessage> pendingMessages, ChatThreadSnapshot state) {
@@ -3136,6 +3160,12 @@ class _ChatThreadState extends State<ChatThread> {
                 room: widget.room,
                 path: widget.path,
                 agentName: widget.agentName,
+                showCompletedToolCalls: _showCompletedToolCalls,
+                onShowCompletedToolCallsChanged: (value) {
+                  setState(() {
+                    _showCompletedToolCalls = value;
+                  });
+                },
                 startChatCentered: widget.startChatCentered,
                 messages: state.messages,
                 online: state.online,
@@ -3256,6 +3286,7 @@ class ChatThreadMessages extends StatefulWidget {
     required this.path,
     required this.messages,
     required this.online,
+    required this.showCompletedToolCalls,
 
     this.startChatCentered = false,
     this.showTyping = false,
@@ -3274,6 +3305,7 @@ class ChatThreadMessages extends StatefulWidget {
     this.emptyStateTitle,
     this.emptyStateDescription,
     this.emptyState,
+    this.onShowCompletedToolCallsChanged,
   });
 
   final Map<String, MessageBuilder>? messageBuilders;
@@ -3281,6 +3313,7 @@ class ChatThreadMessages extends StatefulWidget {
   final RoomClient room;
   final String path;
   final String? agentName;
+  final bool showCompletedToolCalls;
   final bool startChatCentered;
   final bool showTyping;
   final bool showListening;
@@ -3295,6 +3328,7 @@ class ChatThreadMessages extends StatefulWidget {
   final String? emptyStateTitle;
   final String? emptyStateDescription;
   final Widget? emptyState;
+  final ValueChanged<bool>? onShowCompletedToolCallsChanged;
 
   final Widget Function(BuildContext, MeshDocument, MeshElement)? messageHeaderBuilder;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
@@ -4294,24 +4328,6 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     return [_AttachmentOptionsButton(items: items)];
   }
 
-  List<String> _eventDetailLines(String raw) {
-    final value = raw.trim();
-    if (value.isEmpty) {
-      return const [];
-    }
-
-    if (value.startsWith("[") && value.endsWith("]")) {
-      try {
-        final decoded = jsonDecode(value);
-        if (decoded is List) {
-          return decoded.whereType<String>().map((line) => line.trim()).where((line) => line.isNotEmpty).toList();
-        }
-      } catch (_) {}
-    }
-
-    return value.split(RegExp(r"\r?\n")).map((line) => line.trim()).where((line) => line.isNotEmpty).toList();
-  }
-
   bool _shouldRenderThreadMessage(MeshElement message) {
     if (message.tagName == "reasoning") {
       final summary = (message.getAttribute("summary") ?? "").toString().trim();
@@ -4327,23 +4343,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     if (!supportedKinds.contains(kind)) {
       return false;
     }
-
-    final state = ((message.getAttribute("state") as String?) ?? "info").toLowerCase();
-    final itemType = ((message.getAttribute("item_type") as String?) ?? "").trim().toLowerCase();
-    final method = (message.getAttribute("method") as String?) ?? "agent/event";
-    final summary = ((message.getAttribute("summary") as String?) ?? method).trim();
-    final headlineAttr = ((message.getAttribute("headline") as String?) ?? "").trim();
-    final detailLines = _eventDetailLines(((message.getAttribute("details") as String?) ?? "").trim());
-    final resolvedHeadlineForFiltering = (headlineAttr.isNotEmpty ? headlineAttr : summary).trim().toLowerCase();
-    final hideCompletedToolCall =
-        kind == "tool" &&
-        state == "completed" &&
-        (itemType == "tool_call" ||
-            (resolvedHeadlineForFiltering == "called tool" &&
-                detailLines.isNotEmpty &&
-                detailLines.every((line) => line.trimLeft().toLowerCase().startsWith("tool:"))));
-
-    return !hideCompletedToolCall;
+    return !_shouldHideCompletedToolCallEvent(message, showCompletedToolCalls: widget.showCompletedToolCalls);
   }
 
   bool _defaultHeaderWillRender({required MeshElement message}) {
@@ -4405,6 +4405,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
         room: room,
         path: path,
         agentName: agentName,
+        showCompletedToolCalls: widget.showCompletedToolCalls,
         openFile: openFile,
         pendingItemId: pendingItemId,
         threadStatus: threadStatus,
@@ -4596,6 +4597,19 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
       ],
       children: messageWidgets,
     );
+    final threadViewWithContextMenu = ShadContextMenuRegion(
+      constraints: const BoxConstraints(minWidth: 180),
+      items: [
+        ShadContextMenuItem(
+          onPressed: widget.onShowCompletedToolCallsChanged == null
+              ? null
+              : () => widget.onShowCompletedToolCallsChanged!(!widget.showCompletedToolCalls),
+          leading: Icon(widget.showCompletedToolCalls ? LucideIcons.squareCheckBig : LucideIcons.square),
+          child: const Text("Show tool calls"),
+        ),
+      ],
+      child: threadView,
+    );
 
     return Expanded(
       child: OverlayPortal(
@@ -4612,7 +4626,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
             onClose: _closeThreadImageViewer,
           );
         },
-        child: threadView,
+        child: threadViewWithContextMenu,
       ),
     );
   }
@@ -6574,6 +6588,7 @@ class EventLine extends StatefulWidget {
     required this.next,
     required this.room,
     required this.path,
+    required this.showCompletedToolCalls,
     this.agentName,
     this.openFile,
     this.pendingItemId,
@@ -6586,6 +6601,7 @@ class EventLine extends StatefulWidget {
   final MeshElement? next;
   final RoomClient room;
   final String path;
+  final bool showCompletedToolCalls;
   final String? agentName;
   final FutureOr<void> Function(String path)? openFile;
   final String? pendingItemId;
@@ -6669,21 +6685,7 @@ class _EventLineState extends State<EventLine> {
   }
 
   List<String> _detailLines(String raw) {
-    final value = raw.trim();
-    if (value.isEmpty) {
-      return const [];
-    }
-
-    if (value.startsWith("[") && value.endsWith("]")) {
-      try {
-        final decoded = jsonDecode(value);
-        if (decoded is List) {
-          return decoded.whereType<String>().map((line) => line.trim()).where((line) => line.isNotEmpty).toList();
-        }
-      } catch (_) {}
-    }
-
-    return value.split(RegExp(r"\r?\n")).map((line) => line.trim()).where((line) => line.isNotEmpty).toList();
+    return _parseEventDetailLines(raw);
   }
 
   String _displayText({required String headline}) {
@@ -7113,15 +7115,7 @@ class _EventLineState extends State<EventLine> {
     final headlineAttr = ((widget.message.getAttribute("headline") as String?) ?? "").trim();
     final detailsAttr = ((widget.message.getAttribute("details") as String?) ?? "").trim();
     final detailLines = _detailLines(detailsAttr);
-    final resolvedHeadlineForFiltering = (headlineAttr.isNotEmpty ? headlineAttr : summary).trim().toLowerCase();
-    final hideCompletedToolCall =
-        kind == "tool" &&
-        state == "completed" &&
-        (itemType == "tool_call" ||
-            (resolvedHeadlineForFiltering == "called tool" &&
-                detailLines.isNotEmpty &&
-                detailLines.every((line) => line.trimLeft().toLowerCase().startsWith("tool:"))));
-    if (hideCompletedToolCall) {
+    if (_shouldHideCompletedToolCallEvent(widget.message, showCompletedToolCalls: widget.showCompletedToolCalls)) {
       return const SizedBox.shrink();
     }
     final approvalId =
