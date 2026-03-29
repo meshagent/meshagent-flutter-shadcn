@@ -2473,6 +2473,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
                           }
 
                           return FileDefaultAttachmentPreview(
+                            key: ValueKey(attachment.path),
                             attachment: attachment,
                             maxWidth: constraints.maxWidth - 50,
                             onRemove: () {

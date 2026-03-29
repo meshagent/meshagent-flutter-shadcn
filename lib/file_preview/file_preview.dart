@@ -129,9 +129,22 @@ class _FileDefaultAttachmentPreviewState extends State<FileDefaultAttachmentPrev
   UploadStatus status = UploadStatus.initial;
 
   void onAttachmentUpdate() {
+    final nextStatus = widget.attachment.status;
+
     if (mounted) {
+      if (status != UploadStatus.failed && nextStatus == UploadStatus.failed) {
+        final buildContext = this.context;
+
+        ShadToaster.of(buildContext).show(
+          ShadToast.destructive(
+            title: const Text("Attachment upload failed"),
+            description: Text("Unable to upload ${widget.attachment.filename}. Remove it or try again."),
+          ),
+        );
+      }
+
       setState(() {
-        status = widget.attachment.status;
+        status = nextStatus;
       });
     }
   }
@@ -154,15 +167,21 @@ class _FileDefaultAttachmentPreviewState extends State<FileDefaultAttachmentPrev
 
   @override
   Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final destructiveColor = theme.colorScheme.destructive;
+    final isUploading = status == UploadStatus.initial || status == UploadStatus.uploading;
+    final hasFailed = status == UploadStatus.failed;
+
     return ShadTooltip(
       waitDuration: const Duration(seconds: 1),
       builder: (context) {
-        return Text(widget.attachment.filename, style: ShadTheme.of(context).textTheme.small);
+        return Text(hasFailed ? 'Upload failed: ${widget.attachment.filename}' : widget.attachment.filename, style: theme.textTheme.small);
       },
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: widget.maxWidth),
         child: ShadCard(
-          backgroundColor: Colors.transparent,
+          backgroundColor: hasFailed ? destructiveColor.withValues(alpha: 0.1) : Colors.transparent,
+          border: hasFailed ? ShadBorder.all(color: destructiveColor.withValues(alpha: 0.5), width: 1) : null,
           radius: BorderRadius.circular(16),
           padding: EdgeInsets.only(left: 8, top: 8, bottom: 8, right: 8),
           rowCrossAxisAlignment: CrossAxisAlignment.center,
@@ -176,9 +195,15 @@ class _FileDefaultAttachmentPreviewState extends State<FileDefaultAttachmentPrev
                   SizedBox(
                     width: 24,
                     height: 24,
-                    child: (status == UploadStatus.initial || status == UploadStatus.uploading)
-                        ? CircularProgressIndicator(color: ShadTheme.of(context).colorScheme.primary, strokeWidth: 2.0)
-                        : Center(child: Icon(LucideIcons.file, size: 20)),
+                    child: isUploading
+                        ? CircularProgressIndicator(color: theme.colorScheme.primary, strokeWidth: 2.0)
+                        : Center(
+                            child: Icon(
+                              hasFailed ? LucideIcons.triangleAlert : LucideIcons.file,
+                              size: 20,
+                              color: hasFailed ? destructiveColor : null,
+                            ),
+                          ),
                   ),
                 ],
               ),
