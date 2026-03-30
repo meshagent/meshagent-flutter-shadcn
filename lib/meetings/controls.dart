@@ -18,15 +18,16 @@ class MeetingControls extends StatelessWidget {
     return ListenableBuilder(
       listenable: controller.livekitRoom,
       builder: (context, _) {
-        return Row(
-          mainAxisSize: MainAxisSize.min,
+        return Wrap(
+          alignment: WrapAlignment.center,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: spacing,
+          runSpacing: spacing,
           children: [
             ConnectionButton(controller: controller),
             if (controller.livekitRoom.localParticipant != null) ...[
-              SizedBox(width: spacing),
-              CameraToggle(controller: controller),
-              SizedBox(width: spacing),
               MicToggle(controller: controller),
+              CameraToggle(controller: controller),
             ],
           ],
         );
@@ -53,17 +54,18 @@ class _CameraToggleState extends State<CameraToggle> {
       builder: (context, _) {
         final enabled = localParticipant.isCameraEnabled();
 
-        return Row(
-          mainAxisSize: MainAxisSize.min,
+        return Wrap(
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 4,
           children: [
             _MeetingControlsButon(
               text: enabled ? "Turn off camera" : "Turn on camera",
               on: enabled,
               onColor: Colors.black,
               onForeground: Colors.white,
-              offColor: Colors.red,
+              offColor: ShadTheme.of(context).colorScheme.destructive,
               offForeground: Colors.white,
-              icon: (enabled ? Icons.videocam : Icons.videocam_off),
+              icon: enabled ? LucideIcons.video : LucideIcons.videoOff,
               onPressed: () {
                 setState(() {
                   localParticipant.setCameraEnabled(!enabled);
@@ -96,17 +98,18 @@ class _MicToggleState extends State<MicToggle> {
       builder: (context, _) {
         final enabled = localParticipant.isMicrophoneEnabled();
 
-        return Row(
-          mainAxisSize: MainAxisSize.min,
+        return Wrap(
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 4,
           children: [
             _MeetingControlsButon(
               text: enabled ? "Turn off mic" : "Turn on mic",
               on: enabled,
               onColor: Colors.black,
               onForeground: Colors.white,
-              offColor: Colors.red,
+              offColor: ShadTheme.of(context).colorScheme.destructive,
               offForeground: Colors.white,
-              icon: (enabled ? Icons.mic : Icons.mic_off),
+              icon: enabled ? LucideIcons.mic : LucideIcons.micOff,
               onPressed: () {
                 setState(() {
                   localParticipant.setMicrophoneEnabled(!enabled);
@@ -139,9 +142,9 @@ class ConnectionButton extends StatelessWidget {
             on: false,
             onColor: Colors.black,
             onForeground: Colors.white,
-            offColor: Colors.red,
+            offColor: ShadTheme.of(context).colorScheme.destructive,
             offForeground: Colors.white,
-            icon: Icons.phone,
+            icon: LucideIcons.phone,
             onPressed: () {
               controller.disconnect();
             },
@@ -153,19 +156,19 @@ class ConnectionButton extends StatelessWidget {
             onForeground: Colors.white,
             offColor: Colors.black,
             offForeground: Colors.white,
-            icon: Icons.phone,
+            icon: LucideIcons.phone,
             onPressed: () {
               controller.disconnect();
             },
           ),
-          _ => const _MeetingControlsButon(
+          _ => _MeetingControlsButon(
             text: "Connecting",
             on: false,
             onColor: Colors.black,
             onForeground: Colors.white,
-            offColor: Colors.red,
+            offColor: ShadTheme.of(context).colorScheme.destructive,
             offForeground: Colors.white,
-            icon: Icons.phone,
+            icon: LucideIcons.phone,
           ),
         };
       },
@@ -197,21 +200,15 @@ class _MeetingControlsButon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: onPressed,
-        child: Tooltip(
-          message: text,
-          child: SizedBox(
-            width: 40,
-            height: 40,
-            child: DecoratedBox(
-              decoration: BoxDecoration(borderRadius: BorderRadius.circular(100), color: on ? onColor : offColor),
-              child: Center(child: Icon(icon, size: 22, color: on ? onForeground : (onPressed != null ? offForeground : Colors.grey))),
-            ),
-          ),
-        ),
+    return Tooltip(
+      message: text,
+      child: ShadIconButton(
+        width: 48,
+        height: 48,
+        onPressed: onPressed,
+        backgroundColor: on ? onColor : offColor,
+        foregroundColor: on ? onForeground : (onPressed != null ? offForeground : Colors.grey),
+        icon: Icon(icon, size: 22),
       ),
     );
   }
@@ -371,13 +368,18 @@ class _ChangeDeviceButtonState extends State<_ChangeDeviceButton> {
       ],
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
-        child: GestureDetector(
-          onTap: () {
-            setState(() {
-              menuController.setOpen(!menuController.isOpen);
-            });
-          },
-          child: Icon(Icons.keyboard_arrow_down),
+        child: Tooltip(
+          message: "Change device",
+          child: ShadIconButton.ghost(
+            width: 28,
+            height: 48,
+            onPressed: () {
+              setState(() {
+                menuController.setOpen(!menuController.isOpen);
+              });
+            },
+            icon: const Icon(LucideIcons.chevronDown, size: 18),
+          ),
         ),
       ),
     );
