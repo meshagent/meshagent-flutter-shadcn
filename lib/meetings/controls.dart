@@ -88,6 +88,26 @@ livekit.MediaDevice? _selectedMenuDevice(List<livekit.MediaDevice> devices, Stri
       visibleDevices.first;
 }
 
+String _describeDeviceSwitchError(String label, Object error) {
+  final message = '$error';
+  if (message.contains('NotAllowedError')) {
+    return '$label access was blocked by the browser or system.';
+  }
+  if (message.contains('NotFoundError')) {
+    return 'The selected ${label.toLowerCase()} was not found.';
+  }
+  return 'Unable to switch ${label.toLowerCase()}: $message';
+}
+
+livekit.LocalTrackPublication<livekit.LocalVideoTrack>? _cameraPublication(livekit.LocalParticipant? participant) {
+  final publication = participant?.getTrackPublicationBySource(livekit.TrackSource.camera);
+  if (publication is! livekit.LocalTrackPublication<livekit.LocalVideoTrack>) {
+    return null;
+  }
+
+  return publication;
+}
+
 class MeetingControls extends StatelessWidget {
   const MeetingControls({required this.controller, this.spacing = 5, super.key});
 
@@ -127,31 +147,70 @@ class CameraToggle extends StatefulWidget {
 }
 
 class _CameraToggleState extends State<CameraToggle> {
+  bool _processing = false;
+
+  String _describeCameraToggleError(Object error) {
+    final message = '$error';
+    if (message.contains('NotAllowedError')) {
+      return 'Camera access was blocked by the browser or system.';
+    }
+    if (message.contains('NotFoundError')) {
+      return 'The selected camera was not found.';
+    }
+    return 'Unable to change camera state: $message';
+  }
+
+  Future<void> _toggleCamera(livekit.LocalParticipant localParticipant, bool enabled) async {
+    if (_processing) {
+      return;
+    }
+
+    final toaster = ShadToaster.maybeOf(context);
+    setState(() {
+      _processing = true;
+    });
+
+    try {
+      await localParticipant.setCameraEnabled(enabled);
+    } catch (error) {
+      toaster?.show(ShadToast.destructive(description: Text(_describeCameraToggleError(error))));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _processing = false;
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final localParticipant = widget.controller.livekitRoom.localParticipant;
     return ListenableBuilder(
-      listenable: localParticipant!,
+      listenable: Listenable.merge([localParticipant!, widget.controller.pendingLocalMedia]),
       builder: (context, _) {
         final enabled = localParticipant.isCameraEnabled();
+        final pending = widget.controller.pendingLocalMedia.cameraPending;
+        final showEnabled = enabled || pending;
 
         return Wrap(
           crossAxisAlignment: WrapCrossAlignment.center,
           spacing: 4,
           children: [
             _MeetingControlsButon(
-              text: enabled ? "Turn off camera" : "Turn on camera",
-              on: enabled,
+              text: pending
+                  ? "Starting camera"
+                  : enabled
+                  ? "Turn off camera"
+                  : "Turn on camera",
+              on: showEnabled,
               onColor: Colors.black,
               onForeground: Colors.white,
               offColor: ShadTheme.of(context).colorScheme.destructive,
               offForeground: Colors.white,
-              icon: enabled ? LucideIcons.video : LucideIcons.videoOff,
-              onPressed: () {
-                setState(() {
-                  localParticipant.setCameraEnabled(!enabled);
-                });
-              },
+              icon: showEnabled ? LucideIcons.video : LucideIcons.videoOff,
+              loading: pending || _processing,
+              onPressed: (_processing || pending) ? null : () => unawaited(_toggleCamera(localParticipant, !enabled)),
             ),
             _ChangeSettings(kind: _DeviceKind.videoInput, room: widget.controller.livekitRoom),
           ],
@@ -171,31 +230,70 @@ class MicToggle extends StatefulWidget {
 }
 
 class _MicToggleState extends State<MicToggle> {
+  bool _processing = false;
+
+  String _describeMicrophoneToggleError(Object error) {
+    final message = '$error';
+    if (message.contains('NotAllowedError')) {
+      return 'Microphone access was blocked by the browser or system.';
+    }
+    if (message.contains('NotFoundError')) {
+      return 'The selected microphone was not found.';
+    }
+    return 'Unable to change microphone state: $message';
+  }
+
+  Future<void> _toggleMicrophone(livekit.LocalParticipant localParticipant, bool enabled) async {
+    if (_processing) {
+      return;
+    }
+
+    final toaster = ShadToaster.maybeOf(context);
+    setState(() {
+      _processing = true;
+    });
+
+    try {
+      await localParticipant.setMicrophoneEnabled(enabled);
+    } catch (error) {
+      toaster?.show(ShadToast.destructive(description: Text(_describeMicrophoneToggleError(error))));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _processing = false;
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final localParticipant = widget.controller.livekitRoom.localParticipant;
     return ListenableBuilder(
-      listenable: localParticipant!,
+      listenable: Listenable.merge([localParticipant!, widget.controller.pendingLocalMedia]),
       builder: (context, _) {
         final enabled = localParticipant.isMicrophoneEnabled();
+        final pending = widget.controller.pendingLocalMedia.microphonePending;
+        final showEnabled = enabled || pending;
 
         return Wrap(
           crossAxisAlignment: WrapCrossAlignment.center,
           spacing: 4,
           children: [
             _MeetingControlsButon(
-              text: enabled ? "Turn off mic" : "Turn on mic",
-              on: enabled,
+              text: pending
+                  ? "Starting mic"
+                  : enabled
+                  ? "Turn off mic"
+                  : "Turn on mic",
+              on: showEnabled,
               onColor: Colors.black,
               onForeground: Colors.white,
               offColor: ShadTheme.of(context).colorScheme.destructive,
               offForeground: Colors.white,
-              icon: enabled ? LucideIcons.mic : LucideIcons.micOff,
-              onPressed: () {
-                setState(() {
-                  localParticipant.setMicrophoneEnabled(!enabled);
-                });
-              },
+              icon: showEnabled ? LucideIcons.mic : LucideIcons.micOff,
+              loading: pending || _processing,
+              onPressed: (_processing || pending) ? null : () => unawaited(_toggleMicrophone(localParticipant, !enabled)),
             ),
             _ChangeSettings(kind: _DeviceKind.audioInput, room: widget.controller.livekitRoom),
           ],
@@ -239,7 +337,7 @@ class ConnectionButton extends StatelessWidget {
             offForeground: Colors.white,
             icon: LucideIcons.phone,
             onPressed: () {
-              controller.disconnect();
+              unawaited(controller.connect());
             },
           ),
           _ => _MeetingControlsButon(
@@ -250,6 +348,7 @@ class ConnectionButton extends StatelessWidget {
             offColor: ShadTheme.of(context).colorScheme.destructive,
             offForeground: Colors.white,
             icon: LucideIcons.phone,
+            loading: true,
           ),
         };
       },
@@ -267,6 +366,7 @@ class _MeetingControlsButon extends StatelessWidget {
     this.onForeground = Colors.white,
     this.offForeground = Colors.black,
     this.on = false,
+    this.loading = false,
   });
 
   final void Function()? onPressed;
@@ -278,9 +378,12 @@ class _MeetingControlsButon extends StatelessWidget {
   final IconData icon;
 
   final bool on;
+  final bool loading;
 
   @override
   Widget build(BuildContext context) {
+    final foregroundColor = on ? onForeground : (onPressed != null ? offForeground : Colors.grey);
+
     return Tooltip(
       message: text,
       child: ShadIconButton(
@@ -288,8 +391,14 @@ class _MeetingControlsButon extends StatelessWidget {
         height: 48,
         onPressed: onPressed,
         backgroundColor: on ? onColor : offColor,
-        foregroundColor: on ? onForeground : (onPressed != null ? offForeground : Colors.grey),
-        icon: Icon(icon, size: 22),
+        foregroundColor: foregroundColor,
+        icon: loading
+            ? SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation<Color>(foregroundColor)),
+              )
+            : Icon(icon, size: 22),
       ),
     );
   }
@@ -300,15 +409,63 @@ enum _DeviceKind { audioInput, audioOutput, videoInput }
 class _ChangeSettings extends StatelessWidget {
   const _ChangeSettings({required this.kind, required this.room});
 
+  static const Duration _minimumPendingDuration = Duration(milliseconds: 350);
+
   final livekit.Room room;
   final _DeviceKind kind;
 
+  Future<void> _runWithMinimumPendingDuration(Future<void> Function() action) async {
+    final startedAt = DateTime.now();
+    await action();
+    final remaining = _minimumPendingDuration - DateTime.now().difference(startedAt);
+    if (remaining > Duration.zero) {
+      await Future<void>.delayed(remaining);
+    }
+  }
+
+  Future<void> _runCameraDeviceSwitch(BuildContext context, Future<void> Function() action) async {
+    final controller = MeetingController.maybeOf(context);
+    final shouldShowPending = room.localParticipant?.isCameraEnabled() ?? false;
+    if (shouldShowPending) {
+      controller?.pendingLocalMedia.setCameraPending(true);
+    }
+
+    try {
+      await _runWithMinimumPendingDuration(action);
+    } finally {
+      if (shouldShowPending) {
+        controller?.pendingLocalMedia.setCameraPending(false);
+      }
+    }
+  }
+
+  Future<void> _runMicrophoneDeviceSwitch(BuildContext context, Future<void> Function() action) async {
+    final controller = MeetingController.maybeOf(context);
+    final shouldShowPending = room.localParticipant?.isMicrophoneEnabled() ?? false;
+    if (shouldShowPending) {
+      controller?.pendingLocalMedia.setMicrophonePending(true);
+    }
+
+    try {
+      await _runWithMinimumPendingDuration(action);
+    } finally {
+      if (shouldShowPending) {
+        controller?.pendingLocalMedia.setMicrophonePending(false);
+      }
+    }
+  }
+
   Future<void> _selectVideoInput(BuildContext context, livekit.MediaDevice device) async {
-    await room.setVideoInputDevice(device);
+    final track = _cameraPublication(room.localParticipant)?.track;
+
+    await _runCameraDeviceSwitch(context, () async {
+      await room.setVideoInputDevice(device);
+      await track?.restartTrack(livekit.CameraCaptureOptions(deviceId: device.deviceId));
+    });
   }
 
   Future<void> _selectAudioInput(BuildContext context, livekit.MediaDevice device) async {
-    await room.setAudioInputDevice(device);
+    await _runMicrophoneDeviceSwitch(context, () => room.setAudioInputDevice(device));
   }
 
   Future<void> _selectAudioOutput(BuildContext context, livekit.MediaDevice device) async {
@@ -524,21 +681,21 @@ class _ChangeDeviceButtonState extends State<_ChangeDeviceButton> {
           for (final device in visibleVideoInputs)
             ShadContextMenuItem(
               trailing: selectedVideoDevice == device ? Icon(Icons.check) : null,
-              onPressed: () => unawaited(_runDeviceChange(onChangeVideoInput, device)),
+              onPressed: () => unawaited(_runDeviceChange("Camera", onChangeVideoInput, device)),
               child: Text(_normalizedDeviceLabel(device.label)),
             ),
         if (widget.kind == null || widget.kind == _DeviceKind.audioInput)
           for (final device in visibleAudioInputs)
             ShadContextMenuItem(
               trailing: selectedAudioInputDevice == device ? Icon(Icons.check) : null,
-              onPressed: () => unawaited(_runDeviceChange(onChangeAudioInput, device)),
+              onPressed: () => unawaited(_runDeviceChange("Microphone", onChangeAudioInput, device)),
               child: Text(_normalizedDeviceLabel(device.label)),
             ),
         if (kIsWeb && widget.kind == null || widget.kind == _DeviceKind.audioOutput)
           for (final device in visibleAudioOutputs)
             ShadContextMenuItem(
               trailing: selectedAudioOutputDevice == device ? Icon(Icons.check) : null,
-              onPressed: () => unawaited(_runDeviceChange(onChangeAudioOutput, device)),
+              onPressed: () => unawaited(_runDeviceChange("Speakers", onChangeAudioOutput, device)),
               child: Text(_normalizedDeviceLabel(device.label)),
             ),
       ],
@@ -561,10 +718,14 @@ class _ChangeDeviceButtonState extends State<_ChangeDeviceButton> {
     );
   }
 
-  Future<void> _runDeviceChange(Future<void> Function(livekit.MediaDevice) onChange, livekit.MediaDevice device) async {
+  Future<void> _runDeviceChange(String label, Future<void> Function(livekit.MediaDevice) onChange, livekit.MediaDevice device) async {
     try {
       await onChange(device);
     } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ShadToaster.maybeOf(context)?.show(ShadToast.destructive(description: Text(_describeDeviceSwitchError(label, error))));
       debugPrint('Unable to switch device ${device.deviceId}: $error');
     }
   }
