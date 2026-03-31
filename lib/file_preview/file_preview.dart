@@ -1,5 +1,6 @@
 import "package:flutter/material.dart";
 import "package:meshagent_flutter_shadcn/file_preview/code.dart";
+import "package:meshagent_flutter_shadcn/ui/coordinated_context_menu.dart";
 import "package:path/path.dart";
 import "package:shadcn_ui/shadcn_ui.dart";
 import "package:url_launcher/url_launcher.dart";
@@ -93,7 +94,7 @@ class _FilePreviewState extends State<FilePreview> {
       future: urlLookup,
       builder: (context, snapshot) {
         if (snapshot.hasData) {
-          return ShadContextMenuRegion(
+          return CoordinatedShadContextMenuRegion(
             items: [
               ShadContextMenuItem(
                 trailing: Icon(LucideIcons.download),
