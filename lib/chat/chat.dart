@@ -692,10 +692,26 @@ class ChatThreadController extends ChangeNotifier {
   final List<ToolkitBuilderOption> toolkits = [];
   final RoomClient room;
   final TextEditingController textFieldController = ShadTextEditingController();
+  final ScrollController threadScrollController = ScrollController();
   final List<FileAttachment> _attachmentUploads = [];
   final OutboundMessageStatusQueue outboundStatus = OutboundMessageStatusQueue();
   final LinkedHashMap<String, PendingAgentMessage> _pendingAgentMessages = LinkedHashMap<String, PendingAgentMessage>();
   final LinkedHashMap<String, _PendingSendWait> _pendingSendWaits = LinkedHashMap<String, _PendingSendWait>();
+
+  void scrollThreadToBottom({bool animated = true}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!threadScrollController.hasClients) {
+        return;
+      }
+
+      final targetOffset = threadScrollController.position.minScrollExtent;
+      if (animated) {
+        unawaited(threadScrollController.animateTo(targetOffset, duration: const Duration(milliseconds: 180), curve: Curves.easeOut));
+      } else {
+        threadScrollController.jumpTo(targetOffset);
+      }
+    });
+  }
 
   bool _listening = false;
 
@@ -1264,8 +1280,8 @@ class ChatThreadController extends ChangeNotifier {
 
   @override
   void dispose() {
-    super.dispose();
-
+    textFieldController.removeListener(notifyListeners);
+    threadScrollController.dispose();
     textFieldController.dispose();
     outboundStatus.dispose();
 
@@ -1276,6 +1292,8 @@ class ChatThreadController extends ChangeNotifier {
       }
       upload.dispose();
     }
+
+    super.dispose();
   }
 }
 
@@ -1383,6 +1401,7 @@ class ChatThreadViewportBody extends StatelessWidget {
   const ChatThreadViewportBody({
     super.key,
     required this.children,
+    this.scrollController,
     this.bottomAlign = true,
     this.centerContent,
     this.bottomSpacer = 0,
@@ -1390,6 +1409,7 @@ class ChatThreadViewportBody extends StatelessWidget {
   });
 
   final List<Widget> children;
+  final ScrollController? scrollController;
   final bool bottomAlign;
   final Widget? centerContent;
   final double bottomSpacer;
@@ -1411,6 +1431,7 @@ class ChatThreadViewportBody extends StatelessWidget {
                 Expanded(
                   child: LayoutBuilder(
                     builder: (context, constraints) => ListView(
+                      controller: scrollController,
                       reverse: true,
                       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
                       padding: EdgeInsets.only(
@@ -2169,6 +2190,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     });
     final sendFuture = widget.onSend(draftText, draftAttachments);
     widget.controller.clear();
+    widget.controller.scrollThreadToBottom();
 
     try {
       await sendFuture;
@@ -3160,6 +3182,7 @@ class _ChatThreadState extends State<ChatThread> {
               ChatThreadMessages(
                 room: widget.room,
                 path: widget.path,
+                scrollController: controller.threadScrollController,
                 agentName: widget.agentName,
                 showCompletedToolCalls: _showCompletedToolCalls,
                 onShowCompletedToolCallsChanged: (value) {
@@ -3285,6 +3308,7 @@ class ChatThreadMessages extends StatefulWidget {
     super.key,
     required this.room,
     required this.path,
+    required this.scrollController,
     required this.messages,
     required this.online,
     required this.showCompletedToolCalls,
@@ -3313,6 +3337,7 @@ class ChatThreadMessages extends StatefulWidget {
 
   final RoomClient room;
   final String path;
+  final ScrollController scrollController;
   final String? agentName;
   final bool showCompletedToolCalls;
   final bool startChatCentered;
@@ -4540,6 +4565,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
       messageWidgets.insert(0, messageWidget);
     }
     final threadView = ChatThreadViewportBody(
+      scrollController: widget.scrollController,
       bottomAlign: bottomAlign,
       centerContent: visibleMessages.isEmpty
           ? emptyState ??
