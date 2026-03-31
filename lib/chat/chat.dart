@@ -2613,24 +2613,44 @@ class _ChatBubble extends State<ChatBubble> {
   static const double _actionSlotSize = 30;
   static const double _actionGap = 6;
   static const double _bubbleRadius = 16;
+  static ShadContextMenuController? _activeOptionsController;
 
   bool hovering = false;
 
   final optionsController = ShadContextMenuController();
+  final Object _contextMenuGroupId = Object();
 
   @override
   void initState() {
     super.initState();
 
-    optionsController.addListener(() {
-      setState(() {});
-    });
+    optionsController.addListener(_handleOptionsControllerChanged);
   }
 
   @override
   void dispose() {
-    super.dispose();
+    if (identical(_activeOptionsController, optionsController)) {
+      _activeOptionsController = null;
+    }
+    optionsController.removeListener(_handleOptionsControllerChanged);
     optionsController.dispose();
+    super.dispose();
+  }
+
+  void _handleOptionsControllerChanged() {
+    if (optionsController.isOpen) {
+      final activeOptionsController = _activeOptionsController;
+      if (!identical(activeOptionsController, optionsController)) {
+        activeOptionsController?.hide();
+        _activeOptionsController = optionsController;
+      }
+    } else if (identical(_activeOptionsController, optionsController)) {
+      _activeOptionsController = null;
+    }
+
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   Future<void> _onCopy() async {
@@ -2813,6 +2833,7 @@ class _ChatBubble extends State<ChatBubble> {
           padding: EdgeInsets.only(bottom: 5),
           child: ShadContextMenuRegion(
             controller: optionsController,
+            groupId: _contextMenuGroupId,
             constraints: const BoxConstraints(minWidth: 200),
             items: [
               ShadContextMenuItem(height: 40, onPressed: _onCopy, child: Text('Copy')),
@@ -2870,47 +2891,46 @@ class _ChatBubble extends State<ChatBubble> {
       ),
     );
 
-    return ShadGestureDetector(
-      onHoverChange: (h) {
-        setState(() {
-          hovering = h;
-        });
+    return TapRegion(
+      groupId: _contextMenuGroupId,
+      onTapOutside: (_) {
+        optionsController.hide();
       },
-      onLongPress: optionsController.show,
-      child: Container(
-        padding: EdgeInsets.symmetric(horizontal: 5),
-        color: Colors.transparent,
+      child: ShadGestureDetector(
+        onHoverChange: (h) {
+          setState(() {
+            hovering = h;
+          });
+        },
+        onLongPress: optionsController.show,
         child: Container(
-          margin: EdgeInsets.only(top: 0),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              if (mine) actions,
-              Expanded(
-                child: Container(
-                  padding: _chatBubbleContentPadding,
-                  decoration: BoxDecoration(color: bubbleColor, borderRadius: BorderRadius.circular(_bubbleRadius)),
-                  child: MediaQuery(
-                    data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
-                    child: MarkdownWidget(
-                      padding: const EdgeInsets.all(0),
-                      config: buildChatBubbleMarkdownConfig(context, threadTypography: true),
-                      shrinkWrap: true,
-                      selectable: kIsWeb,
-
-                      /*builders: {
-      "code": CodeElementBuilder(
-          document: ChatDocumentProvider.of(context).document,
-          api: TimuApiProvider.of(context).api,
-          layer: layer),
-},*/
-                      data: text,
+          padding: EdgeInsets.symmetric(horizontal: 5),
+          color: Colors.transparent,
+          child: Container(
+            margin: EdgeInsets.only(top: 0),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                if (mine) actions,
+                Expanded(
+                  child: Container(
+                    padding: _chatBubbleContentPadding,
+                    decoration: BoxDecoration(color: bubbleColor, borderRadius: BorderRadius.circular(_bubbleRadius)),
+                    child: MediaQuery(
+                      data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
+                      child: MarkdownWidget(
+                        padding: const EdgeInsets.all(0),
+                        config: buildChatBubbleMarkdownConfig(context, threadTypography: true),
+                        shrinkWrap: true,
+                        selectable: kIsWeb,
+                        data: text,
+                      ),
                     ),
                   ),
                 ),
-              ),
-              if (!mine) actions,
-            ],
+                if (!mine) actions,
+              ],
+            ),
           ),
         ),
       ),
@@ -3749,6 +3769,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     final grouped = <String, Set<String>>{};
     final groupedDisplayNames = <String, Map<String, String>>{};
     final mineValues = <String>{};
+
     for (final reactionElement in _reactionElementsForTarget(
       message: message,
       target: effectiveTarget,
@@ -3772,13 +3793,14 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     }
 
     final entries = grouped.entries.toList()..sort((left, right) => left.key.compareTo(right.key));
-    String? selectedReaction;
-    selectedReaction = entries.firstWhereOrNull((entry) => mineValues.contains(entry.key))?.key;
+    String? selectedReaction = entries.firstWhereOrNull((entry) => mineValues.contains(entry.key))?.key;
     final hasSelectedReaction = selectedReaction != null;
     final showAddButton = localUserName != null && !hasSelectedReaction && (showAddWhenEmpty || grouped.isNotEmpty);
+
     if (grouped.isEmpty && !showAddButton && leadingActions.isEmpty) {
       return const SizedBox.shrink();
     }
+
     final alignment = mine ? Alignment.centerRight : Alignment.centerLeft;
     final theme = ShadTheme.of(context);
 
@@ -4600,6 +4622,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     );
     final threadViewWithContextMenu = ShadContextMenuRegion(
       constraints: const BoxConstraints(minWidth: 180),
+      tapEnabled: false,
       items: [
         ShadContextMenuItem(
           onPressed: widget.onShowCompletedToolCallsChanged == null
