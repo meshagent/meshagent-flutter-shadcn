@@ -17,6 +17,7 @@ import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_flutter_shadcn/chat_bubble_markdown_config.dart';
 import 'package:meshagent_flutter_shadcn/code_language_resolver.dart';
 import 'package:meshagent_flutter_shadcn/storage/file_browser.dart';
+import 'package:meshagent_flutter_shadcn/ui/coordinated_context_menu.dart';
 import 'package:meshagent_flutter_shadcn/ui/ui.dart';
 import 'package:re_highlight/styles/monokai-sublime.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
@@ -1787,6 +1788,8 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
 
     final storageToolkit = widget.toolkits.where((x) => x is StaticToolkitBuilderOption && x.config is StorageConfig).firstOrNull;
     final canUpload = widget.alwaysShowAttachFiles == true || storageToolkit != null;
+    final attachMenuItemCount = (canUpload ? (kIsWeb ? 1 : 2) : 0) + 1 + widget.toolkits.length;
+    final attachMenuHeight = attachMenuItemCount * 40.0 + (widget.toolkits.isNotEmpty ? 8.0 : 0.0);
 
     return ListenableBuilder(
       listenable: popoverController,
@@ -1795,9 +1798,10 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
         runAlignment: WrapAlignment.center,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          ShadContextMenu(
+          CoordinatedShadContextMenu(
             constraints: BoxConstraints(minWidth: 175),
-            anchor: ShadAnchorAuto(followerAnchor: Alignment.topRight, targetAnchor: Alignment.topLeft),
+            estimatedMenuWidth: 175,
+            estimatedMenuHeight: attachMenuHeight,
             items: [
               if (canUpload) ...[
                 if (!kIsWeb)
@@ -1841,11 +1845,7 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
             child: ShadIconButton.ghost(
               hoverBackgroundColor: ShadTheme.of(context).colorScheme.background,
               decoration: ShadDecoration(shape: BoxShape.circle),
-              onPressed: popoverController.isOpen
-                  ? null
-                  : () {
-                      popoverController.toggle();
-                    },
+              onPressed: popoverController.toggle,
               iconSize: 16,
               width: 32,
               height: 32,
@@ -1878,10 +1878,13 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
             ),
             if (tool is ConnectorToolkitBuilderOption) ...[
               if (widget.agentName != null)
-                ShadContextMenu(
+                CoordinatedShadContextMenu(
                   controller: addMcpController,
                   constraints: BoxConstraints(minWidth: 175),
-                  anchor: ShadAnchorAuto(followerAnchor: Alignment.topRight, targetAnchor: Alignment.topLeft),
+                  estimatedMenuWidth: 175,
+                  estimatedMenuHeight: (_loadingAvailableConnectors || _availableConnectorsError != null || _availableConnectors.isEmpty)
+                      ? 48
+                      : _availableConnectors.length * 40.0 + 8.0,
                   items: [
                     if (_loadingAvailableConnectors) ShadContextMenuItem(child: Text("Loading connectors...")),
                     if (!_loadingAvailableConnectors && _availableConnectorsError != null)
@@ -1940,12 +1943,7 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
                     listenable: addMcpController,
                     builder: (context, _) => ShadButton.ghost(
                       decoration: ShadDecoration(border: ShadBorder.all(radius: BorderRadius.circular(30))),
-
-                      onPressed: addMcpController.isOpen
-                          ? null
-                          : () {
-                              addMcpController.setOpen(true);
-                            },
+                      onPressed: addMcpController.toggle,
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         spacing: 8,
@@ -2592,7 +2590,7 @@ class ChatBubble extends StatefulWidget {
     required this.mine,
     required this.text,
     this.onDelete,
-    this.reactionAction,
+    this.reactionActionBuilder,
     this.showReactionAction = false,
     this.onReactFromMenu,
   });
@@ -2601,7 +2599,7 @@ class ChatBubble extends StatefulWidget {
   final bool mine;
   final String text;
   final VoidCallback? onDelete;
-  final Widget? reactionAction;
+  final Widget Function(ShadContextMenuController controller)? reactionActionBuilder;
   final bool showReactionAction;
   final VoidCallback? onReactFromMenu;
 
@@ -2613,24 +2611,69 @@ class _ChatBubble extends State<ChatBubble> {
   static const double _actionSlotSize = 30;
   static const double _actionGap = 6;
   static const double _bubbleRadius = 16;
+  static const Duration _menuReverseDuration = Duration(milliseconds: 150);
 
   bool hovering = false;
+  bool _keepingActionsVisible = false;
+  Timer? _actionVisibilityTimer;
 
   final optionsController = ShadContextMenuController();
+  final reactionController = ShadContextMenuController();
 
   @override
   void initState() {
     super.initState();
 
-    optionsController.addListener(() {
-      setState(() {});
-    });
+    optionsController.addListener(_handleControllerChanged);
+    reactionController.addListener(_handleControllerChanged);
   }
 
   @override
   void dispose() {
-    super.dispose();
+    _actionVisibilityTimer?.cancel();
+    optionsController.removeListener(_handleControllerChanged);
+    reactionController.removeListener(_handleControllerChanged);
     optionsController.dispose();
+    reactionController.dispose();
+    super.dispose();
+  }
+
+  void _handleControllerChanged() {
+    if (!mounted) {
+      return;
+    }
+
+    _syncActionVisibilityForMenuState();
+    setState(() {});
+  }
+
+  void _syncActionVisibilityForMenuState() {
+    final menuOpen = optionsController.isOpen || reactionController.isOpen;
+    if (menuOpen) {
+      _actionVisibilityTimer?.cancel();
+      _keepingActionsVisible = true;
+      return;
+    }
+
+    if (hovering) {
+      _actionVisibilityTimer?.cancel();
+      return;
+    }
+
+    _scheduleActionVisibilityHide();
+  }
+
+  void _scheduleActionVisibilityHide() {
+    _actionVisibilityTimer?.cancel();
+    _actionVisibilityTimer = Timer(_menuReverseDuration, () {
+      if (!mounted || hovering || optionsController.isOpen || reactionController.isOpen) {
+        return;
+      }
+
+      setState(() {
+        _keepingActionsVisible = false;
+      });
+    });
   }
 
   Future<void> _onCopy() async {
@@ -2801,19 +2844,23 @@ class _ChatBubble extends State<ChatBubble> {
     final text = widget.text;
     final mine = widget.mine;
     final bubbleColor = cs.background;
-    final openOptions = optionsController.isOpen || hovering;
+    final showActions = hovering || optionsController.isOpen || reactionController.isOpen || _keepingActionsVisible;
     final canLongPressReact =
         (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS) && widget.onReactFromMenu != null;
+    final optionItemCount = 1 + (canLongPressReact ? 1 : 0) + (widget.room != null ? 1 : 0) + (widget.onDelete != null ? 1 : 0);
 
     final optionsAction = IgnorePointer(
-      ignoring: !openOptions,
+      ignoring: !showActions,
       child: Opacity(
-        opacity: openOptions ? 1 : 0,
+        opacity: showActions ? 1 : 0,
         child: Padding(
           padding: EdgeInsets.only(bottom: 5),
-          child: ShadContextMenuRegion(
+          child: CoordinatedShadContextMenu(
             controller: optionsController,
             constraints: const BoxConstraints(minWidth: 200),
+            estimatedMenuWidth: 200,
+            estimatedMenuHeight: optionItemCount * 40.0 + 8.0,
+            popoverReverseDuration: _menuReverseDuration,
             items: [
               ShadContextMenuItem(height: 40, onPressed: _onCopy, child: Text('Copy')),
               if (canLongPressReact) ShadContextMenuItem(height: 40, onPressed: widget.onReactFromMenu, child: Text('React')),
@@ -2831,7 +2878,7 @@ class _ChatBubble extends State<ChatBubble> {
               height: 30,
               width: 30,
               padding: EdgeInsets.zero,
-              onPressed: optionsController.show,
+              onPressed: optionsController.toggle,
               child: Icon(LucideIcons.ellipsis, size: 18, color: cs.mutedForeground),
             ),
           ),
@@ -2843,10 +2890,13 @@ class _ChatBubble extends State<ChatBubble> {
       width: _actionSlotSize,
       height: 35,
       child: IgnorePointer(
-        ignoring: !(openOptions && widget.showReactionAction),
+        ignoring: !(showActions && widget.showReactionAction),
         child: Opacity(
-          opacity: openOptions && widget.showReactionAction ? 1 : 0,
-          child: Padding(padding: const EdgeInsets.only(bottom: 5), child: widget.reactionAction ?? const SizedBox.shrink()),
+          opacity: showActions && widget.showReactionAction ? 1 : 0,
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 5),
+            child: widget.reactionActionBuilder?.call(reactionController) ?? const SizedBox.shrink(),
+          ),
         ),
       ),
     );
@@ -2872,9 +2922,17 @@ class _ChatBubble extends State<ChatBubble> {
 
     return ShadGestureDetector(
       onHoverChange: (h) {
+        _actionVisibilityTimer?.cancel();
         setState(() {
           hovering = h;
+          if (h) {
+            _keepingActionsVisible = true;
+          }
         });
+
+        if (!h && !optionsController.isOpen && !reactionController.isOpen) {
+          _scheduleActionVisibilityHide();
+        }
       },
       onLongPress: optionsController.show,
       child: Container(
@@ -3149,121 +3207,122 @@ class _ChatThreadState extends State<ChatThread> {
 
         bool bottomAlign = !widget.startChatCentered || state.messages.isNotEmpty;
 
-        return FileDropArea(
-          onFileDrop: (name, dataStream, size) async {
-            widget.controller?.uploadFile(name, dataStream, size ?? 0);
-          },
+        return ShadContextMenuBoundary(
+          child: FileDropArea(
+            onFileDrop: (name, dataStream, size) async {
+              widget.controller?.uploadFile(name, dataStream, size ?? 0);
+            },
+            child: Column(
+              mainAxisAlignment: bottomAlign ? .end : .center,
+              children: [
+                ChatThreadMessages(
+                  room: widget.room,
+                  path: widget.path,
+                  agentName: widget.agentName,
+                  showCompletedToolCalls: _showCompletedToolCalls,
+                  onShowCompletedToolCallsChanged: (value) {
+                    setState(() {
+                      _showCompletedToolCalls = value;
+                    });
+                  },
+                  startChatCentered: widget.startChatCentered,
+                  messages: state.messages,
+                  online: state.online,
+                  showTyping: (state.threadStatusMode != null) && state.listening.isEmpty,
+                  showListening: state.listening.isNotEmpty,
+                  threadStatus: state.threadStatus,
+                  threadStatusStartedAt: state.threadStatusStartedAt,
+                  threadStatusMode: state.threadStatusMode,
+                  pendingItemId: state.pendingItemId,
+                  onCancel: () {
+                    controller.cancel(
+                      widget.path,
+                      widget.document,
+                      useAgentMessages: state.supportsAgentMessages,
+                      turnId: state.threadTurnId,
+                      participantName: widget.agentName,
+                    );
+                  },
+                  messageHeaderBuilder: widget.messageHeaderBuilder,
+                  fileInThreadBuilder: widget.fileInThreadBuilder,
+                  openFile: widget.openFile,
+                  currentStatusEntry: _currentStatusEntry,
+                  emptyStateTitle: widget.emptyStateTitle,
+                  emptyStateDescription: widget.emptyStateDescription,
+                  emptyState: widget.emptyState,
+                ),
+                ListenableBuilder(
+                  listenable: controller,
+                  builder: (context, _) {
+                    final pendingMessages = _combinedPendingMessages(state);
+                    final canInterruptActiveTurn = _canInterruptActiveTurn(state: state, pendingMessages: pendingMessages);
 
-          child: Column(
-            mainAxisAlignment: bottomAlign ? .end : .center,
-            children: [
-              ChatThreadMessages(
-                room: widget.room,
-                path: widget.path,
-                agentName: widget.agentName,
-                showCompletedToolCalls: _showCompletedToolCalls,
-                onShowCompletedToolCallsChanged: (value) {
-                  setState(() {
-                    _showCompletedToolCalls = value;
-                  });
-                },
-                startChatCentered: widget.startChatCentered,
-                messages: state.messages,
-                online: state.online,
-                showTyping: (state.threadStatusMode != null) && state.listening.isEmpty,
-                showListening: state.listening.isNotEmpty,
-                threadStatus: state.threadStatus,
-                threadStatusStartedAt: state.threadStatusStartedAt,
-                threadStatusMode: state.threadStatusMode,
-                pendingItemId: state.pendingItemId,
-                onCancel: () {
-                  controller.cancel(
-                    widget.path,
-                    widget.document,
-                    useAgentMessages: state.supportsAgentMessages,
-                    turnId: state.threadTurnId,
-                    participantName: widget.agentName,
-                  );
-                },
-                messageHeaderBuilder: widget.messageHeaderBuilder,
-                fileInThreadBuilder: widget.fileInThreadBuilder,
-                openFile: widget.openFile,
-                currentStatusEntry: _currentStatusEntry,
-                emptyStateTitle: widget.emptyStateTitle,
-                emptyStateDescription: widget.emptyStateDescription,
-                emptyState: widget.emptyState,
-              ),
-              ListenableBuilder(
-                listenable: controller,
-                builder: (context, _) {
-                  final pendingMessages = _combinedPendingMessages(state);
-                  final canInterruptActiveTurn = _canInterruptActiveTurn(state: state, pendingMessages: pendingMessages);
-
-                  return ChatThreadInputFrame(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        if (pendingMessages.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const SizedBox(width: 10),
-                                const SizedBox(width: 24, height: 24),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(
-                                        "Pending messages:",
-                                        style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      for (final pending in pendingMessages)
-                                        Padding(
-                                          padding: const EdgeInsets.only(bottom: 4),
-                                          child: Text(
-                                            [
-                                              if (pending.senderName != null) "${_displayParticipantName(pending.senderName!)}:",
-                                              if (pending.text.trim().isNotEmpty) pending.text.trim(),
-                                              if (pending.attachments.isNotEmpty)
-                                                "${pending.attachments.length} attachment${pending.attachments.length == 1 ? "" : "s"}",
-                                              if (pending.awaitingOnline)
-                                                "(waiting for @${_displayParticipantName(widget.agentName ?? "agent")} to come online)"
-                                              else if (pending.awaitingAcceptance)
-                                                "(waiting for acceptance)",
-                                            ].join(" "),
-                                            style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
-                                          ),
+                    return ChatThreadInputFrame(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (pendingMessages.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const SizedBox(width: 10),
+                                  const SizedBox(width: 24, height: 24),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          "Pending messages:",
+                                          style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
                                         ),
-                                      if (canInterruptActiveTurn)
-                                        Padding(
-                                          padding: const EdgeInsets.only(top: 8),
-                                          child: _ProcessingStatusText(
-                                            text: "Messages will be processed shortly. Press Esc to interrupt and send now.",
-                                            style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                                        const SizedBox(height: 4),
+                                        for (final pending in pendingMessages)
+                                          Padding(
+                                            padding: const EdgeInsets.only(bottom: 4),
+                                            child: Text(
+                                              [
+                                                if (pending.senderName != null) "${_displayParticipantName(pending.senderName!)}:",
+                                                if (pending.text.trim().isNotEmpty) pending.text.trim(),
+                                                if (pending.attachments.isNotEmpty)
+                                                  "${pending.attachments.length} attachment${pending.attachments.length == 1 ? "" : "s"}",
+                                                if (pending.awaitingOnline)
+                                                  "(waiting for @${_displayParticipantName(widget.agentName ?? "agent")} to come online)"
+                                                else if (pending.awaitingAcceptance)
+                                                  "(waiting for acceptance)",
+                                              ].join(" "),
+                                              style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                                            ),
                                           ),
-                                        ),
-                                    ],
+                                        if (canInterruptActiveTurn)
+                                          Padding(
+                                            padding: const EdgeInsets.only(top: 8),
+                                            child: _ProcessingStatusText(
+                                              text: "Messages will be processed shortly. Press Esc to interrupt and send now.",
+                                              style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
-                          ),
-                        if (widget.chatInputBoxBuilder != null)
-                          widget.chatInputBoxBuilder!(context, _buildInputChatBox(context, pendingMessages, state))
-                        else
-                          _buildInputChatBox(context, pendingMessages, state),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ],
+                          if (widget.chatInputBoxBuilder != null)
+                            widget.chatInputBoxBuilder!(context, _buildInputChatBox(context, pendingMessages, state))
+                          else
+                            _buildInputChatBox(context, pendingMessages, state),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -4126,7 +4185,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   Widget _buildFileImageInThread(BuildContext context, String path, _ThreadImageRecord? imageRecord, bool loading) {
     final items = _buildAttachmentOptions(imageRecord: imageRecord, path: path);
 
-    return ShadContextMenuRegion(
+    return CoordinatedShadContextMenuRegion(
       items: items,
       child: _wrapTapTarget(
         SizedBox(
@@ -4155,7 +4214,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   Widget _buildFileInThread(BuildContext context, String path) {
     final items = _buildAttachmentOptions(path: path);
 
-    return ShadContextMenuRegion(
+    return CoordinatedShadContextMenuRegion(
       items: items,
       child: _wrapTapTarget(
         fileInThreadBuilder != null ? fileInThreadBuilder!(context, path) : ChatThreadPreview(room: room, path: path),
@@ -4449,9 +4508,10 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                 mine: mine,
                 text: message.getAttribute("text"),
                 onDelete: message.delete,
-                reactionAction: localParticipantReactionName == null
+                reactionActionBuilder: localParticipantReactionName == null
                     ? null
-                    : _ReactionPickerButton(
+                    : (controller) => _ReactionPickerButton(
+                        controller: controller,
                         reactionOptions: _defaultReactionOptions,
                         selectedReaction: selectedMessageReaction,
                         onSelected: (reaction) {
@@ -4598,7 +4658,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
       ],
       children: messageWidgets,
     );
-    final threadViewWithContextMenu = ShadContextMenuRegion(
+    final threadViewWithContextMenu = CoordinatedShadContextMenuRegion(
       constraints: const BoxConstraints(minWidth: 180),
       items: [
         ShadContextMenuItem(
@@ -4689,8 +4749,15 @@ class ChatThreadEmptyStateContent extends StatelessWidget {
 }
 
 class _ReactionPickerButton extends StatefulWidget {
-  const _ReactionPickerButton({required this.reactionOptions, required this.onSelected, this.selectedReaction, this.triggerBuilder});
+  const _ReactionPickerButton({
+    required this.reactionOptions,
+    required this.onSelected,
+    this.controller,
+    this.selectedReaction,
+    this.triggerBuilder,
+  });
 
+  final ShadContextMenuController? controller;
   final List<String> reactionOptions;
   final ValueChanged<String> onSelected;
   final String? selectedReaction;
@@ -4701,7 +4768,9 @@ class _ReactionPickerButton extends StatefulWidget {
 }
 
 class _ReactionPickerButtonState extends State<_ReactionPickerButton> {
-  final ShadPopoverController _controller = ShadPopoverController();
+  late final ShadContextMenuController _internalController = ShadContextMenuController();
+
+  ShadContextMenuController get _controller => widget.controller ?? _internalController;
 
   void _onSelectReaction(String reaction) {
     widget.onSelected(reaction);
@@ -4710,7 +4779,9 @@ class _ReactionPickerButtonState extends State<_ReactionPickerButton> {
 
   @override
   void dispose() {
-    _controller.dispose();
+    if (widget.controller == null) {
+      _internalController.dispose();
+    }
     super.dispose();
   }
 
@@ -4729,10 +4800,12 @@ class _ReactionPickerButtonState extends State<_ReactionPickerButton> {
           ),
         );
 
-    return ShadContextMenu(
+    return CoordinatedShadContextMenu(
       controller: _controller,
       constraints: const BoxConstraints(minWidth: 220, maxWidth: 220),
-      anchor: const ShadAnchorAuto(offset: Offset(0, 4), followerAnchor: Alignment.topRight, targetAnchor: Alignment.bottomRight),
+      estimatedMenuWidth: 220,
+      estimatedMenuHeight: 280,
+      popoverReverseDuration: _ChatBubble._menuReverseDuration,
       items: [
         Padding(
           padding: const EdgeInsets.all(4),
@@ -4800,9 +4873,11 @@ class _AttachmentOptionsButtonState extends State<_AttachmentOptionsButton> {
     final theme = ShadTheme.of(context);
     final cs = theme.colorScheme;
 
-    return ShadContextMenuRegion(
+    return CoordinatedShadContextMenu(
       controller: _controller,
       constraints: const BoxConstraints(minWidth: 180),
+      estimatedMenuWidth: 180,
+      estimatedMenuHeight: widget.items.length * 40.0 + 8.0,
       items: widget.items,
       child: Tooltip(
         message: "Attachment options",
@@ -4811,7 +4886,7 @@ class _AttachmentOptionsButtonState extends State<_AttachmentOptionsButton> {
           height: 30,
           padding: EdgeInsets.zero,
           icon: Icon(LucideIcons.ellipsis, size: 18, color: cs.mutedForeground),
-          onPressed: _controller.show,
+          onPressed: _controller.toggle,
         ),
       ),
     );
@@ -5137,7 +5212,7 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
   }
 
   Widget _wrapContextMenu({required _ThreadImageRecord image, required Widget child}) {
-    return ShadContextMenuRegion(
+    return CoordinatedShadContextMenuRegion(
       items: [
         ShadContextMenuItem(height: 40, onPressed: () => _onSaveImage(image), child: const Text("Save As...")),
         ShadContextMenuItem(height: 40, onPressed: () => _onCopyImage(image), child: const Text("Copy")),
@@ -5667,7 +5742,7 @@ class _ThreadFullscreenImage extends StatelessWidget {
           return viewer;
         }
 
-        return ShadContextMenuRegion(
+        return CoordinatedShadContextMenuRegion(
           items: [
             if (onSaveImage != null) ShadContextMenuItem(height: 40, onPressed: () => onSaveImage!(image), child: const Text("Save As...")),
             if (onCopyImage != null) ShadContextMenuItem(height: 40, onPressed: () => onCopyImage!(image), child: const Text("Copy")),
