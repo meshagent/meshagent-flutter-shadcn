@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/widgets.dart';
 import 'package:livekit_client/livekit_client.dart' as livekit;
 import "package:logging/logging.dart";
+import 'package:shadcn_ui/shadcn_ui.dart';
 
 Future<livekit.RoomOptions> getSavedRoomOptions() async {
   livekit.RoomOptions? savedRoomOptions;
@@ -46,19 +47,76 @@ class _MeetingScopeState extends State<MeetingScope> {
 
   @override
   void dispose() {
-    super.dispose();
     if (controller.isConnected) {
       controller.disconnect().catchError((err) {
         Logger.root.warning("unable to disconnect $err");
       });
     }
+    controller.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return WakeLocker(
-      child: _MeetingControllerData(controller: controller, child: widget.builder(context, controller)),
+      child: ShadToaster(
+        child: _MeetingControllerData(controller: controller, child: widget.builder(context, controller)),
+      ),
     );
+  }
+}
+
+class PendingLocalMediaState extends ChangeNotifier {
+  bool _cameraPending = false;
+  bool _microphonePending = false;
+  bool _cameraAwaitingEnableConfirmation = false;
+  bool _microphoneAwaitingEnableConfirmation = false;
+
+  bool get cameraPending => _cameraPending;
+  bool get microphonePending => _microphonePending;
+
+  void setCameraPending(bool value, {bool awaitEnableConfirmation = false}) {
+    if (_cameraPending == value && _cameraAwaitingEnableConfirmation == awaitEnableConfirmation) {
+      return;
+    }
+
+    _cameraPending = value;
+    _cameraAwaitingEnableConfirmation = value && awaitEnableConfirmation;
+    notifyListeners();
+  }
+
+  void setMicrophonePending(bool value, {bool awaitEnableConfirmation = false}) {
+    if (_microphonePending == value && _microphoneAwaitingEnableConfirmation == awaitEnableConfirmation) {
+      return;
+    }
+
+    _microphonePending = value;
+    _microphoneAwaitingEnableConfirmation = value && awaitEnableConfirmation;
+    notifyListeners();
+  }
+
+  void setPending({
+    required bool cameraPending,
+    required bool microphonePending,
+    bool cameraAwaitEnableConfirmation = false,
+    bool microphoneAwaitEnableConfirmation = false,
+  }) {
+    if (_cameraPending == cameraPending &&
+        _microphonePending == microphonePending &&
+        _cameraAwaitingEnableConfirmation == (cameraPending && cameraAwaitEnableConfirmation) &&
+        _microphoneAwaitingEnableConfirmation == (microphonePending && microphoneAwaitEnableConfirmation)) {
+      return;
+    }
+
+    _cameraPending = cameraPending;
+    _microphonePending = microphonePending;
+    _cameraAwaitingEnableConfirmation = cameraPending && cameraAwaitEnableConfirmation;
+    _microphoneAwaitingEnableConfirmation = microphonePending && microphoneAwaitEnableConfirmation;
+    notifyListeners();
+  }
+
+  void clear() {
+    setPending(cameraPending: false, microphonePending: false);
   }
 }
 
@@ -66,11 +124,14 @@ class MeetingController extends ChangeNotifier {
   MeetingController({required this.room, livekit.RoomOptions? roomOptions})
     : livekitRoom = livekit.Room(roomOptions: roomOptions ?? livekit.RoomOptions()) {
     livekitRoom.addListener(_onRoomChanged);
+    _syncObservedLocalParticipant();
   }
 
   final RoomClient room;
   LivekitConnectionInfo? _config;
   final livekit.Room livekitRoom;
+  final PendingLocalMediaState pendingLocalMedia = PendingLocalMediaState();
+  livekit.LocalParticipant? _observedLocalParticipant;
 
   LivekitConnectionInfo? get config {
     return _config;
@@ -88,7 +149,40 @@ class MeetingController extends ChangeNotifier {
             .isNotEmpty;
   }
 
+  void _syncObservedLocalParticipant() {
+    final localParticipant = livekitRoom.localParticipant;
+    if (_observedLocalParticipant == localParticipant) {
+      return;
+    }
+
+    _observedLocalParticipant?.removeListener(_onLocalParticipantChanged);
+    _observedLocalParticipant = localParticipant;
+    _observedLocalParticipant?.addListener(_onLocalParticipantChanged);
+  }
+
+  void _onLocalParticipantChanged() {
+    _syncPendingLocalMediaState();
+    notifyListeners();
+  }
+
+  void _syncPendingLocalMediaState() {
+    if (livekitRoom.connectionState == livekit.ConnectionState.disconnected) {
+      pendingLocalMedia.clear();
+      return;
+    }
+
+    final localParticipant = _observedLocalParticipant;
+    if (pendingLocalMedia._cameraAwaitingEnableConfirmation && (localParticipant?.isCameraEnabled() ?? false)) {
+      pendingLocalMedia.setCameraPending(false);
+    }
+    if (pendingLocalMedia._microphoneAwaitingEnableConfirmation && (localParticipant?.isMicrophoneEnabled() ?? false)) {
+      pendingLocalMedia.setMicrophonePending(false);
+    }
+  }
+
   void _onRoomChanged() {
+    _syncObservedLocalParticipant();
+    _syncPendingLocalMediaState();
     notifyListeners();
   }
 
@@ -114,15 +208,37 @@ class MeetingController extends ChangeNotifier {
     if (config == null) {
       throw Exception("The controller has not been configured");
     }
-    await livekitRoom.connect(config.url, config.token, fastConnectOptions: fastConnectOptions);
+
+    pendingLocalMedia.setPending(
+      cameraPending: fastConnectOptions?.camera.enabled == true,
+      microphonePending: fastConnectOptions?.microphone.enabled == true,
+      cameraAwaitEnableConfirmation: fastConnectOptions?.camera.enabled == true,
+      microphoneAwaitEnableConfirmation: fastConnectOptions?.microphone.enabled == true,
+    );
+    try {
+      await livekitRoom.connect(config.url, config.token, fastConnectOptions: fastConnectOptions);
+      _syncPendingLocalMediaState();
+    } catch (error) {
+      pendingLocalMedia.clear();
+      rethrow;
+    }
   }
 
   Future<void> disconnect() async {
+    pendingLocalMedia.clear();
     await livekitRoom.disconnect();
   }
 
   bool get isConnected {
     return livekitRoom.connectionState != livekit.ConnectionState.disconnected;
+  }
+
+  @override
+  void dispose() {
+    livekitRoom.removeListener(_onRoomChanged);
+    _observedLocalParticipant?.removeListener(_onLocalParticipantChanged);
+    pendingLocalMedia.dispose();
+    super.dispose();
   }
 
   static MeetingController of(BuildContext context) {
