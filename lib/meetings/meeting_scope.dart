@@ -217,6 +217,30 @@ class MeetingController extends ChangeNotifier {
     );
     try {
       await livekitRoom.connect(config.url, config.token, fastConnectOptions: fastConnectOptions);
+      final localParticipant = livekitRoom.localParticipant;
+
+      if (fastConnectOptions?.camera.enabled == true) {
+        try {
+          await localParticipant?.setCameraEnabled(true);
+        } catch (error) {
+          pendingLocalMedia.setCameraPending(false);
+          Logger.root.warning("unable to enable camera after connecting $error");
+        }
+      } else {
+        pendingLocalMedia.setCameraPending(false);
+      }
+
+      if (fastConnectOptions?.microphone.enabled == true) {
+        try {
+          await localParticipant?.setMicrophoneEnabled(true);
+        } catch (error) {
+          pendingLocalMedia.setMicrophonePending(false);
+          Logger.root.warning("unable to enable microphone after connecting $error");
+        }
+      } else {
+        pendingLocalMedia.setMicrophonePending(false);
+      }
+
       _syncPendingLocalMediaState();
     } catch (error) {
       pendingLocalMedia.clear();

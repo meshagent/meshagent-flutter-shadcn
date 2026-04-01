@@ -17,6 +17,7 @@ class VoiceAgentCaller extends StatefulWidget {
     this.allowToggleTranscribe = true,
     this.emptyStateTitle = "Start an audio session",
     this.emptyStateDescription = "Connect with this agent using your microphone.",
+    this.connectedControlsBuilder,
   });
 
   final RemoteParticipant participant;
@@ -29,6 +30,7 @@ class VoiceAgentCaller extends StatefulWidget {
   final bool allowToggleTranscribe;
   final String emptyStateTitle;
   final String emptyStateDescription;
+  final Widget Function(BuildContext context, MeetingController meeting)? connectedControlsBuilder;
 
   @override
   State createState() => _VoiceAgentCaller();
@@ -146,7 +148,8 @@ class _VoiceAgentCaller extends State<VoiceAgentCaller> {
                         );
                 },
               ),
-              if (meeting.livekitRoom.connectionState == livekit.ConnectionState.connected) MeetingControls(controller: meeting),
+              if (meeting.livekitRoom.connectionState == livekit.ConnectionState.connected)
+                (widget.connectedControlsBuilder?.call(context, meeting) ?? MeetingControls(controller: meeting)),
             ],
           ],
         ),
