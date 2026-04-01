@@ -5,6 +5,24 @@ import 'package:flutter/material.dart';
 import 'package:livekit_client/livekit_client.dart';
 import './meetings.dart';
 
+const _participantOverlayPadding = EdgeInsets.symmetric(horizontal: 12, vertical: 8);
+const _participantOverlayRadius = BorderRadius.all(Radius.circular(12));
+const _unmutedParticipantOverlayColor = Color(0x99222222);
+const _mutedParticipantIconColor = Color(0xFFE84D5B);
+
+bool _isMicrophoneEnabled(Participant participant) {
+  return participant.isMicrophoneEnabled();
+}
+
+VideoTrack? _firstEnabledVideoTrack(Participant participant) {
+  final publication = participant.getTrackPublicationBySource(TrackSource.camera);
+  if (publication == null || publication.muted || publication.track is! VideoTrack) {
+    return null;
+  }
+
+  return publication.track as VideoTrack;
+}
+
 class ParticipantCamerasList extends StatefulWidget {
   const ParticipantCamerasList({required this.controller, this.padding = EdgeInsets.zero, this.spacing = 10, super.key});
 
@@ -52,13 +70,13 @@ class ParticipantTile extends StatelessWidget {
     return ListenableBuilder(
       listenable: participant,
       builder: (context, _) {
-        final track = participant.trackPublications.values.map((x) => x.track).whereType<VideoTrack>().firstOrNull;
+        final track = _firstEnabledVideoTrack(participant);
         return AspectRatio(
           aspectRatio: 4 / 3,
           child: _CameraBox(
             borderColor: Colors.transparent,
             borderWidth: 0,
-            muted: participant.isMuted,
+            muted: !_isMicrophoneEnabled(participant),
             camera: track != null
                 ? VideoTrackRenderer(track, fit: VideoViewFit.cover)
                 : (participant.kind == ParticipantKind.AGENT
@@ -128,16 +146,26 @@ class _ParticipantOverlayState extends State<_ParticipantOverlay> with SingleTic
     const audioIconSize = 16.0;
     const audioIconColor = Colors.white;
     const textStyle = TextStyle(color: audioIconColor, fontSize: 11, fontWeight: FontWeight.w500);
+    final theme = ShadTheme.of(context);
+    final overlayBorderColor = theme.colorScheme.border.withValues(alpha: 0.35);
 
     return Container(
-      decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: const Color(0x992f2d57)),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        borderRadius: _participantOverlayRadius,
+        color: _unmutedParticipantOverlayColor,
+        border: Border.all(color: overlayBorderColor),
+      ),
+      padding: _participantOverlayPadding,
       child: Row(
         mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Icon(widget.muted ? Icons.mic_off : Icons.mic, color: audioIconColor, size: audioIconSize),
+          Icon(
+            widget.muted ? LucideIcons.micOff : LucideIcons.mic,
+            color: widget.muted ? _mutedParticipantIconColor : audioIconColor,
+            size: audioIconSize,
+          ),
           if (widget.name.isNotEmpty)
             AnimatedBuilder(
               animation: _animationController,
