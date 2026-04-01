@@ -692,10 +692,26 @@ class ChatThreadController extends ChangeNotifier {
   final List<ToolkitBuilderOption> toolkits = [];
   final RoomClient room;
   final TextEditingController textFieldController = ShadTextEditingController();
+  final ScrollController threadScrollController = ScrollController();
   final List<FileAttachment> _attachmentUploads = [];
   final OutboundMessageStatusQueue outboundStatus = OutboundMessageStatusQueue();
   final LinkedHashMap<String, PendingAgentMessage> _pendingAgentMessages = LinkedHashMap<String, PendingAgentMessage>();
   final LinkedHashMap<String, _PendingSendWait> _pendingSendWaits = LinkedHashMap<String, _PendingSendWait>();
+
+  void scrollThreadToBottom({bool animated = true}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!threadScrollController.hasClients) {
+        return;
+      }
+
+      final targetOffset = threadScrollController.position.minScrollExtent;
+      if (animated) {
+        unawaited(threadScrollController.animateTo(targetOffset, duration: const Duration(milliseconds: 180), curve: Curves.easeOut));
+      } else {
+        threadScrollController.jumpTo(targetOffset);
+      }
+    });
+  }
 
   bool _listening = false;
 
@@ -1264,8 +1280,8 @@ class ChatThreadController extends ChangeNotifier {
 
   @override
   void dispose() {
-    super.dispose();
-
+    textFieldController.removeListener(notifyListeners);
+    threadScrollController.dispose();
     textFieldController.dispose();
     outboundStatus.dispose();
 
@@ -1276,6 +1292,8 @@ class ChatThreadController extends ChangeNotifier {
       }
       upload.dispose();
     }
+
+    super.dispose();
   }
 }
 
@@ -1383,6 +1401,7 @@ class ChatThreadViewportBody extends StatelessWidget {
   const ChatThreadViewportBody({
     super.key,
     required this.children,
+    this.scrollController,
     this.bottomAlign = true,
     this.centerContent,
     this.bottomSpacer = 0,
@@ -1390,6 +1409,7 @@ class ChatThreadViewportBody extends StatelessWidget {
   });
 
   final List<Widget> children;
+  final ScrollController? scrollController;
   final bool bottomAlign;
   final Widget? centerContent;
   final double bottomSpacer;
@@ -1411,6 +1431,7 @@ class ChatThreadViewportBody extends StatelessWidget {
                 Expanded(
                   child: LayoutBuilder(
                     builder: (context, constraints) => ListView(
+                      controller: scrollController,
                       reverse: true,
                       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
                       padding: EdgeInsets.only(
@@ -2169,6 +2190,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     });
     final sendFuture = widget.onSend(draftText, draftAttachments);
     widget.controller.clear();
+    widget.controller.scrollThreadToBottom();
 
     try {
       await sendFuture;
@@ -2613,24 +2635,44 @@ class _ChatBubble extends State<ChatBubble> {
   static const double _actionSlotSize = 30;
   static const double _actionGap = 6;
   static const double _bubbleRadius = 16;
+  static ShadContextMenuController? _activeOptionsController;
 
   bool hovering = false;
 
   final optionsController = ShadContextMenuController();
+  final Object _contextMenuGroupId = Object();
 
   @override
   void initState() {
     super.initState();
 
-    optionsController.addListener(() {
-      setState(() {});
-    });
+    optionsController.addListener(_handleOptionsControllerChanged);
   }
 
   @override
   void dispose() {
-    super.dispose();
+    if (identical(_activeOptionsController, optionsController)) {
+      _activeOptionsController = null;
+    }
+    optionsController.removeListener(_handleOptionsControllerChanged);
     optionsController.dispose();
+    super.dispose();
+  }
+
+  void _handleOptionsControllerChanged() {
+    if (optionsController.isOpen) {
+      final activeOptionsController = _activeOptionsController;
+      if (!identical(activeOptionsController, optionsController)) {
+        activeOptionsController?.hide();
+        _activeOptionsController = optionsController;
+      }
+    } else if (identical(_activeOptionsController, optionsController)) {
+      _activeOptionsController = null;
+    }
+
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   Future<void> _onCopy() async {
@@ -2813,6 +2855,7 @@ class _ChatBubble extends State<ChatBubble> {
           padding: EdgeInsets.only(bottom: 5),
           child: ShadContextMenuRegion(
             controller: optionsController,
+            groupId: _contextMenuGroupId,
             constraints: const BoxConstraints(minWidth: 200),
             items: [
               ShadContextMenuItem(height: 40, onPressed: _onCopy, child: Text('Copy')),
@@ -2870,47 +2913,46 @@ class _ChatBubble extends State<ChatBubble> {
       ),
     );
 
-    return ShadGestureDetector(
-      onHoverChange: (h) {
-        setState(() {
-          hovering = h;
-        });
+    return TapRegion(
+      groupId: _contextMenuGroupId,
+      onTapOutside: (_) {
+        optionsController.hide();
       },
-      onLongPress: optionsController.show,
-      child: Container(
-        padding: EdgeInsets.symmetric(horizontal: 5),
-        color: Colors.transparent,
+      child: ShadGestureDetector(
+        onHoverChange: (h) {
+          setState(() {
+            hovering = h;
+          });
+        },
+        onLongPress: optionsController.show,
         child: Container(
-          margin: EdgeInsets.only(top: 0),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              if (mine) actions,
-              Expanded(
-                child: Container(
-                  padding: _chatBubbleContentPadding,
-                  decoration: BoxDecoration(color: bubbleColor, borderRadius: BorderRadius.circular(_bubbleRadius)),
-                  child: MediaQuery(
-                    data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
-                    child: MarkdownWidget(
-                      padding: const EdgeInsets.all(0),
-                      config: buildChatBubbleMarkdownConfig(context, threadTypography: true),
-                      shrinkWrap: true,
-                      selectable: kIsWeb,
-
-                      /*builders: {
-      "code": CodeElementBuilder(
-          document: ChatDocumentProvider.of(context).document,
-          api: TimuApiProvider.of(context).api,
-          layer: layer),
-},*/
-                      data: text,
+          padding: EdgeInsets.symmetric(horizontal: 5),
+          color: Colors.transparent,
+          child: Container(
+            margin: EdgeInsets.only(top: 0),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                if (mine) actions,
+                Expanded(
+                  child: Container(
+                    padding: _chatBubbleContentPadding,
+                    decoration: BoxDecoration(color: bubbleColor, borderRadius: BorderRadius.circular(_bubbleRadius)),
+                    child: MediaQuery(
+                      data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
+                      child: MarkdownWidget(
+                        padding: const EdgeInsets.all(0),
+                        config: buildChatBubbleMarkdownConfig(context, threadTypography: true),
+                        shrinkWrap: true,
+                        selectable: kIsWeb,
+                        data: text,
+                      ),
                     ),
                   ),
                 ),
-              ),
-              if (!mine) actions,
-            ],
+                if (!mine) actions,
+              ],
+            ),
           ),
         ),
       ),
@@ -3160,6 +3202,7 @@ class _ChatThreadState extends State<ChatThread> {
               ChatThreadMessages(
                 room: widget.room,
                 path: widget.path,
+                scrollController: controller.threadScrollController,
                 agentName: widget.agentName,
                 showCompletedToolCalls: _showCompletedToolCalls,
                 onShowCompletedToolCallsChanged: (value) {
@@ -3285,6 +3328,7 @@ class ChatThreadMessages extends StatefulWidget {
     super.key,
     required this.room,
     required this.path,
+    required this.scrollController,
     required this.messages,
     required this.online,
     required this.showCompletedToolCalls,
@@ -3313,6 +3357,7 @@ class ChatThreadMessages extends StatefulWidget {
 
   final RoomClient room;
   final String path;
+  final ScrollController scrollController;
   final String? agentName;
   final bool showCompletedToolCalls;
   final bool startChatCentered;
@@ -3749,6 +3794,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     final grouped = <String, Set<String>>{};
     final groupedDisplayNames = <String, Map<String, String>>{};
     final mineValues = <String>{};
+
     for (final reactionElement in _reactionElementsForTarget(
       message: message,
       target: effectiveTarget,
@@ -3772,13 +3818,14 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     }
 
     final entries = grouped.entries.toList()..sort((left, right) => left.key.compareTo(right.key));
-    String? selectedReaction;
-    selectedReaction = entries.firstWhereOrNull((entry) => mineValues.contains(entry.key))?.key;
+    String? selectedReaction = entries.firstWhereOrNull((entry) => mineValues.contains(entry.key))?.key;
     final hasSelectedReaction = selectedReaction != null;
     final showAddButton = localUserName != null && !hasSelectedReaction && (showAddWhenEmpty || grouped.isNotEmpty);
+
     if (grouped.isEmpty && !showAddButton && leadingActions.isEmpty) {
       return const SizedBox.shrink();
     }
+
     final alignment = mine ? Alignment.centerRight : Alignment.centerLeft;
     final theme = ShadTheme.of(context);
 
@@ -4540,6 +4587,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
       messageWidgets.insert(0, messageWidget);
     }
     final threadView = ChatThreadViewportBody(
+      scrollController: widget.scrollController,
       bottomAlign: bottomAlign,
       centerContent: visibleMessages.isEmpty
           ? emptyState ??
@@ -4600,6 +4648,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     );
     final threadViewWithContextMenu = ShadContextMenuRegion(
       constraints: const BoxConstraints(minWidth: 180),
+      tapEnabled: false,
       items: [
         ShadContextMenuItem(
           onPressed: widget.onShowCompletedToolCallsChanged == null
