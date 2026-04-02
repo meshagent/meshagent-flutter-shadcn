@@ -17,6 +17,7 @@ import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_flutter_shadcn/chat_bubble_markdown_config.dart';
 import 'package:meshagent_flutter_shadcn/code_language_resolver.dart';
 import 'package:meshagent_flutter_shadcn/storage/file_browser.dart';
+import 'package:meshagent_flutter_shadcn/ui/coordinated_context_menu.dart';
 import 'package:meshagent_flutter_shadcn/ui/ui.dart';
 import 'package:re_highlight/styles/monokai-sublime.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
@@ -35,8 +36,15 @@ import 'ansi.dart';
 import 'outbound_delivery_status.dart';
 import 'folder_drop.dart';
 
-const webPDFFormat = SimpleFileFormat(uniformTypeIdentifiers: ['com.adobe.pdf'], mimeTypes: ['web application/pdf']);
-const List<String> _emojiFontFamilyFallback = <String>['Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji'];
+const webPDFFormat = SimpleFileFormat(
+  uniformTypeIdentifiers: ['com.adobe.pdf'],
+  mimeTypes: ['web application/pdf'],
+);
+const List<String> _emojiFontFamilyFallback = <String>[
+  'Apple Color Emoji',
+  'Segoe UI Emoji',
+  'Noto Color Emoji',
+];
 const double _chatBubbleContentHorizontalPadding = 16;
 const double _chatBubbleContentTopPadding = 4;
 const double _chatBubbleContentBottomPadding = 2;
@@ -56,17 +64,25 @@ const String _agentTurnInterruptType = "meshagent.agent.turn.interrupt";
 const String _agentThreadClearType = "meshagent.agent.thread.clear";
 const String _agentToolApproveType = "meshagent.agent.tool_call.approve";
 const String _agentToolRejectType = "meshagent.agent.tool_call.reject";
-const String _agentTurnStartAcceptedType = "meshagent.agent.turn.start.accepted";
-const String _agentTurnInterruptAcceptedType = "meshagent.agent.turn.interrupt.accepted";
+const String _agentTurnStartAcceptedType =
+    "meshagent.agent.turn.start.accepted";
+const String _agentTurnInterruptAcceptedType =
+    "meshagent.agent.turn.interrupt.accepted";
 const String _agentTurnInterruptedType = "meshagent.agent.turn.interrupted";
 const String _agentTurnStartedType = "meshagent.agent.turn.started";
-const String _agentTurnSteerAcceptedType = "meshagent.agent.turn.steer.accepted";
-const String _agentTurnSteerRejectedType = "meshagent.agent.turn.steer.rejected";
+const String _agentTurnSteerAcceptedType =
+    "meshagent.agent.turn.steer.accepted";
+const String _agentTurnSteerRejectedType =
+    "meshagent.agent.turn.steer.rejected";
 const String _agentTurnEndedType = "meshagent.agent.turn.ended";
 const String _agentThreadClearedType = "meshagent.agent.thread.cleared";
 
 String _normalizeEmojiPresentationKey(String value) {
-  return value.replaceAll('\u{FE0F}', '').replaceAll('\u{FE0E}', '').replaceAll('\u{200D}', '').trim();
+  return value
+      .replaceAll('\u{FE0F}', '')
+      .replaceAll('\u{FE0E}', '')
+      .replaceAll('\u{200D}', '')
+      .trim();
 }
 
 String _primaryEmojiFontFamily() {
@@ -93,7 +109,10 @@ TextStyle _emojiTextStyle({double size = 14}) {
   );
 }
 
-bool _shouldShowAuthorNames({required MeshDocument thread, String? localParticipantName}) {
+bool _shouldShowAuthorNames({
+  required MeshDocument thread,
+  String? localParticipantName,
+}) {
   return true;
 }
 
@@ -107,12 +126,20 @@ List<String> _parseEventDetailLines(String raw) {
     try {
       final decoded = jsonDecode(value);
       if (decoded is List) {
-        return decoded.whereType<String>().map((line) => line.trim()).where((line) => line.isNotEmpty).toList();
+        return decoded
+            .whereType<String>()
+            .map((line) => line.trim())
+            .where((line) => line.isNotEmpty)
+            .toList();
       }
     } catch (_) {}
   }
 
-  return value.split(RegExp(r"\r?\n")).map((line) => line.trim()).where((line) => line.isNotEmpty).toList();
+  return value
+      .split(RegExp(r"\r?\n"))
+      .map((line) => line.trim())
+      .where((line) => line.isNotEmpty)
+      .toList();
 }
 
 bool _isCompletedToolCallEvent(MeshElement message) {
@@ -120,33 +147,48 @@ bool _isCompletedToolCallEvent(MeshElement message) {
     return false;
   }
 
-  final kind = ((message.getAttribute("kind") as String?) ?? "").trim().toLowerCase();
+  final kind = ((message.getAttribute("kind") as String?) ?? "")
+      .trim()
+      .toLowerCase();
   if (kind != "tool") {
     return false;
   }
 
-  final state = ((message.getAttribute("state") as String?) ?? "info").toLowerCase();
+  final state = ((message.getAttribute("state") as String?) ?? "info")
+      .toLowerCase();
   if (state != "completed") {
     return false;
   }
 
-  final itemType = ((message.getAttribute("item_type") as String?) ?? "").trim().toLowerCase();
+  final itemType = ((message.getAttribute("item_type") as String?) ?? "")
+      .trim()
+      .toLowerCase();
   if (itemType == "tool_call") {
     return true;
   }
 
   final method = (message.getAttribute("method") as String?) ?? "agent/event";
-  final summary = ((message.getAttribute("summary") as String?) ?? method).trim();
-  final headlineAttr = ((message.getAttribute("headline") as String?) ?? "").trim();
-  final detailLines = _parseEventDetailLines(((message.getAttribute("details") as String?) ?? "").trim());
-  final resolvedHeadlineForFiltering = (headlineAttr.isNotEmpty ? headlineAttr : summary).trim().toLowerCase();
+  final summary = ((message.getAttribute("summary") as String?) ?? method)
+      .trim();
+  final headlineAttr = ((message.getAttribute("headline") as String?) ?? "")
+      .trim();
+  final detailLines = _parseEventDetailLines(
+    ((message.getAttribute("details") as String?) ?? "").trim(),
+  );
+  final resolvedHeadlineForFiltering =
+      (headlineAttr.isNotEmpty ? headlineAttr : summary).trim().toLowerCase();
 
   return resolvedHeadlineForFiltering == "called tool" &&
       detailLines.isNotEmpty &&
-      detailLines.every((line) => line.trimLeft().toLowerCase().startsWith("tool:"));
+      detailLines.every(
+        (line) => line.trimLeft().toLowerCase().startsWith("tool:"),
+      );
 }
 
-bool _shouldHideCompletedToolCallEvent(MeshElement message, {required bool showCompletedToolCalls}) {
+bool _shouldHideCompletedToolCallEvent(
+  MeshElement message, {
+  required bool showCompletedToolCalls,
+}) {
   return !showCompletedToolCalls && _isCompletedToolCallEvent(message);
 }
 
@@ -257,7 +299,9 @@ String? _normalizeAgentAttachmentUrl(String path) {
     return trimmedPath;
   }
 
-  final roomPath = trimmedPath.startsWith("/") ? trimmedPath.substring(1) : trimmedPath;
+  final roomPath = trimmedPath.startsWith("/")
+      ? trimmedPath.substring(1)
+      : trimmedPath;
   if (roomPath.isEmpty) {
     return null;
   }
@@ -337,7 +381,9 @@ class PendingAgentMessage {
       threadPath: threadPath is String ? threadPath : "",
       text: textParts.join("\n\n"),
       attachments: attachments,
-      senderName: senderName is String && senderName.trim().isNotEmpty ? senderName.trim() : null,
+      senderName: senderName is String && senderName.trim().isNotEmpty
+          ? senderName.trim()
+          : null,
       awaitingOnline: false,
     );
   }
@@ -376,8 +422,14 @@ Set<String> _threadStatusAttributeCandidates(String path, String prefix) {
   return candidates;
 }
 
-Map<String, dynamic>? _parsePendingMessagesStatus(Participant participant, String path) {
-  for (final key in _threadStatusAttributeCandidates(path, "thread.status.pending_messages")) {
+Map<String, dynamic>? _parsePendingMessagesStatus(
+  Participant participant,
+  String path,
+) {
+  for (final key in _threadStatusAttributeCandidates(
+    path,
+    "thread.status.pending_messages",
+  )) {
     final value = participant.getAttribute(key);
     if (value is! String || value.trim().isEmpty) {
       continue;
@@ -426,16 +478,33 @@ ChatThreadStatusState resolveChatThreadStatus({
   ChatThreadStatusState? previous,
 }) {
   final keyCandidates = _threadStatusAttributeCandidates(path, "thread.status");
-  final textKeyCandidates = _threadStatusAttributeCandidates(path, "thread.status.text");
-  final modeKeyCandidates = _threadStatusAttributeCandidates(path, "thread.status.mode");
-  final startedAtKeyCandidates = _threadStatusAttributeCandidates(path, "thread.status.started_at");
-  final pendingItemIdKeyCandidates = _threadStatusAttributeCandidates(path, "thread.status.pending_item_id");
+  final textKeyCandidates = _threadStatusAttributeCandidates(
+    path,
+    "thread.status.text",
+  );
+  final modeKeyCandidates = _threadStatusAttributeCandidates(
+    path,
+    "thread.status.mode",
+  );
+  final startedAtKeyCandidates = _threadStatusAttributeCandidates(
+    path,
+    "thread.status.started_at",
+  );
+  final pendingItemIdKeyCandidates = _threadStatusAttributeCandidates(
+    path,
+    "thread.status.pending_item_id",
+  );
 
   final candidates = <Participant>[
     if (agentName != null)
-      ...room.messaging.remoteParticipants.where((participant) => participant.getAttribute("name") == agentName)
+      ...room.messaging.remoteParticipants.where(
+        (participant) => participant.getAttribute("name") == agentName,
+      )
     else
-      ...room.messaging.remoteParticipants.where((participant) => participant.role == "agent" || _supportsAgentMessages(participant)),
+      ...room.messaging.remoteParticipants.where(
+        (participant) =>
+            participant.role == "agent" || _supportsAgentMessages(participant),
+      ),
   ];
 
   String? nextStatus;
@@ -487,7 +556,9 @@ ChatThreadStatusState resolveChatThreadStatus({
               if (item is Map<String, dynamic>)
                 PendingAgentMessage.fromQueueJson(item)
               else if (item is Map)
-                PendingAgentMessage.fromQueueJson(Map<String, dynamic>.from(item)),
+                PendingAgentMessage.fromQueueJson(
+                  Map<String, dynamic>.from(item),
+                ),
           ];
         }
       }
@@ -536,17 +607,25 @@ ChatThreadStatusState resolveChatThreadStatus({
       }
     }
 
-    if (nextStatus != null && nextMode != null && nextStartedAt != null && nextTurnId != null && nextPendingItemId != null) {
+    if (nextStatus != null &&
+        nextMode != null &&
+        nextStartedAt != null &&
+        nextTurnId != null &&
+        nextPendingItemId != null) {
       break;
     }
   }
 
   if (nextStatus == null) {
-    return ChatThreadStatusState(supportsAgentMessages: nextSupportsAgentMessages);
+    return ChatThreadStatusState(
+      supportsAgentMessages: nextSupportsAgentMessages,
+    );
   }
 
   nextMode ??= "busy";
-  nextStartedAt ??= previous?.hasStatus == true ? previous?.startedAt : DateTime.now();
+  nextStartedAt ??= previous?.hasStatus == true
+      ? previous?.startedAt
+      : DateTime.now();
 
   return ChatThreadStatusState(
     text: nextStatus,
@@ -590,7 +669,13 @@ class ChatThreadStatusIndicator extends StatelessWidget {
         waitDuration: const Duration(milliseconds: 300),
         builder: (context) => ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 320),
-          child: Text(formatChatThreadStatusText(normalizedStatusText, startedAt: startedAt), style: ShadTheme.of(context).textTheme.small),
+          child: Text(
+            formatChatThreadStatusText(
+              normalizedStatusText,
+              startedAt: startedAt,
+            ),
+            style: ShadTheme.of(context).textTheme.small,
+          ),
         ),
         child: _CyclingProgressIndicator(strokeWidth: strokeWidth),
       ),
@@ -599,7 +684,10 @@ class ChatThreadStatusIndicator extends StatelessWidget {
 }
 
 class FileAttachment extends ChangeNotifier {
-  FileAttachment({required this.path, UploadStatus initialStatus = UploadStatus.initial}) : _status = initialStatus;
+  FileAttachment({
+    required this.path,
+    UploadStatus initialStatus = UploadStatus.initial,
+  }) : _status = initialStatus;
 
   UploadStatus _status;
 
@@ -618,12 +706,22 @@ class FileAttachment extends ChangeNotifier {
 }
 
 class MeshagentFileUpload extends FileAttachment {
-  MeshagentFileUpload({required this.room, required super.path, required this.dataStream, this.size = 0}) {
+  MeshagentFileUpload({
+    required this.room,
+    required super.path,
+    required this.dataStream,
+    this.size = 0,
+  }) {
     _upload();
   }
 
   // Requires to manually call startUpload()
-  MeshagentFileUpload.deferred({required this.room, required super.path, required this.dataStream, this.size = 0});
+  MeshagentFileUpload.deferred({
+    required this.room,
+    required super.path,
+    required this.dataStream,
+    this.size = 0,
+  });
 
   int size;
 
@@ -665,7 +763,12 @@ class MeshagentFileUpload extends FileAttachment {
         }
       }
 
-      await room.storage.uploadStream(path, trackedStream(), overwrite: true, size: size > 0 ? size : null);
+      await room.storage.uploadStream(
+        path,
+        trackedStream(),
+        overwrite: true,
+        size: size > 0 ? size : null,
+      );
 
       _completer.complete();
 
@@ -694,9 +797,12 @@ class ChatThreadController extends ChangeNotifier {
   final TextEditingController textFieldController = ShadTextEditingController();
   final ScrollController threadScrollController = ScrollController();
   final List<FileAttachment> _attachmentUploads = [];
-  final OutboundMessageStatusQueue outboundStatus = OutboundMessageStatusQueue();
-  final LinkedHashMap<String, PendingAgentMessage> _pendingAgentMessages = LinkedHashMap<String, PendingAgentMessage>();
-  final LinkedHashMap<String, _PendingSendWait> _pendingSendWaits = LinkedHashMap<String, _PendingSendWait>();
+  final OutboundMessageStatusQueue outboundStatus =
+      OutboundMessageStatusQueue();
+  final LinkedHashMap<String, PendingAgentMessage> _pendingAgentMessages =
+      LinkedHashMap<String, PendingAgentMessage>();
+  final LinkedHashMap<String, _PendingSendWait> _pendingSendWaits =
+      LinkedHashMap<String, _PendingSendWait>();
 
   void scrollThreadToBottom({bool animated = true}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -706,7 +812,13 @@ class ChatThreadController extends ChangeNotifier {
 
       final targetOffset = threadScrollController.position.minScrollExtent;
       if (animated) {
-        unawaited(threadScrollController.animateTo(targetOffset, duration: const Duration(milliseconds: 180), curve: Curves.easeOut));
+        unawaited(
+          threadScrollController.animateTo(
+            targetOffset,
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+          ),
+        );
       } else {
         threadScrollController.jumpTo(targetOffset);
       }
@@ -726,7 +838,8 @@ class ChatThreadController extends ChangeNotifier {
     }
   }
 
-  List<FileAttachment> get attachmentUploads => List<FileAttachment>.unmodifiable(_attachmentUploads);
+  List<FileAttachment> get attachmentUploads =>
+      List<FileAttachment>.unmodifiable(_attachmentUploads);
 
   bool toggleToolkit(ToolkitBuilderOption toolkit) {
     if (toolkits.contains(toolkit)) {
@@ -740,15 +853,25 @@ class ChatThreadController extends ChangeNotifier {
     }
   }
 
-  List<PendingAgentMessage> get pendingAgentMessages => List<PendingAgentMessage>.unmodifiable(_pendingAgentMessages.values);
+  List<PendingAgentMessage> get pendingAgentMessages =>
+      List<PendingAgentMessage>.unmodifiable(_pendingAgentMessages.values);
 
   List<PendingAgentMessage> pendingAgentMessagesForPath(String path) {
-    return List<PendingAgentMessage>.unmodifiable(_pendingAgentMessages.values.where((message) => message.threadPath == path));
+    return List<PendingAgentMessage>.unmodifiable(
+      _pendingAgentMessages.values.where(
+        (message) => message.threadPath == path,
+      ),
+    );
   }
 
-  Iterable<RemoteParticipant> getAgentParticipants(MeshDocument document, {String? participantName}) sync* {
+  Iterable<RemoteParticipant> getAgentParticipants(
+    MeshDocument document, {
+    String? participantName,
+  }) sync* {
     final normalizedParticipantName = participantName?.trim();
-    for (final participant in getOnlineParticipants(document).whereType<RemoteParticipant>()) {
+    for (final participant in getOnlineParticipants(
+      document,
+    ).whereType<RemoteParticipant>()) {
       if (normalizedParticipantName != null &&
           normalizedParticipantName.isNotEmpty &&
           participant.getAttribute("name") != normalizedParticipantName) {
@@ -798,7 +921,10 @@ class ChatThreadController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _setPendingAgentMessageAwaitingOnline(String? messageId, bool awaitingOnline) {
+  void _setPendingAgentMessageAwaitingOnline(
+    String? messageId,
+    bool awaitingOnline,
+  ) {
     if (messageId == null || messageId.trim().isEmpty) {
       return;
     }
@@ -855,7 +981,9 @@ class ChatThreadController extends ChangeNotifier {
     }
 
     final sourceMessageId = payload["source_message_id"];
-    final normalizedSourceMessageId = sourceMessageId is String ? sourceMessageId : null;
+    final normalizedSourceMessageId = sourceMessageId is String
+        ? sourceMessageId
+        : null;
     final threadPath = payload["thread_id"];
     final normalizedThreadPath = threadPath is String ? threadPath.trim() : "";
 
@@ -864,13 +992,18 @@ class ChatThreadController extends ChangeNotifier {
       return;
     }
 
-    if (type == _agentTurnInterruptAcceptedType || type == _agentTurnInterruptedType) {
+    if (type == _agentTurnInterruptAcceptedType ||
+        type == _agentTurnInterruptedType) {
       return;
     }
 
-    if (type == _agentTurnStartedType || type == _agentTurnSteerAcceptedType || type == _agentTurnSteerRejectedType) {
+    if (type == _agentTurnStartedType ||
+        type == _agentTurnSteerAcceptedType ||
+        type == _agentTurnSteerRejectedType) {
       final sourceMessageId = payload["source_message_id"];
-      _clearPendingAgentMessage(sourceMessageId is String ? sourceMessageId : null);
+      _clearPendingAgentMessage(
+        sourceMessageId is String ? sourceMessageId : null,
+      );
       return;
     }
 
@@ -886,11 +1019,17 @@ class ChatThreadController extends ChangeNotifier {
   }) {
     final normalizedParticipantName = participantName?.trim();
     if (useAgentMessages) {
-      return getAgentParticipants(thread, participantName: normalizedParticipantName).toList();
+      return getAgentParticipants(
+        thread,
+        participantName: normalizedParticipantName,
+      ).toList();
     }
 
-    return getOnlineParticipants(thread).whereType<RemoteParticipant>().where((participant) {
-      if (normalizedParticipantName == null || normalizedParticipantName.isEmpty) {
+    return getOnlineParticipants(thread).whereType<RemoteParticipant>().where((
+      participant,
+    ) {
+      if (normalizedParticipantName == null ||
+          normalizedParticipantName.isEmpty) {
         return true;
       }
       return participant.getAttribute("name") == normalizedParticipantName;
@@ -898,11 +1037,15 @@ class ChatThreadController extends ChangeNotifier {
   }
 
   bool hasPendingSendWait(String threadPath) {
-    return _pendingSendWaits.values.any((wait) => wait.threadPath == threadPath);
+    return _pendingSendWaits.values.any(
+      (wait) => wait.threadPath == threadPath,
+    );
   }
 
   void cancelPendingSend(String threadPath) {
-    final waits = _pendingSendWaits.values.where((wait) => wait.threadPath == threadPath).toList();
+    final waits = _pendingSendWaits.values
+        .where((wait) => wait.threadPath == threadPath)
+        .toList();
     for (final wait in waits) {
       wait.cancel();
     }
@@ -930,7 +1073,11 @@ class ChatThreadController extends ChangeNotifier {
         return;
       }
 
-      final recipients = _matchingRecipients(thread: thread, useAgentMessages: useAgentMessages, participantName: participantName);
+      final recipients = _matchingRecipients(
+        thread: thread,
+        useAgentMessages: useAgentMessages,
+        participantName: participantName,
+      );
       if (recipients.isNotEmpty) {
         completer.complete(recipients);
       }
@@ -956,14 +1103,22 @@ class ChatThreadController extends ChangeNotifier {
     try {
       return await Future.any([
         completer.future,
-        wait.cancelled.future.then<List<RemoteParticipant>>((_) => throw const ChatSendCancelledException()),
+        wait.cancelled.future.then<List<RemoteParticipant>>(
+          (_) => throw const ChatSendCancelledException(),
+        ),
       ]);
     } finally {
       finish();
     }
   }
 
-  Future<void> cancel(String path, MeshDocument thread, {bool useAgentMessages = false, String? turnId, String? participantName}) async {
+  Future<void> cancel(
+    String path,
+    MeshDocument thread, {
+    bool useAgentMessages = false,
+    String? turnId,
+    String? participantName,
+  }) async {
     if (hasPendingSendWait(path)) {
       cancelPendingSend(path);
       return;
@@ -975,19 +1130,28 @@ class ChatThreadController extends ChangeNotifier {
       }
 
       await Future.wait([
-        for (final participant in getAgentParticipants(thread, participantName: participantName))
+        for (final participant in getAgentParticipants(
+          thread,
+          participantName: participantName,
+        ))
           room.messaging.sendMessage(
             to: participant,
             type: _agentRoomMessageType,
             message: {
-              "payload": {"type": _agentTurnInterruptType, "thread_id": path, "turn_id": turnId},
+              "payload": {
+                "type": _agentTurnInterruptType,
+                "thread_id": path,
+                "turn_id": turnId,
+              },
             },
           ),
       ]);
       return;
     }
 
-    for (final participant in getOnlineParticipants(thread).whereType<RemoteParticipant>()) {
+    for (final participant in getOnlineParticipants(
+      thread,
+    ).whereType<RemoteParticipant>()) {
       final normalizedParticipantName = participantName?.trim();
       if (normalizedParticipantName != null &&
           normalizedParticipantName.isNotEmpty &&
@@ -995,15 +1159,27 @@ class ChatThreadController extends ChangeNotifier {
         continue;
       }
       if (participant.role == "agent") {
-        await room.messaging.sendMessage(to: participant, type: "cancel", message: {"path": path});
+        await room.messaging.sendMessage(
+          to: participant,
+          type: "cancel",
+          message: {"path": path},
+        );
       }
     }
   }
 
-  Future<void> clearThread(String path, MeshDocument thread, {bool useAgentMessages = false, String? participantName}) async {
+  Future<void> clearThread(
+    String path,
+    MeshDocument thread, {
+    bool useAgentMessages = false,
+    String? participantName,
+  }) async {
     if (useAgentMessages) {
       await Future.wait([
-        for (final participant in getAgentParticipants(thread, participantName: participantName))
+        for (final participant in getAgentParticipants(
+          thread,
+          participantName: participantName,
+        ))
           room.messaging.sendMessage(
             to: participant,
             type: _agentRoomMessageType,
@@ -1017,18 +1193,32 @@ class ChatThreadController extends ChangeNotifier {
 
     final normalizedParticipantName = participantName?.trim();
     final participant = room.messaging.remoteParticipants.firstWhereOrNull((x) {
-      if (normalizedParticipantName == null || normalizedParticipantName.isEmpty) {
+      if (normalizedParticipantName == null ||
+          normalizedParticipantName.isEmpty) {
         return true;
       }
       return x.getAttribute("name") == normalizedParticipantName;
     });
     if (participant != null) {
-      await room.messaging.sendMessage(to: participant, type: "clear", message: {"path": path});
+      await room.messaging.sendMessage(
+        to: participant,
+        type: "clear",
+        message: {"path": path},
+      );
     }
   }
 
-  Future<FileAttachment> uploadFile(String path, Stream<Uint8List> dataStream, int size) async {
-    final uploader = MeshagentFileUpload(room: room, path: path, dataStream: dataStream, size: size);
+  Future<FileAttachment> uploadFile(
+    String path,
+    Stream<Uint8List> dataStream,
+    int size,
+  ) async {
+    final uploader = MeshagentFileUpload(
+      room: room,
+      path: path,
+      dataStream: dataStream,
+      size: size,
+    );
     uploader.addListener(notifyListeners);
 
     _attachmentUploads.add(uploader);
@@ -1037,8 +1227,17 @@ class ChatThreadController extends ChangeNotifier {
     return uploader;
   }
 
-  Future<FileAttachment> uploadFileDeferred(String path, Stream<Uint8List> dataStream, int size) async {
-    final uploader = MeshagentFileUpload.deferred(room: room, path: path, dataStream: dataStream, size: size);
+  Future<FileAttachment> uploadFileDeferred(
+    String path,
+    Stream<Uint8List> dataStream,
+    int size,
+  ) async {
+    final uploader = MeshagentFileUpload.deferred(
+      room: room,
+      path: path,
+      dataStream: dataStream,
+      size: size,
+    );
 
     uploader.addListener(notifyListeners);
 
@@ -1049,7 +1248,10 @@ class ChatThreadController extends ChangeNotifier {
   }
 
   FileAttachment attachFile(String path) {
-    final attachment = FileAttachment(path: path, initialStatus: UploadStatus.completed);
+    final attachment = FileAttachment(
+      path: path,
+      initialStatus: UploadStatus.completed,
+    );
     attachment.addListener(notifyListeners);
     _attachmentUploads.add(attachment);
     notifyListeners();
@@ -1094,7 +1296,9 @@ class ChatThreadController extends ChangeNotifier {
   Iterable<String> getOfflineParticipants(MeshDocument document) sync* {
     for (final participantName in getParticipantNames(document)) {
       bool found = false;
-      if (room.messaging.remoteParticipants.where((x) => x.getAttribute("name") == participantName).isNotEmpty ||
+      if (room.messaging.remoteParticipants
+              .where((x) => x.getAttribute("name") == participantName)
+              .isNotEmpty ||
           participantName == room.localParticipant?.getAttribute("name")) {
         found = true;
       }
@@ -1109,7 +1313,9 @@ class ChatThreadController extends ChangeNotifier {
       if (participantName == room.localParticipant?.getAttribute("name")) {
         yield room.localParticipant!;
       }
-      for (final part in room.messaging.remoteParticipants.where((x) => x.getAttribute("name") == participantName)) {
+      for (final part in room.messaging.remoteParticipants.where(
+        (x) => x.getAttribute("name") == participantName,
+      )) {
         yield part;
       }
     }
@@ -1132,16 +1338,24 @@ class ChatThreadController extends ChangeNotifier {
           "thread_id": path,
           "message_id": message.id,
           "content": _agentInputContentFromMessage(message),
-          "toolkits": [for (final tk in toolkits) (await tk.build(room)).toJson()],
+          "toolkits": [
+            for (final tk in toolkits) (await tk.build(room)).toJson(),
+          ],
         };
         if (isSteer && turnId != null && turnId.trim().isNotEmpty) {
           payload["turn_id"] = turnId;
         }
-        await room.messaging.sendMessage(to: participant, type: _agentRoomMessageType, message: {"payload": payload});
+        await room.messaging.sendMessage(
+          to: participant,
+          type: _agentRoomMessageType,
+          message: {"payload": payload},
+        );
         return;
       }
 
-      final tools = [for (final tk in toolkits) (await tk.build(room)).toJson()];
+      final tools = [
+        for (final tk in toolkits) (await tk.build(room)).toJson(),
+      ];
       await room.messaging.sendMessage(
         to: participant,
         type: messageType,
@@ -1156,8 +1370,14 @@ class ChatThreadController extends ChangeNotifier {
     }
   }
 
-  void insertMessage({required MeshDocument thread, required ChatMessage message}) {
-    final messages = thread.root.getChildren().whereType<MeshElement>().firstWhere((x) => x.tagName == "messages");
+  void insertMessage({
+    required MeshDocument thread,
+    required ChatMessage message,
+  }) {
+    final messages = thread.root
+        .getChildren()
+        .whereType<MeshElement>()
+        .firstWhere((x) => x.tagName == "messages");
 
     final m = messages.createChildElement("message", {
       "id": message.id,
@@ -1205,11 +1425,15 @@ class ChatThreadController extends ChangeNotifier {
         _markPendingAgentMessage(
           message: PendingAgentMessage(
             messageId: message.id,
-            messageType: messageType == "steer" ? _agentTurnSteerType : _agentTurnStartType,
+            messageType: messageType == "steer"
+                ? _agentTurnSteerType
+                : _agentTurnStartType,
             threadPath: path,
             text: message.text,
             attachments: List<String>.from(message.attachments),
-            senderName: senderName is String && senderName.trim().isNotEmpty ? senderName.trim() : null,
+            senderName: senderName is String && senderName.trim().isNotEmpty
+                ? senderName.trim()
+                : null,
             awaitingAcceptance: true,
             awaitingOnline: false,
           ),
@@ -1227,9 +1451,14 @@ class ChatThreadController extends ChangeNotifier {
             participantName: normalizedParticipantName,
           );
           if (participants.isEmpty) {
-            final shouldWaitForRecipient = useAgentMessages || (normalizedParticipantName != null && normalizedParticipantName.isNotEmpty);
+            final shouldWaitForRecipient =
+                useAgentMessages ||
+                (normalizedParticipantName != null &&
+                    normalizedParticipantName.isNotEmpty);
             if (!shouldWaitForRecipient) {
-              throw StateError("no matching recipients are available for '$path'");
+              throw StateError(
+                "no matching recipients are available for '$path'",
+              );
             }
             participants = await _waitForRecipients(
               thread: thread,
@@ -1243,7 +1472,9 @@ class ChatThreadController extends ChangeNotifier {
           for (final participant in participants) {
             final participantName = participant.getAttribute("name");
             final shouldStoreRemotely =
-                remoteStoreParticipantName != null && participantName is String && participantName == remoteStoreParticipantName;
+                remoteStoreParticipantName != null &&
+                participantName is String &&
+                participantName == remoteStoreParticipantName;
             sentMessages.add(
               sendMessageToParticipant(
                 participant: participant,
@@ -1318,12 +1549,16 @@ class ChatThreadLoader extends StatelessWidget {
   final Widget Function(BuildContext)? loadingBuilder;
 
   void _ensureParticipants(MeshDocument document) {
-    final participantsList = <Participant>[if (participants != null) ...participants!, if (includeLocalParticipant) room.localParticipant!];
+    final participantsList = <Participant>[
+      if (participants != null) ...participants!,
+      if (includeLocalParticipant) room.localParticipant!,
+    ];
 
     if (participants != null || participantNames != null) {
       Set<String> existing = {};
 
-      for (final child in document.root.getChildren().whereType<MeshElement>()) {
+      for (final child
+          in document.root.getChildren().whereType<MeshElement>()) {
         if (child.tagName == "members") {
           for (final member in child.getChildren().whereType<MeshElement>()) {
             if (member.getAttribute("name") != null) {
@@ -1333,7 +1568,9 @@ class ChatThreadLoader extends StatelessWidget {
 
           for (final part in participantsList) {
             if (!existing.contains(part.getAttribute("name"))) {
-              child.createChildElement("member", {"name": part.getAttribute("name")});
+              child.createChildElement("member", {
+                "name": part.getAttribute("name"),
+              });
               existing.add(part.getAttribute("name"));
             }
           }
@@ -1359,15 +1596,23 @@ class ChatThreadLoader extends StatelessWidget {
       room: room,
       builder: (context, document, error) {
         if (error != null) {
-          return Center(child: Text("Unable to load thread", style: ShadTheme.of(context).textTheme.p));
+          return Center(
+            child: Text(
+              "Unable to load thread",
+              style: ShadTheme.of(context).textTheme.p,
+            ),
+          );
         }
 
         if (document == null) {
-          return loadingBuilder == null ? const Center(child: CircularProgressIndicator()) : loadingBuilder!(context);
+          return loadingBuilder == null
+              ? const Center(child: CircularProgressIndicator())
+              : loadingBuilder!(context);
         }
         _ensureParticipants(document);
 
-        return builder?.call(context, document) ?? ChatThread(path: path, document: document, room: room);
+        return builder?.call(context, document) ??
+            ChatThread(path: path, document: document, room: room);
       },
     );
   }
@@ -1391,7 +1636,10 @@ class ChatThreadInputFrame extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
       child: Center(
-        child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 912), child: child),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 912),
+          child: child,
+        ),
       ),
     );
   }
@@ -1426,19 +1674,26 @@ class ChatThreadViewportBody extends StatelessWidget {
             ),
           Positioned.fill(
             child: Column(
-              mainAxisAlignment: bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
+              mainAxisAlignment: bottomAlign
+                  ? MainAxisAlignment.end
+                  : MainAxisAlignment.center,
               children: [
                 Expanded(
                   child: LayoutBuilder(
                     builder: (context, constraints) => ListView(
                       controller: scrollController,
                       reverse: true,
-                      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                      keyboardDismissBehavior:
+                          ScrollViewKeyboardDismissBehavior.onDrag,
                       padding: EdgeInsets.only(
                         top: 0,
                         bottom: 16,
-                        left: chatThreadFeedHorizontalPadding(constraints.maxWidth),
-                        right: chatThreadFeedHorizontalPadding(constraints.maxWidth),
+                        left: chatThreadFeedHorizontalPadding(
+                          constraints.maxWidth,
+                        ),
+                        right: chatThreadFeedHorizontalPadding(
+                          constraints.maxWidth,
+                        ),
                       ),
                       children: children,
                     ),
@@ -1495,7 +1750,9 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
     final extension = dotIndex > 0 ? candidate.substring(dotIndex) : '';
 
     for (var i = 1; ; i++) {
-      final candidateExists = await widget.controller.room.storage.exists(candidate);
+      final candidateExists = await widget.controller.room.storage.exists(
+        candidate,
+      );
       if (!candidateExists) {
         return candidate;
       }
@@ -1505,7 +1762,10 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
     }
   }
 
-  Future<String> _importFile({required RoomClient sourceRoom, required String sourcePath}) async {
+  Future<String> _importFile({
+    required RoomClient sourceRoom,
+    required String sourcePath,
+  }) async {
     final content = await sourceRoom.storage.download(sourcePath);
     final destinationPath = await _resolveImportedPath(sourcePath);
 
@@ -1520,14 +1780,22 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
   }
 
   Future<void> _onSelectAttachment(ToolkitBuilderOption? storage) async {
-    final picked = await FilePicker.platform.pickFiles(dialogTitle: "Select files", allowMultiple: true, withReadStream: true);
+    final picked = await FilePicker.platform.pickFiles(
+      dialogTitle: "Select files",
+      allowMultiple: true,
+      withReadStream: true,
+    );
 
     if (picked == null) {
       return;
     }
 
     for (final file in picked.files) {
-      await widget.controller.uploadFile(file.name, file.readStream!.map(Uint8List.fromList), file.size);
+      await widget.controller.uploadFile(
+        file.name,
+        file.readStream!.map(Uint8List.fromList),
+        file.size,
+      );
     }
 
     if (storage != null) {
@@ -1589,8 +1857,10 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
     if (widget.availableRooms != null) {
       try {
         final loaded = await widget.availableRooms!();
-        roomOptions = {selectedRoomName, ...loaded.map((r) => r.name).where((n) => n.isNotEmpty)}.toList()
-          ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+        roomOptions = {
+          selectedRoomName,
+          ...loaded.map((r) => r.name).where((n) => n.isNotEmpty),
+        }.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
       } catch (_) {}
     }
 
@@ -1635,9 +1905,17 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
                       child: ShadSelect<String>(
                         initialValue: selectedRoomName,
                         selectedOptionBuilder: (context, value) => Text(value),
-                        options: [for (final option in roomOptions) ShadOption<String>(value: option, child: Text(option))],
+                        options: [
+                          for (final option in roomOptions)
+                            ShadOption<String>(
+                              value: option,
+                              child: Text(option),
+                            ),
+                        ],
                         onChanged: (value) async {
-                          if (value == null || value == selectedRoomName || widget.connectRoomClient == null) {
+                          if (value == null ||
+                              value == selectedRoomName ||
+                              widget.connectRoomClient == null) {
                             return;
                           }
 
@@ -1651,7 +1929,9 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
                             nextRoomClient = widget.controller.room;
                           } else {
                             try {
-                              nextRoomClient = await widget.connectRoomClient!(value);
+                              nextRoomClient = await widget.connectRoomClient!(
+                                value,
+                              );
                             } catch (_) {}
                           }
 
@@ -1661,7 +1941,14 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
                               resolveError = true;
                             });
                           } else {
-                            if (!identical(widget.controller.room, selectedRoomClient) && !identical(nextRoomClient, selectedRoomClient)) {
+                            if (!identical(
+                                  widget.controller.room,
+                                  selectedRoomClient,
+                                ) &&
+                                !identical(
+                                  nextRoomClient,
+                                  selectedRoomClient,
+                                )) {
                               selectedRoomClient.dispose();
                             }
 
@@ -1703,7 +1990,10 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
       if (identical(selectedRoomClient, widget.controller.room)) {
         widget.controller.attachFile(f);
       } else {
-        final importedPath = await _importFile(sourceRoom: selectedRoomClient, sourcePath: f);
+        final importedPath = await _importFile(
+          sourceRoom: selectedRoomClient,
+          sourcePath: f,
+        );
         widget.controller.attachFile(importedPath);
       }
     }
@@ -1726,7 +2016,9 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
   @override
   void didUpdateWidget(covariant ChatThreadAttachButton oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final loaderAvailabilityChanged = (oldWidget.availableConnectors == null) != (widget.availableConnectors == null);
+    final loaderAvailabilityChanged =
+        (oldWidget.availableConnectors == null) !=
+        (widget.availableConnectors == null);
     if (loaderAvailabilityChanged) {
       _availableConnectors = const [];
       _availableConnectorsError = null;
@@ -1747,7 +2039,9 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
   Future<void> _refreshAvailableConnectors() async {
     final loader = widget.availableConnectors;
     if (loader == null) {
-      if (_availableConnectors.isEmpty && _availableConnectorsError == null && !_loadingAvailableConnectors) {
+      if (_availableConnectors.isEmpty &&
+          _availableConnectorsError == null &&
+          !_loadingAvailableConnectors) {
         return;
       }
       if (!mounted) {
@@ -1806,8 +2100,17 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
       return SizedBox(width: 0, height: 22);
     }
 
-    final storageToolkit = widget.toolkits.where((x) => x is StaticToolkitBuilderOption && x.config is StorageConfig).firstOrNull;
-    final canUpload = widget.alwaysShowAttachFiles == true || storageToolkit != null;
+    final storageToolkit = widget.toolkits
+        .where(
+          (x) => x is StaticToolkitBuilderOption && x.config is StorageConfig,
+        )
+        .firstOrNull;
+    final canUpload =
+        widget.alwaysShowAttachFiles == true || storageToolkit != null;
+    final attachMenuItemCount =
+        (canUpload ? (kIsWeb ? 1 : 2) : 0) + 1 + widget.toolkits.length;
+    final attachMenuHeight =
+        attachMenuItemCount * 40.0 + (widget.toolkits.isNotEmpty ? 8.0 : 0.0);
 
     return ListenableBuilder(
       listenable: popoverController,
@@ -1816,9 +2119,10 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
         runAlignment: WrapAlignment.center,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          ShadContextMenu(
+          CoordinatedShadContextMenu(
             constraints: BoxConstraints(minWidth: 175),
-            anchor: ShadAnchorAuto(followerAnchor: Alignment.topRight, targetAnchor: Alignment.topLeft),
+            estimatedMenuWidth: 175,
+            estimatedMenuHeight: attachMenuHeight,
             items: [
               if (canUpload) ...[
                 if (!kIsWeb)
@@ -1839,20 +2143,34 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
                 child: Text("Add from room..."),
               ),
 
-              if (widget.toolkits.isNotEmpty) ShadSeparator.horizontal(margin: EdgeInsets.symmetric(vertical: 3)),
+              if (widget.toolkits.isNotEmpty)
+                ShadSeparator.horizontal(
+                  margin: EdgeInsets.symmetric(vertical: 3),
+                ),
 
               for (final tk in widget.toolkits)
                 Builder(
                   builder: (context) => ShadContextMenuItem(
                     textStyle: widget.controller.toolkits.contains(tk)
-                        ? ShadTheme.of(context).contextMenuTheme.textStyle!.copyWith(color: Colors.blue)
+                        ? ShadTheme.of(context).contextMenuTheme.textStyle!
+                              .copyWith(color: Colors.blue)
                         : null,
-                    leading: Icon(tk.icon, color: widget.controller.toolkits.contains(tk) ? Colors.blue : null),
+                    leading: Icon(
+                      tk.icon,
+                      color: widget.controller.toolkits.contains(tk)
+                          ? Colors.blue
+                          : null,
+                    ),
                     onPressed: () {
                       widget.controller.toggleToolkit(tk);
                     },
                     trailing: widget.controller.toolkits.contains(tk)
-                        ? Icon(LucideIcons.check, color: widget.controller.toolkits.contains(tk) ? Colors.blue : null)
+                        ? Icon(
+                            LucideIcons.check,
+                            color: widget.controller.toolkits.contains(tk)
+                                ? Colors.blue
+                                : null,
+                          )
                         : null,
                     child: Text(tk.text),
                   ),
@@ -1860,13 +2178,11 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
             ],
             controller: popoverController,
             child: ShadIconButton.ghost(
-              hoverBackgroundColor: ShadTheme.of(context).colorScheme.background,
+              hoverBackgroundColor: ShadTheme.of(
+                context,
+              ).colorScheme.background,
               decoration: ShadDecoration(shape: BoxShape.circle),
-              onPressed: popoverController.isOpen
-                  ? null
-                  : () {
-                      popoverController.toggle();
-                    },
+              onPressed: popoverController.toggle,
               iconSize: 16,
               width: 32,
               height: 32,
@@ -1882,16 +2198,24 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
                   });
                 }
 
-                final isConnectorToolkit = tool is ConnectorToolkitBuilderOption;
+                final isConnectorToolkit =
+                    tool is ConnectorToolkitBuilderOption;
 
                 return ShadButton.ghost(
                   trailing: GestureDetector(
                     behavior: HitTestBehavior.opaque,
                     onTap: removeToolkit,
-                    child: Padding(padding: EdgeInsets.all(2), child: Icon(LucideIcons.x, size: 14)),
+                    child: Padding(
+                      padding: EdgeInsets.all(2),
+                      child: Icon(LucideIcons.x, size: 14),
+                    ),
                   ),
-                  hoverBackgroundColor: ShadTheme.of(context).colorScheme.background,
-                  decoration: ShadDecoration(border: ShadBorder.all(radius: BorderRadius.circular(30))),
+                  hoverBackgroundColor: ShadTheme.of(
+                    context,
+                  ).colorScheme.background,
+                  decoration: ShadDecoration(
+                    border: ShadBorder.all(radius: BorderRadius.circular(30)),
+                  ),
                   onPressed: isConnectorToolkit ? () {} : removeToolkit,
                   child: Text(tool.selectedText),
                 );
@@ -1899,47 +2223,75 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
             ),
             if (tool is ConnectorToolkitBuilderOption) ...[
               if (widget.agentName != null)
-                ShadContextMenu(
+                CoordinatedShadContextMenu(
                   controller: addMcpController,
                   constraints: BoxConstraints(minWidth: 175),
-                  anchor: ShadAnchorAuto(followerAnchor: Alignment.topRight, targetAnchor: Alignment.topLeft),
+                  estimatedMenuWidth: 175,
+                  estimatedMenuHeight:
+                      (_loadingAvailableConnectors ||
+                          _availableConnectorsError != null ||
+                          _availableConnectors.isEmpty)
+                      ? 48
+                      : _availableConnectors.length * 40.0 + 8.0,
                   items: [
-                    if (_loadingAvailableConnectors) ShadContextMenuItem(child: Text("Loading connectors...")),
-                    if (!_loadingAvailableConnectors && _availableConnectorsError != null)
+                    if (_loadingAvailableConnectors)
+                      ShadContextMenuItem(child: Text("Loading connectors...")),
+                    if (!_loadingAvailableConnectors &&
+                        _availableConnectorsError != null)
                       ShadContextMenuItem(
                         leading: Icon(LucideIcons.refreshCw),
                         onPressed: _refreshAvailableConnectors,
                         child: Text("Unable to load connectors"),
                       ),
-                    if (!_loadingAvailableConnectors && _availableConnectorsError == null && _availableConnectors.isEmpty)
-                      ShadContextMenuItem(child: Text("No connectors are configured for this room")),
+                    if (!_loadingAvailableConnectors &&
+                        _availableConnectorsError == null &&
+                        _availableConnectors.isEmpty)
+                      ShadContextMenuItem(
+                        child: Text(
+                          "No connectors are configured for this room",
+                        ),
+                      ),
                     for (final connector in _availableConnectors)
                       ConnectorContextMenuItem(
                         selected:
-                            widget.controller.toolkits.whereType<ConnectorToolkitBuilderOption>().firstOrNull?.connectors.firstWhereOrNull(
-                              (c) => c.name == connector.name,
-                            ) !=
+                            widget.controller.toolkits
+                                .whereType<ConnectorToolkitBuilderOption>()
+                                .firstOrNull
+                                ?.connectors
+                                .firstWhereOrNull(
+                                  (c) => c.name == connector.name,
+                                ) !=
                             null,
                         agentName: widget.agentName!,
                         room: widget.controller.room,
                         connector: connector,
                         onSelectedChanged: (selected) async {
                           if (!selected) {
-                            widget.controller.toolkits.whereType<ConnectorToolkitBuilderOption>().firstOrNull?.connectors.removeWhere(
-                              (c) => c.name == connector.name,
-                            );
+                            widget.controller.toolkits
+                                .whereType<ConnectorToolkitBuilderOption>()
+                                .firstOrNull
+                                ?.connectors
+                                .removeWhere((c) => c.name == connector.name);
                             setState(() {});
                           } else {
                             try {
                               if (widget.onConnectorSetup == null) {
-                                throw Exception("Connector setup handler is not configured");
+                                throw Exception(
+                                  "Connector setup handler is not configured",
+                                );
                               }
                               await widget.onConnectorSetup!(connector);
                               var mcp =
-                                  widget.controller.toolkits.firstWhereOrNull((c) => c is ConnectorToolkitBuilderOption)
+                                  widget.controller.toolkits.firstWhereOrNull(
+                                        (c) =>
+                                            c is ConnectorToolkitBuilderOption,
+                                      )
                                       as ConnectorToolkitBuilderOption?;
                               if (mounted) {
-                                if (mcp!.connectors.firstWhereOrNull((c) => c.name == connector.name) == null) {
+                                if (mcp!.connectors.firstWhereOrNull(
+                                      (c) => c.name == connector.name,
+                                    ) ==
+                                    null) {
                                   setState(() {
                                     mcp.connectors.add(connector);
                                   });
@@ -1948,7 +2300,12 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
                             } catch (error) {
                               if (mounted) {
                                 ShadToaster.of(this.context).show(
-                                  ShadToast.destructive(title: Text("Failed to connect ${connector.name}"), description: Text("$error")),
+                                  ShadToast.destructive(
+                                    title: Text(
+                                      "Failed to connect ${connector.name}",
+                                    ),
+                                    description: Text("$error"),
+                                  ),
                                 );
                               }
                             }
@@ -1960,17 +2317,20 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
                   child: ListenableBuilder(
                     listenable: addMcpController,
                     builder: (context, _) => ShadButton.ghost(
-                      decoration: ShadDecoration(border: ShadBorder.all(radius: BorderRadius.circular(30))),
-
-                      onPressed: addMcpController.isOpen
-                          ? null
-                          : () {
-                              addMcpController.setOpen(true);
-                            },
+                      decoration: ShadDecoration(
+                        border: ShadBorder.all(
+                          radius: BorderRadius.circular(30),
+                        ),
+                      ),
+                      onPressed: addMcpController.toggle,
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         spacing: 8,
-                        children: [Icon(LucideIcons.cable), Text("${tool.connectors.length}"), Icon(LucideIcons.chevronDown)],
+                        children: [
+                          Icon(LucideIcons.cable),
+                          Text("${tool.connectors.length}"),
+                          Icon(LucideIcons.chevronDown),
+                        ],
                       ),
                     ),
                   ),
@@ -2012,7 +2372,10 @@ class _ConnectorContextMenuItem extends State<ConnectorContextMenuItem> {
 
   Future<void> _loadConnectedState() async {
     try {
-      final value = await widget.connector.isConnected(widget.room, widget.agentName);
+      final value = await widget.connector.isConnected(
+        widget.room,
+        widget.agentName,
+      );
       if (mounted) {
         setState(() {
           connected = value;
@@ -2043,7 +2406,12 @@ class _ConnectorContextMenuItem extends State<ConnectorContextMenuItem> {
         maintainAnimation: true,
         visible: connected != null,
         child: connected != true
-            ? Text("Connect", style: TextStyle(color: ShadTheme.of(context).colorScheme.mutedForeground))
+            ? Text(
+                "Connect",
+                style: TextStyle(
+                  color: ShadTheme.of(context).colorScheme.mutedForeground,
+                ),
+              )
             : ShadSwitch(
                 onChanged: (value) {
                   if (widget.onSelectedChanged != null) {
@@ -2064,7 +2432,11 @@ class _ConnectorContextMenuItem extends State<ConnectorContextMenuItem> {
 }
 
 abstract class ToolkitBuilderOption {
-  ToolkitBuilderOption({required this.icon, required this.text, required this.selectedText});
+  ToolkitBuilderOption({
+    required this.icon,
+    required this.text,
+    required this.selectedText,
+  });
 
   final String text;
   final String selectedText;
@@ -2074,7 +2446,12 @@ abstract class ToolkitBuilderOption {
 }
 
 class StaticToolkitBuilderOption extends ToolkitBuilderOption {
-  StaticToolkitBuilderOption({required super.icon, required super.text, required super.selectedText, required this.config});
+  StaticToolkitBuilderOption({
+    required super.icon,
+    required super.text,
+    required super.selectedText,
+    required this.config,
+  });
 
   final ToolkitConfig config;
   @override
@@ -2084,7 +2461,12 @@ class StaticToolkitBuilderOption extends ToolkitBuilderOption {
 }
 
 class ConnectorToolkitBuilderOption extends ToolkitBuilderOption {
-  ConnectorToolkitBuilderOption({required super.icon, required super.text, required super.selectedText, required this.connectors});
+  ConnectorToolkitBuilderOption({
+    required super.icon,
+    required super.text,
+    required super.selectedText,
+    required this.connectors,
+  });
 
   final List<Connector> connectors;
 
@@ -2138,7 +2520,8 @@ class ChatThreadInput extends StatefulWidget {
   final void Function()? onCancelSend;
   final String? sendPendingText;
   final ChatThreadController controller;
-  final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
+  final Widget Function(BuildContext context, FileAttachment upload)?
+  attachmentBuilder;
   final Widget? leading;
   final Widget? trailing;
   final Widget? header;
@@ -2199,7 +2582,8 @@ class _ChatThreadInput extends State<ChatThreadInput> {
         return;
       }
 
-      if (widget.controller.textFieldController.text.isEmpty && widget.controller.attachmentUploads.isEmpty) {
+      if (widget.controller.textFieldController.text.isEmpty &&
+          widget.controller.attachmentUploads.isEmpty) {
         widget.controller.textFieldController.text = draftText;
         for (final attachment in draftAttachments) {
           if (attachment.status == UploadStatus.completed) {
@@ -2212,7 +2596,8 @@ class _ChatThreadInput extends State<ChatThreadInput> {
         return;
       }
 
-      if (widget.controller.textFieldController.text.isEmpty && widget.controller.attachmentUploads.isEmpty) {
+      if (widget.controller.textFieldController.text.isEmpty &&
+          widget.controller.attachmentUploads.isEmpty) {
         widget.controller.textFieldController.text = draftText;
         for (final attachment in draftAttachments) {
           if (attachment.status == UploadStatus.completed) {
@@ -2221,7 +2606,12 @@ class _ChatThreadInput extends State<ChatThreadInput> {
         }
       }
 
-      ShadToaster.of(context).show(ShadToast.destructive(title: const Text("Unable to send message"), description: Text("$error")));
+      ShadToaster.of(context).show(
+        ShadToast.destructive(
+          title: const Text("Unable to send message"),
+          description: Text("$error"),
+        ),
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -2233,19 +2623,24 @@ class _ChatThreadInput extends State<ChatThreadInput> {
 
   late final focusNode = FocusNode(
     onKeyEvent: (_, event) {
-      if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.enter && !HardwareKeyboard.instance.isShiftPressed) {
+      if (event is KeyDownEvent &&
+          event.logicalKey == LogicalKeyboardKey.enter &&
+          !HardwareKeyboard.instance.isShiftPressed) {
         unawaited(_handleSend());
 
         return KeyEventResult.handled;
       }
 
-      if (event is KeyDownEvent && event.character == "l" && HardwareKeyboard.instance.isControlPressed) {
+      if (event is KeyDownEvent &&
+          event.character == "l" &&
+          HardwareKeyboard.instance.isControlPressed) {
         if (widget.onClear != null) {
           widget.onClear!();
         }
       }
 
-      if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.escape) {
+      if (event is KeyDownEvent &&
+          event.logicalKey == LogicalKeyboardKey.escape) {
         if (widget.onInterrupt != null) {
           widget.onInterrupt!();
           return KeyEventResult.handled;
@@ -2281,7 +2676,9 @@ class _ChatThreadInput extends State<ChatThreadInput> {
 
     bool allCompleted = true;
     if (attachments.isNotEmpty) {
-      allCompleted = attachments.every((upload) => (upload.status == UploadStatus.completed));
+      allCompleted = attachments.every(
+        (upload) => (upload.status == UploadStatus.completed),
+      );
     }
     if (allCompleted != allAttachmentsUploaded) {
       setState(() {
@@ -2325,7 +2722,8 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   @override
   void didUpdateWidget(covariant ChatThreadInput oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if ((!oldWidget.autoFocus && widget.autoFocus) || oldWidget.focusTrigger != widget.focusTrigger) {
+    if ((!oldWidget.autoFocus && widget.autoFocus) ||
+        oldWidget.focusTrigger != widget.focusTrigger) {
       _scheduleAutoFocus();
     }
   }
@@ -2344,12 +2742,20 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   Future<DataReaderFile> _getFile(DataReader reader, SimpleFileFormat? format) {
     final completer = Completer<DataReaderFile>();
 
-    reader.getFile(format, completer.complete, onError: completer.completeError);
+    reader.getFile(
+      format,
+      completer.complete,
+      onError: completer.completeError,
+    );
 
     return completer.future;
   }
 
-  Future<void> onFileDrop(String name, Stream<Uint8List> dataStream, int size) async {
+  Future<void> onFileDrop(
+    String name,
+    Stream<Uint8List> dataStream,
+    int size,
+  ) async {
     widget.controller.uploadFile(name, dataStream, size);
   }
 
@@ -2360,7 +2766,9 @@ class _ChatThreadInput extends State<ChatThreadInput> {
       for (final item in reader.items) {
         final name = (await item.getSuggestedName());
         if (name != null) {
-          final fmt = _preferredFormats.firstWhereOrNull((f) => item.canProvide(f));
+          final fmt = _preferredFormats.firstWhereOrNull(
+            (f) => item.canProvide(f),
+          );
           final file = await _getFile(item, fmt);
 
           await onFileDrop(name, file.getStream(), file.fileSize ?? 0);
@@ -2390,10 +2798,15 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     final newText = textBefore + text + textAfter;
 
     // Calculate the new selection (cursor at the end of the inserted text)
-    final newSelection = TextSelection.collapsed(offset: textBefore.length + text.length);
+    final newSelection = TextSelection.collapsed(
+      offset: textBefore.length + text.length,
+    );
 
     // Update the controller's value
-    controller.textFieldController.value = TextEditingValue(text: newText, selection: newSelection);
+    controller.textFieldController.value = TextEditingValue(
+      text: newText,
+      selection: newSelection,
+    );
   }
 
   @override
@@ -2401,10 +2814,15 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     final theme = ShadTheme.of(context);
     final cancelSendButton = ShadTooltip(
       waitDuration: const Duration(seconds: 1),
-      builder: (context) =>
-          Text(widget.sendPendingText?.trim().isNotEmpty == true ? widget.sendPendingText!.trim() : "Waiting for agent to come online."),
+      builder: (context) => Text(
+        widget.sendPendingText?.trim().isNotEmpty == true
+            ? widget.sendPendingText!.trim()
+            : "Waiting for agent to come online.",
+      ),
       child: ShadGestureDetector(
-        cursor: widget.onCancelSend == null ? SystemMouseCursors.basic : SystemMouseCursors.click,
+        cursor: widget.onCancelSend == null
+            ? SystemMouseCursors.basic
+            : SystemMouseCursors.click,
         onTapDown: widget.onCancelSend == null
             ? null
             : (_) {
@@ -2419,13 +2837,23 @@ class _ChatThreadInput extends State<ChatThreadInput> {
               alignment: Alignment.center,
               children: [
                 const Positioned.fill(
-                  child: Padding(padding: EdgeInsets.all(1), child: _CyclingProgressIndicator(strokeWidth: 2)),
+                  child: Padding(
+                    padding: EdgeInsets.all(1),
+                    child: _CyclingProgressIndicator(strokeWidth: 2),
+                  ),
                 ),
                 Container(
                   width: 18,
                   height: 18,
-                  decoration: BoxDecoration(shape: BoxShape.circle, color: theme.colorScheme.background),
-                  child: Icon(LucideIcons.x, color: theme.colorScheme.foreground, size: 16),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: theme.colorScheme.background,
+                  ),
+                  child: Icon(
+                    LucideIcons.x,
+                    color: theme.colorScheme.foreground,
+                    size: 16,
+                  ),
                 ),
               ],
             ),
@@ -2448,7 +2876,9 @@ class _ChatThreadInput extends State<ChatThreadInput> {
                       : "Wait for the current turn to start",
                 ),
                 child: ShadIconButton(
-                  cursor: widget.sendEnabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+                  cursor: widget.sendEnabled
+                      ? SystemMouseCursors.click
+                      : SystemMouseCursors.basic,
                   onPressed: widget.sendEnabled
                       ? () {
                           unawaited(_handleSend());
@@ -2457,8 +2887,14 @@ class _ChatThreadInput extends State<ChatThreadInput> {
                   width: 32,
                   height: 32,
                   iconSize: 16,
-                  decoration: ShadDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
-                  icon: Icon(LucideIcons.arrowUp, color: ShadTheme.of(context).colorScheme.background),
+                  decoration: ShadDecoration(
+                    shape: BoxShape.circle,
+                    color: ShadTheme.of(context).colorScheme.foreground,
+                  ),
+                  icon: Icon(
+                    LucideIcons.arrowUp,
+                    color: ShadTheme.of(context).colorScheme.background,
+                  ),
                 ),
               )
             : null);
@@ -2469,7 +2905,9 @@ class _ChatThreadInput extends State<ChatThreadInput> {
         if (widget.header != null) widget.header!,
         ShadInput(
           contextMenuBuilder: (context, editableTextState) =>
-              AdaptiveTextSelectionToolbar.editableText(editableTextState: editableTextState),
+              AdaptiveTextSelectionToolbar.editableText(
+                editableTextState: editableTextState,
+              ),
           top: ListenableBuilder(
             listenable: widget.controller,
             builder: (context, _) {
@@ -2485,13 +2923,17 @@ class _ChatThreadInput extends State<ChatThreadInput> {
                     child: Center(
                       child: ListView.separated(
                         itemCount: attachments.length,
-                        separatorBuilder: (context, index) => const SizedBox(width: 10),
+                        separatorBuilder: (context, index) =>
+                            const SizedBox(width: 10),
                         scrollDirection: Axis.horizontal,
                         itemBuilder: (context, index) {
                           final attachment = attachments[index];
 
                           if (widget.attachmentBuilder != null) {
-                            return widget.attachmentBuilder!(context, attachment);
+                            return widget.attachmentBuilder!(
+                              context,
+                              attachment,
+                            );
                           }
 
                           return FileDefaultAttachmentPreview(
@@ -2514,12 +2956,27 @@ class _ChatThreadInput extends State<ChatThreadInput> {
           inputPadding: EdgeInsets.all(2),
           leading: widget.leading ?? SizedBox(width: 3),
           trailing: widget.footer == null ? trailer : null,
-          padding: EdgeInsets.only(left: 5, right: 5, top: widget.footer == null ? 5 : 10, bottom: 5),
+          padding: EdgeInsets.only(
+            left: 5,
+            right: 5,
+            top: widget.footer == null ? 5 : 10,
+            bottom: 5,
+          ),
           decoration: (() {
             final theme = ShadTheme.of(context);
-            final composerRadius = theme.radius.resolve(Directionality.of(context));
-            final composerBorder = ShadBorder.all(radius: composerRadius, color: theme.colorScheme.border, width: 2);
-            final composerFocusedBorder = ShadBorder.all(radius: composerRadius, color: theme.colorScheme.foreground, width: 2);
+            final composerRadius = theme.radius.resolve(
+              Directionality.of(context),
+            );
+            final composerBorder = ShadBorder.all(
+              radius: composerRadius,
+              color: theme.colorScheme.border,
+              width: 2,
+            );
+            final composerFocusedBorder = ShadBorder.all(
+              radius: composerRadius,
+              color: theme.colorScheme.foreground,
+              width: 2,
+            );
             return ShadDecoration(
               color: theme.colorScheme.card,
               border: composerBorder,
@@ -2536,7 +2993,12 @@ class _ChatThreadInput extends State<ChatThreadInput> {
           bottom: widget.footer == null
               ? null
               : Padding(
-                  padding: EdgeInsets.only(left: 5, right: 5, top: 5, bottom: 0),
+                  padding: EdgeInsets.only(
+                    left: 5,
+                    right: 5,
+                    top: 5,
+                    bottom: 0,
+                  ),
                   child: Row(
                     children: [
                       Expanded(child: widget.footer!),
@@ -2595,13 +3057,18 @@ class ChatThread extends StatefulWidget {
   final FutureOr<void> Function()? onVisibleMessagesEmpty;
   final bool initialShowCompletedToolCalls;
 
-  final Widget Function(BuildContext, MeshDocument, MeshElement)? messageHeaderBuilder;
-  final Widget Function(BuildContext, List<String>)? waitingForParticipantsBuilder;
-  final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
+  final Widget Function(BuildContext, MeshDocument, MeshElement)?
+  messageHeaderBuilder;
+  final Widget Function(BuildContext, List<String>)?
+  waitingForParticipantsBuilder;
+  final Widget Function(BuildContext context, FileAttachment upload)?
+  attachmentBuilder;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
-  final Widget Function(BuildContext context, Widget chatBox)? chatInputBoxBuilder;
+  final Widget Function(BuildContext context, Widget chatBox)?
+  chatInputBoxBuilder;
   final FutureOr<void> Function(String path)? openFile;
-  final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
+  final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)?
+  toolsBuilder;
 
   @override
   State createState() => _ChatThreadState();
@@ -2614,7 +3081,7 @@ class ChatBubble extends StatefulWidget {
     required this.mine,
     required this.text,
     this.onDelete,
-    this.reactionAction,
+    this.reactionActionBuilder,
     this.showReactionAction = false,
     this.onReactFromMenu,
   });
@@ -2623,7 +3090,8 @@ class ChatBubble extends StatefulWidget {
   final bool mine;
   final String text;
   final VoidCallback? onDelete;
-  final Widget? reactionAction;
+  final Widget Function(ShadContextMenuController controller)?
+  reactionActionBuilder;
   final bool showReactionAction;
   final VoidCallback? onReactFromMenu;
 
@@ -2635,27 +3103,35 @@ class _ChatBubble extends State<ChatBubble> {
   static const double _actionSlotSize = 30;
   static const double _actionGap = 6;
   static const double _bubbleRadius = 16;
+  static const Duration _menuReverseDuration = Duration(milliseconds: 150);
   static ShadContextMenuController? _activeOptionsController;
 
   bool hovering = false;
+  bool _keepingActionsVisible = false;
+  Timer? _actionVisibilityTimer;
 
   final optionsController = ShadContextMenuController();
   final Object _contextMenuGroupId = Object();
+  final reactionController = ShadContextMenuController();
 
   @override
   void initState() {
     super.initState();
 
     optionsController.addListener(_handleOptionsControllerChanged);
+    reactionController.addListener(_handleControllerChanged);
   }
 
   @override
   void dispose() {
+    _actionVisibilityTimer?.cancel();
     if (identical(_activeOptionsController, optionsController)) {
       _activeOptionsController = null;
     }
     optionsController.removeListener(_handleOptionsControllerChanged);
+    reactionController.removeListener(_handleControllerChanged);
     optionsController.dispose();
+    reactionController.dispose();
     super.dispose();
   }
 
@@ -2670,9 +3146,48 @@ class _ChatBubble extends State<ChatBubble> {
       _activeOptionsController = null;
     }
 
-    if (mounted) {
-      setState(() {});
+    _handleControllerChanged();
+  }
+
+  void _handleControllerChanged() {
+    if (!mounted) {
+      return;
     }
+
+    _syncActionVisibilityForMenuState();
+    setState(() {});
+  }
+
+  void _syncActionVisibilityForMenuState() {
+    final menuOpen = optionsController.isOpen || reactionController.isOpen;
+    if (menuOpen) {
+      _actionVisibilityTimer?.cancel();
+      _keepingActionsVisible = true;
+      return;
+    }
+
+    if (hovering) {
+      _actionVisibilityTimer?.cancel();
+      return;
+    }
+
+    _scheduleActionVisibilityHide();
+  }
+
+  void _scheduleActionVisibilityHide() {
+    _actionVisibilityTimer?.cancel();
+    _actionVisibilityTimer = Timer(_menuReverseDuration, () {
+      if (!mounted ||
+          hovering ||
+          optionsController.isOpen ||
+          reactionController.isOpen) {
+        return;
+      }
+
+      setState(() {
+        _keepingActionsVisible = false;
+      });
+    });
   }
 
   Future<void> _onCopy() async {
@@ -2680,7 +3195,12 @@ class _ChatBubble extends State<ChatBubble> {
     if (clipboard == null) return;
 
     final text = widget.text;
-    final html = md.markdownToHtml(text, extensionSet: md.ExtensionSet.gitHubFlavored, inlineSyntaxes: const [], blockSyntaxes: const []);
+    final html = md.markdownToHtml(
+      text,
+      extensionSet: md.ExtensionSet.gitHubFlavored,
+      inlineSyntaxes: const [],
+      blockSyntaxes: const [],
+    );
 
     final reps = <raw.DataRepresentation>[
       raw.DataRepresentation.simple(format: "text/plain", data: text),
@@ -2689,13 +3209,19 @@ class _ChatBubble extends State<ChatBubble> {
 
     if (!kIsWeb) {
       reps.insertAll(0, [
-        raw.DataRepresentation.simple(format: "public.utf8-plain-text", data: text),
+        raw.DataRepresentation.simple(
+          format: "public.utf8-plain-text",
+          data: text,
+        ),
         raw.DataRepresentation.simple(format: "public.plain-text", data: text),
         raw.DataRepresentation.simple(format: "public.html", data: html),
       ]);
     }
 
-    await clipboard.write([DataWriterItem(suggestedName: "meshwidget.widget")..add(EncodedData(reps))]);
+    await clipboard.write([
+      DataWriterItem(suggestedName: "meshwidget.widget")
+        ..add(EncodedData(reps)),
+    ]);
   }
 
   Future<void> _onSave(RoomClient room) async {
@@ -2771,7 +3297,12 @@ class _ChatBubble extends State<ChatBubble> {
                 }
 
                 final bytes = Uint8List.fromList(utf8.encode(widget.text));
-                await room.storage.uploadStream(fullPath, Stream.value(bytes), overwrite: true, size: bytes.length);
+                await room.storage.uploadStream(
+                  fullPath,
+                  Stream.value(bytes),
+                  overwrite: true,
+                  size: bytes.length,
+                );
 
                 if (context.mounted) {
                   Navigator.of(context).pop();
@@ -2798,7 +3329,10 @@ class _ChatBubble extends State<ChatBubble> {
               Padding(
                 padding: .only(top: 12.0),
                 child: ShadInputFormField(
-                  label: Text('Enter File Name', style: tt.small.copyWith(fontWeight: FontWeight.bold)),
+                  label: Text(
+                    'Enter File Name',
+                    style: tt.small.copyWith(fontWeight: FontWeight.bold),
+                  ),
                   placeholder: const Text('chat-comment.md'),
                   keyboardType: TextInputType.emailAddress,
                   controller: fileNameController,
@@ -2816,7 +3350,9 @@ class _ChatBubble extends State<ChatBubble> {
       context: context,
       builder: (context) => ShadDialog(
         title: Text("Delete Message"),
-        description: Text("Are you sure you want to delete this message? This action cannot be undone."),
+        description: Text(
+          "Are you sure you want to delete this message? This action cannot be undone.",
+        ),
         actions: [
           ShadButton.secondary(
             onPressed: () {
@@ -2843,23 +3379,46 @@ class _ChatBubble extends State<ChatBubble> {
     final text = widget.text;
     final mine = widget.mine;
     final bubbleColor = cs.background;
-    final openOptions = optionsController.isOpen || hovering;
+    final showActions =
+        hovering ||
+        optionsController.isOpen ||
+        reactionController.isOpen ||
+        _keepingActionsVisible;
     final canLongPressReact =
-        (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS) && widget.onReactFromMenu != null;
+        (defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS) &&
+        widget.onReactFromMenu != null;
+    final optionItemCount =
+        1 +
+        (canLongPressReact ? 1 : 0) +
+        (widget.room != null ? 1 : 0) +
+        (widget.onDelete != null ? 1 : 0);
 
     final optionsAction = IgnorePointer(
-      ignoring: !openOptions,
+      ignoring: !showActions,
       child: Opacity(
-        opacity: openOptions ? 1 : 0,
+        opacity: showActions ? 1 : 0,
         child: Padding(
           padding: EdgeInsets.only(bottom: 5),
-          child: ShadContextMenuRegion(
+          child: CoordinatedShadContextMenu(
             controller: optionsController,
             groupId: _contextMenuGroupId,
             constraints: const BoxConstraints(minWidth: 200),
+            estimatedMenuWidth: 200,
+            estimatedMenuHeight: optionItemCount * 40.0 + 8.0,
+            popoverReverseDuration: _menuReverseDuration,
             items: [
-              ShadContextMenuItem(height: 40, onPressed: _onCopy, child: Text('Copy')),
-              if (canLongPressReact) ShadContextMenuItem(height: 40, onPressed: widget.onReactFromMenu, child: Text('React')),
+              ShadContextMenuItem(
+                height: 40,
+                onPressed: _onCopy,
+                child: Text('Copy'),
+              ),
+              if (canLongPressReact)
+                ShadContextMenuItem(
+                  height: 40,
+                  onPressed: widget.onReactFromMenu,
+                  child: Text('React'),
+                ),
               if (widget.room != null)
                 ShadContextMenuItem(
                   height: 40,
@@ -2868,14 +3427,23 @@ class _ChatBubble extends State<ChatBubble> {
                   },
                   child: Text('Save as...'),
                 ),
-              if (widget.onDelete != null) ShadContextMenuItem(height: 40, onPressed: _onDelete, child: Text('Delete')),
+              if (widget.onDelete != null)
+                ShadContextMenuItem(
+                  height: 40,
+                  onPressed: _onDelete,
+                  child: Text('Delete'),
+                ),
             ],
             child: ShadButton.ghost(
               height: 30,
               width: 30,
               padding: EdgeInsets.zero,
-              onPressed: optionsController.show,
-              child: Icon(LucideIcons.ellipsis, size: 18, color: cs.mutedForeground),
+              onPressed: optionsController.toggle,
+              child: Icon(
+                LucideIcons.ellipsis,
+                size: 18,
+                color: cs.mutedForeground,
+              ),
             ),
           ),
         ),
@@ -2886,10 +3454,15 @@ class _ChatBubble extends State<ChatBubble> {
       width: _actionSlotSize,
       height: 35,
       child: IgnorePointer(
-        ignoring: !(openOptions && widget.showReactionAction),
+        ignoring: !(showActions && widget.showReactionAction),
         child: Opacity(
-          opacity: openOptions && widget.showReactionAction ? 1 : 0,
-          child: Padding(padding: const EdgeInsets.only(bottom: 5), child: widget.reactionAction ?? const SizedBox.shrink()),
+          opacity: showActions && widget.showReactionAction ? 1 : 0,
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 5),
+            child:
+                widget.reactionActionBuilder?.call(reactionController) ??
+                const SizedBox.shrink(),
+          ),
         ),
       ),
     );
@@ -2917,12 +3490,21 @@ class _ChatBubble extends State<ChatBubble> {
       groupId: _contextMenuGroupId,
       onTapOutside: (_) {
         optionsController.hide();
+        reactionController.hide();
       },
       child: ShadGestureDetector(
         onHoverChange: (h) {
+          _actionVisibilityTimer?.cancel();
           setState(() {
             hovering = h;
+            if (h) {
+              _keepingActionsVisible = true;
+            }
           });
+
+          if (!h && !optionsController.isOpen && !reactionController.isOpen) {
+            _scheduleActionVisibilityHide();
+          }
         },
         onLongPress: optionsController.show,
         child: Container(
@@ -2937,12 +3519,20 @@ class _ChatBubble extends State<ChatBubble> {
                 Expanded(
                   child: Container(
                     padding: _chatBubbleContentPadding,
-                    decoration: BoxDecoration(color: bubbleColor, borderRadius: BorderRadius.circular(_bubbleRadius)),
+                    decoration: BoxDecoration(
+                      color: bubbleColor,
+                      borderRadius: BorderRadius.circular(_bubbleRadius),
+                    ),
                     child: MediaQuery(
-                      data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
+                      data: MediaQuery.of(
+                        context,
+                      ).copyWith(textScaler: const TextScaler.linear(1.0)),
                       child: MarkdownWidget(
                         padding: const EdgeInsets.all(0),
-                        config: buildChatBubbleMarkdownConfig(context, threadTypography: true),
+                        config: buildChatBubbleMarkdownConfig(
+                          context,
+                          threadTypography: true,
+                        ),
                         shrinkWrap: true,
                         selectable: kIsWeb,
                         data: text,
@@ -2961,7 +3551,11 @@ class _ChatBubble extends State<ChatBubble> {
 }
 
 class ChatMessage {
-  const ChatMessage({required this.id, required this.text, this.attachments = const []});
+  const ChatMessage({
+    required this.id,
+    required this.text,
+    this.attachments = const [],
+  });
 
   final String id;
   final String text;
@@ -2974,7 +3568,10 @@ class _ChatThreadState extends State<ChatThread> {
   bool _didNotifyVisibleMessagesEmpty = false;
   late bool _showCompletedToolCalls;
 
-  bool _shouldStoreLocally({required bool hasConfiguredAgent, required bool useAgentMessages}) {
+  bool _shouldStoreLocally({
+    required bool hasConfiguredAgent,
+    required bool useAgentMessages,
+  }) {
     return !hasConfiguredAgent && !useAgentMessages;
   }
 
@@ -2987,19 +3584,32 @@ class _ChatThreadState extends State<ChatThread> {
       combined[message.messageId] = message;
     }
     final values = combined.values.toList();
-    return [...values.where((message) => !message.awaitingAcceptance), ...values.where((message) => message.awaitingAcceptance)];
+    return [
+      ...values.where((message) => !message.awaitingAcceptance),
+      ...values.where((message) => message.awaitingAcceptance),
+    ];
   }
 
-  bool _isWaitingForTurnStart({required ChatThreadSnapshot state, required List<PendingAgentMessage> pendingMessages}) {
+  bool _isWaitingForTurnStart({
+    required ChatThreadSnapshot state,
+    required List<PendingAgentMessage> pendingMessages,
+  }) {
     if (!state.supportsAgentMessages || state.threadTurnId != null) {
       return false;
     }
 
-    return pendingMessages.any((message) => message.messageType == _agentTurnStartType);
+    return pendingMessages.any(
+      (message) => message.messageType == _agentTurnStartType,
+    );
   }
 
-  bool _canInterruptActiveTurn({required ChatThreadSnapshot state, required List<PendingAgentMessage> pendingMessages}) {
-    return state.supportsAgentMessages && state.threadTurnId != null && pendingMessages.isNotEmpty;
+  bool _canInterruptActiveTurn({
+    required ChatThreadSnapshot state,
+    required List<PendingAgentMessage> pendingMessages,
+  }) {
+    return state.supportsAgentMessages &&
+        state.threadTurnId != null &&
+        pendingMessages.isNotEmpty;
   }
 
   Future<void> _clearThread(ChatThreadSnapshot state) async {
@@ -3020,16 +3630,27 @@ class _ChatThreadState extends State<ChatThread> {
 
     if (widget.initialMessage != null) {
       final normalizedAgentName = widget.agentName?.trim();
-      final hasConfiguredAgent = normalizedAgentName != null && normalizedAgentName.isNotEmpty;
+      final hasConfiguredAgent =
+          normalizedAgentName != null && normalizedAgentName.isNotEmpty;
       final useAgentMessages = hasConfiguredAgent
-          ? controller.getAgentParticipants(widget.document, participantName: normalizedAgentName).isNotEmpty
+          ? controller
+                .getAgentParticipants(
+                  widget.document,
+                  participantName: normalizedAgentName,
+                )
+                .isNotEmpty
           : controller.getAgentParticipants(widget.document).isNotEmpty;
       controller.send(
         thread: widget.document,
         path: widget.path,
         message: widget.initialMessage!,
-        remoteStoreParticipantName: hasConfiguredAgent ? normalizedAgentName : null,
-        storeLocally: _shouldStoreLocally(hasConfiguredAgent: hasConfiguredAgent, useAgentMessages: useAgentMessages),
+        remoteStoreParticipantName: hasConfiguredAgent
+            ? normalizedAgentName
+            : null,
+        storeLocally: _shouldStoreLocally(
+          hasConfiguredAgent: hasConfiguredAgent,
+          useAgentMessages: useAgentMessages,
+        ),
         useAgentMessages: useAgentMessages,
         onMessageSent: widget.onMessageSent,
       );
@@ -3054,7 +3675,8 @@ class _ChatThreadState extends State<ChatThread> {
   @override
   void didUpdateWidget(covariant ChatThread oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.path != widget.path || oldWidget.document != widget.document) {
+    if (oldWidget.path != widget.path ||
+        oldWidget.document != widget.document) {
       _didNotifyVisibleMessagesEmpty = false;
     }
   }
@@ -3065,7 +3687,9 @@ class _ChatThreadState extends State<ChatThread> {
       return;
     }
 
-    final hasVisibleMessages = messages.any(_shouldRenderThreadMessageForVisibility);
+    final hasVisibleMessages = messages.any(
+      _shouldRenderThreadMessageForVisibility,
+    );
     if (hasVisibleMessages) {
       _didNotifyVisibleMessagesEmpty = false;
       return;
@@ -3094,23 +3718,54 @@ class _ChatThreadState extends State<ChatThread> {
       return true;
     }
 
-    const supportedKinds = {"exec", "tool", "web", "search", "diff", "image", "approval", "collab", "plan", "thread", "file"};
-    final kind = ((message.getAttribute("kind") as String?) ?? "").trim().toLowerCase();
+    const supportedKinds = {
+      "exec",
+      "tool",
+      "web",
+      "search",
+      "diff",
+      "image",
+      "approval",
+      "collab",
+      "plan",
+      "thread",
+      "file",
+    };
+    final kind = ((message.getAttribute("kind") as String?) ?? "")
+        .trim()
+        .toLowerCase();
     if (!supportedKinds.contains(kind)) {
       return false;
     }
-    return !_shouldHideCompletedToolCallEvent(message, showCompletedToolCalls: _showCompletedToolCalls);
+    return !_shouldHideCompletedToolCallEvent(
+      message,
+      showCompletedToolCalls: _showCompletedToolCalls,
+    );
   }
 
-  Widget _buildInputChatBox(BuildContext context, List<PendingAgentMessage> pendingMessages, ChatThreadSnapshot state) {
-    final waitingForTurnStart = _isWaitingForTurnStart(state: state, pendingMessages: pendingMessages);
-    final waitingForOnlineMessage = pendingMessages.firstWhereOrNull((message) => message.awaitingOnline);
-    final canInterruptActiveTurn = _canInterruptActiveTurn(state: state, pendingMessages: pendingMessages);
+  Widget _buildInputChatBox(
+    BuildContext context,
+    List<PendingAgentMessage> pendingMessages,
+    ChatThreadSnapshot state,
+  ) {
+    final waitingForTurnStart = _isWaitingForTurnStart(
+      state: state,
+      pendingMessages: pendingMessages,
+    );
+    final waitingForOnlineMessage = pendingMessages.firstWhereOrNull(
+      (message) => message.awaitingOnline,
+    );
+    final canInterruptActiveTurn = _canInterruptActiveTurn(
+      state: state,
+      pendingMessages: pendingMessages,
+    );
 
     return ChatThreadInput(
       focusTrigger: widget.path,
       sendEnabled: !waitingForTurnStart,
-      sendDisabledReason: waitingForTurnStart ? "Wait for the previous message to start before sending another one." : null,
+      sendDisabledReason: waitingForTurnStart
+          ? "Wait for the previous message to start before sending another one."
+          : null,
       placeholder: widget.inputPlaceholder,
       onClear: () {
         _clearThread(state);
@@ -3147,16 +3802,29 @@ class _ChatThreadState extends State<ChatThread> {
       trailing: null,
       room: widget.room,
       onSend: (value, attachments) async {
-        final messageType = state.threadStatusMode == "steerable" && state.threadTurnId != null ? "steer" : "chat";
+        final messageType =
+            state.threadStatusMode == "steerable" && state.threadTurnId != null
+            ? "steer"
+            : "chat";
         final normalizedAgentName = widget.agentName?.trim();
-        final hasConfiguredAgent = normalizedAgentName != null && normalizedAgentName.isNotEmpty;
+        final hasConfiguredAgent =
+            normalizedAgentName != null && normalizedAgentName.isNotEmpty;
         await controller.send(
           thread: widget.document,
           path: widget.path,
-          message: ChatMessage(id: const Uuid().v4(), text: value, attachments: attachments.map((x) => x.path).toList()),
+          message: ChatMessage(
+            id: const Uuid().v4(),
+            text: value,
+            attachments: attachments.map((x) => x.path).toList(),
+          ),
           messageType: messageType,
-          remoteStoreParticipantName: hasConfiguredAgent ? normalizedAgentName : null,
-          storeLocally: _shouldStoreLocally(hasConfiguredAgent: hasConfiguredAgent, useAgentMessages: state.supportsAgentMessages),
+          remoteStoreParticipantName: hasConfiguredAgent
+              ? normalizedAgentName
+              : null,
+          storeLocally: _shouldStoreLocally(
+            hasConfiguredAgent: hasConfiguredAgent,
+            useAgentMessages: state.supportsAgentMessages,
+          ),
           useAgentMessages: state.supportsAgentMessages,
           turnId: state.threadTurnId,
           onMessageSent: widget.onMessageSent,
@@ -3165,7 +3833,11 @@ class _ChatThreadState extends State<ChatThread> {
       onChanged: (value, attachments) {
         for (final part in controller.getOnlineParticipants(widget.document)) {
           if (part.id != widget.room.localParticipant?.id) {
-            widget.room.messaging.sendMessage(to: part, type: "typing", message: {"path": widget.path});
+            widget.room.messaging.sendMessage(
+              to: part,
+              type: "typing",
+              message: {"path": widget.path},
+            );
           }
         }
       },
@@ -3183,130 +3855,175 @@ class _ChatThreadState extends State<ChatThread> {
       controller: controller,
       agentName: widget.agentName,
       builder: (context, state) {
-        if (state.offline.isNotEmpty && widget.waitingForParticipantsBuilder != null) {
-          return widget.waitingForParticipantsBuilder!(context, state.offline.toList());
+        if (state.offline.isNotEmpty &&
+            widget.waitingForParticipantsBuilder != null) {
+          return widget.waitingForParticipantsBuilder!(
+            context,
+            state.offline.toList(),
+          );
         }
 
         _handleVisibleMessages(state.messages);
 
-        bool bottomAlign = !widget.startChatCentered || state.messages.isNotEmpty;
+        bool bottomAlign =
+            !widget.startChatCentered || state.messages.isNotEmpty;
 
-        return FileDropArea(
-          onFileDrop: (name, dataStream, size) async {
-            widget.controller?.uploadFile(name, dataStream, size ?? 0);
-          },
-
-          child: Column(
-            mainAxisAlignment: bottomAlign ? .end : .center,
-            children: [
-              ChatThreadMessages(
-                room: widget.room,
-                path: widget.path,
-                scrollController: controller.threadScrollController,
-                agentName: widget.agentName,
-                showCompletedToolCalls: _showCompletedToolCalls,
-                onShowCompletedToolCallsChanged: (value) {
-                  setState(() {
-                    _showCompletedToolCalls = value;
-                  });
-                },
-                startChatCentered: widget.startChatCentered,
-                messages: state.messages,
-                online: state.online,
-                showTyping: (state.threadStatusMode != null) && state.listening.isEmpty,
-                showListening: state.listening.isNotEmpty,
-                threadStatus: state.threadStatus,
-                threadStatusStartedAt: state.threadStatusStartedAt,
-                threadStatusMode: state.threadStatusMode,
-                pendingItemId: state.pendingItemId,
-                onCancel: () {
-                  controller.cancel(
-                    widget.path,
-                    widget.document,
-                    useAgentMessages: state.supportsAgentMessages,
-                    turnId: state.threadTurnId,
-                    participantName: widget.agentName,
-                  );
-                },
-                messageHeaderBuilder: widget.messageHeaderBuilder,
-                fileInThreadBuilder: widget.fileInThreadBuilder,
-                openFile: widget.openFile,
-                currentStatusEntry: _currentStatusEntry,
-                emptyStateTitle: widget.emptyStateTitle,
-                emptyStateDescription: widget.emptyStateDescription,
-                emptyState: widget.emptyState,
-              ),
-              ListenableBuilder(
-                listenable: controller,
-                builder: (context, _) {
-                  final pendingMessages = _combinedPendingMessages(state);
-                  final canInterruptActiveTurn = _canInterruptActiveTurn(state: state, pendingMessages: pendingMessages);
-
-                  return ChatThreadInputFrame(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        if (pendingMessages.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const SizedBox(width: 10),
-                                const SizedBox(width: 24, height: 24),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(
-                                        "Pending messages:",
-                                        style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      for (final pending in pendingMessages)
-                                        Padding(
-                                          padding: const EdgeInsets.only(bottom: 4),
-                                          child: Text(
-                                            [
-                                              if (pending.senderName != null) "${_displayParticipantName(pending.senderName!)}:",
-                                              if (pending.text.trim().isNotEmpty) pending.text.trim(),
-                                              if (pending.attachments.isNotEmpty)
-                                                "${pending.attachments.length} attachment${pending.attachments.length == 1 ? "" : "s"}",
-                                              if (pending.awaitingOnline)
-                                                "(waiting for @${_displayParticipantName(widget.agentName ?? "agent")} to come online)"
-                                              else if (pending.awaitingAcceptance)
-                                                "(waiting for acceptance)",
-                                            ].join(" "),
-                                            style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
+        return ShadContextMenuBoundary(
+          child: FileDropArea(
+            onFileDrop: (name, dataStream, size) async {
+              widget.controller?.uploadFile(name, dataStream, size ?? 0);
+            },
+            child: Column(
+              mainAxisAlignment: bottomAlign ? .end : .center,
+              children: [
+                ChatThreadMessages(
+                  room: widget.room,
+                  path: widget.path,
+                  scrollController: controller.threadScrollController,
+                  agentName: widget.agentName,
+                  showCompletedToolCalls: _showCompletedToolCalls,
+                  onShowCompletedToolCallsChanged: (value) {
+                    setState(() {
+                      _showCompletedToolCalls = value;
+                    });
+                  },
+                  startChatCentered: widget.startChatCentered,
+                  messages: state.messages,
+                  online: state.online,
+                  showTyping:
+                      (state.threadStatusMode != null) &&
+                      state.listening.isEmpty,
+                  showListening: state.listening.isNotEmpty,
+                  threadStatus: state.threadStatus,
+                  threadStatusStartedAt: state.threadStatusStartedAt,
+                  threadStatusMode: state.threadStatusMode,
+                  pendingItemId: state.pendingItemId,
+                  onCancel: () {
+                    controller.cancel(
+                      widget.path,
+                      widget.document,
+                      useAgentMessages: state.supportsAgentMessages,
+                      turnId: state.threadTurnId,
+                      participantName: widget.agentName,
+                    );
+                  },
+                  messageHeaderBuilder: widget.messageHeaderBuilder,
+                  fileInThreadBuilder: widget.fileInThreadBuilder,
+                  openFile: widget.openFile,
+                  currentStatusEntry: _currentStatusEntry,
+                  emptyStateTitle: widget.emptyStateTitle,
+                  emptyStateDescription: widget.emptyStateDescription,
+                  emptyState: widget.emptyState,
+                ),
+                ListenableBuilder(
+                  listenable: controller,
+                  builder: (context, _) {
+                    final pendingMessages = _combinedPendingMessages(state);
+                    final canInterruptActiveTurn = _canInterruptActiveTurn(
+                      state: state,
+                      pendingMessages: pendingMessages,
+                    );
+                    return ChatThreadInputFrame(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (pendingMessages.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const SizedBox(width: 10),
+                                  const SizedBox(width: 24, height: 24),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          "Pending messages:",
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            color: ShadTheme.of(
+                                              context,
+                                            ).colorScheme.mutedForeground,
                                           ),
                                         ),
-                                      if (canInterruptActiveTurn)
-                                        Padding(
-                                          padding: const EdgeInsets.only(top: 8),
-                                          child: _ProcessingStatusText(
-                                            text: "Messages will be processed shortly. Press Esc to interrupt and send now.",
-                                            style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                                        const SizedBox(height: 4),
+                                        for (final pending in pendingMessages)
+                                          Padding(
+                                            padding: const EdgeInsets.only(
+                                              bottom: 4,
+                                            ),
+                                            child: Text(
+                                              [
+                                                if (pending.senderName != null)
+                                                  "${_displayParticipantName(pending.senderName!)}:",
+                                                if (pending.text
+                                                    .trim()
+                                                    .isNotEmpty)
+                                                  pending.text.trim(),
+                                                if (pending
+                                                    .attachments
+                                                    .isNotEmpty)
+                                                  "${pending.attachments.length} attachment${pending.attachments.length == 1 ? "" : "s"}",
+                                                if (pending.awaitingOnline)
+                                                  "(waiting for @${_displayParticipantName(widget.agentName ?? "agent")} to come online)"
+                                                else if (pending
+                                                    .awaitingAcceptance)
+                                                  "(waiting for acceptance)",
+                                              ].join(" "),
+                                              style: TextStyle(
+                                                fontSize: 13,
+                                                color: ShadTheme.of(
+                                                  context,
+                                                ).colorScheme.mutedForeground,
+                                              ),
+                                            ),
                                           ),
-                                        ),
-                                    ],
+                                        if (canInterruptActiveTurn)
+                                          Padding(
+                                            padding: const EdgeInsets.only(
+                                              top: 8,
+                                            ),
+                                            child: _ProcessingStatusText(
+                                              text:
+                                                  "Messages will be processed shortly. Press Esc to interrupt and send now.",
+                                              style: TextStyle(
+                                                fontSize: 13,
+                                                color: ShadTheme.of(
+                                                  context,
+                                                ).colorScheme.mutedForeground,
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
-                          ),
-                        if (widget.chatInputBoxBuilder != null)
-                          widget.chatInputBoxBuilder!(context, _buildInputChatBox(context, pendingMessages, state))
-                        else
-                          _buildInputChatBox(context, pendingMessages, state),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ],
+                          if (widget.chatInputBoxBuilder != null)
+                            widget.chatInputBoxBuilder!(
+                              context,
+                              _buildInputChatBox(
+                                context,
+                                pendingMessages,
+                                state,
+                              ),
+                            )
+                          else
+                            _buildInputChatBox(context, pendingMessages, state),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -3376,7 +4093,8 @@ class ChatThreadMessages extends StatefulWidget {
   final Widget? emptyState;
   final ValueChanged<bool>? onShowCompletedToolCallsChanged;
 
-  final Widget Function(BuildContext, MeshDocument, MeshElement)? messageHeaderBuilder;
+  final Widget Function(BuildContext, MeshDocument, MeshElement)?
+  messageHeaderBuilder;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
   final FutureOr<void> Function(String path)? openFile;
 
@@ -3462,7 +4180,8 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   ];
   static const String _reactionTargetMessage = "message";
   static const String _reactionTargetAttachment = "attachment";
-  static const Map<String, String> _reactionEmojiCanonicalByKey = <String, String>{"❤": "❤️", "♥": "❤️", "⚠": "⚠️", "🛠": "🛠️"};
+  static const Map<String, String> _reactionEmojiCanonicalByKey =
+      <String, String>{"❤": "❤️", "♥": "❤️", "⚠": "⚠️", "🛠": "🛠️"};
 
   RoomClient get room => widget.room;
   String get path => widget.path;
@@ -3482,17 +4201,23 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   String? get emptyStateDescription => widget.emptyStateDescription;
   Widget? get emptyState => widget.emptyState;
   Map<String, MessageBuilder>? get messageBuilders => widget.messageBuilders;
-  Widget Function(BuildContext, MeshDocument, MeshElement)? get messageHeaderBuilder => widget.messageHeaderBuilder;
-  Widget Function(BuildContext context, String path)? get fileInThreadBuilder => widget.fileInThreadBuilder;
+  Widget Function(BuildContext, MeshDocument, MeshElement)?
+  get messageHeaderBuilder => widget.messageHeaderBuilder;
+  Widget Function(BuildContext context, String path)? get fileInThreadBuilder =>
+      widget.fileInThreadBuilder;
   FutureOr<void> Function(String path)? get openFile => widget.openFile;
 
-  final OverlayPortalController _imageViewerController = OverlayPortalController();
+  final OverlayPortalController _imageViewerController =
+      OverlayPortalController();
   List<_ThreadFeedImage> _overlayImages = const <_ThreadFeedImage>[];
   int _overlayInitialIndex = 0;
   LocalHistoryEntry? _imageViewerHistoryEntry;
-  final LinkedHashMap<String, _ThreadImageRecord> _imageCache = LinkedHashMap<String, _ThreadImageRecord>();
-  final LinkedHashMap<String, int> _imageCacheSizes = LinkedHashMap<String, int>();
-  final Map<String, Future<_ThreadImageRecord?>> _imageInFlight = <String, Future<_ThreadImageRecord?>>{};
+  final LinkedHashMap<String, _ThreadImageRecord> _imageCache =
+      LinkedHashMap<String, _ThreadImageRecord>();
+  final LinkedHashMap<String, int> _imageCacheSizes =
+      LinkedHashMap<String, int>();
+  final Map<String, Future<_ThreadImageRecord?>> _imageInFlight =
+      <String, Future<_ThreadImageRecord?>>{};
   int _imageCacheBytes = 0;
 
   String? _localParticipantName() {
@@ -3523,7 +4248,8 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     return _reactionEmojiCanonicalByKey[emojiKey] ?? emoji;
   }
 
-  bool _isTerminalStackMessage(MeshElement? message) => message?.tagName == "exec";
+  bool _isTerminalStackMessage(MeshElement? message) =>
+      message?.tagName == "exec";
 
   String? _normalizeReactionUserName(Object? value) {
     if (value is! String) {
@@ -3536,9 +4262,15 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     return trimmed.toLowerCase();
   }
 
-  bool _isLocalReactionAuthor(MeshElement reactionElement, {required String? normalizedLocalUserName}) {
-    final reactionUserName = _normalizeReactionUserName(reactionElement.getAttribute("user_name"));
-    if (normalizedLocalUserName != null && reactionUserName == normalizedLocalUserName) {
+  bool _isLocalReactionAuthor(
+    MeshElement reactionElement, {
+    required String? normalizedLocalUserName,
+  }) {
+    final reactionUserName = _normalizeReactionUserName(
+      reactionElement.getAttribute("user_name"),
+    );
+    if (normalizedLocalUserName != null &&
+        reactionUserName == normalizedLocalUserName) {
       return true;
     }
 
@@ -3556,7 +4288,10 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     return reactions;
   }
 
-  void _createReactionElement({required MeshElement message, required Map<String, Object?> attributes}) {
+  void _createReactionElement({
+    required MeshElement message,
+    required Map<String, Object?> attributes,
+  }) {
     message.createChildElement("reaction", attributes);
   }
 
@@ -3572,8 +4307,15 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   }
 
   String _reactionUsersTooltipText(Iterable<String> userNames) {
-    final names = userNames.map((name) => name.trim()).where((name) => name.isNotEmpty).toSet().toList()
-      ..sort((left, right) => left.toLowerCase().compareTo(right.toLowerCase()));
+    final names =
+        userNames
+            .map((name) => name.trim())
+            .where((name) => name.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort(
+            (left, right) => left.toLowerCase().compareTo(right.toLowerCase()),
+          );
 
     if (names.isEmpty) {
       return "No users";
@@ -3590,30 +4332,46 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   }
 
   String? _reactionAttachmentRefFromElement(MeshElement reactionElement) {
-    return _normalizeReactionAttachmentRef(reactionElement.getAttribute("attachment_ref"));
+    return _normalizeReactionAttachmentRef(
+      reactionElement.getAttribute("attachment_ref"),
+    );
   }
 
   String _reactionTargetFromElement(MeshElement reactionElement) {
     final attachmentRef = _reactionAttachmentRefFromElement(reactionElement);
     final targetRaw = reactionElement.getAttribute("target");
     if (targetRaw is! String) {
-      return attachmentRef == null ? _reactionTargetMessage : _reactionTargetAttachment;
+      return attachmentRef == null
+          ? _reactionTargetMessage
+          : _reactionTargetAttachment;
     }
 
     final normalized = targetRaw.trim().toLowerCase();
     if (normalized == _reactionTargetAttachment) {
-      return attachmentRef == null ? _reactionTargetMessage : _reactionTargetAttachment;
+      return attachmentRef == null
+          ? _reactionTargetMessage
+          : _reactionTargetAttachment;
     }
     if (normalized == _reactionTargetMessage) {
       return _reactionTargetMessage;
     }
-    return attachmentRef == null ? _reactionTargetMessage : _reactionTargetAttachment;
+    return attachmentRef == null
+        ? _reactionTargetMessage
+        : _reactionTargetAttachment;
   }
 
-  List<MeshElement> _reactionElementsForTarget({required MeshElement message, required String target, String? attachmentRef}) {
+  List<MeshElement> _reactionElementsForTarget({
+    required MeshElement message,
+    required String target,
+    String? attachmentRef,
+  }) {
     final normalizedTarget = target.trim().toLowerCase();
-    final normalizedAttachmentRef = _normalizeReactionAttachmentRef(attachmentRef);
-    final effectiveTarget = normalizedTarget == _reactionTargetAttachment && normalizedAttachmentRef != null
+    final normalizedAttachmentRef = _normalizeReactionAttachmentRef(
+      attachmentRef,
+    );
+    final effectiveTarget =
+        normalizedTarget == _reactionTargetAttachment &&
+            normalizedAttachmentRef != null
         ? _reactionTargetAttachment
         : _reactionTargetMessage;
 
@@ -3623,7 +4381,9 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
         continue;
       }
       if (effectiveTarget == _reactionTargetAttachment) {
-        final reactionAttachmentRef = _reactionAttachmentRefFromElement(reactionElement);
+        final reactionAttachmentRef = _reactionAttachmentRefFromElement(
+          reactionElement,
+        );
         if (reactionAttachmentRef != normalizedAttachmentRef) {
           continue;
         }
@@ -3633,15 +4393,25 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     return reactions;
   }
 
-  String? _selectedReactionForTarget({required MeshElement message, required String target, String? attachmentRef}) {
-    final normalizedLocalUserName = _normalizeReactionUserName(_localParticipantName());
+  String? _selectedReactionForTarget({
+    required MeshElement message,
+    required String target,
+    String? attachmentRef,
+  }) {
+    final normalizedLocalUserName = _normalizeReactionUserName(
+      _localParticipantName(),
+    );
     if (normalizedLocalUserName == null) {
       return null;
     }
 
     final normalizedTarget = target.trim().toLowerCase();
-    final normalizedAttachmentRef = _normalizeReactionAttachmentRef(attachmentRef);
-    final effectiveTarget = normalizedTarget == _reactionTargetAttachment && normalizedAttachmentRef != null
+    final normalizedAttachmentRef = _normalizeReactionAttachmentRef(
+      attachmentRef,
+    );
+    final effectiveTarget =
+        normalizedTarget == _reactionTargetAttachment &&
+            normalizedAttachmentRef != null
         ? _reactionTargetAttachment
         : _reactionTargetMessage;
 
@@ -3650,10 +4420,15 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
       target: effectiveTarget,
       attachmentRef: normalizedAttachmentRef,
     )) {
-      if (!_isLocalReactionAuthor(reactionElement, normalizedLocalUserName: normalizedLocalUserName)) {
+      if (!_isLocalReactionAuthor(
+        reactionElement,
+        normalizedLocalUserName: normalizedLocalUserName,
+      )) {
         continue;
       }
-      final value = _normalizeReactionValue(reactionElement.getAttribute("value"));
+      final value = _normalizeReactionValue(
+        reactionElement.getAttribute("value"),
+      );
       if (value != null) {
         return value;
       }
@@ -3673,7 +4448,12 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
         return ShadDialog(
           title: const Text("React"),
           constraints: const BoxConstraints(maxWidth: 320),
-          actions: [ShadButton.ghost(onPressed: () => Navigator.of(context).pop(), child: const Text("Close"))],
+          actions: [
+            ShadButton.ghost(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text("Close"),
+            ),
+          ],
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxHeight: 360),
             child: SingleChildScrollView(
@@ -3686,20 +4466,30 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                       builder: (context) {
                         final selected =
                             selectedReaction != null &&
-                            _normalizeEmojiPresentationKey(selectedReaction) == _normalizeEmojiPresentationKey(reaction);
+                            _normalizeEmojiPresentationKey(selectedReaction) ==
+                                _normalizeEmojiPresentationKey(reaction);
                         return ShadButton.ghost(
                           width: 34,
                           height: 34,
                           padding: EdgeInsets.zero,
-                          backgroundColor: selected ? theme.colorScheme.foreground.withValues(alpha: 0.16) : null,
+                          backgroundColor: selected
+                              ? theme.colorScheme.foreground.withValues(
+                                  alpha: 0.16,
+                                )
+                              : null,
                           hoverBackgroundColor: selected
-                              ? theme.colorScheme.foreground.withValues(alpha: 0.24)
+                              ? theme.colorScheme.foreground.withValues(
+                                  alpha: 0.24,
+                                )
                               : theme.colorScheme.muted.withValues(alpha: 0.55),
                           onPressed: () {
                             onSelected(reaction);
                             Navigator.of(context).pop();
                           },
-                          child: Text(reaction, style: _emojiTextStyle(size: 18)),
+                          child: Text(
+                            reaction,
+                            style: _emojiTextStyle(size: 18),
+                          ),
                         );
                       },
                     ),
@@ -3730,20 +4520,33 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     }
 
     final normalizedTarget = target.trim().toLowerCase();
-    final normalizedAttachmentRef = _normalizeReactionAttachmentRef(attachmentRef);
-    final effectiveTarget = normalizedTarget == _reactionTargetAttachment && normalizedAttachmentRef != null
+    final normalizedAttachmentRef = _normalizeReactionAttachmentRef(
+      attachmentRef,
+    );
+    final effectiveTarget =
+        normalizedTarget == _reactionTargetAttachment &&
+            normalizedAttachmentRef != null
         ? _reactionTargetAttachment
         : _reactionTargetMessage;
-    final reactions = _reactionElementsForTarget(message: message, target: effectiveTarget, attachmentRef: normalizedAttachmentRef);
+    final reactions = _reactionElementsForTarget(
+      message: message,
+      target: effectiveTarget,
+      attachmentRef: normalizedAttachmentRef,
+    );
 
     final mine = <MeshElement>[];
     final mineWithSameValue = <MeshElement>[];
     for (final reactionElement in reactions) {
-      if (!_isLocalReactionAuthor(reactionElement, normalizedLocalUserName: normalizedUserName)) {
+      if (!_isLocalReactionAuthor(
+        reactionElement,
+        normalizedLocalUserName: normalizedUserName,
+      )) {
         continue;
       }
       mine.add(reactionElement);
-      final existingValue = _normalizeReactionValue(reactionElement.getAttribute("value"));
+      final existingValue = _normalizeReactionValue(
+        reactionElement.getAttribute("value"),
+      );
       if (existingValue == normalizedValue) {
         mineWithSameValue.add(reactionElement);
       }
@@ -3768,7 +4571,8 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
       "target": effectiveTarget,
       "created_at": DateTime.now().toUtc().toIso8601String(),
     };
-    if (effectiveTarget == _reactionTargetAttachment && normalizedAttachmentRef != null) {
+    if (effectiveTarget == _reactionTargetAttachment &&
+        normalizedAttachmentRef != null) {
       attrs["attachment_ref"] = normalizedAttachmentRef;
     }
 
@@ -3787,8 +4591,12 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     final localUserName = _localParticipantName();
     final normalizedLocalUserName = _normalizeReactionUserName(localUserName);
     final normalizedTarget = target.trim().toLowerCase();
-    final normalizedAttachmentRef = _normalizeReactionAttachmentRef(attachmentRef);
-    final effectiveTarget = normalizedTarget == _reactionTargetAttachment && normalizedAttachmentRef != null
+    final normalizedAttachmentRef = _normalizeReactionAttachmentRef(
+      attachmentRef,
+    );
+    final effectiveTarget =
+        normalizedTarget == _reactionTargetAttachment &&
+            normalizedAttachmentRef != null
         ? _reactionTargetAttachment
         : _reactionTargetMessage;
     final grouped = <String, Set<String>>{};
@@ -3800,27 +4608,46 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
       target: effectiveTarget,
       attachmentRef: normalizedAttachmentRef,
     )) {
-      final value = _normalizeReactionValue(reactionElement.getAttribute("value"));
+      final value = _normalizeReactionValue(
+        reactionElement.getAttribute("value"),
+      );
       if (value == null) {
         continue;
       }
-      final userName = _normalizeReactionUserName(reactionElement.getAttribute("user_name"));
+      final userName = _normalizeReactionUserName(
+        reactionElement.getAttribute("user_name"),
+      );
       if (userName == null) {
         continue;
       }
       final displayNameRaw = reactionElement.getAttribute("user_name");
-      final displayName = displayNameRaw is String && displayNameRaw.trim().isNotEmpty ? displayNameRaw.trim() : userName;
+      final displayName =
+          displayNameRaw is String && displayNameRaw.trim().isNotEmpty
+          ? displayNameRaw.trim()
+          : userName;
       grouped.putIfAbsent(value, () => <String>{}).add(userName);
-      groupedDisplayNames.putIfAbsent(value, () => <String, String>{})[userName] = displayName;
-      if (_isLocalReactionAuthor(reactionElement, normalizedLocalUserName: normalizedLocalUserName)) {
+      groupedDisplayNames.putIfAbsent(
+        value,
+        () => <String, String>{},
+      )[userName] = displayName;
+      if (_isLocalReactionAuthor(
+        reactionElement,
+        normalizedLocalUserName: normalizedLocalUserName,
+      )) {
         mineValues.add(value);
       }
     }
 
-    final entries = grouped.entries.toList()..sort((left, right) => left.key.compareTo(right.key));
-    String? selectedReaction = entries.firstWhereOrNull((entry) => mineValues.contains(entry.key))?.key;
+    final entries = grouped.entries.toList()
+      ..sort((left, right) => left.key.compareTo(right.key));
+    String? selectedReaction = entries
+        .firstWhereOrNull((entry) => mineValues.contains(entry.key))
+        ?.key;
     final hasSelectedReaction = selectedReaction != null;
-    final showAddButton = localUserName != null && !hasSelectedReaction && (showAddWhenEmpty || grouped.isNotEmpty);
+    final showAddButton =
+        localUserName != null &&
+        !hasSelectedReaction &&
+        (showAddWhenEmpty || grouped.isNotEmpty);
 
     if (grouped.isEmpty && !showAddButton && leadingActions.isEmpty) {
       return const SizedBox.shrink();
@@ -3830,7 +4657,11 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     final theme = ShadTheme.of(context);
 
     return Container(
-      margin: EdgeInsets.only(top: 6, right: mine ? 0 : 50, left: mine ? 50 : 0),
+      margin: EdgeInsets.only(
+        top: 6,
+        right: mine ? 0 : 50,
+        left: mine ? 50 : 0,
+      ),
       child: Align(
         alignment: alignment,
         child: Wrap(
@@ -3843,14 +4674,21 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
               Builder(
                 builder: (context) {
                   final users = entry.value;
-                  final tooltipText = _reactionUsersTooltipText(groupedDisplayNames[entry.key]?.values ?? const <String>[]);
+                  final tooltipText = _reactionUsersTooltipText(
+                    groupedDisplayNames[entry.key]?.values ?? const <String>[],
+                  );
                   final isMine = mineValues.contains(entry.key);
                   Widget reactionChip({required VoidCallback? onPressed}) {
                     return Tooltip(
                       message: tooltipText,
                       child: ShadButton.ghost(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        backgroundColor: isMine ? theme.colorScheme.accent.withValues(alpha: 0.2) : theme.colorScheme.muted,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        backgroundColor: isMine
+                            ? theme.colorScheme.accent.withValues(alpha: 0.2)
+                            : theme.colorScheme.muted,
                         hoverBackgroundColor: isMine
                             ? theme.colorScheme.accent.withValues(alpha: 0.25)
                             : theme.colorScheme.muted.withValues(alpha: 0.7),
@@ -3862,7 +4700,11 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                             const SizedBox(width: 4),
                             Text(
                               "${users.length}",
-                              style: theme.textTheme.small.copyWith(fontWeight: isMine ? FontWeight.w700 : FontWeight.w500),
+                              style: theme.textTheme.small.copyWith(
+                                fontWeight: isMine
+                                    ? FontWeight.w700
+                                    : FontWeight.w500,
+                              ),
                             ),
                           ],
                         ),
@@ -3887,7 +4729,8 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                           removeIfSame: true,
                         );
                       },
-                      triggerBuilder: (onPressed) => reactionChip(onPressed: onPressed),
+                      triggerBuilder: (onPressed) =>
+                          reactionChip(onPressed: onPressed),
                     );
                   }
 
@@ -3938,7 +4781,11 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     _hideThreadImageViewer();
   }
 
-  void _openThreadImageViewer(BuildContext context, {required List<_ThreadFeedImage> images, required int initialIndex}) {
+  void _openThreadImageViewer(
+    BuildContext context, {
+    required List<_ThreadFeedImage> images,
+    required int initialIndex,
+  }) {
     if (images.isEmpty) {
       return;
     }
@@ -3985,7 +4832,10 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
         }
 
         final imageIdAttribute = attachment.getAttribute("id");
-        final imageId = (imageIdAttribute is String && imageIdAttribute.trim().isNotEmpty) ? imageIdAttribute.trim() : null;
+        final imageId =
+            (imageIdAttribute is String && imageIdAttribute.trim().isNotEmpty)
+            ? imageIdAttribute.trim()
+            : null;
         if (imageId == null) {
           continue;
         }
@@ -3997,11 +4847,17 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
         final mimeTypeAttribute = attachment.getAttribute("mime_type");
         final mimeType = mimeTypeAttribute is String ? mimeTypeAttribute : null;
         final statusAttribute = attachment.getAttribute("status");
-        final status = statusAttribute is String ? statusAttribute.trim() : null;
+        final status = statusAttribute is String
+            ? statusAttribute.trim()
+            : null;
         final statusDetailAttribute = attachment.getAttribute("status_detail");
-        final statusDetail = statusDetailAttribute is String ? statusDetailAttribute.trim() : null;
+        final statusDetail = statusDetailAttribute is String
+            ? statusDetailAttribute.trim()
+            : null;
         final width = _parsePositiveDimension(attachment.getAttribute("width"));
-        final height = _parsePositiveDimension(attachment.getAttribute("height"));
+        final height = _parsePositiveDimension(
+          attachment.getAttribute("height"),
+        );
 
         imagesInThread.add(
           _ThreadFeedImage(
@@ -4064,7 +4920,8 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
 
     final existingRecord = _imageCache.remove(path);
     if (existingRecord != null) {
-      _imageCacheBytes -= _imageCacheSizes.remove(path) ?? existingRecord.data.length;
+      _imageCacheBytes -=
+          _imageCacheSizes.remove(path) ?? existingRecord.data.length;
     }
 
     if (size > _maxImageCacheBytes) {
@@ -4091,7 +4948,9 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
 
     final lookup = () async {
       final file = await room.storage.download(path);
-      final mimeType = file.mimeType.trim().isNotEmpty ? file.mimeType.trim() : "image/png";
+      final mimeType = file.mimeType.trim().isNotEmpty
+          ? file.mimeType.trim()
+          : "image/png";
       final record = _ThreadImageRecord(data: file.data, mimeType: mimeType);
       _cacheImageRecord(path, record);
       return record;
@@ -4115,11 +4974,17 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
 
     final mimeType = image.mimeType.trim().toLowerCase();
     final format = _ImageMime.clipboardFormat(mimeType);
-    final item = DataWriterItem(suggestedName: _ImageMime.suggestedFileName(mimeType));
+    final item = DataWriterItem(
+      suggestedName: _ImageMime.suggestedFileName(mimeType),
+    );
     if (format != null) {
       item.add(format(image.data));
     } else {
-      item.add(EncodedData([raw.DataRepresentation.simple(format: mimeType, data: image.data)]));
+      item.add(
+        EncodedData([
+          raw.DataRepresentation.simple(format: mimeType, data: image.data),
+        ]),
+      );
     }
 
     await clipboard.write([item]);
@@ -4170,10 +5035,15 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     );
   }
 
-  Widget _buildFileImageInThread(BuildContext context, String path, _ThreadImageRecord? imageRecord, bool loading) {
+  Widget _buildFileImageInThread(
+    BuildContext context,
+    String path,
+    _ThreadImageRecord? imageRecord,
+    bool loading,
+  ) {
     final items = _buildAttachmentOptions(imageRecord: imageRecord, path: path);
 
-    return ShadContextMenuRegion(
+    return CoordinatedShadContextMenuRegion(
       items: items,
       child: _wrapTapTarget(
         SizedBox(
@@ -4185,8 +5055,18 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
               child: imageRecord == null
                   ? Center(
                       child: loading
-                          ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
-                          : Icon(LucideIcons.imageOff, size: 20, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                          ? const SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Icon(
+                              LucideIcons.imageOff,
+                              size: 20,
+                              color: ShadTheme.of(
+                                context,
+                              ).colorScheme.mutedForeground,
+                            ),
                     )
                   : _ImageMime.isSvg(imageRecord.mimeType)
                   ? SvgPicture.memory(imageRecord.data, fit: BoxFit.cover)
@@ -4202,33 +5082,50 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   Widget _buildFileInThread(BuildContext context, String path) {
     final items = _buildAttachmentOptions(path: path);
 
-    return ShadContextMenuRegion(
+    return CoordinatedShadContextMenuRegion(
       items: items,
       child: _wrapTapTarget(
-        fileInThreadBuilder != null ? fileInThreadBuilder!(context, path) : ChatThreadPreview(room: room, path: path),
+        fileInThreadBuilder != null
+            ? fileInThreadBuilder!(context, path)
+            : ChatThreadPreview(room: room, path: path),
         path,
       ),
     );
   }
 
-  Widget _buildImageInThread(BuildContext context, MeshElement attachment, {required List<_ThreadFeedImage> feedImages}) {
+  Widget _buildImageInThread(
+    BuildContext context,
+    MeshElement attachment, {
+    required List<_ThreadFeedImage> feedImages,
+  }) {
     final imageIdAttribute = attachment.getAttribute("id");
-    final imageId = (imageIdAttribute is String && imageIdAttribute.trim().isNotEmpty) ? imageIdAttribute.trim() : null;
+    final imageId =
+        (imageIdAttribute is String && imageIdAttribute.trim().isNotEmpty)
+        ? imageIdAttribute.trim()
+        : null;
 
     final mimeTypeAttribute = attachment.getAttribute("mime_type");
     final mimeType = mimeTypeAttribute is String ? mimeTypeAttribute : null;
     final statusAttribute = attachment.getAttribute("status");
     final status = statusAttribute is String ? statusAttribute.trim() : null;
     final statusDetailAttribute = attachment.getAttribute("status_detail");
-    final statusDetail = statusDetailAttribute is String ? statusDetailAttribute.trim() : null;
+    final statusDetail = statusDetailAttribute is String
+        ? statusDetailAttribute.trim()
+        : null;
     final width = _parsePositiveDimension(attachment.getAttribute("width"));
     final height = _parsePositiveDimension(attachment.getAttribute("height"));
-    final initialIndex = feedImages.indexWhere((entry) => entry.attachmentElementId == attachment.id);
+    final initialIndex = feedImages.indexWhere(
+      (entry) => entry.attachmentElementId == attachment.id,
+    );
 
     VoidCallback? onOpenFullscreen;
     if (initialIndex >= 0 && feedImages.isNotEmpty) {
       onOpenFullscreen = () {
-        _openThreadImageViewer(context, images: feedImages, initialIndex: initialIndex);
+        _openThreadImageViewer(
+          context,
+          images: feedImages,
+          initialIndex: initialIndex,
+        );
       };
     }
 
@@ -4268,7 +5165,9 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     MeshElement attachment, {
     required List<_ThreadFeedImage> feedImages,
   }) {
-    final normalizedAttachmentRef = _normalizeReactionAttachmentRef(attachment.id);
+    final normalizedAttachmentRef = _normalizeReactionAttachmentRef(
+      attachment.id,
+    );
 
     if (attachment.tagName == "image") {
       return Column(
@@ -4306,7 +5205,12 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
           return Column(
             crossAxisAlignment: mine ? .end : .start,
             children: [
-              _buildFileImageInThread(context, normalizedPath, imageRecord, loading),
+              _buildFileImageInThread(
+                context,
+                normalizedPath,
+                imageRecord,
+                loading,
+              ),
               if (normalizedAttachmentRef != null)
                 _buildReactionRow(
                   context,
@@ -4314,7 +5218,10 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                   mine: mine,
                   target: _reactionTargetAttachment,
                   attachmentRef: normalizedAttachmentRef,
-                  leadingActions: _buildAttachmentActions(imageRecord: imageRecord, path: normalizedPath),
+                  leadingActions: _buildAttachmentActions(
+                    imageRecord: imageRecord,
+                    path: normalizedPath,
+                  ),
                 ),
             ],
           );
@@ -4339,7 +5246,10 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     );
   }
 
-  List<ShadContextMenuItem> _buildAttachmentOptions({_ThreadImageRecord? imageRecord, String? path}) {
+  List<ShadContextMenuItem> _buildAttachmentOptions({
+    _ThreadImageRecord? imageRecord,
+    String? path,
+  }) {
     return [
       if (path != null)
         ShadContextMenuItem(
@@ -4371,7 +5281,10 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     ];
   }
 
-  List<Widget> _buildAttachmentActions({_ThreadImageRecord? imageRecord, String? path}) {
+  List<Widget> _buildAttachmentActions({
+    _ThreadImageRecord? imageRecord,
+    String? path,
+  }) {
     final items = _buildAttachmentOptions(imageRecord: imageRecord, path: path);
     return [_AttachmentOptionsButton(items: items)];
   }
@@ -4386,12 +5299,29 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
       return true;
     }
 
-    const supportedKinds = {"exec", "tool", "web", "search", "diff", "image", "approval", "collab", "plan", "thread", "file"};
-    final kind = ((message.getAttribute("kind") as String?) ?? "").trim().toLowerCase();
+    const supportedKinds = {
+      "exec",
+      "tool",
+      "web",
+      "search",
+      "diff",
+      "image",
+      "approval",
+      "collab",
+      "plan",
+      "thread",
+      "file",
+    };
+    final kind = ((message.getAttribute("kind") as String?) ?? "")
+        .trim()
+        .toLowerCase();
     if (!supportedKinds.contains(kind)) {
       return false;
     }
-    return !_shouldHideCompletedToolCallEvent(message, showCompletedToolCalls: widget.showCompletedToolCalls);
+    return !_shouldHideCompletedToolCallEvent(
+      message,
+      showCompletedToolCalls: widget.showCompletedToolCalls,
+    );
   }
 
   bool _defaultHeaderWillRender({required MeshElement message}) {
@@ -4401,7 +5331,12 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     }
 
     final localParticipantName = room.localParticipant?.getAttribute("name");
-    return _shouldShowAuthorNames(thread: doc, localParticipantName: localParticipantName is String ? localParticipantName : null);
+    return _shouldShowAuthorNames(
+      thread: doc,
+      localParticipantName: localParticipantName is String
+          ? localParticipantName
+          : null,
+    );
   }
 
   Widget _buildMessage(
@@ -4411,14 +5346,19 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     MeshElement? next, {
     required List<_ThreadFeedImage> feedImages,
   }) {
-    final isSameAuthor = message.getAttribute("author_name") == previous?.getAttribute("author_name");
+    final isSameAuthor =
+        message.getAttribute("author_name") ==
+        previous?.getAttribute("author_name");
     final localParticipantName = room.localParticipant?.getAttribute("name");
     final localParticipantReactionName = _localParticipantName();
     final mine = message.getAttribute("author_name") == localParticipantName;
     final useDefaultHeaderBuilder = messageHeaderBuilder == null;
     final isLastVisibleMessage = next == null;
     final shouldShowHeader =
-        (!isSameAuthor && (!useDefaultHeaderBuilder || _defaultHeaderWillRender(message: message))) || isLastVisibleMessage;
+        (!isSameAuthor &&
+            (!useDefaultHeaderBuilder ||
+                _defaultHeaderWillRender(message: message))) ||
+        isLastVisibleMessage;
 
     final id = message.getAttribute("id");
     final text = message.getAttribute("text");
@@ -4428,11 +5368,22 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
         .whereType<MeshElement>()
         .where((child) => child.tagName == "file" || child.tagName == "image")
         .toList();
-    final hasMessageLevelReactions = _reactionElementsForTarget(message: message, target: _reactionTargetMessage).isNotEmpty;
-    final selectedMessageReaction = _selectedReactionForTarget(message: message, target: _reactionTargetMessage);
+    final hasMessageLevelReactions = _reactionElementsForTarget(
+      message: message,
+      target: _reactionTargetMessage,
+    ).isNotEmpty;
+    final selectedMessageReaction = _selectedReactionForTarget(
+      message: message,
+      target: _reactionTargetMessage,
+    );
 
     if (messageBuilders?[message.tagName] != null) {
-      return messageBuilders![message.tagName]!(room: room, previous: previous, message: message, next: next);
+      return messageBuilders![message.tagName]!(
+        room: room,
+        previous: previous,
+        message: message,
+        next: next,
+      );
     }
 
     if (message.tagName == "reasoning") {
@@ -4470,19 +5421,29 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
           if (shouldShowHeader)
             Container(
               margin: .only(
-                left: mine ? _chatBubbleHorizontalInset + _chatBubbleActionRailWidth : _chatBubbleHorizontalInset,
-                right: mine ? _chatBubbleHorizontalInset : _chatBubbleHorizontalInset + _chatBubbleActionRailWidth,
+                left: mine
+                    ? _chatBubbleHorizontalInset + _chatBubbleActionRailWidth
+                    : _chatBubbleHorizontalInset,
+                right: mine
+                    ? _chatBubbleHorizontalInset
+                    : _chatBubbleHorizontalInset + _chatBubbleActionRailWidth,
                 bottom: 6,
               ),
               child: Align(
                 alignment: mine ? .centerRight : .centerLeft,
                 child:
-                    messageHeaderBuilder?.call(context, message.doc as MeshDocument, message) ??
+                    messageHeaderBuilder?.call(
+                      context,
+                      message.doc as MeshDocument,
+                      message,
+                    ) ??
                     defaultMessageHeaderBuilder(
                       context,
                       message.doc as MeshDocument,
                       message,
-                      localParticipantName: localParticipantName is String ? localParticipantName : null,
+                      localParticipantName: localParticipantName is String
+                          ? localParticipantName
+                          : null,
                       isLastMessage: isLastVisibleMessage,
                     ),
               ),
@@ -4496,16 +5457,24 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                 mine: mine,
                 text: message.getAttribute("text"),
                 onDelete: message.delete,
-                reactionAction: localParticipantReactionName == null
+                reactionActionBuilder: localParticipantReactionName == null
                     ? null
-                    : _ReactionPickerButton(
+                    : (controller) => _ReactionPickerButton(
+                        controller: controller,
                         reactionOptions: _defaultReactionOptions,
                         selectedReaction: selectedMessageReaction,
                         onSelected: (reaction) {
-                          _toggleReaction(message: message, reaction: reaction, target: _reactionTargetMessage, removeIfSame: true);
+                          _toggleReaction(
+                            message: message,
+                            reaction: reaction,
+                            target: _reactionTargetMessage,
+                            removeIfSame: true,
+                          );
                         },
                       ),
-                showReactionAction: localParticipantReactionName != null && !hasMessageLevelReactions,
+                showReactionAction:
+                    localParticipantReactionName != null &&
+                    !hasMessageLevelReactions,
                 onReactFromMenu: localParticipantReactionName == null
                     ? null
                     : () {
@@ -4513,7 +5482,12 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                           context,
                           selectedReaction: selectedMessageReaction,
                           onSelected: (reaction) {
-                            _toggleReaction(message: message, reaction: reaction, target: _reactionTargetMessage, removeIfSame: true);
+                            _toggleReaction(
+                              message: message,
+                              reaction: reaction,
+                              target: _reactionTargetMessage,
+                              removeIfSame: true,
+                            );
                           },
                         );
                       },
@@ -4521,14 +5495,27 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
             ),
 
           for (var i = 0; i < attachments.length; i++) ...[
-            if (hasText || i > 0) const SizedBox(height: _chatBubbleSiblingSpacing),
+            if (hasText || i > 0)
+              const SizedBox(height: _chatBubbleSiblingSpacing),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 5),
-              child: _buildAttachmentInThread(context, message, mine, attachments[i], feedImages: feedImages),
+              child: _buildAttachmentInThread(
+                context,
+                message,
+                mine,
+                attachments[i],
+                feedImages: feedImages,
+              ),
             ),
           ],
 
-          _buildReactionRow(context, message: message, mine: mine, target: _reactionTargetMessage, showAddWhenEmpty: false),
+          _buildReactionRow(
+            context,
+            message: message,
+            mine: mine,
+            target: _reactionTargetMessage,
+            showAddWhenEmpty: false,
+          ),
 
           if (currentStatusEntry != null && currentStatusEntry?.messageId == id)
             Padding(
@@ -4537,9 +5524,11 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                 alignment: .centerRight,
                 child: Text(
                   currentStatusEntry!.state.status.name,
-                  style: ShadTheme.of(
-                    context,
-                  ).textTheme.p.copyWith(fontSize: 12, fontWeight: .w700, color: Color(currentStatusEntry!.state.status.colorValue)),
+                  style: ShadTheme.of(context).textTheme.p.copyWith(
+                    fontSize: 12,
+                    fontWeight: .w700,
+                    color: Color(currentStatusEntry!.state.status.colorValue),
+                  ),
                 ),
               ),
             ),
@@ -4554,34 +5543,54 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     bool bottomAlign = !startChatCentered || visibleMessages.isNotEmpty;
     final feedImages = _collectThreadImages();
     final rawCenteredTitle = emptyStateTitle?.trim();
-    final participantCenteredTitle = online.firstOrNull?.getAttribute("empty_state_title");
-    final participantCenteredDescription = online.firstOrNull?.getAttribute("empty_state_description");
-    final centeredTitle = rawCenteredTitle != null && rawCenteredTitle.isNotEmpty
+    final participantCenteredTitle = online.firstOrNull?.getAttribute(
+      "empty_state_title",
+    );
+    final participantCenteredDescription = online.firstOrNull?.getAttribute(
+      "empty_state_description",
+    );
+    final centeredTitle =
+        rawCenteredTitle != null && rawCenteredTitle.isNotEmpty
         ? rawCenteredTitle
-        : participantCenteredTitle is String && participantCenteredTitle.trim().isNotEmpty
+        : participantCenteredTitle is String &&
+              participantCenteredTitle.trim().isNotEmpty
         ? participantCenteredTitle.trim()
         : startChatCentered
         ? "How can I help you?"
         : null;
     final rawCenteredDescription = emptyStateDescription?.trim();
-    final centeredDescription = rawCenteredDescription != null && rawCenteredDescription.isNotEmpty
+    final centeredDescription =
+        rawCenteredDescription != null && rawCenteredDescription.isNotEmpty
         ? rawCenteredDescription
-        : participantCenteredDescription is String && participantCenteredDescription.trim().isNotEmpty
+        : participantCenteredDescription is String &&
+              participantCenteredDescription.trim().isNotEmpty
         ? participantCenteredDescription.trim()
         : null;
 
     final messageWidgets = <Widget>[];
     for (var message in visibleMessages.indexed) {
       final previous = message.$1 > 0 ? visibleMessages[message.$1 - 1] : null;
-      final next = message.$1 < visibleMessages.length - 1 ? visibleMessages[message.$1 + 1] : null;
+      final next = message.$1 < visibleMessages.length - 1
+          ? visibleMessages[message.$1 + 1]
+          : null;
 
       final messageWidget = Container(
         key: ValueKey(message.$2.id),
-        child: _buildMessage(context, previous, message.$2, next, feedImages: feedImages),
+        child: _buildMessage(
+          context,
+          previous,
+          message.$2,
+          next,
+          feedImages: feedImages,
+        ),
       );
 
       if (messageWidgets.isNotEmpty) {
-        final stackSpacing = _isTerminalStackMessage(previous) && _isTerminalStackMessage(message.$2) ? 0.0 : _chatMessageStackSpacing;
+        final stackSpacing =
+            _isTerminalStackMessage(previous) &&
+                _isTerminalStackMessage(message.$2)
+            ? 0.0
+            : _chatMessageStackSpacing;
         messageWidgets.insert(0, SizedBox(height: stackSpacing));
       }
       messageWidgets.insert(0, messageWidget);
@@ -4593,8 +5602,14 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
           ? emptyState ??
                 (centeredTitle != null
                     ? Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
-                        child: ChatThreadEmptyStateContent(title: centeredTitle, description: centeredDescription),
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 20,
+                          horizontal: 24,
+                        ),
+                        child: ChatThreadEmptyStateContent(
+                          title: centeredTitle,
+                          description: centeredDescription,
+                        ),
                       )
                     : null)
           : null,
@@ -4608,12 +5623,22 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final trimmedThreadStatus = threadStatus?.trim();
-                final hasThreadStatus = trimmedThreadStatus != null && trimmedThreadStatus.isNotEmpty;
-                final cancelling = _isCancellingThreadStatusText(trimmedThreadStatus);
-                final displayStatus = hasThreadStatus ? trimmedThreadStatus : "Thinking";
+                final hasThreadStatus =
+                    trimmedThreadStatus != null &&
+                    trimmedThreadStatus.isNotEmpty;
+                final cancelling = _isCancellingThreadStatusText(
+                  trimmedThreadStatus,
+                );
+                final displayStatus = hasThreadStatus
+                    ? trimmedThreadStatus
+                    : "Thinking";
 
                 return Padding(
-                  padding: EdgeInsets.symmetric(horizontal: chatThreadStatusHorizontalPadding(constraints.maxWidth)),
+                  padding: EdgeInsets.symmetric(
+                    horizontal: chatThreadStatusHorizontalPadding(
+                      constraints.maxWidth,
+                    ),
+                  ),
                   child: ChatThreadProcessingStatusRow(
                     text: displayStatus,
                     startedAt: threadStatusStartedAt,
@@ -4636,7 +5661,9 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                 child: SizedBox(
                   height: 1,
                   child: LinearProgressIndicator(
-                    backgroundColor: ShadTheme.of(context).colorScheme.background,
+                    backgroundColor: ShadTheme.of(
+                      context,
+                    ).colorScheme.background,
                     color: ShadTheme.of(context).colorScheme.mutedForeground,
                   ),
                 ),
@@ -4646,15 +5673,21 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
       ],
       children: messageWidgets,
     );
-    final threadViewWithContextMenu = ShadContextMenuRegion(
+    final threadViewWithContextMenu = CoordinatedShadContextMenuRegion(
       constraints: const BoxConstraints(minWidth: 180),
       tapEnabled: false,
       items: [
         ShadContextMenuItem(
           onPressed: widget.onShowCompletedToolCallsChanged == null
               ? null
-              : () => widget.onShowCompletedToolCallsChanged!(!widget.showCompletedToolCalls),
-          leading: Icon(widget.showCompletedToolCalls ? LucideIcons.squareCheckBig : LucideIcons.square),
+              : () => widget.onShowCompletedToolCallsChanged!(
+                  !widget.showCompletedToolCalls,
+                ),
+          leading: Icon(
+            widget.showCompletedToolCalls
+                ? LucideIcons.squareCheckBig
+                : LucideIcons.square,
+          ),
           child: const Text("Show tool calls"),
         ),
       ],
@@ -4683,7 +5716,12 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
 }
 
 class ChatThreadEmptyStateContent extends StatelessWidget {
-  const ChatThreadEmptyStateContent({super.key, required this.title, this.description, this.titleScaleOverride});
+  const ChatThreadEmptyStateContent({
+    super.key,
+    required this.title,
+    this.description,
+    this.titleScaleOverride,
+  });
 
   static const double _descriptionVisibilityMinWidth = 480;
   static const double _mobileScreenWidthMax = 600;
@@ -4705,7 +5743,8 @@ class ChatThreadEmptyStateContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
-    final isMobileScreen = MediaQuery.sizeOf(context).width < _mobileScreenWidthMax;
+    final isMobileScreen =
+        MediaQuery.sizeOf(context).width < _mobileScreenWidthMax;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -4716,7 +5755,8 @@ class ChatThreadEmptyStateContent extends StatelessWidget {
         final showDescription =
             description != null &&
             description!.trim().isNotEmpty &&
-            (constraints.maxWidth >= _descriptionVisibilityMinWidth || isMobileScreen);
+            (constraints.maxWidth >= _descriptionVisibilityMinWidth ||
+                isMobileScreen);
 
         return ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 640),
@@ -4728,7 +5768,14 @@ class ChatThreadEmptyStateContent extends StatelessWidget {
                 textAlign: TextAlign.center,
                 style: titleStyle.copyWith(fontSize: titleFontSize),
               ),
-              if (showDescription) ...[const SizedBox(height: 8), Text(description!, textAlign: TextAlign.center, style: descriptionStyle)],
+              if (showDescription) ...[
+                const SizedBox(height: 8),
+                Text(
+                  description!,
+                  textAlign: TextAlign.center,
+                  style: descriptionStyle,
+                ),
+              ],
             ],
           ),
         );
@@ -4738,8 +5785,15 @@ class ChatThreadEmptyStateContent extends StatelessWidget {
 }
 
 class _ReactionPickerButton extends StatefulWidget {
-  const _ReactionPickerButton({required this.reactionOptions, required this.onSelected, this.selectedReaction, this.triggerBuilder});
+  const _ReactionPickerButton({
+    required this.reactionOptions,
+    required this.onSelected,
+    this.controller,
+    this.selectedReaction,
+    this.triggerBuilder,
+  });
 
+  final ShadContextMenuController? controller;
   final List<String> reactionOptions;
   final ValueChanged<String> onSelected;
   final String? selectedReaction;
@@ -4750,7 +5804,11 @@ class _ReactionPickerButton extends StatefulWidget {
 }
 
 class _ReactionPickerButtonState extends State<_ReactionPickerButton> {
-  final ShadPopoverController _controller = ShadPopoverController();
+  late final ShadContextMenuController _internalController =
+      ShadContextMenuController();
+
+  ShadContextMenuController get _controller =>
+      widget.controller ?? _internalController;
 
   void _onSelectReaction(String reaction) {
     widget.onSelected(reaction);
@@ -4759,7 +5817,9 @@ class _ReactionPickerButtonState extends State<_ReactionPickerButton> {
 
   @override
   void dispose() {
-    _controller.dispose();
+    if (widget.controller == null) {
+      _internalController.dispose();
+    }
     super.dispose();
   }
 
@@ -4778,10 +5838,12 @@ class _ReactionPickerButtonState extends State<_ReactionPickerButton> {
           ),
         );
 
-    return ShadContextMenu(
+    return CoordinatedShadContextMenu(
       controller: _controller,
       constraints: const BoxConstraints(minWidth: 220, maxWidth: 220),
-      anchor: const ShadAnchorAuto(offset: Offset(0, 4), followerAnchor: Alignment.topRight, targetAnchor: Alignment.bottomRight),
+      estimatedMenuWidth: 220,
+      estimatedMenuHeight: 280,
+      popoverReverseDuration: _ChatBubble._menuReverseDuration,
       items: [
         Padding(
           padding: const EdgeInsets.all(4),
@@ -4797,17 +5859,29 @@ class _ReactionPickerButtonState extends State<_ReactionPickerButton> {
                       builder: (context) {
                         final selected =
                             widget.selectedReaction != null &&
-                            _normalizeEmojiPresentationKey(widget.selectedReaction!) == _normalizeEmojiPresentationKey(reaction);
+                            _normalizeEmojiPresentationKey(
+                                  widget.selectedReaction!,
+                                ) ==
+                                _normalizeEmojiPresentationKey(reaction);
                         return ShadButton.ghost(
                           width: 32,
                           height: 32,
                           padding: EdgeInsets.zero,
-                          backgroundColor: selected ? theme.colorScheme.foreground.withValues(alpha: 0.16) : null,
+                          backgroundColor: selected
+                              ? theme.colorScheme.foreground.withValues(
+                                  alpha: 0.16,
+                                )
+                              : null,
                           hoverBackgroundColor: selected
-                              ? theme.colorScheme.foreground.withValues(alpha: 0.24)
+                              ? theme.colorScheme.foreground.withValues(
+                                  alpha: 0.24,
+                                )
                               : theme.colorScheme.muted.withValues(alpha: 0.55),
                           onPressed: () => _onSelectReaction(reaction),
-                          child: Text(reaction, style: _emojiTextStyle(size: 18)),
+                          child: Text(
+                            reaction,
+                            style: _emojiTextStyle(size: 18),
+                          ),
                         );
                       },
                     ),
@@ -4828,7 +5902,8 @@ class _AttachmentOptionsButton extends StatefulWidget {
   final List<Widget> items;
 
   @override
-  State<_AttachmentOptionsButton> createState() => _AttachmentOptionsButtonState();
+  State<_AttachmentOptionsButton> createState() =>
+      _AttachmentOptionsButtonState();
 }
 
 class _AttachmentOptionsButtonState extends State<_AttachmentOptionsButton> {
@@ -4849,9 +5924,11 @@ class _AttachmentOptionsButtonState extends State<_AttachmentOptionsButton> {
     final theme = ShadTheme.of(context);
     final cs = theme.colorScheme;
 
-    return ShadContextMenuRegion(
+    return CoordinatedShadContextMenu(
       controller: _controller,
       constraints: const BoxConstraints(minWidth: 180),
+      estimatedMenuWidth: 180,
+      estimatedMenuHeight: widget.items.length * 40.0 + 8.0,
       items: widget.items,
       child: Tooltip(
         message: "Attachment options",
@@ -4860,7 +5937,7 @@ class _AttachmentOptionsButtonState extends State<_AttachmentOptionsButton> {
           height: 30,
           padding: EdgeInsets.zero,
           icon: Icon(LucideIcons.ellipsis, size: 18, color: cs.mutedForeground),
-          onPressed: _controller.show,
+          onPressed: _controller.toggle,
         ),
       ),
     );
@@ -4875,12 +5952,21 @@ class _ThreadImageRecord {
 }
 
 class _ThreadImageLookup extends StatefulWidget {
-  const _ThreadImageLookup({required this.lookupKey, required this.readCached, required this.lookupImage, required this.builder});
+  const _ThreadImageLookup({
+    required this.lookupKey,
+    required this.readCached,
+    required this.lookupImage,
+    required this.builder,
+  });
 
   final Object lookupKey;
   final _ThreadImageRecord? Function() readCached;
   final Future<_ThreadImageRecord?> Function() lookupImage;
-  final Widget Function(BuildContext context, AsyncSnapshot<_ThreadImageRecord?> snapshot) builder;
+  final Widget Function(
+    BuildContext context,
+    AsyncSnapshot<_ThreadImageRecord?> snapshot,
+  )
+  builder;
 
   @override
   State<_ThreadImageLookup> createState() => _ThreadImageLookupState();
@@ -4913,7 +5999,10 @@ class _ThreadImageLookupState extends State<_ThreadImageLookup> {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<_ThreadImageRecord?>(future: _lookup, builder: widget.builder);
+    return FutureBuilder<_ThreadImageRecord?>(
+      future: _lookup,
+      builder: widget.builder,
+    );
   }
 }
 
@@ -4962,7 +6051,8 @@ class ChatThreadImageAttachment extends StatefulWidget {
   final VoidCallback? onOpenFullscreen;
 
   @override
-  State<ChatThreadImageAttachment> createState() => _ChatThreadImageAttachmentState();
+  State<ChatThreadImageAttachment> createState() =>
+      _ChatThreadImageAttachmentState();
 }
 
 class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
@@ -4988,7 +6078,12 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
       return null;
     }
 
-    final rows = await widget.room.database.search(table: "images", where: {"id": imageId}, limit: 1, select: ["data", "mime_type"]);
+    final rows = await widget.room.database.search(
+      table: "images",
+      where: {"id": imageId},
+      limit: 1,
+      select: ["data", "mime_type"],
+    );
     if (rows.isEmpty) {
       return null;
     }
@@ -5000,7 +6095,9 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
     }
 
     final value = row["mime_type"];
-    final mimeType = (value is String && value.trim().isNotEmpty) ? value : (widget.fallbackMimeType ?? "image/png");
+    final mimeType = (value is String && value.trim().isNotEmpty)
+        ? value
+        : (widget.fallbackMimeType ?? "image/png");
 
     return _ThreadImageRecord(data: data, mimeType: mimeType);
   }
@@ -5032,7 +6129,10 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
 
     final rawWidth = widget.widthPx;
     final rawHeight = widget.heightPx;
-    if (rawWidth == null || rawHeight == null || rawWidth <= 0 || rawHeight <= 0) {
+    if (rawWidth == null ||
+        rawHeight == null ||
+        rawWidth <= 0 ||
+        rawHeight <= 0) {
       return const Size(fallbackPreviewEdge, fallbackPreviewEdge);
     }
 
@@ -5056,7 +6156,9 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
 
     if (fileName.isEmpty) {
       final suggested = _ImageMime.suggestedFileName(mimeType);
-      return trimmed.endsWith("/") ? "$trimmed$suggested" : "$trimmed/$suggested";
+      return trimmed.endsWith("/")
+          ? "$trimmed$suggested"
+          : "$trimmed/$suggested";
     }
 
     if (fileName.contains(".")) {
@@ -5074,18 +6176,26 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
 
     final mimeType = image.mimeType.trim().toLowerCase();
     final format = _ImageMime.clipboardFormat(mimeType);
-    final item = DataWriterItem(suggestedName: _ImageMime.suggestedFileName(mimeType));
+    final item = DataWriterItem(
+      suggestedName: _ImageMime.suggestedFileName(mimeType),
+    );
     if (format != null) {
       item.add(format(image.data));
     } else {
-      item.add(EncodedData([raw.DataRepresentation.simple(format: mimeType, data: image.data)]));
+      item.add(
+        EncodedData([
+          raw.DataRepresentation.simple(format: mimeType, data: image.data),
+        ]),
+      );
     }
 
     await clipboard.write([item]);
   }
 
   Future<void> _onSaveImage(_ThreadImageRecord image) async {
-    final fileNameController = TextEditingController(text: _ImageMime.suggestedFileName(image.mimeType));
+    final fileNameController = TextEditingController(
+      text: _ImageMime.suggestedFileName(image.mimeType),
+    );
     String selectedFolder = "";
 
     await showShadDialog<void>(
@@ -5109,10 +6219,14 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
             ShadButton(
               onPressed: () async {
                 final value = fileNameController.text.trim();
-                var fullPath = value.isEmpty ? _ImageMime.suggestedFileName(image.mimeType) : value;
+                var fullPath = value.isEmpty
+                    ? _ImageMime.suggestedFileName(image.mimeType)
+                    : value;
 
                 if (!fullPath.contains("/")) {
-                  fullPath = selectedFolder.isEmpty ? fullPath : "$selectedFolder/$fullPath";
+                  fullPath = selectedFolder.isEmpty
+                      ? fullPath
+                      : "$selectedFolder/$fullPath";
                 }
                 fullPath = _ensureFileNameExtension(fullPath, image.mimeType);
 
@@ -5122,7 +6236,9 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
                     context: context,
                     builder: (context) => ShadDialog(
                       title: const Text("File already exists"),
-                      description: Text("A file at '$fullPath' already exists in room storage. Do you want to overwrite it?"),
+                      description: Text(
+                        "A file at '$fullPath' already exists in room storage. Do you want to overwrite it?",
+                      ),
                       actions: [
                         ShadButton.secondary(
                           onPressed: () {
@@ -5145,7 +6261,12 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
                   }
                 }
 
-                await widget.room.storage.uploadStream(fullPath, Stream.value(image.data), overwrite: true, size: image.data.length);
+                await widget.room.storage.uploadStream(
+                  fullPath,
+                  Stream.value(image.data),
+                  overwrite: true,
+                  size: image.data.length,
+                );
 
                 if (context.mounted) {
                   Navigator.of(context).pop();
@@ -5172,8 +6293,13 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
               Padding(
                 padding: const EdgeInsets.only(top: 12),
                 child: ShadInputFormField(
-                  label: Text("File name or path", style: tt.small.copyWith(fontWeight: FontWeight.bold)),
-                  placeholder: Text(_ImageMime.suggestedFileName(image.mimeType)),
+                  label: Text(
+                    "File name or path",
+                    style: tt.small.copyWith(fontWeight: FontWeight.bold),
+                  ),
+                  placeholder: Text(
+                    _ImageMime.suggestedFileName(image.mimeType),
+                  ),
                   controller: fileNameController,
                 ),
               ),
@@ -5185,11 +6311,22 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
     fileNameController.dispose();
   }
 
-  Widget _wrapContextMenu({required _ThreadImageRecord image, required Widget child}) {
-    return ShadContextMenuRegion(
+  Widget _wrapContextMenu({
+    required _ThreadImageRecord image,
+    required Widget child,
+  }) {
+    return CoordinatedShadContextMenuRegion(
       items: [
-        ShadContextMenuItem(height: 40, onPressed: () => _onSaveImage(image), child: const Text("Save As...")),
-        ShadContextMenuItem(height: 40, onPressed: () => _onCopyImage(image), child: const Text("Copy")),
+        ShadContextMenuItem(
+          height: 40,
+          onPressed: () => _onSaveImage(image),
+          child: const Text("Save As..."),
+        ),
+        ShadContextMenuItem(
+          height: 40,
+          onPressed: () => _onCopyImage(image),
+          child: const Text("Copy"),
+        ),
       ],
       child: child,
     );
@@ -5207,10 +6344,18 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
       return child;
     }
 
-    return ShadGestureDetector(cursor: SystemMouseCursors.zoomIn, onTap: widget.onOpenFullscreen, child: child);
+    return ShadGestureDetector(
+      cursor: SystemMouseCursors.zoomIn,
+      onTap: widget.onOpenFullscreen,
+      child: child,
+    );
   }
 
-  Widget _buildPlaceholder(BuildContext context, {required bool showSpinner, String? label}) {
+  Widget _buildPlaceholder(
+    BuildContext context, {
+    required bool showSpinner,
+    String? label,
+  }) {
     final size = _displaySize();
     final trimmedLabel = label == null ? "" : label.trim();
 
@@ -5225,9 +6370,17 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (showSpinner)
-                  SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                  SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
                 else
-                  Icon(LucideIcons.imageOff, size: 20, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                  Icon(
+                    LucideIcons.imageOff,
+                    size: 20,
+                    color: ShadTheme.of(context).colorScheme.mutedForeground,
+                  ),
                 if (trimmedLabel.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   Padding(
@@ -5237,7 +6390,11 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.center,
-                      style: ShadTheme.of(context).textTheme.small.copyWith(color: ShadTheme.of(context).colorScheme.mutedForeground),
+                      style: ShadTheme.of(context).textTheme.small.copyWith(
+                        color: ShadTheme.of(
+                          context,
+                        ).colorScheme.mutedForeground,
+                      ),
                     ),
                   ),
                 ],
@@ -5252,22 +6409,40 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
   @override
   Widget build(BuildContext context) {
     final status = widget.status?.trim();
-    final hasImageId = widget.imageId != null && widget.imageId!.trim().isNotEmpty;
+    final hasImageId =
+        widget.imageId != null && widget.imageId!.trim().isNotEmpty;
     final statusDetail = widget.statusDetail?.trim();
 
     if (!hasImageId) {
       if (_isFailedStatus(status)) {
-        return FileDefaultPreviewCard(icon: LucideIcons.imageOff, text: statusDetail?.isNotEmpty == true ? statusDetail! : "Image failed");
+        return FileDefaultPreviewCard(
+          icon: LucideIcons.imageOff,
+          text: statusDetail?.isNotEmpty == true
+              ? statusDetail!
+              : "Image failed",
+        );
       }
 
-      return _buildPlaceholder(context, showSpinner: true, label: statusDetail?.isNotEmpty == true ? statusDetail : "Generating image");
+      return _buildPlaceholder(
+        context,
+        showSpinner: true,
+        label: statusDetail?.isNotEmpty == true
+            ? statusDetail
+            : "Generating image",
+      );
     }
 
     return FutureBuilder<_ThreadImageRecord?>(
       future: _lookup,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
-          return _buildPlaceholder(context, showSpinner: true, label: statusDetail?.isNotEmpty == true ? statusDetail : "Loading image");
+          return _buildPlaceholder(
+            context,
+            showSpinner: true,
+            label: statusDetail?.isNotEmpty == true
+                ? statusDetail
+                : "Loading image",
+          );
         }
 
         final image = snapshot.data;
@@ -5276,32 +6451,61 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
             return _buildPlaceholder(
               context,
               showSpinner: true,
-              label: statusDetail?.isNotEmpty == true ? statusDetail : "Generating image",
+              label: statusDetail?.isNotEmpty == true
+                  ? statusDetail
+                  : "Generating image",
             );
           }
           if (_isFailedStatus(status)) {
             return FileDefaultPreviewCard(
               icon: LucideIcons.imageOff,
-              text: statusDetail?.isNotEmpty == true ? statusDetail! : "Image failed",
+              text: statusDetail?.isNotEmpty == true
+                  ? statusDetail!
+                  : "Image failed",
             );
           }
-          return const FileDefaultPreviewCard(icon: LucideIcons.imageOff, text: "Image unavailable");
+          return const FileDefaultPreviewCard(
+            icon: LucideIcons.imageOff,
+            text: "Image unavailable",
+          );
         }
 
         final imageWidget = _ImageMime.isSvg(image.mimeType)
-            ? SvgPicture.memory(image.data, fit: (widget.widthPx != null && widget.heightPx != null) ? BoxFit.contain : BoxFit.cover)
-            : Image.memory(image.data, fit: (widget.widthPx != null && widget.heightPx != null) ? BoxFit.contain : BoxFit.cover);
+            ? SvgPicture.memory(
+                image.data,
+                fit: (widget.widthPx != null && widget.heightPx != null)
+                    ? BoxFit.contain
+                    : BoxFit.cover,
+              )
+            : Image.memory(
+                image.data,
+                fit: (widget.widthPx != null && widget.heightPx != null)
+                    ? BoxFit.contain
+                    : BoxFit.cover,
+              );
         final size = _displaySize();
 
-        final imageContainer = SizedBox(width: size.width, height: size.height, child: _wrapWithCorners(imageWidget));
-        return _wrapContextMenu(image: image, child: _wrapTapTarget(imageContainer));
+        final imageContainer = SizedBox(
+          width: size.width,
+          height: size.height,
+          child: _wrapWithCorners(imageWidget),
+        );
+        return _wrapContextMenu(
+          image: image,
+          child: _wrapTapTarget(imageContainer),
+        );
       },
     );
   }
 }
 
 class _ThreadImageGalleryPage extends StatefulWidget {
-  const _ThreadImageGalleryPage({required this.room, required this.images, required this.initialIndex, required this.onClose});
+  const _ThreadImageGalleryPage({
+    required this.room,
+    required this.images,
+    required this.initialIndex,
+    required this.onClose,
+  });
 
   final RoomClient room;
   final List<_ThreadFeedImage> images;
@@ -5309,7 +6513,8 @@ class _ThreadImageGalleryPage extends StatefulWidget {
   final VoidCallback onClose;
 
   @override
-  State<_ThreadImageGalleryPage> createState() => _ThreadImageGalleryPageState();
+  State<_ThreadImageGalleryPage> createState() =>
+      _ThreadImageGalleryPageState();
 }
 
 class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
@@ -5333,7 +6538,11 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
     if (nextIndex < 0 || nextIndex >= widget.images.length) {
       return;
     }
-    _controller.animateToPage(nextIndex, duration: const Duration(milliseconds: 180), curve: Curves.easeInOut);
+    _controller.animateToPage(
+      nextIndex,
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeInOut,
+    );
   }
 
   String _ensureFileNameExtension(String rawPath, String mimeType) {
@@ -5347,7 +6556,9 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
 
     if (fileName.isEmpty) {
       final suggested = _ImageMime.suggestedFileName(mimeType);
-      return trimmed.endsWith("/") ? "$trimmed$suggested" : "$trimmed/$suggested";
+      return trimmed.endsWith("/")
+          ? "$trimmed$suggested"
+          : "$trimmed/$suggested";
     }
 
     if (fileName.contains(".")) {
@@ -5359,7 +6570,12 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
 
   Future<_ThreadImageRecord?> _loadCurrentImage() async {
     final entry = widget.images[_currentIndex];
-    final rows = await widget.room.database.search(table: "images", where: {"id": entry.imageId}, limit: 1, select: ["data", "mime_type"]);
+    final rows = await widget.room.database.search(
+      table: "images",
+      where: {"id": entry.imageId},
+      limit: 1,
+      select: ["data", "mime_type"],
+    );
     if (rows.isEmpty) {
       return null;
     }
@@ -5371,7 +6587,10 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
     }
 
     final mimeTypeValue = row["mime_type"];
-    final mimeType = (mimeTypeValue is String && mimeTypeValue.trim().isNotEmpty) ? mimeTypeValue : (entry.mimeType ?? "image/png");
+    final mimeType =
+        (mimeTypeValue is String && mimeTypeValue.trim().isNotEmpty)
+        ? mimeTypeValue
+        : (entry.mimeType ?? "image/png");
     return _ThreadImageRecord(data: data, mimeType: mimeType);
   }
 
@@ -5383,11 +6602,17 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
 
     final mimeType = image.mimeType.trim().toLowerCase();
     final format = _ImageMime.clipboardFormat(mimeType);
-    final item = DataWriterItem(suggestedName: _ImageMime.suggestedFileName(mimeType));
+    final item = DataWriterItem(
+      suggestedName: _ImageMime.suggestedFileName(mimeType),
+    );
     if (format != null) {
       item.add(format(image.data));
     } else {
-      item.add(EncodedData([raw.DataRepresentation.simple(format: mimeType, data: image.data)]));
+      item.add(
+        EncodedData([
+          raw.DataRepresentation.simple(format: mimeType, data: image.data),
+        ]),
+      );
     }
 
     await clipboard.write([item]);
@@ -5405,7 +6630,9 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
     if (!mounted) {
       return;
     }
-    final fileNameController = TextEditingController(text: _ImageMime.suggestedFileName(image.mimeType));
+    final fileNameController = TextEditingController(
+      text: _ImageMime.suggestedFileName(image.mimeType),
+    );
     String selectedFolder = "";
 
     await showShadDialog<void>(
@@ -5429,10 +6656,14 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
             ShadButton(
               onPressed: () async {
                 final value = fileNameController.text.trim();
-                var fullPath = value.isEmpty ? _ImageMime.suggestedFileName(image.mimeType) : value;
+                var fullPath = value.isEmpty
+                    ? _ImageMime.suggestedFileName(image.mimeType)
+                    : value;
 
                 if (!fullPath.contains("/")) {
-                  fullPath = selectedFolder.isEmpty ? fullPath : "$selectedFolder/$fullPath";
+                  fullPath = selectedFolder.isEmpty
+                      ? fullPath
+                      : "$selectedFolder/$fullPath";
                 }
                 fullPath = _ensureFileNameExtension(fullPath, image.mimeType);
 
@@ -5442,7 +6673,9 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
                     context: context,
                     builder: (context) => ShadDialog(
                       title: const Text("File already exists"),
-                      description: Text("A file at '$fullPath' already exists in room storage. Do you want to overwrite it?"),
+                      description: Text(
+                        "A file at '$fullPath' already exists in room storage. Do you want to overwrite it?",
+                      ),
                       actions: [
                         ShadButton.secondary(
                           onPressed: () {
@@ -5465,7 +6698,12 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
                   }
                 }
 
-                await widget.room.storage.uploadStream(fullPath, Stream.value(image.data), overwrite: true, size: image.data.length);
+                await widget.room.storage.uploadStream(
+                  fullPath,
+                  Stream.value(image.data),
+                  overwrite: true,
+                  size: image.data.length,
+                );
 
                 if (context.mounted) {
                   Navigator.of(context).pop();
@@ -5492,8 +6730,13 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
               Padding(
                 padding: const EdgeInsets.only(top: 12),
                 child: ShadInputFormField(
-                  label: Text("File name or path", style: tt.small.copyWith(fontWeight: FontWeight.bold)),
-                  placeholder: Text(_ImageMime.suggestedFileName(image.mimeType)),
+                  label: Text(
+                    "File name or path",
+                    style: tt.small.copyWith(fontWeight: FontWeight.bold),
+                  ),
+                  placeholder: Text(
+                    _ImageMime.suggestedFileName(image.mimeType),
+                  ),
                   controller: fileNameController,
                 ),
               ),
@@ -5564,13 +6807,31 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
                   children: [
                     ShadButton.ghost(
                       onPressed: _onCopyCurrentImage,
-                      leading: const Icon(LucideIcons.copy, size: 16, color: Colors.white),
-                      child: Text("Copy", style: ShadTheme.of(context).textTheme.small.copyWith(color: Colors.white)),
+                      leading: const Icon(
+                        LucideIcons.copy,
+                        size: 16,
+                        color: Colors.white,
+                      ),
+                      child: Text(
+                        "Copy",
+                        style: ShadTheme.of(
+                          context,
+                        ).textTheme.small.copyWith(color: Colors.white),
+                      ),
                     ),
                     ShadButton.ghost(
                       onPressed: _onSaveCurrentImage,
-                      leading: const Icon(LucideIcons.save, size: 16, color: Colors.white),
-                      child: Text("Save As...", style: ShadTheme.of(context).textTheme.small.copyWith(color: Colors.white)),
+                      leading: const Icon(
+                        LucideIcons.save,
+                        size: 16,
+                        color: Colors.white,
+                      ),
+                      child: Text(
+                        "Save As...",
+                        style: ShadTheme.of(
+                          context,
+                        ).textTheme.small.copyWith(color: Colors.white),
+                      ),
                     ),
                   ],
                 ),
@@ -5581,7 +6842,9 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
                   bottom: 16,
                   child: Text(
                     "${_currentIndex + 1} / ${widget.images.length}",
-                    style: ShadTheme.of(context).textTheme.small.copyWith(color: Colors.white.withAlpha(220)),
+                    style: ShadTheme.of(context).textTheme.small.copyWith(
+                      color: Colors.white.withAlpha(220),
+                    ),
                   ),
                 ),
               if (widget.images.length > 1)
@@ -5591,8 +6854,13 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
                   bottom: 0,
                   child: Center(
                     child: ShadIconButton.ghost(
-                      icon: Icon(LucideIcons.chevronLeft, color: canGoBack ? Colors.white : Colors.white30),
-                      onPressed: canGoBack ? () => _changePage(_currentIndex - 1) : null,
+                      icon: Icon(
+                        LucideIcons.chevronLeft,
+                        color: canGoBack ? Colors.white : Colors.white30,
+                      ),
+                      onPressed: canGoBack
+                          ? () => _changePage(_currentIndex - 1)
+                          : null,
                     ),
                   ),
                 ),
@@ -5603,8 +6871,13 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
                   bottom: 0,
                   child: Center(
                     child: ShadIconButton.ghost(
-                      icon: Icon(LucideIcons.chevronRight, color: canGoForward ? Colors.white : Colors.white30),
-                      onPressed: canGoForward ? () => _changePage(_currentIndex + 1) : null,
+                      icon: Icon(
+                        LucideIcons.chevronRight,
+                        color: canGoForward ? Colors.white : Colors.white30,
+                      ),
+                      onPressed: canGoForward
+                          ? () => _changePage(_currentIndex + 1)
+                          : null,
                     ),
                   ),
                 ),
@@ -5636,7 +6909,12 @@ class _ThreadFullscreenImage extends StatelessWidget {
   final Future<void> Function(_ThreadImageRecord image)? onSaveImage;
 
   Future<_ThreadImageRecord?> _loadImage() async {
-    final rows = await room.database.search(table: "images", where: {"id": imageId}, limit: 1, select: ["data", "mime_type"]);
+    final rows = await room.database.search(
+      table: "images",
+      where: {"id": imageId},
+      limit: 1,
+      select: ["data", "mime_type"],
+    );
     if (rows.isEmpty) {
       return null;
     }
@@ -5648,7 +6926,10 @@ class _ThreadFullscreenImage extends StatelessWidget {
     }
 
     final mimeTypeValue = row["mime_type"];
-    final mimeType = (mimeTypeValue is String && mimeTypeValue.trim().isNotEmpty) ? mimeTypeValue : (fallbackMimeType ?? "image/png");
+    final mimeType =
+        (mimeTypeValue is String && mimeTypeValue.trim().isNotEmpty)
+        ? mimeTypeValue
+        : (fallbackMimeType ?? "image/png");
 
     return _ThreadImageRecord(data: data, mimeType: mimeType);
   }
@@ -5692,14 +6973,23 @@ class _ThreadFullscreenImage extends StatelessWidget {
             return Center(
               child: Text(
                 detail?.isNotEmpty == true ? detail! : "Generating image",
-                style: ShadTheme.of(context).textTheme.p.copyWith(color: Colors.white70),
+                style: ShadTheme.of(
+                  context,
+                ).textTheme.p.copyWith(color: Colors.white70),
               ),
             );
           }
 
-          final message = _isFailedStatus(normalizedStatus) ? (detail?.isNotEmpty == true ? detail! : "Image failed") : "Image unavailable";
+          final message = _isFailedStatus(normalizedStatus)
+              ? (detail?.isNotEmpty == true ? detail! : "Image failed")
+              : "Image unavailable";
           return Center(
-            child: Text(message, style: ShadTheme.of(context).textTheme.p.copyWith(color: Colors.white70)),
+            child: Text(
+              message,
+              style: ShadTheme.of(
+                context,
+              ).textTheme.p.copyWith(color: Colors.white70),
+            ),
           );
         }
 
@@ -5709,17 +6999,30 @@ class _ThreadFullscreenImage extends StatelessWidget {
 
         final viewer = InteractiveViewer2(
           child: Center(
-            child: Padding(padding: const EdgeInsets.all(24), child: imageWidget),
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: imageWidget,
+            ),
           ),
         );
         if (onCopyImage == null && onSaveImage == null) {
           return viewer;
         }
 
-        return ShadContextMenuRegion(
+        return CoordinatedShadContextMenuRegion(
           items: [
-            if (onSaveImage != null) ShadContextMenuItem(height: 40, onPressed: () => onSaveImage!(image), child: const Text("Save As...")),
-            if (onCopyImage != null) ShadContextMenuItem(height: 40, onPressed: () => onCopyImage!(image), child: const Text("Copy")),
+            if (onSaveImage != null)
+              ShadContextMenuItem(
+                height: 40,
+                onPressed: () => onSaveImage!(image),
+                child: const Text("Save As..."),
+              ),
+            if (onCopyImage != null)
+              ShadContextMenuItem(
+                height: 40,
+                onPressed: () => onCopyImage!(image),
+                child: const Text("Copy"),
+              ),
           ],
           child: viewer,
         );
@@ -5734,16 +7037,21 @@ class _CyclingProgressIndicator extends StatefulWidget {
   final double strokeWidth;
 
   @override
-  State<_CyclingProgressIndicator> createState() => _CyclingProgressIndicatorState();
+  State<_CyclingProgressIndicator> createState() =>
+      _CyclingProgressIndicatorState();
 }
 
-class _CyclingProgressIndicatorState extends State<_CyclingProgressIndicator> with SingleTickerProviderStateMixin {
+class _CyclingProgressIndicatorState extends State<_CyclingProgressIndicator>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1800))..repeat();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    )..repeat();
   }
 
   @override
@@ -5754,14 +7062,20 @@ class _CyclingProgressIndicatorState extends State<_CyclingProgressIndicator> wi
 
   Color _colorAt(BuildContext context, double t) {
     final colorScheme = ShadTheme.of(context).colorScheme;
-    final palette = [colorScheme.primary, colorScheme.foreground, colorScheme.mutedForeground, colorScheme.primary];
+    final palette = [
+      colorScheme.primary,
+      colorScheme.foreground,
+      colorScheme.mutedForeground,
+      colorScheme.primary,
+    ];
 
     final segmentCount = palette.length - 1;
     final scaled = t * segmentCount;
     final index = scaled.floor().clamp(0, segmentCount - 1);
     final localT = (scaled - index).clamp(0.0, 1.0);
     final eased = Curves.easeInOut.transform(localT);
-    return Color.lerp(palette[index], palette[index + 1], eased) ?? colorScheme.primary;
+    return Color.lerp(palette[index], palette[index + 1], eased) ??
+        colorScheme.primary;
   }
 
   @override
@@ -5770,7 +7084,9 @@ class _CyclingProgressIndicatorState extends State<_CyclingProgressIndicator> wi
       animation: _controller,
       builder: (context, _) => CircularProgressIndicator(
         strokeWidth: widget.strokeWidth,
-        valueColor: AlwaysStoppedAnimation<Color>(_colorAt(context, _controller.value)),
+        valueColor: AlwaysStoppedAnimation<Color>(
+          _colorAt(context, _controller.value),
+        ),
       ),
     );
   }
@@ -5789,7 +7105,10 @@ String formatChatThreadStatusText(String text, {DateTime? startedAt}) {
   return "$text (${seconds}s)";
 }
 
-LinearGradient _processingSweepGradient(BuildContext context, {required double t}) {
+LinearGradient _processingSweepGradient(
+  BuildContext context, {
+  required double t,
+}) {
   final colorScheme = ShadTheme.of(context).colorScheme;
   final centerX = -1.4 + (t * 2.8);
   final highlight = colorScheme.background.withAlpha(210);
@@ -5802,7 +7121,11 @@ LinearGradient _processingSweepGradient(BuildContext context, {required double t
   );
 }
 
-Shader _processingSweepShader(BuildContext context, Rect rect, {required double t}) {
+Shader _processingSweepShader(
+  BuildContext context,
+  Rect rect, {
+  required double t,
+}) {
   return _processingSweepGradient(context, t: t).createShader(rect);
 }
 
@@ -5810,16 +7133,21 @@ class _ProcessingSweepOverlay extends StatefulWidget {
   const _ProcessingSweepOverlay();
 
   @override
-  State<_ProcessingSweepOverlay> createState() => _ProcessingSweepOverlayState();
+  State<_ProcessingSweepOverlay> createState() =>
+      _ProcessingSweepOverlayState();
 }
 
-class _ProcessingSweepOverlayState extends State<_ProcessingSweepOverlay> with SingleTickerProviderStateMixin {
+class _ProcessingSweepOverlayState extends State<_ProcessingSweepOverlay>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1700))..repeat();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1700),
+    )..repeat();
   }
 
   @override
@@ -5833,7 +7161,9 @@ class _ProcessingSweepOverlayState extends State<_ProcessingSweepOverlay> with S
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) => DecoratedBox(
-        decoration: BoxDecoration(gradient: _processingSweepGradient(context, t: _controller.value)),
+        decoration: BoxDecoration(
+          gradient: _processingSweepGradient(context, t: _controller.value),
+        ),
       ),
     );
   }
@@ -5862,7 +7192,14 @@ class ChatThreadProcessingSweepText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!animate) {
-      return Text(text, style: style, maxLines: maxLines, overflow: overflow, softWrap: softWrap, textAlign: textAlign);
+      return Text(
+        text,
+        style: style,
+        maxLines: maxLines,
+        overflow: overflow,
+        softWrap: softWrap,
+        textAlign: textAlign,
+      );
     }
 
     return _ProcessingStatusText(
@@ -5877,7 +7214,14 @@ class ChatThreadProcessingSweepText extends StatelessWidget {
 }
 
 class _ProcessingStatusText extends StatefulWidget {
-  const _ProcessingStatusText({required this.text, required this.style, this.maxLines, this.overflow, this.softWrap, this.textAlign});
+  const _ProcessingStatusText({
+    required this.text,
+    required this.style,
+    this.maxLines,
+    this.overflow,
+    this.softWrap,
+    this.textAlign,
+  });
 
   final String text;
   final TextStyle style;
@@ -5890,13 +7234,17 @@ class _ProcessingStatusText extends StatefulWidget {
   State<_ProcessingStatusText> createState() => _ProcessingStatusTextState();
 }
 
-class _ProcessingStatusTextState extends State<_ProcessingStatusText> with SingleTickerProviderStateMixin {
+class _ProcessingStatusTextState extends State<_ProcessingStatusText>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1700))..repeat();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1700),
+    )..repeat();
   }
 
   @override
@@ -5924,7 +7272,8 @@ class _ProcessingStatusTextState extends State<_ProcessingStatusText> with Singl
             text,
             ShaderMask(
               blendMode: BlendMode.srcIn,
-              shaderCallback: (rect) => _processingSweepShader(context, rect, t: _controller.value),
+              shaderCallback: (rect) =>
+                  _processingSweepShader(context, rect, t: _controller.value),
               child: Text(
                 widget.text,
                 style: widget.style.copyWith(color: Colors.white),
@@ -5967,10 +7316,12 @@ class ChatThreadProcessingStatusRow extends StatefulWidget {
   final bool cancelEnabled;
 
   @override
-  State<ChatThreadProcessingStatusRow> createState() => _ChatThreadProcessingStatusRowState();
+  State<ChatThreadProcessingStatusRow> createState() =>
+      _ChatThreadProcessingStatusRowState();
 }
 
-class _ChatThreadProcessingStatusRowState extends State<ChatThreadProcessingStatusRow> {
+class _ChatThreadProcessingStatusRowState
+    extends State<ChatThreadProcessingStatusRow> {
   Timer? _ticker;
 
   @override
@@ -6019,8 +7370,12 @@ class _ChatThreadProcessingStatusRowState extends State<ChatThreadProcessingStat
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
-    final cancelButtonColor = widget.cancelEnabled ? theme.colorScheme.foreground : theme.colorScheme.muted;
-    final cancelIconColor = widget.cancelEnabled ? theme.colorScheme.background : theme.colorScheme.mutedForeground;
+    final cancelButtonColor = widget.cancelEnabled
+        ? theme.colorScheme.foreground
+        : theme.colorScheme.muted;
+    final cancelIconColor = widget.cancelEnabled
+        ? theme.colorScheme.background
+        : theme.colorScheme.mutedForeground;
     final displayText = _displayText();
 
     return Row(
@@ -6032,26 +7387,38 @@ class _ChatThreadProcessingStatusRowState extends State<ChatThreadProcessingStat
           Opacity(
             opacity: widget.cancelEnabled ? 1 : 0.55,
             child: ShadGestureDetector(
-              cursor: widget.cancelEnabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+              cursor: widget.cancelEnabled
+                  ? SystemMouseCursors.click
+                  : SystemMouseCursors.basic,
               onTapDown: widget.cancelEnabled && widget.onCancel != null
                   ? (_) {
                       widget.onCancel!();
                     }
                   : null,
               child: ShadTooltip(
-                builder: (context) => Text(widget.cancelEnabled ? "Stop" : "Cancelling"),
+                builder: (context) =>
+                    Text(widget.cancelEnabled ? "Stop" : "Cancelling"),
                 child: SizedBox(
                   width: 24,
                   height: 24,
                   child: Stack(
                     alignment: Alignment.center,
                     children: [
-                      const Positioned.fill(child: _CyclingProgressIndicator(strokeWidth: 2)),
+                      const Positioned.fill(
+                        child: _CyclingProgressIndicator(strokeWidth: 2),
+                      ),
                       Container(
                         width: 18,
                         height: 18,
-                        decoration: BoxDecoration(shape: BoxShape.circle, color: cancelButtonColor),
-                        child: Icon(LucideIcons.x, color: cancelIconColor, size: 12),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: cancelButtonColor,
+                        ),
+                        child: Icon(
+                          LucideIcons.x,
+                          color: cancelIconColor,
+                          size: 12,
+                        ),
                       ),
                     ],
                   ),
@@ -6060,12 +7427,19 @@ class _ChatThreadProcessingStatusRowState extends State<ChatThreadProcessingStat
             ),
           )
         else
-          const SizedBox(width: 13, height: 13, child: _CyclingProgressIndicator(strokeWidth: 2)),
+          const SizedBox(
+            width: 13,
+            height: 13,
+            child: _CyclingProgressIndicator(strokeWidth: 2),
+          ),
         const SizedBox(width: 10),
         Expanded(
           child: ChatThreadProcessingSweepText(
             text: displayText,
-            style: TextStyle(fontSize: 13, color: theme.colorScheme.mutedForeground),
+            style: TextStyle(
+              fontSize: 13,
+              color: theme.colorScheme.mutedForeground,
+            ),
           ),
         ),
       ],
@@ -6080,13 +7454,17 @@ class _PreviewSweepOverlay extends StatefulWidget {
   State<_PreviewSweepOverlay> createState() => _PreviewSweepOverlayState();
 }
 
-class _PreviewSweepOverlayState extends State<_PreviewSweepOverlay> with SingleTickerProviderStateMixin {
+class _PreviewSweepOverlayState extends State<_PreviewSweepOverlay>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1700))..repeat();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1700),
+    )..repeat();
   }
 
   @override
@@ -6107,7 +7485,11 @@ class _PreviewSweepOverlayState extends State<_PreviewSweepOverlay> with SingleT
             gradient: LinearGradient(
               begin: Alignment(centerX - 0.45, 0),
               end: Alignment(centerX + 0.45, 0),
-              colors: const <Color>[Color(0x22000000), Color(0x7A000000), Color(0x22000000)],
+              colors: const <Color>[
+                Color(0x22000000),
+                Color(0x7A000000),
+                Color(0x22000000),
+              ],
               stops: const <double>[0.0, 0.5, 1.0],
             ),
           ),
@@ -6130,12 +7512,20 @@ Widget defaultMessageHeaderBuilder(
   final isDesktopScreen = MediaQuery.sizeOf(context).width >= 600;
 
   final name = message.getAttribute("author_name") ?? "";
-  final createdAt = message.getAttribute("created_at") == null ? DateTime.now() : DateTime.parse(message.getAttribute("created_at"));
+  final createdAt = message.getAttribute("created_at") == null
+      ? DateTime.now()
+      : DateTime.parse(message.getAttribute("created_at"));
 
-  if (isLastMessage || _shouldShowAuthorNames(thread: thread, localParticipantName: localParticipantName)) {
+  if (isLastMessage ||
+      _shouldShowAuthorNames(
+        thread: thread,
+        localParticipantName: localParticipantName,
+      )) {
     return Container(
       padding: _chatBubbleContentPadding,
-      width: ((message.getAttribute("text") as String?)?.isEmpty ?? true) ? 250 : double.infinity,
+      width: ((message.getAttribute("text") as String?)?.isEmpty ?? true)
+          ? 250
+          : double.infinity,
       child: SelectionArea(
         child: Row(
           spacing: 8,
@@ -6144,7 +7534,11 @@ Widget defaultMessageHeaderBuilder(
               child: Text(
                 _displayParticipantName(name),
                 style: isDesktopScreen
-                    ? GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700, color: cs.foreground)
+                    ? GoogleFonts.inter(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: cs.foreground,
+                      )
                     : tt.small.copyWith(color: cs.foreground),
                 maxLines: 1,
                 overflow: .ellipsis,
@@ -6260,7 +7654,9 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
 
   bool agentOnline = false;
   void _checkAgent() {
-    final agent = widget.room.messaging.remoteParticipants.firstWhereOrNull((x) => x.getAttribute("name") == widget.agentName);
+    final agent = widget.room.messaging.remoteParticipants.firstWhereOrNull(
+      (x) => x.getAttribute("name") == widget.agentName,
+    );
     final online = agent != null;
     if (online != agentOnline) {
       if (!mounted) {
@@ -6271,8 +7667,16 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
       });
 
       if (online) {
-        widget.room.messaging.sendMessage(to: agent, type: "opened", message: {"path": widget.path});
-        widget.room.messaging.sendMessage(to: agent, type: "get_thread_toolkit_builders", message: {"path": widget.path});
+        widget.room.messaging.sendMessage(
+          to: agent,
+          type: "opened",
+          message: {"path": widget.path},
+        );
+        widget.room.messaging.sendMessage(
+          to: agent,
+          type: "get_thread_toolkit_builders",
+          message: {"path": widget.path},
+        );
       }
     }
   }
@@ -6317,7 +7721,11 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
       if (event.message.type == "set_thread_tool_providers") {
         if (mounted) {
           setState(() {
-            availableTools = [for (final json in event.message.message["tool_providers"] as List) ThreadToolkitBuilder(name: json["name"])];
+            availableTools = [
+              for (final json
+                  in event.message.message["tool_providers"] as List)
+                ThreadToolkitBuilder(name: json["name"]),
+            ];
           });
         }
       }
@@ -6327,7 +7735,9 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         if (payload is Map<String, dynamic>) {
           widget.controller.handleAgentMessagePayload(payload);
         } else if (payload is Map) {
-          widget.controller.handleAgentMessagePayload(Map<String, dynamic>.from(payload));
+          widget.controller.handleAgentMessagePayload(
+            Map<String, dynamic>.from(payload),
+          );
         }
       }
 
@@ -6336,19 +7746,24 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         _checkAgent();
       }
 
-      if (event.message.type == "typing" && event.message.message["path"] == widget.path) {
+      if (event.message.type == "typing" &&
+          event.message.message["path"] == widget.path) {
         // TODO: verify thread_id matches
         typing[event.message.fromParticipantId]?.cancel();
-        typing[event.message.fromParticipantId] = Timer(Duration(seconds: 1), () {
-          typing.remove(event.message.fromParticipantId);
-          if (mounted) {
-            setState(() {});
-          }
-        });
+        typing[event.message.fromParticipantId] = Timer(
+          Duration(seconds: 1),
+          () {
+            typing.remove(event.message.fromParticipantId);
+            if (mounted) {
+              setState(() {});
+            }
+          },
+        );
         if (mounted) {
           setState(() {});
         }
-      } else if (event.message.type == "listening" && event.message.message["path"] == widget.path) {
+      } else if (event.message.type == "listening" &&
+          event.message.message["path"] == widget.path) {
         if (event.message.message["listening"] == true) {
           listening.add(event.message.fromParticipantId);
         } else {
@@ -6364,7 +7779,9 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
   }
 
   void _getParticipants() {
-    final online = widget.controller.getOnlineParticipants(widget.document).toSet();
+    final online = widget.controller
+        .getOnlineParticipants(widget.document)
+        .toSet();
     if (!setEquals(online, onlineParticipants)) {
       onlineParticipants = online;
       if (!mounted) {
@@ -6373,7 +7790,9 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
       setState(() {});
     }
 
-    final offline = widget.controller.getOfflineParticipants(widget.document).toSet();
+    final offline = widget.controller
+        .getOfflineParticipants(widget.document)
+        .toSet();
     if (!setEquals(offline, offlineParticipants)) {
       offlineParticipants = offline;
       if (!mounted) {
@@ -6384,8 +7803,14 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
   }
 
   void _getMessages() {
-    final threadMessages = widget.document.root.getChildren().whereType<MeshElement>().where((x) => x.tagName == "messages").firstOrNull;
-    messages = (threadMessages?.getChildren() ?? []).whereType<MeshElement>().toList();
+    final threadMessages = widget.document.root
+        .getChildren()
+        .whereType<MeshElement>()
+        .where((x) => x.tagName == "messages")
+        .firstOrNull;
+    messages = (threadMessages?.getChildren() ?? [])
+        .whereType<MeshElement>()
+        .toList();
     setState(() {});
   }
 
@@ -6405,12 +7830,34 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
       ),
     );
 
-    final sameStartedAt = nextState.startedAt?.millisecondsSinceEpoch == threadStatusStartedAt?.millisecondsSinceEpoch;
+    final sameStartedAt =
+        nextState.startedAt?.millisecondsSinceEpoch ==
+        threadStatusStartedAt?.millisecondsSinceEpoch;
     final samePendingMessages =
         nextState.pendingMessages.length == pendingMessages.length &&
         const DeepCollectionEquality().equals(
-          nextState.pendingMessages.map((x) => [x.messageId, x.messageType, x.text, x.attachments, x.senderName]).toList(),
-          pendingMessages.map((x) => [x.messageId, x.messageType, x.text, x.attachments, x.senderName]).toList(),
+          nextState.pendingMessages
+              .map(
+                (x) => [
+                  x.messageId,
+                  x.messageType,
+                  x.text,
+                  x.attachments,
+                  x.senderName,
+                ],
+              )
+              .toList(),
+          pendingMessages
+              .map(
+                (x) => [
+                  x.messageId,
+                  x.messageType,
+                  x.text,
+                  x.attachments,
+                  x.senderName,
+                ],
+              )
+              .toList(),
         );
     if (nextState.text == threadStatus &&
         nextState.mode == threadStatusMode &&
@@ -6471,7 +7918,12 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
 }
 
 class ReasoningTrace extends StatefulWidget {
-  const ReasoningTrace({super.key, required this.previous, required this.message, required this.next});
+  const ReasoningTrace({
+    super.key,
+    required this.previous,
+    required this.message,
+    required this.next,
+  });
 
   final MeshElement? previous;
   final MeshElement message;
@@ -6498,7 +7950,10 @@ class _ReasoningTrace extends State<ReasoningTrace> {
                 Expanded(
                   child: MarkdownWidget(
                     padding: const EdgeInsets.all(0),
-                    config: buildChatBubbleMarkdownConfig(context, threadTypography: true),
+                    config: buildChatBubbleMarkdownConfig(
+                      context,
+                      threadTypography: true,
+                    ),
                     shrinkWrap: true,
                     selectable: true,
 
@@ -6521,7 +7976,12 @@ class _ReasoningTrace extends State<ReasoningTrace> {
 }
 
 class ShellLine extends StatefulWidget {
-  const ShellLine({super.key, required this.previous, required this.message, required this.next});
+  const ShellLine({
+    super.key,
+    required this.previous,
+    required this.message,
+    required this.next,
+  });
 
   final MeshElement? previous;
   final MeshElement message;
@@ -6542,7 +8002,9 @@ class _ShellLineState extends State<ShellLine> {
   bool expanded = false;
   @override
   Widget build(BuildContext context) {
-    final border = BorderSide(color: ShadTheme.of(context).cardTheme.border!.bottom!.color!);
+    final border = BorderSide(
+      color: ShadTheme.of(context).cardTheme.border!.bottom!.color!,
+    );
     return Container(
       margin: EdgeInsets.only(top: 0, bottom: 0, right: 50, left: 5),
       decoration: BoxDecoration(
@@ -6550,14 +8012,24 @@ class _ShellLineState extends State<ShellLine> {
         border: Border(
           left: border,
           right: border,
-          top: widget.previous?.tagName != widget.message.tagName ? border : BorderSide.none,
+          top: widget.previous?.tagName != widget.message.tagName
+              ? border
+              : BorderSide.none,
           bottom: border,
         ),
         borderRadius: BorderRadius.only(
-          topLeft: widget.previous?.tagName != widget.message.tagName ? Radius.circular(10) : Radius.zero,
-          topRight: widget.previous?.tagName != widget.message.tagName ? Radius.circular(10) : Radius.zero,
-          bottomRight: widget.next?.tagName == widget.message.tagName ? Radius.zero : Radius.circular(10),
-          bottomLeft: widget.next?.tagName == widget.message.tagName ? Radius.zero : Radius.circular(10),
+          topLeft: widget.previous?.tagName != widget.message.tagName
+              ? Radius.circular(10)
+              : Radius.zero,
+          topRight: widget.previous?.tagName != widget.message.tagName
+              ? Radius.circular(10)
+              : Radius.zero,
+          bottomRight: widget.next?.tagName == widget.message.tagName
+              ? Radius.zero
+              : Radius.circular(10),
+          bottomLeft: widget.next?.tagName == widget.message.tagName
+              ? Radius.zero
+              : Radius.circular(10),
         ),
       ),
       child: Column(
@@ -6574,7 +8046,12 @@ class _ShellLineState extends State<ShellLine> {
                 children: [
                   Icon(LucideIcons.terminal),
                   SizedBox(width: 10),
-                  Expanded(child: Text("Terminal", style: ShadTheme.of(context).textTheme.p)),
+                  Expanded(
+                    child: Text(
+                      "Terminal",
+                      style: ShadTheme.of(context).textTheme.p,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -6590,7 +8067,14 @@ class _ShellLineState extends State<ShellLine> {
                       expanded = !expanded;
                     });
                   },
-                  child: Padding(padding: EdgeInsets.all(3), child: Icon(expanded ? LucideIcons.chevronDown : LucideIcons.chevronRight)),
+                  child: Padding(
+                    padding: EdgeInsets.all(3),
+                    child: Icon(
+                      expanded
+                          ? LucideIcons.chevronDown
+                          : LucideIcons.chevronRight,
+                    ),
+                  ),
                 ),
 
                 Expanded(
@@ -6598,22 +8082,36 @@ class _ShellLineState extends State<ShellLine> {
                     maxLines: expanded ? null : 1,
                     TextSpan(
                       children: [
-                        TextSpan(text: widget.message.getAttribute("command"), style: GoogleFonts.sourceCodePro()),
+                        TextSpan(
+                          text: widget.message.getAttribute("command"),
+                          style: GoogleFonts.sourceCodePro(),
+                        ),
                         if (expanded) ...[
                           TextSpan(text: "\n"),
-                          if (widget.message.getAttribute("result") != null) ...[
+                          if (widget.message.getAttribute("result") !=
+                              null) ...[
                             TextSpan(text: "\n"),
-                            TextSpan(text: trim(widget.message.getAttribute("result")), style: GoogleFonts.sourceCodePro()),
+                            TextSpan(
+                              text: trim(widget.message.getAttribute("result")),
+                              style: GoogleFonts.sourceCodePro(),
+                            ),
                           ],
-                          if (widget.message.getAttribute("stdout") != null) ...[
+                          if (widget.message.getAttribute("stdout") !=
+                              null) ...[
                             TextSpan(text: "\n"),
-                            TextSpan(text: trim(widget.message.getAttribute("stdout")), style: GoogleFonts.sourceCodePro()),
+                            TextSpan(
+                              text: trim(widget.message.getAttribute("stdout")),
+                              style: GoogleFonts.sourceCodePro(),
+                            ),
                           ],
-                          if (widget.message.getAttribute("stderr") != null) ...[
+                          if (widget.message.getAttribute("stderr") !=
+                              null) ...[
                             TextSpan(text: "\n"),
                             TextSpan(
                               text: trim(widget.message.getAttribute("stderr")),
-                              style: GoogleFonts.sourceCodePro(color: Colors.red),
+                              style: GoogleFonts.sourceCodePro(
+                                color: Colors.red,
+                              ),
                             ),
                           ],
                         ],
@@ -6665,7 +8163,11 @@ class EventLine extends StatefulWidget {
 class _EventLineState extends State<EventLine> {
   bool sendingApprovalDecision = false;
 
-  Widget _wrapWithTooltip(BuildContext context, {required Widget child, required String? tooltipText}) {
+  Widget _wrapWithTooltip(
+    BuildContext context, {
+    required Widget child,
+    required String? tooltipText,
+  }) {
     final normalizedTooltipText = tooltipText?.trim() ?? "";
     if (normalizedTooltipText.isEmpty) {
       return child;
@@ -6675,7 +8177,10 @@ class _EventLineState extends State<EventLine> {
       waitDuration: const Duration(milliseconds: 300),
       builder: (context) => ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 420),
-        child: Text(normalizedTooltipText, style: ShadTheme.of(context).textTheme.small),
+        child: Text(
+          normalizedTooltipText,
+          style: ShadTheme.of(context).textTheme.small,
+        ),
       ),
       child: child,
     );
@@ -6688,10 +8193,17 @@ class _EventLineState extends State<EventLine> {
 
     final normalized = value.replaceAll(RegExp(r"[._-]+"), " ").trim();
     final parts = normalized.split(RegExp(r"\s+"));
-    return parts.where((part) => part.isNotEmpty).map((part) => "${part[0].toUpperCase()}${part.substring(1)}").join(" ");
+    return parts
+        .where((part) => part.isNotEmpty)
+        .map((part) => "${part[0].toUpperCase()}${part.substring(1)}")
+        .join(" ");
   }
 
-  String _defaultHeadline({required String kind, required String state, required String eventName}) {
+  String _defaultHeadline({
+    required String kind,
+    required String state,
+    required String eventName,
+  }) {
     if (kind == "plan") {
       return state == "completed" ? "Plan Ready" : "Planning";
     }
@@ -6716,7 +8228,11 @@ class _EventLineState extends State<EventLine> {
     return "";
   }
 
-  bool _useSummaryAsHeadline({required String summary, required String method, required String eventName}) {
+  bool _useSummaryAsHeadline({
+    required String summary,
+    required String method,
+    required String eventName,
+  }) {
     if (summary.trim().isEmpty) {
       return false;
     }
@@ -6843,7 +8359,11 @@ class _EventLineState extends State<EventLine> {
         return const [];
       }
 
-      final itemCandidates = <dynamic>[decoded["item"], (decoded["msg"] is Map) ? (decoded["msg"] as Map)["item"] : null, decoded];
+      final itemCandidates = <dynamic>[
+        decoded["item"],
+        (decoded["msg"] is Map) ? (decoded["msg"] as Map)["item"] : null,
+        decoded,
+      ];
 
       for (final candidate in itemCandidates) {
         if (candidate is! Map) {
@@ -6871,7 +8391,8 @@ class _EventLineState extends State<EventLine> {
             continue;
           }
 
-          final path = _diffPreviewPathForChange(change) ?? fallbackPath ?? headline;
+          final path =
+              _diffPreviewPathForChange(change) ?? fallbackPath ?? headline;
           previews.add({"path": path, "diff": normalizedDiff});
         }
 
@@ -6884,7 +8405,9 @@ class _EventLineState extends State<EventLine> {
     return const [];
   }
 
-  List<Map<String, String>> _extractDiffPreviewBlocks({required String headline}) {
+  List<Map<String, String>> _extractDiffPreviewBlocks({
+    required String headline,
+  }) {
     final previewCandidates = <String>[];
 
     final preview = widget.message.getAttribute("preview");
@@ -6899,7 +8422,11 @@ class _EventLineState extends State<EventLine> {
 
     final fallbackPath = _eventPath();
     for (final candidate in previewCandidates) {
-      final previews = _extractDiffPreviewBlocksFromEncoded(encoded: candidate, headline: headline, fallbackPath: fallbackPath);
+      final previews = _extractDiffPreviewBlocksFromEncoded(
+        encoded: candidate,
+        headline: headline,
+        fallbackPath: fallbackPath,
+      );
       if (previews.isNotEmpty) {
         return previews;
       }
@@ -6926,13 +8453,24 @@ class _EventLineState extends State<EventLine> {
     final theme = ShadTheme.of(context);
     const previewBackground = Color(0xFF050505);
     const previewHeaderBackground = Color(0xFF111111);
-    final codeTextStyle = GoogleFonts.sourceCodePro(fontSize: 12, color: const Color(0xFFE5E7EB), height: 1.3);
-    final headerTextStyle = GoogleFonts.sourceCodePro(fontSize: 11, color: theme.colorScheme.mutedForeground);
-    final resolvedLanguageId = resolveLanguageIdForFilename(languageOrFilename) ?? fallbackLanguageId;
+    final codeTextStyle = GoogleFonts.sourceCodePro(
+      fontSize: 12,
+      color: const Color(0xFFE5E7EB),
+      height: 1.3,
+    );
+    final headerTextStyle = GoogleFonts.sourceCodePro(
+      fontSize: 11,
+      color: theme.colorScheme.mutedForeground,
+    );
+    final resolvedLanguageId =
+        resolveLanguageIdForFilename(languageOrFilename) ?? fallbackLanguageId;
     final body = resolvedLanguageId == "diff"
         ? SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: _chatBubbleContentHorizontalPadding, vertical: 8),
+            padding: const EdgeInsets.symmetric(
+              horizontal: _chatBubbleContentHorizontalPadding,
+              vertical: 8,
+            ),
             child: Builder(
               builder: (context) {
                 final lines = normalizedCode.split("\n");
@@ -6941,13 +8479,18 @@ class _EventLineState extends State<EventLine> {
                   children: [
                     for (final line in lines.indexed)
                       Padding(
-                        padding: EdgeInsets.only(bottom: line.$1 < lines.length - 1 ? 2 : 0),
+                        padding: EdgeInsets.only(
+                          bottom: line.$1 < lines.length - 1 ? 2 : 0,
+                        ),
                         child: Container(
                           decoration: BoxDecoration(
                             color: diffLineBackgroundColor(context, line.$2),
                             borderRadius: BorderRadius.circular(4),
                           ),
-                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 1,
+                          ),
                           child: SelectableText.rich(
                             highlightCodeSpanWithReHighlight(
                               context: context,
@@ -6967,7 +8510,10 @@ class _EventLineState extends State<EventLine> {
           )
         : SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: _chatBubbleContentHorizontalPadding, vertical: 8),
+            padding: const EdgeInsets.symmetric(
+              horizontal: _chatBubbleContentHorizontalPadding,
+              vertical: 8,
+            ),
             child: SelectableText.rich(
               highlightCodeSpanWithReHighlight(
                 context: context,
@@ -6982,7 +8528,12 @@ class _EventLineState extends State<EventLine> {
     final logsBody = hasLogs
         ? Container(
             width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(_chatBubbleContentHorizontalPadding, 0, _chatBubbleContentHorizontalPadding, 8),
+            padding: const EdgeInsets.fromLTRB(
+              _chatBubbleContentHorizontalPadding,
+              0,
+              _chatBubbleContentHorizontalPadding,
+              8,
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -6993,14 +8544,30 @@ class _EventLineState extends State<EventLine> {
                     children: [
                       for (final line in logs.indexed)
                         Padding(
-                          padding: EdgeInsets.only(bottom: line.$1 < logs.length - 1 ? 2 : 0),
+                          padding: EdgeInsets.only(
+                            bottom: line.$1 < logs.length - 1 ? 2 : 0,
+                          ),
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 3,
+                            ),
                             decoration: BoxDecoration(
-                              color: line.$2.source == "stderr" ? const Color(0xFF2A0B0B) : Colors.transparent,
+                              color: line.$2.source == "stderr"
+                                  ? const Color(0xFF2A0B0B)
+                                  : Colors.transparent,
                               borderRadius: BorderRadius.circular(4),
                             ),
-                            child: SelectableText.rich(TextSpan(children: [ansiToTextSpan(line.$2.text, baseStyle: codeTextStyle)])),
+                            child: SelectableText.rich(
+                              TextSpan(
+                                children: [
+                                  ansiToTextSpan(
+                                    line.$2.text,
+                                    baseStyle: codeTextStyle,
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
                     ],
@@ -7016,7 +8583,10 @@ class _EventLineState extends State<EventLine> {
       children: [
         Container(
           width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: _chatBubbleContentHorizontalPadding, vertical: 6),
+          padding: const EdgeInsets.symmetric(
+            horizontal: _chatBubbleContentHorizontalPadding,
+            vertical: 6,
+          ),
           decoration: BoxDecoration(
             color: previewHeaderBackground,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
@@ -7024,7 +8594,9 @@ class _EventLineState extends State<EventLine> {
           child: Row(
             children: [
               Expanded(
-                child: SelectionArea(child: Text(header, style: headerTextStyle)),
+                child: SelectionArea(
+                  child: Text(header, style: headerTextStyle),
+                ),
               ),
               if (normalizedCode.isNotEmpty)
                 ShadIconButton.ghost(
@@ -7055,13 +8627,19 @@ class _EventLineState extends State<EventLine> {
       child: Stack(
         children: [
           previewContent,
-          if (showProcessingOverlay) Positioned.fill(child: IgnorePointer(child: _PreviewSweepOverlay())),
+          if (showProcessingOverlay)
+            Positioned.fill(
+              child: IgnorePointer(child: _PreviewSweepOverlay()),
+            ),
         ],
       ),
     );
   }
 
-  Widget _buildEventLogsBlock(BuildContext context, {required List<({String source, String text})> logs}) {
+  Widget _buildEventLogsBlock(
+    BuildContext context, {
+    required List<({String source, String text})> logs,
+  }) {
     if (logs.isEmpty) {
       return SizedBox.shrink();
     }
@@ -7075,7 +8653,10 @@ class _EventLineState extends State<EventLine> {
     );
   }
 
-  Future<void> _sendApprovalDecision({required String approvalId, required bool approve}) async {
+  Future<void> _sendApprovalDecision({
+    required String approvalId,
+    required bool approve,
+  }) async {
     if (sendingApprovalDecision) {
       return;
     }
@@ -7083,10 +8664,16 @@ class _EventLineState extends State<EventLine> {
     final candidates = <RemoteParticipant>[];
     if (widget.agentName != null) {
       candidates.addAll(
-        widget.room.messaging.remoteParticipants.where((participant) => participant.getAttribute("name") == widget.agentName),
+        widget.room.messaging.remoteParticipants.where(
+          (participant) => participant.getAttribute("name") == widget.agentName,
+        ),
       );
     }
-    candidates.addAll(widget.room.messaging.remoteParticipants.where((participant) => participant.role == "agent"));
+    candidates.addAll(
+      widget.room.messaging.remoteParticipants.where(
+        (participant) => participant.role == "agent",
+      ),
+    );
 
     final recipients = candidates.toSet().toList();
     if (recipients.isEmpty) {
@@ -7097,7 +8684,10 @@ class _EventLineState extends State<EventLine> {
     String? turnId;
     if (useAgentMessages) {
       for (final participant in recipients) {
-        final pendingStatus = _parsePendingMessagesStatus(participant, widget.path);
+        final pendingStatus = _parsePendingMessagesStatus(
+          participant,
+          widget.path,
+        );
         if (pendingStatus == null) {
           continue;
         }
@@ -7123,11 +8713,15 @@ class _EventLineState extends State<EventLine> {
         for (final participant in recipients)
           widget.room.messaging.sendMessage(
             to: participant,
-            type: useAgentMessages ? _agentRoomMessageType : (approve ? "approved" : "rejected"),
+            type: useAgentMessages
+                ? _agentRoomMessageType
+                : (approve ? "approved" : "rejected"),
             message: useAgentMessages
                 ? {
                     "payload": {
-                      "type": approve ? _agentToolApproveType : _agentToolRejectType,
+                      "type": approve
+                          ? _agentToolApproveType
+                          : _agentToolRejectType,
                       "thread_id": widget.path,
                       "turn_id": turnId,
                       "item_id": approvalId,
@@ -7147,33 +8741,72 @@ class _EventLineState extends State<EventLine> {
 
   @override
   Widget build(BuildContext context) {
-    const supportedKinds = {"exec", "tool", "web", "search", "diff", "image", "approval", "collab", "plan", "thread", "file"};
+    const supportedKinds = {
+      "exec",
+      "tool",
+      "web",
+      "search",
+      "diff",
+      "image",
+      "approval",
+      "collab",
+      "plan",
+      "thread",
+      "file",
+    };
 
-    final method = (widget.message.getAttribute("method") as String?) ?? "agent/event";
+    final method =
+        (widget.message.getAttribute("method") as String?) ?? "agent/event";
     final eventName =
         (widget.message.getAttribute("name") as String?) ??
         (widget.message.getAttribute("event_type") as String?) ??
         method.replaceAll("/", ".");
-    final kind = ((widget.message.getAttribute("kind") as String?) ?? "").trim().toLowerCase();
+    final kind = ((widget.message.getAttribute("kind") as String?) ?? "")
+        .trim()
+        .toLowerCase();
     if (!supportedKinds.contains(kind)) {
       return SizedBox.shrink();
     }
-    final state = ((widget.message.getAttribute("state") as String?) ?? "info").toLowerCase();
-    final inProgress = state == "in_progress" || state == "running" || state == "queued";
-    final itemType = ((widget.message.getAttribute("item_type") as String?) ?? "").trim().toLowerCase();
-    final summary = ((widget.message.getAttribute("summary") as String?) ?? method).trim();
-    final headlineAttr = ((widget.message.getAttribute("headline") as String?) ?? "").trim();
-    final detailsAttr = ((widget.message.getAttribute("details") as String?) ?? "").trim();
+    final state = ((widget.message.getAttribute("state") as String?) ?? "info")
+        .toLowerCase();
+    final inProgress =
+        state == "in_progress" || state == "running" || state == "queued";
+    final itemType =
+        ((widget.message.getAttribute("item_type") as String?) ?? "")
+            .trim()
+            .toLowerCase();
+    final summary =
+        ((widget.message.getAttribute("summary") as String?) ?? method).trim();
+    final headlineAttr =
+        ((widget.message.getAttribute("headline") as String?) ?? "").trim();
+    final detailsAttr =
+        ((widget.message.getAttribute("details") as String?) ?? "").trim();
     final detailLines = _detailLines(detailsAttr);
-    if (_shouldHideCompletedToolCallEvent(widget.message, showCompletedToolCalls: widget.showCompletedToolCalls)) {
+    if (_shouldHideCompletedToolCallEvent(
+      widget.message,
+      showCompletedToolCalls: widget.showCompletedToolCalls,
+    )) {
       return const SizedBox.shrink();
     }
     final approvalId =
-        (((widget.message.getAttribute("item_id") as String?) ?? (widget.message.getAttribute("approval_id") as String?) ?? "")).trim();
-    final useSummaryAsHeadline = _useSummaryAsHeadline(summary: summary, method: method, eventName: eventName);
+        (((widget.message.getAttribute("item_id") as String?) ??
+                (widget.message.getAttribute("approval_id") as String?) ??
+                ""))
+            .trim();
+    final useSummaryAsHeadline = _useSummaryAsHeadline(
+      summary: summary,
+      method: method,
+      eventName: eventName,
+    );
     var headline = headlineAttr.isNotEmpty
         ? headlineAttr
-        : (useSummaryAsHeadline ? summary : _defaultHeadline(kind: kind, state: state, eventName: eventName));
+        : (useSummaryAsHeadline
+              ? summary
+              : _defaultHeadline(
+                  kind: kind,
+                  state: state,
+                  eventName: eventName,
+                ));
     if (headline.trim().isEmpty) {
       return SizedBox.shrink();
     }
@@ -7181,7 +8814,10 @@ class _EventLineState extends State<EventLine> {
     if (kind == "exec") {
       renderedDetailLines = detailLines.toList();
     }
-    final failureTooltipText = itemType == "tool_call" && (state == "failed" || state == "cancelled") && renderedDetailLines.isNotEmpty
+    final failureTooltipText =
+        itemType == "tool_call" &&
+            (state == "failed" || state == "cancelled") &&
+            renderedDetailLines.isNotEmpty
         ? renderedDetailLines.join("\n")
         : null;
     if (failureTooltipText != null) {
@@ -7190,13 +8826,25 @@ class _EventLineState extends State<EventLine> {
     final eventPath = _eventPath();
     final commandPreview = _commandPreviewText(kind: kind);
     final eventLogs = _eventLogs();
-    final diffPreviewBlocks = kind == "diff" ? _extractDiffPreviewBlocks(headline: headline) : const <Map<String, String>>[];
+    final diffPreviewBlocks = kind == "diff"
+        ? _extractDiffPreviewBlocks(headline: headline)
+        : const <Map<String, String>>[];
     final displayText = _displayText(headline: headline);
-    final itemId = ((widget.message.getAttribute("item_id") as String?) ?? "").trim();
-    final showPreviewOverlay = itemId.isNotEmpty && widget.pendingItemId != null && widget.pendingItemId == itemId;
-    final canApprove = kind == "approval" && inProgress && approvalId.isNotEmpty;
-    final canOpenPath = eventPath != null && widget.openFile != null && ((kind == "thread" && eventPath != widget.path) || kind == "file");
-    const eventTextPadding = EdgeInsets.only(left: _chatBubbleContentHorizontalPadding);
+    final itemId = ((widget.message.getAttribute("item_id") as String?) ?? "")
+        .trim();
+    final showPreviewOverlay =
+        itemId.isNotEmpty &&
+        widget.pendingItemId != null &&
+        widget.pendingItemId == itemId;
+    final canApprove =
+        kind == "approval" && inProgress && approvalId.isNotEmpty;
+    final canOpenPath =
+        eventPath != null &&
+        widget.openFile != null &&
+        ((kind == "thread" && eventPath != widget.path) || kind == "file");
+    const eventTextPadding = EdgeInsets.only(
+      left: _chatBubbleContentHorizontalPadding,
+    );
 
     Color textColor;
     if (state == "failed") {
@@ -7229,7 +8877,9 @@ class _EventLineState extends State<EventLine> {
                         ? ShadGestureDetector(
                             cursor: SystemMouseCursors.click,
                             onTap: () {
-                              unawaited(Future.sync(() => widget.openFile!(eventPath)));
+                              unawaited(
+                                Future.sync(() => widget.openFile!(eventPath)),
+                              );
                             },
                             child: Padding(
                               padding: eventTextPadding,
@@ -7249,7 +8899,11 @@ class _EventLineState extends State<EventLine> {
                                     ),
                                   ),
                                   const SizedBox(width: 6),
-                                  Icon(LucideIcons.externalLink, size: 12, color: textColor),
+                                  Icon(
+                                    LucideIcons.externalLink,
+                                    size: 12,
+                                    color: textColor,
+                                  ),
                                 ],
                               ),
                             ),
@@ -7259,7 +8913,12 @@ class _EventLineState extends State<EventLine> {
                             child: SelectionArea(
                               child: Text(
                                 displayText,
-                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: textColor, height: 1.3),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: textColor,
+                                  height: 1.3,
+                                ),
                               ),
                             ),
                           ),
@@ -7291,16 +8950,24 @@ class _EventLineState extends State<EventLine> {
                     ),
                 ],
               ),
-            if (eventLogs.isNotEmpty && !((kind == "exec" || kind == "file") && commandPreview != null))
+            if (eventLogs.isNotEmpty &&
+                !((kind == "exec" || kind == "file") && commandPreview != null))
               _buildEventLogsBlock(context, logs: eventLogs),
-            if (renderedDetailLines.isNotEmpty && (kind != "diff" || diffPreviewBlocks.isEmpty))
+            if (renderedDetailLines.isNotEmpty &&
+                (kind != "diff" || diffPreviewBlocks.isEmpty))
               Container(
                 width: double.infinity,
                 margin: EdgeInsets.only(top: 0),
                 child: Padding(
                   padding: eventTextPadding,
                   child: SelectionArea(
-                    child: Text(renderedDetailLines.join("\n"), style: TextStyle(color: textColor.withAlpha(220), height: 1.3)),
+                    child: Text(
+                      renderedDetailLines.join("\n"),
+                      style: TextStyle(
+                        color: textColor.withAlpha(220),
+                        height: 1.3,
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -7317,14 +8984,20 @@ class _EventLineState extends State<EventLine> {
                       ShadButton(
                         enabled: !sendingApprovalDecision,
                         onPressed: () {
-                          _sendApprovalDecision(approvalId: approvalId, approve: true);
+                          _sendApprovalDecision(
+                            approvalId: approvalId,
+                            approve: true,
+                          );
                         },
                         child: Text("Approve"),
                       ),
                       ShadButton.outline(
                         enabled: !sendingApprovalDecision,
                         onPressed: () {
-                          _sendApprovalDecision(approvalId: approvalId, approve: false);
+                          _sendApprovalDecision(
+                            approvalId: approvalId,
+                            approve: false,
+                          );
                         },
                         child: Text("Reject"),
                       ),
@@ -7360,7 +9033,11 @@ class ChatThreadPreview extends StatelessWidget {
               height: previewEdge,
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(16),
-                child: ImagePreview(key: ValueKey(path), url: Uri.parse(snapshot.data!), fit: BoxFit.cover),
+                child: ImagePreview(
+                  key: ValueKey(path),
+                  url: Uri.parse(snapshot.data!),
+                  fit: BoxFit.cover,
+                ),
               ),
             );
           }
@@ -7368,7 +9045,9 @@ class ChatThreadPreview extends StatelessWidget {
           return SizedBox(
             width: previewEdge,
             height: previewEdge,
-            child: ColoredBox(color: ShadTheme.of(context).colorScheme.background),
+            child: ColoredBox(
+              color: ShadTheme.of(context).colorScheme.background,
+            ),
           );
         },
       );
@@ -7386,7 +9065,12 @@ class ChatThreadPreview extends StatelessWidget {
   }
 }
 
-typedef FileDropCallback = Future<void> Function(String name, Stream<Uint8List> dataStream, int? fileSize);
+typedef FileDropCallback =
+    Future<void> Function(
+      String name,
+      Stream<Uint8List> dataStream,
+      int? fileSize,
+    );
 typedef TextPasteCallback = Future<void> Function(String text);
 
 class FileDropArea extends StatefulWidget {
@@ -7394,7 +9078,11 @@ class FileDropArea extends StatefulWidget {
 
   final Widget child;
 
-  const FileDropArea({super.key, required this.onFileDrop, required this.child});
+  const FileDropArea({
+    super.key,
+    required this.onFileDrop,
+    required this.child,
+  });
 
   @override
   FileDropAreaState createState() => FileDropAreaState();
@@ -7419,15 +9107,26 @@ class FileDropAreaState extends State<FileDropArea> {
   Future<DataReaderFile> _getFile(DataReader reader, SimpleFileFormat? format) {
     final completer = Completer<DataReaderFile>();
 
-    reader.getFile(format, completer.complete, onError: completer.completeError);
+    reader.getFile(
+      format,
+      completer.complete,
+      onError: completer.completeError,
+    );
 
     return completer.future;
   }
 
-  Future<T> _getValue<T extends Object>(DataReader reader, ValueFormat<T> format) {
+  Future<T> _getValue<T extends Object>(
+    DataReader reader,
+    ValueFormat<T> format,
+  ) {
     final completer = Completer<T>();
 
-    reader.getValue(format, completer.complete, onError: completer.completeError);
+    reader.getValue(
+      format,
+      completer.complete,
+      onError: completer.completeError,
+    );
 
     return completer.future;
   }
@@ -7443,7 +9142,10 @@ class FileDropAreaState extends State<FileDropArea> {
       child: Stack(
         children: [
           widget.child,
-          if (_dragging) Positioned.fill(child: Container(color: Colors.blue.withValues(alpha: 0.1))),
+          if (_dragging)
+            Positioned.fill(
+              child: Container(color: Colors.blue.withValues(alpha: 0.1)),
+            ),
         ],
       ),
     );
@@ -7452,7 +9154,9 @@ class FileDropAreaState extends State<FileDropArea> {
   DropOperation _onDragOver(DropOverEvent event) {
     setState(() => _dragging = true);
 
-    return event.session.allowedOperations.contains(DropOperation.copy) ? DropOperation.copy : DropOperation.none;
+    return event.session.allowedOperations.contains(DropOperation.copy)
+        ? DropOperation.copy
+        : DropOperation.none;
   }
 
   void _onDragLeave(DropEvent event) {
@@ -7498,7 +9202,9 @@ class FileDropAreaState extends State<FileDropArea> {
         if (folderPayload != null) {
           for (final file in folderPayload.files) {
             final relativePath = file.relativePath.replaceAll('\\', '/');
-            final uploadPath = relativePath.isEmpty ? folderPayload.folderName : '${folderPayload.folderName}/$relativePath';
+            final uploadPath = relativePath.isEmpty
+                ? folderPayload.folderName
+                : '${folderPayload.folderName}/$relativePath';
 
             await widget.onFileDrop(uploadPath, file.dataStream, file.fileSize);
           }
@@ -7552,7 +9258,9 @@ class PhotoNamer {
 
   static String _ext(String originalName) {
     final dotIndex = originalName.lastIndexOf('.');
-    final rawExt = dotIndex == -1 ? '' : originalName.substring(dotIndex + 1).toUpperCase();
+    final rawExt = dotIndex == -1
+        ? ''
+        : originalName.substring(dotIndex + 1).toUpperCase();
 
     if (rawExt.isEmpty) return 'JPG';
 

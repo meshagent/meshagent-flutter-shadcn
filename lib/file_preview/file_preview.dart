@@ -1,5 +1,6 @@
 import "package:flutter/material.dart";
 import "package:meshagent_flutter_shadcn/file_preview/code.dart";
+import "package:meshagent_flutter_shadcn/ui/coordinated_context_menu.dart";
 import "package:path/path.dart";
 import "package:shadcn_ui/shadcn_ui.dart";
 import "package:url_launcher/url_launcher.dart";
@@ -11,9 +12,33 @@ import "video.dart";
 import "markdown.dart";
 import "../chat/chat.dart";
 
-enum FileKind { image, video, audio, pdf, code, parquet, office, markdown, custom, unknown }
+enum FileKind {
+  image,
+  video,
+  audio,
+  pdf,
+  code,
+  parquet,
+  office,
+  markdown,
+  custom,
+  unknown,
+}
 
-final imageExtensions = <String>{"png", "jpg", "jpeg", "jfif", "heic", "heif", "webp", "tif", "tiff", "gif", "svg", "bmp"};
+final imageExtensions = <String>{
+  "png",
+  "jpg",
+  "jpeg",
+  "jfif",
+  "heic",
+  "heif",
+  "webp",
+  "tif",
+  "tiff",
+  "gif",
+  "svg",
+  "bmp",
+};
 final pdfExtensions = <String>{"pdf"};
 final markdownExtensions = <String>{"md"};
 final videoExtensions = <String>{"mp4", "mkv", "mov"};
@@ -21,7 +46,16 @@ final audioExtensions = <String>{"mp3", "ogg", "wav"};
 final officeExtensions = <String>{"docx", "pptx", "xlsx"};
 final parquetExtensions = <String>{"parquet"};
 
-final Map<String, Widget Function({Key? key, required RoomClient room, required String filename, required Uri url})> customViewers = {};
+final Map<
+  String,
+  Widget Function({
+    Key? key,
+    required RoomClient room,
+    required String filename,
+    required Uri url,
+  })
+>
+customViewers = {};
 
 String _ext(String path) {
   final base = basename(path);
@@ -47,7 +81,13 @@ FileKind classifyFile(String path) {
   return FileKind.unknown;
 }
 
-Widget filePreview({Key? key, required RoomClient room, required String filename, required Uri url, BoxFit fit = BoxFit.cover}) {
+Widget filePreview({
+  Key? key,
+  required RoomClient room,
+  required String filename,
+  required Uri url,
+  BoxFit fit = BoxFit.cover,
+}) {
   final kind = classifyFile(filename);
 
   switch (kind) {
@@ -65,7 +105,12 @@ Widget filePreview({Key? key, required RoomClient room, required String filename
       return CodePreview(room: room, filename: filename, url: url, key: key);
     case FileKind.custom:
       final ext = _ext(filename);
-      return customViewers[ext]!(key: key, room: room, filename: filename, url: url);
+      return customViewers[ext]!(
+        key: key,
+        room: room,
+        filename: filename,
+        url: url,
+      );
     case FileKind.parquet:
     case FileKind.office:
     case FileKind.unknown:
@@ -74,7 +119,8 @@ Widget filePreview({Key? key, required RoomClient room, required String filename
 }
 
 class FilePreview extends StatefulWidget {
-  FilePreview({required this.room, required this.path, this.fit = BoxFit.cover}) : super(key: Key(path));
+  FilePreview({required this.room, required this.path, this.fit = BoxFit.cover})
+    : super(key: Key(path));
 
   final String path;
   final RoomClient room;
@@ -85,7 +131,9 @@ class FilePreview extends StatefulWidget {
 }
 
 class _FilePreviewState extends State<FilePreview> {
-  late final Future<String> urlLookup = widget.room.storage.downloadUrl(widget.path);
+  late final Future<String> urlLookup = widget.room.storage.downloadUrl(
+    widget.path,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -93,7 +141,7 @@ class _FilePreviewState extends State<FilePreview> {
       future: urlLookup,
       builder: (context, snapshot) {
         if (snapshot.hasData) {
-          return ShadContextMenuRegion(
+          return CoordinatedShadContextMenuRegion(
             items: [
               ShadContextMenuItem(
                 trailing: Icon(LucideIcons.download),
@@ -103,10 +151,17 @@ class _FilePreviewState extends State<FilePreview> {
                 child: Text("Download"),
               ),
             ],
-            child: filePreview(room: widget.room, filename: widget.path, url: Uri.parse(snapshot.data!), fit: widget.fit),
+            child: filePreview(
+              room: widget.room,
+              filename: widget.path,
+              url: Uri.parse(snapshot.data!),
+              fit: widget.fit,
+            ),
           );
         } else {
-          return ColoredBox(color: ShadTheme.of(context).colorScheme.background);
+          return ColoredBox(
+            color: ShadTheme.of(context).colorScheme.background,
+          );
         }
       },
     );
@@ -114,7 +169,12 @@ class _FilePreviewState extends State<FilePreview> {
 }
 
 class FileDefaultAttachmentPreview extends StatefulWidget {
-  const FileDefaultAttachmentPreview({super.key, required this.attachment, required this.onRemove, this.maxWidth = 200});
+  const FileDefaultAttachmentPreview({
+    super.key,
+    required this.attachment,
+    required this.onRemove,
+    this.maxWidth = 200,
+  });
 
   final FileAttachment attachment;
   final VoidCallback onRemove;
@@ -122,10 +182,12 @@ class FileDefaultAttachmentPreview extends StatefulWidget {
   final double maxWidth;
 
   @override
-  State<FileDefaultAttachmentPreview> createState() => _FileDefaultAttachmentPreviewState();
+  State<FileDefaultAttachmentPreview> createState() =>
+      _FileDefaultAttachmentPreviewState();
 }
 
-class _FileDefaultAttachmentPreviewState extends State<FileDefaultAttachmentPreview> {
+class _FileDefaultAttachmentPreviewState
+    extends State<FileDefaultAttachmentPreview> {
   UploadStatus status = UploadStatus.initial;
 
   void onAttachmentUpdate() {
@@ -138,7 +200,9 @@ class _FileDefaultAttachmentPreviewState extends State<FileDefaultAttachmentPrev
         ShadToaster.of(buildContext).show(
           ShadToast.destructive(
             title: const Text("Attachment upload failed"),
-            description: Text("Unable to upload ${widget.attachment.filename}. Remove it or try again."),
+            description: Text(
+              "Unable to upload ${widget.attachment.filename}. Remove it or try again.",
+            ),
           ),
         );
       }
@@ -169,23 +233,40 @@ class _FileDefaultAttachmentPreviewState extends State<FileDefaultAttachmentPrev
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final destructiveColor = theme.colorScheme.destructive;
-    final isUploading = status == UploadStatus.initial || status == UploadStatus.uploading;
+    final isUploading =
+        status == UploadStatus.initial || status == UploadStatus.uploading;
     final hasFailed = status == UploadStatus.failed;
 
     return ShadTooltip(
       waitDuration: const Duration(seconds: 1),
       builder: (context) {
-        return Text(hasFailed ? 'Upload failed: ${widget.attachment.filename}' : widget.attachment.filename, style: theme.textTheme.small);
+        return Text(
+          hasFailed
+              ? 'Upload failed: ${widget.attachment.filename}'
+              : widget.attachment.filename,
+          style: theme.textTheme.small,
+        );
       },
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: widget.maxWidth),
         child: ShadCard(
-          backgroundColor: hasFailed ? destructiveColor.withValues(alpha: 0.1) : Colors.transparent,
-          border: hasFailed ? ShadBorder.all(color: destructiveColor.withValues(alpha: 0.5), width: 1) : null,
+          backgroundColor: hasFailed
+              ? destructiveColor.withValues(alpha: 0.1)
+              : Colors.transparent,
+          border: hasFailed
+              ? ShadBorder.all(
+                  color: destructiveColor.withValues(alpha: 0.5),
+                  width: 1,
+                )
+              : null,
           radius: BorderRadius.circular(16),
           padding: EdgeInsets.only(left: 8, top: 8, bottom: 8, right: 8),
           rowCrossAxisAlignment: CrossAxisAlignment.center,
-          trailing: ShadGestureDetector(cursor: SystemMouseCursors.click, onTap: widget.onRemove, child: Icon(LucideIcons.x, size: 20)),
+          trailing: ShadGestureDetector(
+            cursor: SystemMouseCursors.click,
+            onTap: widget.onRemove,
+            child: Icon(LucideIcons.x, size: 20),
+          ),
 
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -196,10 +277,15 @@ class _FileDefaultAttachmentPreviewState extends State<FileDefaultAttachmentPrev
                     width: 24,
                     height: 24,
                     child: isUploading
-                        ? CircularProgressIndicator(color: theme.colorScheme.primary, strokeWidth: 2.0)
+                        ? CircularProgressIndicator(
+                            color: theme.colorScheme.primary,
+                            strokeWidth: 2.0,
+                          )
                         : Center(
                             child: Icon(
-                              hasFailed ? LucideIcons.triangleAlert : LucideIcons.file,
+                              hasFailed
+                                  ? LucideIcons.triangleAlert
+                                  : LucideIcons.file,
                               size: 20,
                               color: hasFailed ? destructiveColor : null,
                             ),
@@ -209,7 +295,11 @@ class _FileDefaultAttachmentPreviewState extends State<FileDefaultAttachmentPrev
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: Text(widget.attachment.filename, style: ShadTheme.of(context).textTheme.small, overflow: TextOverflow.ellipsis),
+                child: Text(
+                  widget.attachment.filename,
+                  style: ShadTheme.of(context).textTheme.small,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ],
           ),
@@ -220,7 +310,13 @@ class _FileDefaultAttachmentPreviewState extends State<FileDefaultAttachmentPrev
 }
 
 class FileDefaultPreviewCard extends StatelessWidget {
-  const FileDefaultPreviewCard({super.key, required this.icon, required this.text, this.onClose, this.onDownload});
+  const FileDefaultPreviewCard({
+    super.key,
+    required this.icon,
+    required this.text,
+    this.onClose,
+    this.onDownload,
+  });
 
   final IconData icon;
   final String text;
@@ -236,16 +332,32 @@ class FileDefaultPreviewCard extends StatelessWidget {
         padding: EdgeInsets.only(left: 8, top: 8, bottom: 8, right: 8),
         rowCrossAxisAlignment: CrossAxisAlignment.center,
         trailing: onClose != null
-            ? ShadIconButton.ghost(width: 24, height: 24, icon: Icon(LucideIcons.x, size: 16), onPressed: onClose)
+            ? ShadIconButton.ghost(
+                width: 24,
+                height: 24,
+                icon: Icon(LucideIcons.x, size: 16),
+                onPressed: onClose,
+              )
             : null,
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            SizedBox(width: 24, height: 24, child: Center(child: Icon(icon, size: 20))),
+            SizedBox(
+              width: 24,
+              height: 24,
+              child: Center(child: Icon(icon, size: 20)),
+            ),
             const SizedBox(width: 8),
             ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: constraints.maxWidth - (24 + 16 + 16)),
-              child: Text(text, style: ShadTheme.of(context).textTheme.small, maxLines: 1, overflow: TextOverflow.ellipsis),
+              constraints: BoxConstraints(
+                maxWidth: constraints.maxWidth - (24 + 16 + 16),
+              ),
+              child: Text(
+                text,
+                style: ShadTheme.of(context).textTheme.small,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ],
         ),
