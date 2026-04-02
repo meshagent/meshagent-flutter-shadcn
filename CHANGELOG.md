@@ -1,3 +1,10 @@
+## [0.35.5]
+- Chat threads now keep a dedicated scroll controller and auto-scroll to the latest message after send.
+- Chat bubble context menus now coordinate a single active menu and close on outside taps, with improved controller cleanup.
+
+## [0.35.4]
+- Stability
+
 ## [0.35.3]
 - Stability
 
