@@ -11,29 +11,20 @@ import 'package:flutter/material.dart';
 const String _defaultDeviceLabelPrefix = 'Default - ';
 const String _builtInDeviceLabelSuffix = ' (Built-in)';
 const String _disabledDeviceDescription = 'Check your device settings';
-const List<String> _builtInDeviceLabelPrefixes = [
-  'macbook ',
-  'built-in ',
-  'internal ',
-];
+const List<String> _builtInDeviceLabelPrefixes = ['macbook ', 'built-in ', 'internal '];
 
 bool _isDefaultAliasDevice(livekit.MediaDevice device) {
-  return device.deviceId == 'default' ||
-      device.label.trim().startsWith(_defaultDeviceLabelPrefix);
+  return device.deviceId == 'default' || device.label.trim().startsWith(_defaultDeviceLabelPrefix);
 }
 
 String _normalizedDeviceLabel(String label) {
   var trimmedLabel = label.trim();
   if (trimmedLabel.startsWith(_defaultDeviceLabelPrefix)) {
-    trimmedLabel = trimmedLabel
-        .substring(_defaultDeviceLabelPrefix.length)
-        .trim();
+    trimmedLabel = trimmedLabel.substring(_defaultDeviceLabelPrefix.length).trim();
   }
 
   if (_shouldStripBuiltInSuffix(trimmedLabel)) {
-    return trimmedLabel
-        .substring(0, trimmedLabel.length - _builtInDeviceLabelSuffix.length)
-        .trim();
+    return trimmedLabel.substring(0, trimmedLabel.length - _builtInDeviceLabelSuffix.length).trim();
   }
 
   return trimmedLabel;
@@ -54,22 +45,15 @@ bool _shouldStripBuiltInSuffix(String label) {
   }
 
   final normalizedLabel = label.toLowerCase();
-  return !_builtInDeviceLabelPrefixes.any(
-    (prefix) => normalizedLabel.startsWith(prefix),
-  );
+  return !_builtInDeviceLabelPrefixes.any((prefix) => normalizedLabel.startsWith(prefix));
 }
 
-livekit.MediaDevice? _matchingPhysicalDevice(
-  livekit.MediaDevice device,
-  List<livekit.MediaDevice> devices,
-) {
+livekit.MediaDevice? _matchingPhysicalDevice(livekit.MediaDevice device, List<livekit.MediaDevice> devices) {
   final normalizedLabel = _normalizedDeviceLabel(device.label);
   final groupId = device.groupId?.trim();
 
   return devices.firstWhereOrNull((candidate) {
-    if (candidate.kind != device.kind ||
-        candidate.deviceId == device.deviceId ||
-        _isDefaultAliasDevice(candidate)) {
+    if (candidate.kind != device.kind || candidate.deviceId == device.deviceId || _isDefaultAliasDevice(candidate)) {
       return false;
     }
 
@@ -94,10 +78,7 @@ List<livekit.MediaDevice> _menuDevices(List<livekit.MediaDevice> devices) {
       .toList(growable: false);
 }
 
-livekit.MediaDevice? _selectedMenuDevice(
-  List<livekit.MediaDevice> devices,
-  String? selectedDeviceId,
-) {
+livekit.MediaDevice? _selectedMenuDevice(List<livekit.MediaDevice> devices, String? selectedDeviceId) {
   final visibleDevices = _menuDevices(devices);
   if (visibleDevices.isEmpty) {
     return null;
@@ -107,17 +88,13 @@ livekit.MediaDevice? _selectedMenuDevice(
     return visibleDevices.first;
   }
 
-  final exactDevice = devices.firstWhereOrNull(
-    (device) => device.deviceId == selectedDeviceId,
-  );
+  final exactDevice = devices.firstWhereOrNull((device) => device.deviceId == selectedDeviceId);
   if (exactDevice == null) {
     return visibleDevices.first;
   }
 
   return _matchingPhysicalDevice(exactDevice, visibleDevices) ??
-      visibleDevices.firstWhereOrNull(
-        (device) => device.deviceId == exactDevice.deviceId,
-      ) ??
+      visibleDevices.firstWhereOrNull((device) => device.deviceId == exactDevice.deviceId) ??
       visibleDevices.first;
 }
 
@@ -132,12 +109,8 @@ String _describeDeviceSwitchError(String label, Object error) {
   return 'Unable to switch ${label.toLowerCase()}: $message';
 }
 
-livekit.LocalTrackPublication<livekit.LocalVideoTrack>? _cameraPublication(
-  livekit.LocalParticipant? participant,
-) {
-  final publication = participant?.getTrackPublicationBySource(
-    livekit.TrackSource.camera,
-  );
+livekit.LocalTrackPublication<livekit.LocalVideoTrack>? _cameraPublication(livekit.LocalParticipant? participant) {
+  final publication = participant?.getTrackPublicationBySource(livekit.TrackSource.camera);
   if (publication is! livekit.LocalTrackPublication<livekit.LocalVideoTrack>) {
     return null;
   }
@@ -146,11 +119,7 @@ livekit.LocalTrackPublication<livekit.LocalVideoTrack>? _cameraPublication(
 }
 
 class MeetingControls extends StatelessWidget {
-  const MeetingControls({
-    required this.controller,
-    this.spacing = 5,
-    super.key,
-  });
+  const MeetingControls({required this.controller, this.spacing = 5, super.key});
 
   final double spacing;
   final MeetingController controller;
@@ -202,10 +171,7 @@ class _CameraToggleState extends State<CameraToggle> {
     return 'Unable to change camera state: $message';
   }
 
-  Future<void> _toggleCamera(
-    livekit.LocalParticipant localParticipant,
-    bool enabled,
-  ) async {
+  Future<void> _toggleCamera(livekit.LocalParticipant localParticipant, bool enabled) async {
     if (_processing) {
       return;
     }
@@ -218,11 +184,7 @@ class _CameraToggleState extends State<CameraToggle> {
     try {
       await localParticipant.setCameraEnabled(enabled);
     } catch (error) {
-      toaster?.show(
-        ShadToast.destructive(
-          description: Text(_describeCameraToggleError(error)),
-        ),
-      );
+      toaster?.show(ShadToast.destructive(description: Text(_describeCameraToggleError(error))));
     } finally {
       if (mounted) {
         setState(() {
@@ -236,10 +198,7 @@ class _CameraToggleState extends State<CameraToggle> {
   Widget build(BuildContext context) {
     final localParticipant = widget.controller.livekitRoom.localParticipant;
     return ListenableBuilder(
-      listenable: Listenable.merge([
-        localParticipant!,
-        widget.controller.pendingLocalMedia,
-      ]),
+      listenable: Listenable.merge([localParticipant!, widget.controller.pendingLocalMedia]),
       builder: (context, _) {
         final enabled = localParticipant.isCameraEnabled();
         final pending = widget.controller.pendingLocalMedia.cameraPending;
@@ -258,9 +217,7 @@ class _CameraToggleState extends State<CameraToggle> {
           offForeground: Colors.white,
           icon: showEnabled ? LucideIcons.video : LucideIcons.videoOff,
           loading: pending || _processing,
-          onPressed: (_processing || pending)
-              ? null
-              : () => unawaited(_toggleCamera(localParticipant, !enabled)),
+          onPressed: (_processing || pending) ? null : () => unawaited(_toggleCamera(localParticipant, !enabled)),
         );
       },
     );
@@ -290,10 +247,7 @@ class _MicToggleState extends State<MicToggle> {
     return 'Unable to change microphone state: $message';
   }
 
-  Future<void> _toggleMicrophone(
-    livekit.LocalParticipant localParticipant,
-    bool enabled,
-  ) async {
+  Future<void> _toggleMicrophone(livekit.LocalParticipant localParticipant, bool enabled) async {
     if (_processing) {
       return;
     }
@@ -306,11 +260,7 @@ class _MicToggleState extends State<MicToggle> {
     try {
       await localParticipant.setMicrophoneEnabled(enabled);
     } catch (error) {
-      toaster?.show(
-        ShadToast.destructive(
-          description: Text(_describeMicrophoneToggleError(error)),
-        ),
-      );
+      toaster?.show(ShadToast.destructive(description: Text(_describeMicrophoneToggleError(error))));
     } finally {
       if (mounted) {
         setState(() {
@@ -324,10 +274,7 @@ class _MicToggleState extends State<MicToggle> {
   Widget build(BuildContext context) {
     final localParticipant = widget.controller.livekitRoom.localParticipant;
     return ListenableBuilder(
-      listenable: Listenable.merge([
-        localParticipant!,
-        widget.controller.pendingLocalMedia,
-      ]),
+      listenable: Listenable.merge([localParticipant!, widget.controller.pendingLocalMedia]),
       builder: (context, _) {
         final enabled = localParticipant.isMicrophoneEnabled();
         final pending = widget.controller.pendingLocalMedia.microphonePending;
@@ -346,9 +293,7 @@ class _MicToggleState extends State<MicToggle> {
           offForeground: Colors.white,
           icon: showEnabled ? LucideIcons.mic : LucideIcons.micOff,
           loading: pending || _processing,
-          onPressed: (_processing || pending)
-              ? null
-              : () => unawaited(_toggleMicrophone(localParticipant, !enabled)),
+          onPressed: (_processing || pending) ? null : () => unawaited(_toggleMicrophone(localParticipant, !enabled)),
         );
       },
     );
@@ -434,9 +379,7 @@ class _MeetingControlsButon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final foregroundColor = on
-        ? onForeground
-        : (onPressed != null ? offForeground : Colors.grey);
+    final foregroundColor = on ? onForeground : (onPressed != null ? offForeground : Colors.grey);
 
     return Tooltip(
       message: text,
@@ -450,10 +393,7 @@ class _MeetingControlsButon extends StatelessWidget {
             ? SizedBox(
                 width: 18,
                 height: 18,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(foregroundColor),
-                ),
+                child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation<Color>(foregroundColor)),
               )
             : Icon(icon, size: 22),
       ),
@@ -468,22 +408,16 @@ class _ChangeSettings extends StatelessWidget {
 
   final livekit.Room room;
 
-  Future<void> _runWithMinimumPendingDuration(
-    Future<void> Function() action,
-  ) async {
+  Future<void> _runWithMinimumPendingDuration(Future<void> Function() action) async {
     final startedAt = DateTime.now();
     await action();
-    final remaining =
-        _minimumPendingDuration - DateTime.now().difference(startedAt);
+    final remaining = _minimumPendingDuration - DateTime.now().difference(startedAt);
     if (remaining > Duration.zero) {
       await Future<void>.delayed(remaining);
     }
   }
 
-  Future<void> _runCameraDeviceSwitch(
-    BuildContext context,
-    Future<void> Function() action,
-  ) async {
+  Future<void> _runCameraDeviceSwitch(BuildContext context, Future<void> Function() action) async {
     final controller = MeetingController.maybeOf(context);
     final shouldShowPending = room.localParticipant?.isCameraEnabled() ?? false;
     if (shouldShowPending) {
@@ -499,13 +433,9 @@ class _ChangeSettings extends StatelessWidget {
     }
   }
 
-  Future<void> _runMicrophoneDeviceSwitch(
-    BuildContext context,
-    Future<void> Function() action,
-  ) async {
+  Future<void> _runMicrophoneDeviceSwitch(BuildContext context, Future<void> Function() action) async {
     final controller = MeetingController.maybeOf(context);
-    final shouldShowPending =
-        room.localParticipant?.isMicrophoneEnabled() ?? false;
+    final shouldShowPending = room.localParticipant?.isMicrophoneEnabled() ?? false;
     if (shouldShowPending) {
       controller?.pendingLocalMedia.setMicrophonePending(true);
     }
@@ -519,34 +449,20 @@ class _ChangeSettings extends StatelessWidget {
     }
   }
 
-  Future<void> _selectVideoInput(
-    BuildContext context,
-    livekit.MediaDevice device,
-  ) async {
+  Future<void> _selectVideoInput(BuildContext context, livekit.MediaDevice device) async {
     final track = _cameraPublication(room.localParticipant)?.track;
 
     await _runCameraDeviceSwitch(context, () async {
       await room.setVideoInputDevice(device);
-      await track?.restartTrack(
-        livekit.CameraCaptureOptions(deviceId: device.deviceId),
-      );
+      await track?.restartTrack(livekit.CameraCaptureOptions(deviceId: device.deviceId));
     });
   }
 
-  Future<void> _selectAudioInput(
-    BuildContext context,
-    livekit.MediaDevice device,
-  ) async {
-    await _runMicrophoneDeviceSwitch(
-      context,
-      () => room.setAudioInputDevice(device),
-    );
+  Future<void> _selectAudioInput(BuildContext context, livekit.MediaDevice device) async {
+    await _runMicrophoneDeviceSwitch(context, () => room.setAudioInputDevice(device));
   }
 
-  Future<void> _selectAudioOutput(
-    BuildContext context,
-    livekit.MediaDevice device,
-  ) async {
+  Future<void> _selectAudioOutput(BuildContext context, livekit.MediaDevice device) async {
     await room.setAudioOutputDevice(device);
   }
 
@@ -585,9 +501,7 @@ class _ChangeDeviceButton extends StatefulWidget {
 }
 
 class _ChangeDeviceButtonState extends State<_ChangeDeviceButton> {
-  static const BoxConstraints _dialogConstraints = BoxConstraints(
-    maxWidth: 560,
-  );
+  static const BoxConstraints _dialogConstraints = BoxConstraints(maxWidth: 560);
 
   bool _loaded = false;
   late SharedPreferences _preferences;
@@ -600,9 +514,7 @@ class _ChangeDeviceButtonState extends State<_ChangeDeviceButton> {
     super.initState();
     _load();
 
-    _subscription = livekit.Hardware.instance.onDeviceChange.stream.listen((
-      List<livekit.MediaDevice> devices,
-    ) {
+    _subscription = livekit.Hardware.instance.onDeviceChange.stream.listen((List<livekit.MediaDevice> devices) {
       _devices = _sanitizeDevices(devices);
       if (mounted) {
         setState(() {});
@@ -644,23 +556,15 @@ class _ChangeDeviceButtonState extends State<_ChangeDeviceButton> {
     }
   }
 
-  List<livekit.MediaDevice> _sanitizeDevices(
-    List<livekit.MediaDevice> devices,
-  ) {
+  List<livekit.MediaDevice> _sanitizeDevices(List<livekit.MediaDevice> devices) {
     return devices.where((d) => d.deviceId.isNotEmpty).toList();
   }
 
   String? _selectedDeviceIdForPreferenceKey(String key) {
     return switch (key) {
-      "videoInput" =>
-        widget.selectedVideoInputDeviceId?.call() ??
-            _preferences.getString(key),
-      "audioInput" =>
-        widget.selectedAudioInputDeviceId?.call() ??
-            _preferences.getString(key),
-      "audioOutput" =>
-        widget.selectedAudioOutputDeviceId?.call() ??
-            _preferences.getString(key),
+      "videoInput" => widget.selectedVideoInputDeviceId?.call() ?? _preferences.getString(key),
+      "audioInput" => widget.selectedAudioInputDeviceId?.call() ?? _preferences.getString(key),
+      "audioOutput" => widget.selectedAudioOutputDeviceId?.call() ?? _preferences.getString(key),
       _ => _preferences.getString(key),
     };
   }
@@ -674,15 +578,10 @@ class _ChangeDeviceButtonState extends State<_ChangeDeviceButton> {
     };
   }
 
-  Future<void> _updateDevice(
-    String key,
-    livekit.MediaDevice device,
-    Future<void> Function(livekit.MediaDevice) onChange,
-  ) async {
+  Future<void> _updateDevice(String key, livekit.MediaDevice device, Future<void> Function(livekit.MediaDevice) onChange) async {
     await onChange(device);
     final selectedDeviceIdGetter = _selectedDeviceIdGetterForPreferenceKey(key);
-    if (selectedDeviceIdGetter != null &&
-        selectedDeviceIdGetter() != device.deviceId) {
+    if (selectedDeviceIdGetter != null && selectedDeviceIdGetter() != device.deviceId) {
       throw StateError('Unable to switch $key to ${device.deviceId}');
     }
     await _preferences.setString(key, device.deviceId);
@@ -698,11 +597,7 @@ class _ChangeDeviceButtonState extends State<_ChangeDeviceButton> {
   }) async {
     final visibleDevices = _menuDevices(devices);
     final selectedDeviceId = _selectedDeviceIdForPreferenceKey(preferenceKey);
-    final selectedDevice = selectedDeviceId == null
-        ? null
-        : devices.firstWhereOrNull(
-            (device) => device.deviceId == selectedDeviceId,
-          );
+    final selectedDevice = selectedDeviceId == null ? null : devices.firstWhereOrNull((device) => device.deviceId == selectedDeviceId);
 
     if (visibleDevices.isEmpty) {
       if (_preferences.containsKey(preferenceKey)) {
@@ -711,9 +606,7 @@ class _ChangeDeviceButtonState extends State<_ChangeDeviceButton> {
       return;
     }
 
-    if (selectedDeviceId == null ||
-        selectedDeviceId.isEmpty ||
-        selectedDevice != null) {
+    if (selectedDeviceId == null || selectedDeviceId.isEmpty || selectedDevice != null) {
       return;
     }
 
@@ -731,23 +624,17 @@ class _ChangeDeviceButtonState extends State<_ChangeDeviceButton> {
     try {
       await _syncUnavailableSelection(
         preferenceKey: "videoInput",
-        devices: _devices
-            .where((device) => device.kind == "videoinput")
-            .toList(growable: false),
+        devices: _devices.where((device) => device.kind == "videoinput").toList(growable: false),
         onChange: widget.onChangeVideoInput,
       );
       await _syncUnavailableSelection(
         preferenceKey: "audioInput",
-        devices: _devices
-            .where((device) => device.kind == "audioinput")
-            .toList(growable: false),
+        devices: _devices.where((device) => device.kind == "audioinput").toList(growable: false),
         onChange: widget.onChangeAudioInput,
       );
       await _syncUnavailableSelection(
         preferenceKey: "audioOutput",
-        devices: _devices
-            .where((device) => device.kind == "audiooutput")
-            .toList(growable: false),
+        devices: _devices.where((device) => device.kind == "audiooutput").toList(growable: false),
         onChange: widget.onChangeAudioOutput,
       );
     } finally {
@@ -758,12 +645,9 @@ class _ChangeDeviceButtonState extends State<_ChangeDeviceButton> {
     }
   }
 
-  Future<void> onChangeVideoInput(livekit.MediaDevice device) =>
-      _updateDevice("videoInput", device, widget.onChangeVideoInput);
-  Future<void> onChangeAudioInput(livekit.MediaDevice device) =>
-      _updateDevice("audioInput", device, widget.onChangeAudioInput);
-  Future<void> onChangeAudioOutput(livekit.MediaDevice device) =>
-      _updateDevice("audioOutput", device, widget.onChangeAudioOutput);
+  Future<void> onChangeVideoInput(livekit.MediaDevice device) => _updateDevice("videoInput", device, widget.onChangeVideoInput);
+  Future<void> onChangeAudioInput(livekit.MediaDevice device) => _updateDevice("audioInput", device, widget.onChangeAudioInput);
+  Future<void> onChangeAudioOutput(livekit.MediaDevice device) => _updateDevice("audioOutput", device, widget.onChangeAudioOutput);
 
   Future<void> _showDialog() async {
     await _loadDevices();
@@ -842,9 +726,7 @@ class _ChangeDeviceDialogState extends State<_ChangeDeviceDialog> {
   @override
   void initState() {
     super.initState();
-    _subscription = livekit.Hardware.instance.onDeviceChange.stream.listen((
-      devices,
-    ) {
+    _subscription = livekit.Hardware.instance.onDeviceChange.stream.listen((devices) {
       if (!mounted) {
         return;
       }
@@ -862,9 +744,7 @@ class _ChangeDeviceDialogState extends State<_ChangeDeviceDialog> {
     super.dispose();
   }
 
-  List<livekit.MediaDevice> _sanitizeDevices(
-    List<livekit.MediaDevice> devices,
-  ) {
+  List<livekit.MediaDevice> _sanitizeDevices(List<livekit.MediaDevice> devices) {
     return devices.where((device) => device.deviceId.isNotEmpty).toList();
   }
 
@@ -875,11 +755,7 @@ class _ChangeDeviceDialogState extends State<_ChangeDeviceDialog> {
     }
   }
 
-  Future<void> _runDeviceChange(
-    String label,
-    Future<void> Function(livekit.MediaDevice) onChange,
-    livekit.MediaDevice device,
-  ) async {
+  Future<void> _runDeviceChange(String label, Future<void> Function(livekit.MediaDevice) onChange, livekit.MediaDevice device) async {
     try {
       await onChange(device);
       if (mounted) {
@@ -889,50 +765,28 @@ class _ChangeDeviceDialogState extends State<_ChangeDeviceDialog> {
       if (!mounted) {
         return;
       }
-      ShadToaster.maybeOf(context)?.show(
-        ShadToast.destructive(
-          description: Text(_describeDeviceSwitchError(label, error)),
-        ),
-      );
+      ShadToaster.maybeOf(context)?.show(ShadToast.destructive(description: Text(_describeDeviceSwitchError(label, error))));
       debugPrint('Unable to switch device ${device.deviceId}: $error');
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final videoInput =
-        widget.selectedVideoInputDeviceId?.call() ??
-        widget.preferences.getString("videoInput");
-    final audioInput =
-        widget.selectedAudioInputDeviceId?.call() ??
-        widget.preferences.getString("audioInput");
-    final audioOutput =
-        widget.selectedAudioOutputDeviceId?.call() ??
-        widget.preferences.getString("audioOutput");
+    final videoInput = widget.selectedVideoInputDeviceId?.call() ?? widget.preferences.getString("videoInput");
+    final audioInput = widget.selectedAudioInputDeviceId?.call() ?? widget.preferences.getString("audioInput");
+    final audioOutput = widget.selectedAudioOutputDeviceId?.call() ?? widget.preferences.getString("audioOutput");
 
-    final videoInputs = _devices
-        .where((device) => device.kind == "videoinput")
-        .toList();
-    final audioInputs = _devices
-        .where((device) => device.kind == "audioinput")
-        .toList();
-    final audioOutputs = _devices
-        .where((device) => device.kind == "audiooutput")
-        .toList();
+    final videoInputs = _devices.where((device) => device.kind == "videoinput").toList();
+    final audioInputs = _devices.where((device) => device.kind == "audioinput").toList();
+    final audioOutputs = _devices.where((device) => device.kind == "audiooutput").toList();
 
     final visibleVideoInputs = _menuDevices(videoInputs);
     final visibleAudioInputs = _menuDevices(audioInputs);
     final visibleAudioOutputs = _menuDevices(audioOutputs);
 
     final selectedVideoDevice = _selectedMenuDevice(videoInputs, videoInput);
-    final selectedAudioInputDevice = _selectedMenuDevice(
-      audioInputs,
-      audioInput,
-    );
-    final selectedAudioOutputDevice = _selectedMenuDevice(
-      audioOutputs,
-      audioOutput,
-    );
+    final selectedAudioInputDevice = _selectedMenuDevice(audioInputs, audioInput);
+    final selectedAudioOutputDevice = _selectedMenuDevice(audioOutputs, audioOutput);
 
     return ShadDialog(
       title: const Text("Device settings"),
@@ -958,11 +812,7 @@ class _ChangeDeviceDialogState extends State<_ChangeDeviceDialog> {
                 label: "Camera",
                 devices: visibleVideoInputs,
                 selectedDevice: selectedVideoDevice,
-                onChange: (device) => _runDeviceChange(
-                  "Camera",
-                  widget.onChangeVideoInput,
-                  device,
-                ),
+                onChange: (device) => _runDeviceChange("Camera", widget.onChangeVideoInput, device),
                 icon: LucideIcons.video,
                 disabledIcon: LucideIcons.videoOff,
                 disabledLabel: "Camera disabled",
@@ -973,11 +823,7 @@ class _ChangeDeviceDialogState extends State<_ChangeDeviceDialog> {
                 label: "Microphone",
                 devices: visibleAudioInputs,
                 selectedDevice: selectedAudioInputDevice,
-                onChange: (device) => _runDeviceChange(
-                  "Microphone",
-                  widget.onChangeAudioInput,
-                  device,
-                ),
+                onChange: (device) => _runDeviceChange("Microphone", widget.onChangeAudioInput, device),
                 icon: LucideIcons.mic,
                 disabledIcon: LucideIcons.micOff,
                 disabledLabel: "Microphone disabled",
@@ -989,11 +835,7 @@ class _ChangeDeviceDialogState extends State<_ChangeDeviceDialog> {
                   label: "Speakers",
                   devices: visibleAudioOutputs,
                   selectedDevice: selectedAudioOutputDevice,
-                  onChange: (device) => _runDeviceChange(
-                    "Speakers",
-                    widget.onChangeAudioOutput,
-                    device,
-                  ),
+                  onChange: (device) => _runDeviceChange("Speakers", widget.onChangeAudioOutput, device),
                   icon: LucideIcons.volume2,
                   disabledIcon: LucideIcons.volumeOff,
                   disabledLabel: "Speakers disabled",
@@ -1033,27 +875,16 @@ class _DeviceSettingsSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final isDisabled = selectedDevice == null;
-    final accentColor = isDisabled
-        ? theme.colorScheme.destructive
-        : theme.colorScheme.foreground;
+    final accentColor = isDisabled ? theme.colorScheme.destructive : theme.colorScheme.foreground;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
           children: [
-            Icon(
-              isDisabled ? disabledIcon : icon,
-              size: 18,
-              color: accentColor,
-            ),
+            Icon(isDisabled ? disabledIcon : icon, size: 18, color: accentColor),
             const SizedBox(width: 10),
-            Text(
-              label,
-              style: theme.textTheme.large.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+            Text(label, style: theme.textTheme.large.copyWith(fontWeight: FontWeight.w600)),
           ],
         ),
         const SizedBox(height: 10),
@@ -1068,19 +899,9 @@ class _DeviceSettingsSection extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  disabledLabel,
-                  style: theme.textTheme.small.copyWith(
-                    color: theme.colorScheme.destructive,
-                  ),
-                ),
+                Text(disabledLabel, style: theme.textTheme.small.copyWith(color: theme.colorScheme.destructive)),
                 const SizedBox(height: 4),
-                Text(
-                  disabledDescription,
-                  style: theme.textTheme.muted.copyWith(
-                    color: theme.colorScheme.destructive,
-                  ),
-                ),
+                Text(disabledDescription, style: theme.textTheme.muted.copyWith(color: theme.colorScheme.destructive)),
               ],
             ),
           )
@@ -1101,11 +922,7 @@ class _DeviceSettingsSection extends StatelessWidget {
 }
 
 class _DeviceOptionTile extends StatelessWidget {
-  const _DeviceOptionTile({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
+  const _DeviceOptionTile({required this.label, required this.selected, required this.onTap});
 
   final String label;
   final bool selected;
@@ -1114,12 +931,8 @@ class _DeviceOptionTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
-    final borderColor = selected
-        ? theme.colorScheme.foreground
-        : theme.colorScheme.border;
-    final backgroundColor = selected
-        ? theme.colorScheme.card
-        : theme.colorScheme.background;
+    final borderColor = selected ? theme.colorScheme.foreground : theme.colorScheme.border;
+    final backgroundColor = selected ? theme.colorScheme.card : theme.colorScheme.background;
 
     return Material(
       color: Colors.transparent,

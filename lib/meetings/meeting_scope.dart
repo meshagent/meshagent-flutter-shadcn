@@ -15,32 +15,17 @@ Future<livekit.RoomOptions> getSavedRoomOptions() async {
   final preferedAudioOutputDeviceId = preferences.getString("audioOutput");
 
   savedRoomOptions = livekit.RoomOptions(
-    defaultScreenShareCaptureOptions: const livekit.ScreenShareCaptureOptions(
-      useiOSBroadcastExtension: true,
-      preferCurrentTab: false,
-    ),
-    defaultCameraCaptureOptions: livekit.CameraCaptureOptions(
-      deviceId: preferedVideoDeviceId,
-    ),
-    defaultAudioCaptureOptions: livekit.AudioCaptureOptions(
-      deviceId: preferedAudioInputDeviceId,
-    ),
-    defaultAudioOutputOptions: livekit.AudioOutputOptions(
-      deviceId: preferedAudioOutputDeviceId,
-    ),
+    defaultScreenShareCaptureOptions: const livekit.ScreenShareCaptureOptions(useiOSBroadcastExtension: true, preferCurrentTab: false),
+    defaultCameraCaptureOptions: livekit.CameraCaptureOptions(deviceId: preferedVideoDeviceId),
+    defaultAudioCaptureOptions: livekit.AudioCaptureOptions(deviceId: preferedAudioInputDeviceId),
+    defaultAudioOutputOptions: livekit.AudioOutputOptions(deviceId: preferedAudioOutputDeviceId),
   );
 
   return savedRoomOptions;
 }
 
 class MeetingScope extends StatefulWidget {
-  const MeetingScope({
-    super.key,
-    required this.client,
-    this.breakoutRoom,
-    required this.builder,
-    this.roomOptions,
-  });
+  const MeetingScope({super.key, required this.client, this.breakoutRoom, required this.builder, this.roomOptions});
 
   final livekit.RoomOptions? roomOptions;
   final RoomClient client;
@@ -52,10 +37,7 @@ class MeetingScope extends StatefulWidget {
 }
 
 class _MeetingScopeState extends State<MeetingScope> {
-  late final MeetingController controller = MeetingController(
-    room: widget.client,
-    roomOptions: widget.roomOptions,
-  );
+  late final MeetingController controller = MeetingController(room: widget.client, roomOptions: widget.roomOptions);
 
   @override
   void initState() {
@@ -78,10 +60,7 @@ class _MeetingScopeState extends State<MeetingScope> {
   Widget build(BuildContext context) {
     return WakeLocker(
       child: ShadToaster(
-        child: _MeetingControllerData(
-          controller: controller,
-          child: widget.builder(context, controller),
-        ),
+        child: _MeetingControllerData(controller: controller, child: widget.builder(context, controller)),
       ),
     );
   }
@@ -97,8 +76,7 @@ class PendingLocalMediaState extends ChangeNotifier {
   bool get microphonePending => _microphonePending;
 
   void setCameraPending(bool value, {bool awaitEnableConfirmation = false}) {
-    if (_cameraPending == value &&
-        _cameraAwaitingEnableConfirmation == awaitEnableConfirmation) {
+    if (_cameraPending == value && _cameraAwaitingEnableConfirmation == awaitEnableConfirmation) {
       return;
     }
 
@@ -107,12 +85,8 @@ class PendingLocalMediaState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setMicrophonePending(
-    bool value, {
-    bool awaitEnableConfirmation = false,
-  }) {
-    if (_microphonePending == value &&
-        _microphoneAwaitingEnableConfirmation == awaitEnableConfirmation) {
+  void setMicrophonePending(bool value, {bool awaitEnableConfirmation = false}) {
+    if (_microphonePending == value && _microphoneAwaitingEnableConfirmation == awaitEnableConfirmation) {
       return;
     }
 
@@ -129,19 +103,15 @@ class PendingLocalMediaState extends ChangeNotifier {
   }) {
     if (_cameraPending == cameraPending &&
         _microphonePending == microphonePending &&
-        _cameraAwaitingEnableConfirmation ==
-            (cameraPending && cameraAwaitEnableConfirmation) &&
-        _microphoneAwaitingEnableConfirmation ==
-            (microphonePending && microphoneAwaitEnableConfirmation)) {
+        _cameraAwaitingEnableConfirmation == (cameraPending && cameraAwaitEnableConfirmation) &&
+        _microphoneAwaitingEnableConfirmation == (microphonePending && microphoneAwaitEnableConfirmation)) {
       return;
     }
 
     _cameraPending = cameraPending;
     _microphonePending = microphonePending;
-    _cameraAwaitingEnableConfirmation =
-        cameraPending && cameraAwaitEnableConfirmation;
-    _microphoneAwaitingEnableConfirmation =
-        microphonePending && microphoneAwaitEnableConfirmation;
+    _cameraAwaitingEnableConfirmation = cameraPending && cameraAwaitEnableConfirmation;
+    _microphoneAwaitingEnableConfirmation = microphonePending && microphoneAwaitEnableConfirmation;
     notifyListeners();
   }
 
@@ -152,9 +122,7 @@ class PendingLocalMediaState extends ChangeNotifier {
 
 class MeetingController extends ChangeNotifier {
   MeetingController({required this.room, livekit.RoomOptions? roomOptions})
-    : livekitRoom = livekit.Room(
-        roomOptions: roomOptions ?? livekit.RoomOptions(),
-      ) {
+    : livekitRoom = livekit.Room(roomOptions: roomOptions ?? livekit.RoomOptions()) {
     livekitRoom.addListener(_onRoomChanged);
     _syncObservedLocalParticipant();
   }
@@ -175,18 +143,9 @@ class MeetingController extends ChangeNotifier {
   }
 
   bool get hasParticipantsWithVideo {
-    return livekitRoom.localParticipant?.videoTrackPublications
-                .where((pub) => !pub.muted)
-                .isNotEmpty ==
-            true ||
+    return livekitRoom.localParticipant?.videoTrackPublications.where((pub) => !pub.muted).isNotEmpty == true ||
         livekitRoom.remoteParticipants.values
-            .where(
-              (p) =>
-                  p.videoTrackPublications
-                      .where((pub) => !pub.muted)
-                      .isNotEmpty ==
-                  true,
-            )
+            .where((p) => p.videoTrackPublications.where((pub) => !pub.muted).isNotEmpty == true)
             .isNotEmpty;
   }
 
@@ -213,12 +172,10 @@ class MeetingController extends ChangeNotifier {
     }
 
     final localParticipant = _observedLocalParticipant;
-    if (pendingLocalMedia._cameraAwaitingEnableConfirmation &&
-        (localParticipant?.isCameraEnabled() ?? false)) {
+    if (pendingLocalMedia._cameraAwaitingEnableConfirmation && (localParticipant?.isCameraEnabled() ?? false)) {
       pendingLocalMedia.setCameraPending(false);
     }
-    if (pendingLocalMedia._microphoneAwaitingEnableConfirmation &&
-        (localParticipant?.isMicrophoneEnabled() ?? false)) {
+    if (pendingLocalMedia._microphoneAwaitingEnableConfirmation && (localParticipant?.isMicrophoneEnabled() ?? false)) {
       pendingLocalMedia.setMicrophonePending(false);
     }
   }
@@ -231,17 +188,13 @@ class MeetingController extends ChangeNotifier {
 
   Future<void> configure({String? breakoutRoom}) async {
     if (livekitRoom.connectionState != livekit.ConnectionState.disconnected) {
-      throw Exception(
-        "You cannot reconfigure while the controller is connected",
-      );
+      throw Exception("You cannot reconfigure while the controller is connected");
     }
     _config = null;
     _configurationError = null;
     notifyListeners();
     try {
-      _config = await room.livekit.getConnectionInfo(
-        breakoutRoom: breakoutRoom,
-      );
+      _config = await room.livekit.getConnectionInfo(breakoutRoom: breakoutRoom);
       notifyListeners();
     } catch (err) {
       _configurationError = err;
@@ -260,15 +213,10 @@ class MeetingController extends ChangeNotifier {
       cameraPending: fastConnectOptions?.camera.enabled == true,
       microphonePending: fastConnectOptions?.microphone.enabled == true,
       cameraAwaitEnableConfirmation: fastConnectOptions?.camera.enabled == true,
-      microphoneAwaitEnableConfirmation:
-          fastConnectOptions?.microphone.enabled == true,
+      microphoneAwaitEnableConfirmation: fastConnectOptions?.microphone.enabled == true,
     );
     try {
-      await livekitRoom.connect(
-        config.url,
-        config.token,
-        fastConnectOptions: fastConnectOptions,
-      );
+      await livekitRoom.connect(config.url, config.token, fastConnectOptions: fastConnectOptions);
       final localParticipant = livekitRoom.localParticipant;
 
       if (fastConnectOptions?.camera.enabled == true) {
@@ -276,9 +224,7 @@ class MeetingController extends ChangeNotifier {
           await localParticipant?.setCameraEnabled(true);
         } catch (error) {
           pendingLocalMedia.setCameraPending(false);
-          Logger.root.warning(
-            "unable to enable camera after connecting $error",
-          );
+          Logger.root.warning("unable to enable camera after connecting $error");
         }
       } else {
         pendingLocalMedia.setCameraPending(false);
@@ -289,9 +235,7 @@ class MeetingController extends ChangeNotifier {
           await localParticipant?.setMicrophoneEnabled(true);
         } catch (error) {
           pendingLocalMedia.setMicrophonePending(false);
-          Logger.root.warning(
-            "unable to enable microphone after connecting $error",
-          );
+          Logger.root.warning("unable to enable microphone after connecting $error");
         }
       } else {
         pendingLocalMedia.setMicrophonePending(false);
@@ -322,23 +266,16 @@ class MeetingController extends ChangeNotifier {
   }
 
   static MeetingController of(BuildContext context) {
-    return context
-        .dependOnInheritedWidgetOfExactType<_MeetingControllerData>()!
-        .controller;
+    return context.dependOnInheritedWidgetOfExactType<_MeetingControllerData>()!.controller;
   }
 
   static MeetingController? maybeOf(BuildContext context) {
-    return context
-        .dependOnInheritedWidgetOfExactType<_MeetingControllerData>()
-        ?.controller;
+    return context.dependOnInheritedWidgetOfExactType<_MeetingControllerData>()?.controller;
   }
 }
 
 class _MeetingControllerData extends InheritedWidget {
-  const _MeetingControllerData({
-    required this.controller,
-    required super.child,
-  });
+  const _MeetingControllerData({required this.controller, required super.child});
 
   final MeetingController controller;
 

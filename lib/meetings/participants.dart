@@ -5,10 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:livekit_client/livekit_client.dart';
 import './meetings.dart';
 
-const _participantOverlayPadding = EdgeInsets.symmetric(
-  horizontal: 12,
-  vertical: 8,
-);
+const _participantOverlayPadding = EdgeInsets.symmetric(horizontal: 12, vertical: 8);
 const _participantOverlayRadius = BorderRadius.all(Radius.circular(12));
 const _unmutedParticipantOverlayColor = Color(0x99222222);
 const _mutedParticipantIconColor = Color(0xFFE84D5B);
@@ -18,12 +15,8 @@ bool _isMicrophoneEnabled(Participant participant) {
 }
 
 VideoTrack? _firstEnabledVideoTrack(Participant participant) {
-  final publication = participant.getTrackPublicationBySource(
-    TrackSource.camera,
-  );
-  if (publication == null ||
-      publication.muted ||
-      publication.track is! VideoTrack) {
+  final publication = participant.getTrackPublicationBySource(TrackSource.camera);
+  if (publication == null || publication.muted || publication.track is! VideoTrack) {
     return null;
   }
 
@@ -31,12 +24,7 @@ VideoTrack? _firstEnabledVideoTrack(Participant participant) {
 }
 
 class ParticipantCamerasList extends StatefulWidget {
-  const ParticipantCamerasList({
-    required this.controller,
-    this.padding = EdgeInsets.zero,
-    this.spacing = 10,
-    super.key,
-  });
+  const ParticipantCamerasList({required this.controller, this.padding = EdgeInsets.zero, this.spacing = 10, super.key});
 
   final double spacing;
   final EdgeInsets padding;
@@ -57,18 +45,12 @@ class _ParticipantCamerasListState extends State<ParticipantCamerasList> {
         scrollDirection: Axis.horizontal,
         children: [
           if (controller.livekitRoom.localParticipant != null)
-            ParticipantTile(
-              room: controller.livekitRoom,
-              participant: controller.livekitRoom.localParticipant!,
-            ),
+            ParticipantTile(room: controller.livekitRoom, participant: controller.livekitRoom.localParticipant!),
           SizedBox(width: widget.spacing),
           ...controller.livekitRoom.remoteParticipants.values.map(
             (participant) => Padding(
               padding: EdgeInsets.only(right: widget.spacing),
-              child: ParticipantTile(
-                room: controller.livekitRoom,
-                participant: participant,
-              ),
+              child: ParticipantTile(room: controller.livekitRoom, participant: participant),
             ),
           ),
         ],
@@ -78,11 +60,7 @@ class _ParticipantCamerasListState extends State<ParticipantCamerasList> {
 }
 
 class ParticipantTile extends StatelessWidget {
-  const ParticipantTile({
-    super.key,
-    required this.room,
-    required this.participant,
-  });
+  const ParticipantTile({super.key, required this.room, required this.participant});
 
   final Room room;
   final Participant participant;
@@ -105,19 +83,11 @@ class ParticipantTile extends StatelessWidget {
                       ? AudioWave(
                           room: room,
                           participant: participant,
-                          backgroundColor: ShadTheme.of(
-                            context,
-                          ).colorScheme.background,
-                          speakingColor: ShadTheme.of(
-                            context,
-                          ).colorScheme.foreground.withAlpha(50),
-                          notSpeakingColor: ShadTheme.of(
-                            context,
-                          ).colorScheme.foreground.withAlpha(25),
+                          backgroundColor: ShadTheme.of(context).colorScheme.background,
+                          speakingColor: ShadTheme.of(context).colorScheme.foreground.withAlpha(50),
+                          notSpeakingColor: ShadTheme.of(context).colorScheme.foreground.withAlpha(25),
                         )
-                      : ColoredBox(
-                          color: ShadTheme.of(context).colorScheme.foreground,
-                        )),
+                      : ColoredBox(color: ShadTheme.of(context).colorScheme.foreground)),
             participantName: participant.name,
           ),
         );
@@ -127,11 +97,7 @@ class ParticipantTile extends StatelessWidget {
 }
 
 class _ParticipantOverlay extends StatefulWidget {
-  const _ParticipantOverlay({
-    required this.name,
-    required this.muted,
-    this.showName = true,
-  });
+  const _ParticipantOverlay({required this.name, required this.muted, this.showName = true});
 
   final String name;
   final bool muted;
@@ -141,8 +107,7 @@ class _ParticipantOverlay extends StatefulWidget {
   _ParticipantOverlayState createState() => _ParticipantOverlayState();
 }
 
-class _ParticipantOverlayState extends State<_ParticipantOverlay>
-    with SingleTickerProviderStateMixin {
+class _ParticipantOverlayState extends State<_ParticipantOverlay> with SingleTickerProviderStateMixin {
   late AnimationController _animationController;
   late Animation<double> _animation;
 
@@ -159,19 +124,14 @@ class _ParticipantOverlayState extends State<_ParticipantOverlay>
       vsync: this,
     );
 
-    _animation = CurvedAnimation(
-      parent: _animationController,
-      curve: Curves.easeOut,
-    );
+    _animation = CurvedAnimation(parent: _animationController, curve: Curves.easeOut);
   }
 
   @override
   void didUpdateWidget(covariant _ParticipantOverlay oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.showName != oldWidget.showName) {
-      widget.showName
-          ? _animationController.forward()
-          : _animationController.reverse();
+      widget.showName ? _animationController.forward() : _animationController.reverse();
     }
   }
 
@@ -185,11 +145,7 @@ class _ParticipantOverlayState extends State<_ParticipantOverlay>
   Widget build(BuildContext context) {
     const audioIconSize = 16.0;
     const audioIconColor = Colors.white;
-    const textStyle = TextStyle(
-      color: audioIconColor,
-      fontSize: 11,
-      fontWeight: FontWeight.w500,
-    );
+    const textStyle = TextStyle(color: audioIconColor, fontSize: 11, fontWeight: FontWeight.w500);
     final theme = ShadTheme.of(context);
     final overlayBorderColor = theme.colorScheme.border.withValues(alpha: 0.35);
 
@@ -218,22 +174,14 @@ class _ParticipantOverlayState extends State<_ParticipantOverlay>
                   child: SizedBox(
                     height: audioIconSize,
                     child: ClipRect(
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        widthFactor: _animation.value,
-                        child: child,
-                      ),
+                      child: Align(alignment: Alignment.centerLeft, widthFactor: _animation.value, child: child),
                     ),
                   ),
                 );
               },
               child: Padding(
                 padding: const EdgeInsets.only(left: 1, right: 3),
-                child: Text(
-                  widget.name,
-                  style: textStyle,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                child: Text(widget.name, style: textStyle, overflow: TextOverflow.ellipsis),
               ),
             ),
         ],
@@ -283,11 +231,7 @@ class _CameraBox extends StatelessWidget {
               child: Padding(
                 padding: const EdgeInsets.all(5),
                 child: IntrinsicWidth(
-                  child: _ParticipantOverlay(
-                    name: participantName,
-                    muted: muted,
-                    showName: showName,
-                  ),
+                  child: _ParticipantOverlay(name: participantName, muted: muted, showName: showName),
                 ),
               ),
             ),

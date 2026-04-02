@@ -7,8 +7,7 @@ import 'package:flutter/widgets.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 class ShadTopLevelContextMenuCoordinator {
-  static final Set<ShadContextMenuController> _controllers =
-      <ShadContextMenuController>{};
+  static final Set<ShadContextMenuController> _controllers = <ShadContextMenuController>{};
   static bool _synchronizing = false;
 
   static void register(ShadContextMenuController controller) {
@@ -48,9 +47,7 @@ RenderBox? _safeRenderBox(BuildContext? context) {
 
   try {
     final renderObject = context.findRenderObject();
-    if (renderObject is! RenderBox ||
-        !renderObject.attached ||
-        !renderObject.hasSize) {
+    if (renderObject is! RenderBox || !renderObject.attached || !renderObject.hasSize) {
       return null;
     }
 
@@ -68,16 +65,10 @@ ShadAnchor resolveAdaptiveShadMenuAnchor(
   double? estimatedMenuWidth,
   double? estimatedMenuHeight,
   double viewportEdgePadding = 12,
-  ShadMenuHorizontalPosition horizontalPosition =
-      ShadMenuHorizontalPosition.automatic,
-  ShadMenuVerticalPosition verticalPosition =
-      ShadMenuVerticalPosition.automatic,
+  ShadMenuHorizontalPosition horizontalPosition = ShadMenuHorizontalPosition.automatic,
+  ShadMenuVerticalPosition verticalPosition = ShadMenuVerticalPosition.automatic,
 }) {
-  const fallbackAnchor = ShadAnchor(
-    childAlignment: Alignment.topLeft,
-    overlayAlignment: Alignment.bottomLeft,
-    offset: Offset(0, 8),
-  );
+  const fallbackAnchor = ShadAnchor(childAlignment: Alignment.topLeft, overlayAlignment: Alignment.bottomLeft, offset: Offset(0, 8));
   final renderBox = _safeRenderBox(context);
   if (renderBox == null) {
     return fallbackAnchor;
@@ -93,9 +84,7 @@ ShadAnchor resolveAdaptiveShadMenuAnchor(
         : renderBox.localToGlobal(Offset.zero);
     final triggerBottom = triggerOrigin.dy + renderBox.size.height;
     final triggerRight = triggerOrigin.dx + renderBox.size.width;
-    final triggerCenter =
-        triggerOrigin +
-        Offset(renderBox.size.width / 2, renderBox.size.height / 2);
+    final triggerCenter = triggerOrigin + Offset(renderBox.size.width / 2, renderBox.size.height / 2);
 
     final alignLeft = _shouldAlignMenuLeft(
       triggerOriginX: triggerOrigin.dx,
@@ -147,8 +136,7 @@ bool _shouldAlignMenuLeft({
       return false;
     case ShadMenuHorizontalPosition.automatic:
       if (estimatedMenuWidth != null) {
-        final availableRight =
-            viewportWidth - triggerOriginX - viewportEdgePadding;
+        final availableRight = viewportWidth - triggerOriginX - viewportEdgePadding;
         final availableLeft = triggerRightX - viewportEdgePadding;
         final fitsLeftAligned = estimatedMenuWidth <= availableRight;
         final fitsRightAligned = estimatedMenuWidth <= availableLeft;
@@ -176,8 +164,7 @@ bool _shouldOpenMenuDown({
   double? estimatedMenuHeight,
 }) {
   if (estimatedMenuHeight != null) {
-    final availableBelow =
-        viewportHeight - triggerBottomY - viewportEdgePadding;
+    final availableBelow = viewportHeight - triggerBottomY - viewportEdgePadding;
     final availableAbove = triggerOriginY - viewportEdgePadding;
     final fitsBelow = estimatedMenuHeight <= availableBelow;
     final fitsAbove = estimatedMenuHeight <= availableAbove;
@@ -195,16 +182,10 @@ bool _shouldOpenMenuDown({
 }
 
 Offset _pointForAlignment(Alignment alignment, Size size) {
-  return Offset(
-    (alignment.x + 1) * size.width / 2,
-    (alignment.y + 1) * size.height / 2,
-  );
+  return Offset((alignment.x + 1) * size.width / 2, (alignment.y + 1) * size.height / 2);
 }
 
-double? _resolveEstimatedMenuWidth(
-  BoxConstraints? constraints,
-  double? estimatedMenuWidth,
-) {
+double? _resolveEstimatedMenuWidth(BoxConstraints? constraints, double? estimatedMenuWidth) {
   if (estimatedMenuWidth != null && estimatedMenuWidth > 0) {
     return estimatedMenuWidth;
   }
@@ -214,18 +195,13 @@ double? _resolveEstimatedMenuWidth(
   if (constraints.minWidth > 0) {
     return constraints.minWidth;
   }
-  if (constraints.hasBoundedWidth &&
-      constraints.maxWidth.isFinite &&
-      constraints.maxWidth > 0) {
+  if (constraints.hasBoundedWidth && constraints.maxWidth.isFinite && constraints.maxWidth > 0) {
     return constraints.maxWidth;
   }
   return null;
 }
 
-double? _resolveEstimatedMenuHeight(
-  BoxConstraints? constraints,
-  double? estimatedMenuHeight,
-) {
+double? _resolveEstimatedMenuHeight(BoxConstraints? constraints, double? estimatedMenuHeight) {
   if (estimatedMenuHeight != null && estimatedMenuHeight > 0) {
     return estimatedMenuHeight;
   }
@@ -235,9 +211,7 @@ double? _resolveEstimatedMenuHeight(
   if (constraints.minHeight > 0) {
     return constraints.minHeight;
   }
-  if (constraints.hasBoundedHeight &&
-      constraints.maxHeight.isFinite &&
-      constraints.maxHeight > 0) {
+  if (constraints.hasBoundedHeight && constraints.maxHeight.isFinite && constraints.maxHeight > 0) {
     return constraints.maxHeight;
   }
   return null;
@@ -270,20 +244,14 @@ Rect? _computeGlobalMenuRect({
   final localTriggerOrigin = boundaryRenderBox != null
       ? triggerRenderBox.localToGlobal(Offset.zero, ancestor: boundaryRenderBox)
       : triggerRenderBox.localToGlobal(Offset.zero);
-  final boundaryGlobalOrigin =
-      boundaryRenderBox?.localToGlobal(Offset.zero) ?? Offset.zero;
+  final boundaryGlobalOrigin = boundaryRenderBox?.localToGlobal(Offset.zero) ?? Offset.zero;
 
   final triggerRect = localTriggerOrigin & triggerRenderBox.size;
   final menuSize = Size(menuWidth, menuHeight);
   final childAlignment = anchor.childAlignment.resolve(TextDirection.ltr);
   final overlayAlignment = anchor.overlayAlignment.resolve(TextDirection.ltr);
-  final childPoint =
-      triggerRect.topLeft +
-      _pointForAlignment(childAlignment, triggerRect.size);
-  final menuTopLeftLocal =
-      childPoint +
-      anchor.offset -
-      _pointForAlignment(overlayAlignment, menuSize);
+  final childPoint = triggerRect.topLeft + _pointForAlignment(childAlignment, triggerRect.size);
+  final menuTopLeftLocal = childPoint + anchor.offset - _pointForAlignment(overlayAlignment, menuSize);
   return (boundaryGlobalOrigin + menuTopLeftLocal) & menuSize;
 }
 
@@ -293,29 +261,21 @@ class ShadContextMenuBoundary extends StatelessWidget {
   final Widget child;
 
   static BuildContext? maybeOf(BuildContext context) {
-    return context
-        .dependOnInheritedWidgetOfExactType<_ShadContextMenuBoundaryScope>()
-        ?.boundaryContext;
+    return context.dependOnInheritedWidgetOfExactType<_ShadContextMenuBoundaryScope>()?.boundaryContext;
   }
 
   @override
   Widget build(BuildContext context) {
     return Builder(
       builder: (boundaryContext) {
-        return _ShadContextMenuBoundaryScope(
-          boundaryContext: boundaryContext,
-          child: child,
-        );
+        return _ShadContextMenuBoundaryScope(boundaryContext: boundaryContext, child: child);
       },
     );
   }
 }
 
 class _ShadContextMenuBoundaryScope extends InheritedWidget {
-  const _ShadContextMenuBoundaryScope({
-    required this.boundaryContext,
-    required super.child,
-  });
+  const _ShadContextMenuBoundaryScope({required this.boundaryContext, required super.child});
 
   final BuildContext boundaryContext;
 
@@ -382,28 +342,19 @@ class CoordinatedShadContextMenu extends StatefulWidget {
   final double viewportEdgePadding;
 
   @override
-  State<CoordinatedShadContextMenu> createState() =>
-      _CoordinatedShadContextMenuState();
+  State<CoordinatedShadContextMenu> createState() => _CoordinatedShadContextMenuState();
 }
 
-class _CoordinatedShadContextMenuState
-    extends State<CoordinatedShadContextMenu> {
+class _CoordinatedShadContextMenuState extends State<CoordinatedShadContextMenu> {
   final GlobalKey _triggerKey = GlobalKey();
-  late final ShadContextMenuController _internalController =
-      ShadContextMenuController(isOpen: widget.visible ?? false);
+  late final ShadContextMenuController _internalController = ShadContextMenuController(isOpen: widget.visible ?? false);
   ShadAnchorBase? _frozenAnchor;
   bool _globalPointerRouteAttached = false;
 
-  ShadContextMenuController get _controller =>
-      widget.controller ?? _internalController;
-  BuildContext? get _effectiveBoundaryContext =>
-      widget.boundaryContext ?? ShadContextMenuBoundary.maybeOf(context);
-  double? get _effectiveEstimatedMenuWidth =>
-      _resolveEstimatedMenuWidth(widget.constraints, widget.estimatedMenuWidth);
-  double? get _effectiveEstimatedMenuHeight => _resolveEstimatedMenuHeight(
-    widget.constraints,
-    widget.estimatedMenuHeight,
-  );
+  ShadContextMenuController get _controller => widget.controller ?? _internalController;
+  BuildContext? get _effectiveBoundaryContext => widget.boundaryContext ?? ShadContextMenuBoundary.maybeOf(context);
+  double? get _effectiveEstimatedMenuWidth => _resolveEstimatedMenuWidth(widget.constraints, widget.estimatedMenuWidth);
+  double? get _effectiveEstimatedMenuHeight => _resolveEstimatedMenuHeight(widget.constraints, widget.estimatedMenuHeight);
 
   @override
   void initState() {
@@ -454,10 +405,7 @@ class _CoordinatedShadContextMenuState
   }
 
   void _syncGlobalPointerRoute() {
-    final shouldAttach =
-        _controller.isOpen &&
-        _effectiveEstimatedMenuWidth != null &&
-        _effectiveEstimatedMenuHeight != null;
+    final shouldAttach = _controller.isOpen && _effectiveEstimatedMenuWidth != null && _effectiveEstimatedMenuHeight != null;
     if (shouldAttach) {
       _attachGlobalPointerRoute();
     } else {
@@ -469,9 +417,7 @@ class _CoordinatedShadContextMenuState
     if (_globalPointerRouteAttached) {
       return;
     }
-    GestureBinding.instance.pointerRouter.addGlobalRoute(
-      _handleGlobalPointerEvent,
-    );
+    GestureBinding.instance.pointerRouter.addGlobalRoute(_handleGlobalPointerEvent);
     _globalPointerRouteAttached = true;
   }
 
@@ -479,9 +425,7 @@ class _CoordinatedShadContextMenuState
     if (!_globalPointerRouteAttached) {
       return;
     }
-    GestureBinding.instance.pointerRouter.removeGlobalRoute(
-      _handleGlobalPointerEvent,
-    );
+    GestureBinding.instance.pointerRouter.removeGlobalRoute(_handleGlobalPointerEvent);
     _globalPointerRouteAttached = false;
   }
 
@@ -492,8 +436,7 @@ class _CoordinatedShadContextMenuState
 
     final triggerRenderBox = _safeRenderBox(_triggerKey.currentContext);
     final triggerRect = _globalRectForRenderBox(triggerRenderBox);
-    if (triggerRect != null &&
-        triggerRect.inflate(1).contains(event.position)) {
+    if (triggerRect != null && triggerRect.inflate(1).contains(event.position)) {
       return;
     }
 
@@ -621,18 +564,14 @@ class CoordinatedShadContextMenuRegion extends StatefulWidget {
   final Duration? popoverReverseDuration;
 
   @override
-  State<CoordinatedShadContextMenuRegion> createState() =>
-      _CoordinatedShadContextMenuRegionState();
+  State<CoordinatedShadContextMenuRegion> createState() => _CoordinatedShadContextMenuRegionState();
 }
 
-class _CoordinatedShadContextMenuRegionState
-    extends State<CoordinatedShadContextMenuRegion> {
-  late final ShadContextMenuController _internalController =
-      ShadContextMenuController(isOpen: widget.visible ?? false);
+class _CoordinatedShadContextMenuRegionState extends State<CoordinatedShadContextMenuRegion> {
+  late final ShadContextMenuController _internalController = ShadContextMenuController(isOpen: widget.visible ?? false);
   Offset? _offset;
 
-  ShadContextMenuController get _controller =>
-      widget.controller ?? _internalController;
+  ShadContextMenuController get _controller => widget.controller ?? _internalController;
   final isContextMenuAlreadyDisabled = kIsWeb && !BrowserContextMenu.enabled;
 
   @override
@@ -691,13 +630,9 @@ class _CoordinatedShadContextMenuRegionState
   @override
   Widget build(BuildContext context) {
     final effectiveLongPressEnabled =
-        widget.longPressEnabled ??
-        (defaultTargetPlatform == TargetPlatform.android ||
-            defaultTargetPlatform == TargetPlatform.iOS);
+        widget.longPressEnabled ?? (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS);
     final effectiveTapEnabled =
-        widget.tapEnabled ??
-        (defaultTargetPlatform == TargetPlatform.android ||
-            defaultTargetPlatform == TargetPlatform.iOS);
+        widget.tapEnabled ?? (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS);
     final isWindows = defaultTargetPlatform == TargetPlatform.windows;
 
     return ShadContextMenu(

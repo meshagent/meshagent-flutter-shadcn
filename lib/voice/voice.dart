@@ -17,8 +17,7 @@ class VoiceAgentCaller extends StatefulWidget {
     this.allowToggleTranscribe = true,
     this.showDisconnectedAction = true,
     this.emptyStateTitle = "Start an audio session",
-    this.emptyStateDescription =
-        "Connect with this agent using your microphone.",
+    this.emptyStateDescription = "Connect with this agent using your microphone.",
     this.connectedControlsBuilder,
   });
 
@@ -33,8 +32,7 @@ class VoiceAgentCaller extends StatefulWidget {
   final bool showDisconnectedAction;
   final String emptyStateTitle;
   final String emptyStateDescription;
-  final Widget Function(BuildContext context, MeetingController meeting)?
-  connectedControlsBuilder;
+  final Widget Function(BuildContext context, MeetingController meeting)? connectedControlsBuilder;
 
   @override
   State createState() => _VoiceAgentCaller();
@@ -70,16 +68,14 @@ class _VoiceAgentCaller extends State<VoiceAgentCaller> {
     final emptyStateTitle = widget.emptyStateTitle.trim();
     final emptyStateDescription = widget.emptyStateDescription.trim();
     final emptyStateAvailableWidth = widget.emptyStateAvailableWidth;
-    final isMobileScreen =
-        MediaQuery.sizeOf(context).width < _mobileScreenWidthMax;
+    final isMobileScreen = MediaQuery.sizeOf(context).width < _mobileScreenWidthMax;
 
     return Center(
       child: LayoutBuilder(
         builder: (context, constraints) => ListenableBuilder(
           listenable: meeting,
           builder: (context, _) {
-            if (meeting.livekitRoom.connectionState ==
-                livekit.ConnectionState.disconnected) {
+            if (meeting.livekitRoom.connectionState == livekit.ConnectionState.disconnected) {
               return Column(
                 mainAxisSize: MainAxisSize.min,
                 spacing: 16,
@@ -87,47 +83,27 @@ class _VoiceAgentCaller extends State<VoiceAgentCaller> {
                   AudioAgentEmptyState(
                     title: emptyStateTitle,
                     description: emptyStateDescription,
-                    availableWidth:
-                        emptyStateAvailableWidth ?? constraints.maxWidth,
+                    availableWidth: emptyStateAvailableWidth ?? constraints.maxWidth,
                     action: !showDisconnectedAction
                         ? null
                         : LayoutBuilder(
                             builder: (context, controlsConstraints) {
-                              final controlsAvailableWidth =
-                                  emptyStateAvailableWidth ??
-                                  controlsConstraints.maxWidth;
-                              final horizontalControls =
-                                  allowToggleTranscribe &&
-                                  controlsAvailableWidth >=
-                                      _horizontalControlsMinWidth;
-                              final mobileButtonWidth = controlsAvailableWidth
-                                  .clamp(220.0, _mobilePrimaryButtonMaxWidth)
-                                  .toDouble();
+                              final controlsAvailableWidth = emptyStateAvailableWidth ?? controlsConstraints.maxWidth;
+                              final horizontalControls = allowToggleTranscribe && controlsAvailableWidth >= _horizontalControlsMinWidth;
+                              final mobileButtonWidth = controlsAvailableWidth.clamp(220.0, _mobilePrimaryButtonMaxWidth).toDouble();
 
                               final startButton = ShadButton(
-                                width: isMobileScreen && !horizontalControls
-                                    ? mobileButtonWidth
-                                    : null,
+                                width: isMobileScreen && !horizontalControls ? mobileButtonWidth : null,
                                 onPressed: () async {
                                   final toaster = ShadToaster.maybeOf(context);
 
                                   try {
-                                    final breakout = getBreakoutRoom != null
-                                        ? await getBreakoutRoom(context)
-                                        : const Uuid().v4();
+                                    final breakout = getBreakoutRoom != null ? await getBreakoutRoom(context) : const Uuid().v4();
                                     if (breakout == null) {
                                       return;
                                     }
-                                    await meeting.configure(
-                                      breakoutRoom: breakout,
-                                    );
-                                    await meeting.connect(
-                                      livekit.FastConnectOptions(
-                                        microphone: livekit.TrackOption(
-                                          enabled: true,
-                                        ),
-                                      ),
-                                    );
+                                    await meeting.configure(breakoutRoom: breakout);
+                                    await meeting.connect(livekit.FastConnectOptions(microphone: livekit.TrackOption(enabled: true)));
                                     await meeting.room.messaging.sendMessage(
                                       to: participant,
                                       type: "voice_call",
@@ -139,13 +115,7 @@ class _VoiceAgentCaller extends State<VoiceAgentCaller> {
                                       },
                                     );
                                   } catch (error) {
-                                    toaster?.show(
-                                      ShadToast.destructive(
-                                        description: Text(
-                                          _describeStartSessionError(error),
-                                        ),
-                                      ),
-                                    );
+                                    toaster?.show(ShadToast.destructive(description: Text(_describeStartSessionError(error))));
                                   }
                                 },
                                 child: const Text("Start session"),
@@ -157,10 +127,7 @@ class _VoiceAgentCaller extends State<VoiceAgentCaller> {
                                     transcribe = value;
                                   });
                                 },
-                                label: Text(
-                                  "Transcribe",
-                                  style: ShadTheme.of(context).textTheme.small,
-                                ),
+                                label: Text("Transcribe", style: ShadTheme.of(context).textTheme.small),
                                 value: transcribe,
                               );
 
@@ -168,11 +135,7 @@ class _VoiceAgentCaller extends State<VoiceAgentCaller> {
                                 return Row(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    startButton,
-                                    const SizedBox(width: 32),
-                                    transcribeCheckbox,
-                                  ],
+                                  children: [startButton, const SizedBox(width: 32), transcribeCheckbox],
                                 );
                               }
 
@@ -180,10 +143,7 @@ class _VoiceAgentCaller extends State<VoiceAgentCaller> {
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   startButton,
-                                  if (allowToggleTranscribe) ...[
-                                    const SizedBox(height: 16),
-                                    transcribeCheckbox,
-                                  ],
+                                  if (allowToggleTranscribe) ...[const SizedBox(height: 16), transcribeCheckbox],
                                 ],
                               );
                             },
@@ -193,41 +153,28 @@ class _VoiceAgentCaller extends State<VoiceAgentCaller> {
               );
             }
 
-            final controls =
-                meeting.livekitRoom.connectionState ==
-                    livekit.ConnectionState.connected
-                ? (widget.connectedControlsBuilder?.call(context, meeting) ??
-                      MeetingControls(controller: meeting))
+            final controls = meeting.livekitRoom.connectionState == livekit.ConnectionState.connected
+                ? (widget.connectedControlsBuilder?.call(context, meeting) ?? MeetingControls(controller: meeting))
                 : null;
 
-            final availableHeight = constraints.hasBoundedHeight
-                ? constraints.maxHeight
-                : 500.0;
+            final availableHeight = constraints.hasBoundedHeight ? constraints.maxHeight : 500.0;
             final reservedControlsHeight = controls == null
                 ? 0.0
                 : constraints.maxWidth < 420
                 ? _compactConnectedControlsReservedHeight
                 : _connectedControlsReservedHeight;
-            final waveMaxHeight = (availableHeight - reservedControlsHeight)
-                .clamp(180.0, 360.0);
+            final waveMaxHeight = (availableHeight - reservedControlsHeight).clamp(180.0, 360.0);
 
             return Column(
               mainAxisSize: MainAxisSize.min,
               spacing: 16,
               children: [
                 ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxWidth: constraints.maxWidth,
-                    maxHeight: waveMaxHeight,
-                  ),
+                  constraints: BoxConstraints(maxWidth: constraints.maxWidth, maxHeight: waveMaxHeight),
                   child: ListenableBuilder(
                     listenable: meeting.livekitRoom,
                     builder: (c, _) {
-                      final participant = meeting
-                          .livekitRoom
-                          .remoteParticipants
-                          .values
-                          .firstOrNull;
+                      final participant = meeting.livekitRoom.remoteParticipants.values.firstOrNull;
                       return participant == null
                           ? const SizedBox(width: 320, height: 180)
                           : Padding(
@@ -289,11 +236,7 @@ class AudioAgentEmptyState extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                AudioAgentEmptyStateContent(
-                  title: title,
-                  description: description,
-                  availableWidth: availableWidth,
-                ),
+                AudioAgentEmptyStateContent(title: title, description: description, availableWidth: availableWidth),
                 if (action != null) ...[const SizedBox(height: 24), action!],
               ],
             ),
@@ -305,12 +248,7 @@ class AudioAgentEmptyState extends StatelessWidget {
 }
 
 class AudioAgentEmptyStateContent extends StatelessWidget {
-  const AudioAgentEmptyStateContent({
-    super.key,
-    required this.title,
-    required this.description,
-    required this.availableWidth,
-  });
+  const AudioAgentEmptyStateContent({super.key, required this.title, required this.description, required this.availableWidth});
 
   static const double _descriptionVisibilityMinWidth = 480;
   static const double _mobileScreenWidthMax = 600;
@@ -332,14 +270,11 @@ class AudioAgentEmptyStateContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
-    final isMobileScreen =
-        MediaQuery.sizeOf(context).width < _mobileScreenWidthMax;
+    final isMobileScreen = MediaQuery.sizeOf(context).width < _mobileScreenWidthMax;
     final scale = _titleScale(availableWidth);
     final titleStyle = theme.textTheme.h1;
     final titleFontSize = (titleStyle.fontSize ?? 64) * scale;
-    final showDescription =
-        description.isNotEmpty &&
-        (availableWidth >= _descriptionVisibilityMinWidth || isMobileScreen);
+    final showDescription = description.isNotEmpty && (availableWidth >= _descriptionVisibilityMinWidth || isMobileScreen);
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -349,14 +284,7 @@ class AudioAgentEmptyStateContent extends StatelessWidget {
           style: titleStyle.copyWith(fontSize: titleFontSize),
           textAlign: TextAlign.center,
         ),
-        if (showDescription) ...[
-          const SizedBox(height: 8),
-          Text(
-            description,
-            style: theme.textTheme.p,
-            textAlign: TextAlign.center,
-          ),
-        ],
+        if (showDescription) ...[const SizedBox(height: 8), Text(description, style: theme.textTheme.p, textAlign: TextAlign.center)],
       ],
     );
   }

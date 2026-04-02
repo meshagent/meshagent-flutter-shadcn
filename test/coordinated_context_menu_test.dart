@@ -4,9 +4,7 @@ import 'package:meshagent_flutter_shadcn/ui/coordinated_context_menu.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 void main() {
-  testWidgets('opening a coordinated region closes an open coordinated menu', (
-    tester,
-  ) async {
+  testWidgets('opening a coordinated region closes an open coordinated menu', (tester) async {
     final menuController = ShadContextMenuController();
     final regionController = ShadContextMenuController();
     addTearDown(menuController.dispose);
@@ -20,10 +18,7 @@ void main() {
               CoordinatedShadContextMenu(
                 controller: menuController,
                 items: const [ShadContextMenuItem(child: Text('Menu item'))],
-                child: ShadButton(
-                  onPressed: menuController.toggle,
-                  child: const Text('Open menu'),
-                ),
+                child: ShadButton(onPressed: menuController.toggle, child: const Text('Open menu')),
               ),
               const SizedBox(width: 24),
               CoordinatedShadContextMenuRegion(
@@ -31,10 +26,7 @@ void main() {
                 tapEnabled: false,
                 longPressEnabled: false,
                 items: const [ShadContextMenuItem(child: Text('Region item'))],
-                child: ShadButton(
-                  onPressed: regionController.toggle,
-                  child: const Text('Open region'),
-                ),
+                child: ShadButton(onPressed: regionController.toggle, child: const Text('Open region')),
               ),
             ],
           ),
@@ -70,10 +62,7 @@ void main() {
                 child: CoordinatedShadContextMenu(
                   controller: controller,
                   items: const [ShadContextMenuItem(child: Text('Menu item'))],
-                  child: ShadButton(
-                    onPressed: controller.toggle,
-                    child: const Text('Open menu'),
-                  ),
+                  child: ShadButton(onPressed: controller.toggle, child: const Text('Open menu')),
                 ),
               ),
             ],
