@@ -93,6 +93,9 @@ String? resolveLanguageIdForFilename(String filename) {
   }
 
   final byNameId = highlightIdByKey[base] ?? base;
+  if (byNameId == plaintextLanguageId) {
+    return plaintextLanguageId;
+  }
   if (builtinAllLanguages.containsKey(byNameId)) {
     return byNameId;
   }
@@ -110,6 +113,9 @@ String? resolveLanguageIdForFilename(String filename) {
   }
 
   final id = highlightIdByKey[ext] ?? ext;
+  if (id == plaintextLanguageId) {
+    return plaintextLanguageId;
+  }
   if (builtinAllLanguages.containsKey(id)) {
     return id;
   }
@@ -120,6 +126,9 @@ Mode? resolveModeForFilename(String filename) {
   final id = resolveLanguageIdForFilename(filename);
   if (id == null) {
     return null;
+  }
+  if (id == plaintextLanguageId) {
+    return langPlaintext;
   }
   return builtinAllLanguages[id];
 }

@@ -12,7 +12,7 @@ import 'package:flutter_highlight/themes/monokai-sublime.dart';
 import 'package:re_highlight/languages/plaintext.dart';
 
 bool isCodeFile(String filename) {
-  return resolveModeForFilename(filename) != null;
+  return resolveLanguageIdForFilename(filename) != null;
 }
 
 class CodePreviewController extends ChangeNotifier {

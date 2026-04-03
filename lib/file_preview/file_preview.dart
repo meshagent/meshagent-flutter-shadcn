@@ -1,5 +1,6 @@
 import "package:flutter/material.dart";
 import "package:meshagent_flutter_shadcn/file_preview/code.dart";
+import "package:meshagent_flutter_shadcn/code_language_resolver.dart";
 import "package:meshagent_flutter_shadcn/ui/coordinated_context_menu.dart";
 import "package:path/path.dart";
 import "package:shadcn_ui/shadcn_ui.dart";
@@ -43,6 +44,7 @@ FileKind classifyFile(String path) {
 
   final base = basename(path).toLowerCase();
   if (base == 'readme' || base == 'readme.txt') return FileKind.markdown;
+  if (resolveLanguageIdForFilename(path) != null) return FileKind.code;
   if (isCodeFile(path)) return FileKind.code;
 
   return FileKind.unknown;
