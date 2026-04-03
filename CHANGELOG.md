@@ -1,3 +1,20 @@
+## [0.35.7]
+- Added container build lifecycle support in the Dart SDK (start/build returning `build_id`, list/cancel/delete builds, build logs, image load) plus exec stderr streaming and stricter status decoding.
+- Breaking: container build APIs now return build IDs and BuildInfo fields changed; container stop defaults to non-forced.
+- Added storage upgrades: `stat`, upload MIME-type inference, storage entries now include created/updated timestamps, and stricter download metadata validation.
+- Added secrets client enhancements: async OAuth/secret request handlers, optional client ID, flexible get/set secret by id/type/name, and requestOAuthToken returns null when no token is provided.
+- Added database version metadata (TableVersion now includes metadata) and improved where-clause encoding.
+- Added RoomClient helpers to inspect participant tokens and API grants.
+- Breaking: messaging stream APIs removed (stream callbacks and MessageStream types); use streaming toolkits instead.
+
+## [0.35.6]
+- Dart StorageClient now honors server-provided `chunk_size` pull headers when streaming uploads.
+- Flutter developer tools now sort containers by name/image/starter for stable ordering, and the trace viewer deduplicates span updates with improved timeline layout and timestamp formatting.
+- New coordinated context-menu system adds adaptive anchoring and shared controller coordination across chat, attachments, and file previews.
+- Chat UI refinements improve reaction/attachment menus, action visibility timing, and context-menu boundaries for cleaner interactions.
+- Meeting controls are redesigned with pending mic/camera states, error toasts, responsive layouts, and a unified device settings dialog.
+- Participant tiles now use camera publications and updated overlays, while voice agent calling adds start-session error handling and responsive waveform/controls.
+
 ## [0.35.5]
 - Chat threads now keep a dedicated scroll controller and auto-scroll to the latest message after send.
 - Chat bubble context menus now coordinate a single active menu and close on outside taps, with improved controller cleanup.
