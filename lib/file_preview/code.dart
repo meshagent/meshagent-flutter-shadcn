@@ -125,28 +125,14 @@ class CodePreview extends StatefulWidget {
 class _CodePreview extends State<CodePreview> {
   final theme = monokaiSublimeTheme;
   String? text;
+  Object? loadError;
   Object? saveError;
 
   @override
   void initState() {
     super.initState();
     widget.controller?._attach(this);
-
-    if (widget.url != null) {
-      get(widget.url!).then((response) {
-        if (!mounted) return;
-
-        setState(() {
-          text = utf8.decode(response.bodyBytes);
-          controller = CodeLineEditingController.fromText(text);
-        });
-      });
-    } else {
-      setState(() {
-        text = widget.text!;
-        controller = CodeLineEditingController.fromText(text);
-      });
-    }
+    _load();
   }
 
   void codeChanged() {
@@ -166,9 +152,19 @@ class _CodePreview extends State<CodePreview> {
   void didUpdateWidget(covariant CodePreview oldWidget) {
     super.didUpdateWidget(oldWidget);
 
+    final shouldReload =
+        oldWidget.filename != widget.filename ||
+        oldWidget.url != widget.url ||
+        oldWidget.text != widget.text ||
+        oldWidget.room != widget.room;
+
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller?._detach(this);
       widget.controller?._attach(this);
+    }
+
+    if (shouldReload) {
+      _load();
     } else {
       widget.controller?._sync(this);
     }
@@ -188,6 +184,68 @@ class _CodePreview extends State<CodePreview> {
   );
   var dirty = false;
   var saving = false;
+  int _loadGeneration = 0;
+
+  Future<void> _load() async {
+    final generation = ++_loadGeneration;
+
+    setState(() {
+      text = null;
+      loadError = null;
+      saveError = null;
+      dirty = false;
+      saving = false;
+      controller = null;
+    });
+    widget.controller?._sync(this);
+
+    try {
+      final nextText = await _readText();
+      if (!mounted || generation != _loadGeneration) {
+        return;
+      }
+
+      setState(() {
+        text = nextText;
+        controller = CodeLineEditingController.fromText(nextText);
+      });
+      widget.controller?._sync(this);
+    } catch (error) {
+      if (!mounted || generation != _loadGeneration) {
+        return;
+      }
+
+      setState(() {
+        loadError = error;
+      });
+      widget.controller?._sync(this);
+    }
+  }
+
+  Future<String> _readText() async {
+    final inlineText = widget.text;
+    if (inlineText != null) {
+      return inlineText;
+    }
+
+    final room = widget.room;
+    if (room != null) {
+      final content = await room.storage.download(widget.filename);
+      return utf8.decode(content.data, allowMalformed: true);
+    }
+
+    final url = widget.url;
+    if (url == null) {
+      throw StateError("CodePreview requires room, text, or url.");
+    }
+
+    final response = await get(url);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw ClientException("Failed to load file (${response.statusCode})", url);
+    }
+
+    return utf8.decode(response.bodyBytes, allowMalformed: true);
+  }
 
   Future<void> _save() async {
     final room = widget.room;
@@ -277,7 +335,18 @@ class _CodePreview extends State<CodePreview> {
           ),
         Expanded(
           child: text == null
-              ? Center(child: CircularProgressIndicator())
+              ? loadError != null
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: Text(
+                            "Unable to load file: $loadError",
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: ShadTheme.of(context).colorScheme.destructive),
+                          ),
+                        ),
+                      )
+                    : Center(child: CircularProgressIndicator())
               : Container(
                   padding: EdgeInsets.only(right: 10),
                   color: theme["root"]!.backgroundColor!,
