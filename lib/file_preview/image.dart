@@ -1,4 +1,4 @@
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:path/path.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
@@ -22,11 +22,44 @@ class ImagePreview extends StatelessWidget {
     return svgExtensions.contains(pathExt) || svgExtensions.contains(queryPathExt);
   }
 
+  Widget _previewUnavailable(BuildContext context) {
+    return Center(
+      child: Text(
+        "No preview available",
+        style: ShadTheme.of(context).textTheme.large.copyWith(color: ShadTheme.of(context).colorScheme.mutedForeground),
+        textAlign: TextAlign.center,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (isSvg) {
-      return SvgPicture.network(url.toString(), fit: fit);
-    }
-    return UniversalImage(url.toString(), fit: fit);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.hasBoundedWidth ? constraints.maxWidth : null;
+        final height = constraints.hasBoundedHeight ? constraints.maxHeight : null;
+        final fallback = _previewUnavailable(context);
+
+        if (isSvg) {
+          return SvgPicture.network(
+            url.toString(),
+            fit: fit,
+            width: width,
+            height: height,
+            placeholderBuilder: (context) => Center(child: CircularProgressIndicator()),
+            errorBuilder: (_, __, ___) => fallback,
+          );
+        }
+
+        return UniversalImage(
+          url.toString(),
+          fit: fit,
+          width: width,
+          height: height,
+          placeholder: Center(child: CircularProgressIndicator()),
+          errorPlaceholder: fallback,
+        );
+      },
+    );
   }
 }
