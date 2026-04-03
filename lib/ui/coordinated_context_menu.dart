@@ -65,6 +65,7 @@ ShadAnchor resolveAdaptiveShadMenuAnchor(
   double? estimatedMenuWidth,
   double? estimatedMenuHeight,
   double viewportEdgePadding = 12,
+  bool centerHorizontallyInBoundary = false,
   ShadMenuHorizontalPosition horizontalPosition = ShadMenuHorizontalPosition.automatic,
   ShadMenuVerticalPosition verticalPosition = ShadMenuVerticalPosition.automatic,
 }) {
@@ -85,16 +86,7 @@ ShadAnchor resolveAdaptiveShadMenuAnchor(
     final triggerBottom = triggerOrigin.dy + renderBox.size.height;
     final triggerRight = triggerOrigin.dx + renderBox.size.width;
     final triggerCenter = triggerOrigin + Offset(renderBox.size.width / 2, renderBox.size.height / 2);
-
-    final alignLeft = _shouldAlignMenuLeft(
-      triggerOriginX: triggerOrigin.dx,
-      triggerRightX: triggerRight,
-      triggerCenterX: triggerCenter.dx,
-      viewportWidth: viewportSize.width,
-      viewportEdgePadding: viewportEdgePadding,
-      estimatedMenuWidth: estimatedMenuWidth,
-      horizontalPosition: horizontalPosition,
-    );
+    final viewportCenterX = viewportSize.width / 2;
 
     final openDown = switch (verticalPosition) {
       ShadMenuVerticalPosition.down => true,
@@ -109,6 +101,24 @@ ShadAnchor resolveAdaptiveShadMenuAnchor(
         viewportEdgePadding: viewportEdgePadding,
       ),
     };
+
+    if (centerHorizontallyInBoundary) {
+      return ShadAnchor(
+        childAlignment: Alignment(0, openDown ? -1 : 1),
+        overlayAlignment: Alignment(0, openDown ? 1 : -1),
+        offset: Offset(viewportCenterX - triggerCenter.dx, openDown ? gap : -gap),
+      );
+    }
+
+    final alignLeft = _shouldAlignMenuLeft(
+      triggerOriginX: triggerOrigin.dx,
+      triggerRightX: triggerRight,
+      triggerCenterX: triggerCenter.dx,
+      viewportWidth: viewportSize.width,
+      viewportEdgePadding: viewportEdgePadding,
+      estimatedMenuWidth: estimatedMenuWidth,
+      horizontalPosition: horizontalPosition,
+    );
 
     return ShadAnchor(
       childAlignment: Alignment(alignLeft ? -1 : 1, openDown ? -1 : 1),
@@ -313,6 +323,7 @@ class CoordinatedShadContextMenu extends StatefulWidget {
     this.anchorGap = 8,
     this.viewportVerticalSplit = 2 / 3,
     this.viewportEdgePadding = 12,
+    this.centerHorizontallyInBoundary = false,
   });
 
   final Widget child;
@@ -340,16 +351,18 @@ class CoordinatedShadContextMenu extends StatefulWidget {
   final double anchorGap;
   final double viewportVerticalSplit;
   final double viewportEdgePadding;
+  final bool centerHorizontallyInBoundary;
 
   @override
   State<CoordinatedShadContextMenu> createState() => _CoordinatedShadContextMenuState();
 }
 
-class _CoordinatedShadContextMenuState extends State<CoordinatedShadContextMenu> {
+class _CoordinatedShadContextMenuState extends State<CoordinatedShadContextMenu> with WidgetsBindingObserver {
   final GlobalKey _triggerKey = GlobalKey();
   late final ShadContextMenuController _internalController = ShadContextMenuController(isOpen: widget.visible ?? false);
   ShadAnchorBase? _frozenAnchor;
   bool _globalPointerRouteAttached = false;
+  bool _anchorRefreshScheduled = false;
 
   ShadContextMenuController get _controller => widget.controller ?? _internalController;
   BuildContext? get _effectiveBoundaryContext => widget.boundaryContext ?? ShadContextMenuBoundary.maybeOf(context);
@@ -359,6 +372,7 @@ class _CoordinatedShadContextMenuState extends State<CoordinatedShadContextMenu>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _controller.addListener(_handleChanged);
     _controller.addListener(_syncFrozenAnchor);
     _controller.addListener(_syncGlobalPointerRoute);
@@ -385,10 +399,24 @@ class _CoordinatedShadContextMenuState extends State<CoordinatedShadContextMenu>
     if (widget.visible != null) {
       newController.setOpen(widget.visible!);
     }
+
+    _scheduleFrozenAnchorRefresh();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _scheduleFrozenAnchorRefresh();
+  }
+
+  @override
+  void didChangeMetrics() {
+    _scheduleFrozenAnchorRefresh();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _detachGlobalPointerRoute();
     ShadTopLevelContextMenuCoordinator.unregister(_controller);
     _controller.removeListener(_handleChanged);
@@ -477,6 +505,22 @@ class _CoordinatedShadContextMenuState extends State<CoordinatedShadContextMenu>
     }
   }
 
+  void _scheduleFrozenAnchorRefresh() {
+    if (!mounted || !_controller.isOpen || _anchorRefreshScheduled) {
+      return;
+    }
+
+    _anchorRefreshScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _anchorRefreshScheduled = false;
+      if (!mounted || !_controller.isOpen) {
+        return;
+      }
+
+      _syncFrozenAnchor();
+    });
+  }
+
   ShadAnchorBase _resolveDynamicAnchor() {
     final explicitAnchor = widget.anchor;
     if (explicitAnchor != null) {
@@ -494,6 +538,7 @@ class _CoordinatedShadContextMenuState extends State<CoordinatedShadContextMenu>
       verticalPosition: widget.verticalPosition,
       viewportVerticalSplit: widget.viewportVerticalSplit,
       viewportEdgePadding: widget.viewportEdgePadding,
+      centerHorizontallyInBoundary: widget.centerHorizontallyInBoundary,
     );
   }
 
