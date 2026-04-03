@@ -61,7 +61,7 @@ Widget filePreview({Key? key, required RoomClient room, required String filename
     case FileKind.audio:
       return AudioPreview(url: url, key: key);
     case FileKind.pdf:
-      return PdfPreview(url: url, key: key);
+      return PdfPreview(room: room, path: filename, key: key);
     case FileKind.code:
       return CodePreview(room: room, filename: filename, url: url, key: key);
     case FileKind.custom:
