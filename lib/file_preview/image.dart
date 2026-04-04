@@ -47,7 +47,7 @@ class ImagePreview extends StatelessWidget {
             width: width,
             height: height,
             placeholderBuilder: (context) => Center(child: CircularProgressIndicator()),
-            errorBuilder: (_, __, ___) => fallback,
+            errorBuilder: (_, _, _) => fallback,
           );
         }
 
