@@ -151,6 +151,59 @@ bool _shouldHideCompletedToolCallEvent(MeshElement message, {required bool showC
   return !showCompletedToolCalls && _isCompletedToolCallEvent(message);
 }
 
+const Set<String> _supportedThreadEventKinds = {
+  "exec",
+  "tool",
+  "web",
+  "search",
+  "diff",
+  "image",
+  "approval",
+  "collab",
+  "plan",
+  "thread",
+  "file",
+};
+
+bool _isThreadAttachmentElement(MeshElement element) {
+  return element.tagName == "file" || element.tagName == "image";
+}
+
+bool _hasRenderableStandardThreadMessageContent(MeshElement message) {
+  if (message.tagName != "message") {
+    return true;
+  }
+
+  final text = message.getAttribute("text");
+  final trimmedText = text is String ? text.trim() : "";
+  if (trimmedText.isNotEmpty) {
+    return true;
+  }
+
+  return message.getChildren().whereType<MeshElement>().any(_isThreadAttachmentElement);
+}
+
+bool _shouldRenderThreadMessageElement(MeshElement message, {required bool showCompletedToolCalls}) {
+  if (message.tagName == "reasoning") {
+    final summary = (message.getAttribute("summary") ?? "").toString().trim();
+    return summary.isNotEmpty;
+  }
+
+  if (message.tagName == "message") {
+    return _hasRenderableStandardThreadMessageContent(message);
+  }
+
+  if (message.tagName != "event") {
+    return true;
+  }
+
+  final kind = ((message.getAttribute("kind") as String?) ?? "").trim().toLowerCase();
+  if (!_supportedThreadEventKinds.contains(kind)) {
+    return false;
+  }
+  return !_shouldHideCompletedToolCallEvent(message, showCompletedToolCalls: showCompletedToolCalls);
+}
+
 class _ImageMime {
   static String normalize(String mimeType) {
     return mimeType.trim().toLowerCase();
@@ -3123,7 +3176,9 @@ class _ChatThreadState extends State<ChatThread> {
       return;
     }
 
-    final hasVisibleMessages = messages.any(_shouldRenderThreadMessageForVisibility);
+    final hasVisibleMessages = messages.any(
+      (message) => _shouldRenderThreadMessageElement(message, showCompletedToolCalls: _showCompletedToolCalls),
+    );
     if (hasVisibleMessages) {
       _didNotifyVisibleMessagesEmpty = false;
       return;
@@ -3140,24 +3195,6 @@ class _ChatThreadState extends State<ChatThread> {
       }
       unawaited(Future.sync(onVisibleMessagesEmpty));
     });
-  }
-
-  bool _shouldRenderThreadMessageForVisibility(MeshElement message) {
-    if (message.tagName == "reasoning") {
-      final summary = (message.getAttribute("summary") ?? "").toString().trim();
-      return summary.isNotEmpty;
-    }
-
-    if (message.tagName != "event") {
-      return true;
-    }
-
-    const supportedKinds = {"exec", "tool", "web", "search", "diff", "image", "approval", "collab", "plan", "thread", "file"};
-    final kind = ((message.getAttribute("kind") as String?) ?? "").trim().toLowerCase();
-    if (!supportedKinds.contains(kind)) {
-      return false;
-    }
-    return !_shouldHideCompletedToolCallEvent(message, showCompletedToolCalls: _showCompletedToolCalls);
   }
 
   Widget _buildInputChatBox(BuildContext context, List<PendingAgentMessage> pendingMessages, ChatThreadSnapshot state) {
@@ -3247,7 +3284,10 @@ class _ChatThreadState extends State<ChatThread> {
 
         _handleVisibleMessages(state.messages);
 
-        bool bottomAlign = !widget.startChatCentered || state.messages.isNotEmpty;
+        final hasVisibleMessages = state.messages.any(
+          (message) => _shouldRenderThreadMessageElement(message, showCompletedToolCalls: _showCompletedToolCalls),
+        );
+        bool bottomAlign = !widget.startChatCentered || hasVisibleMessages;
 
         return ShadContextMenuBoundary(
           child: FileDropArea(
@@ -4435,21 +4475,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   }
 
   bool _shouldRenderThreadMessage(MeshElement message) {
-    if (message.tagName == "reasoning") {
-      final summary = (message.getAttribute("summary") ?? "").toString().trim();
-      return summary.isNotEmpty;
-    }
-
-    if (message.tagName != "event") {
-      return true;
-    }
-
-    const supportedKinds = {"exec", "tool", "web", "search", "diff", "image", "approval", "collab", "plan", "thread", "file"};
-    final kind = ((message.getAttribute("kind") as String?) ?? "").trim().toLowerCase();
-    if (!supportedKinds.contains(kind)) {
-      return false;
-    }
-    return !_shouldHideCompletedToolCallEvent(message, showCompletedToolCalls: widget.showCompletedToolCalls);
+    return _shouldRenderThreadMessageElement(message, showCompletedToolCalls: widget.showCompletedToolCalls);
   }
 
   bool _defaultHeaderWillRender({required MeshElement message}) {
@@ -4480,12 +4506,9 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
 
     final id = message.getAttribute("id");
     final text = message.getAttribute("text");
-    final hasText = text is String && text.isNotEmpty;
-    final attachments = message
-        .getChildren()
-        .whereType<MeshElement>()
-        .where((child) => child.tagName == "file" || child.tagName == "image")
-        .toList();
+    final messageText = text is String ? text : null;
+    final hasText = messageText != null && messageText.trim().isNotEmpty;
+    final attachments = message.getChildren().whereType<MeshElement>().where(_isThreadAttachmentElement).toList();
     final hasMessageLevelReactions = _reactionElementsForTarget(message: message, target: _reactionTargetMessage).isNotEmpty;
     final selectedMessageReaction = _selectedReactionForTarget(message: message, target: _reactionTargetMessage);
 
@@ -4552,7 +4575,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
               child: ChatBubble(
                 room: room,
                 mine: mine,
-                text: message.getAttribute("text"),
+                text: messageText,
                 onDelete: message.delete,
                 reactionActionBuilder: localParticipantReactionName == null
                     ? null
