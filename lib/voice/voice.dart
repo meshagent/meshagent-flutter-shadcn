@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:meshagent/room_server_client.dart';
 import 'package:meshagent_flutter_shadcn/meetings/audio_visualization.dart';
 import 'package:meshagent_flutter_shadcn/meetings/meetings.dart';
+import 'package:meshagent_flutter_shadcn/storage/transcript_file_name.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:uuid/uuid.dart';
 import 'package:livekit_client/livekit_client.dart' as livekit;
@@ -111,7 +112,7 @@ class _VoiceAgentCaller extends State<VoiceAgentCaller> {
                                         "breakout_room": breakout,
                                         if (transcribe)
                                           "transcript_path":
-                                              "transcripts/${participant.getAttribute("name")}/${meeting.room.localParticipant!.getAttribute("name")}/${DateTime.now().toIso8601String()}.transcript",
+                                              "transcripts/${participant.getAttribute("name")}/${meeting.room.localParticipant!.getAttribute("name")}/${buildTranscriptFileName()}",
                                       },
                                     );
                                   } catch (error) {
