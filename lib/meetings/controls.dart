@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:livekit_client/livekit_client.dart' as livekit;
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../theme/colors.dart';
 import '../meetings/meetings.dart';
 import 'package:flutter/material.dart';
 
@@ -159,6 +160,39 @@ class CameraToggle extends StatefulWidget {
 
 class _CameraToggleState extends State<CameraToggle> {
   bool _processing = false;
+  bool _deviceAvailable = true;
+  StreamSubscription<List<livekit.MediaDevice>>? _deviceSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_refreshDeviceAvailability());
+    _deviceSubscription = livekit.Hardware.instance.onDeviceChange.stream.listen((devices) {
+      _updateDeviceAvailability(devices);
+    });
+  }
+
+  @override
+  void dispose() {
+    _deviceSubscription?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _refreshDeviceAvailability() async {
+    final devices = await livekit.Hardware.instance.enumerateDevices();
+    _updateDeviceAvailability(devices);
+  }
+
+  void _updateDeviceAvailability(List<livekit.MediaDevice> devices) {
+    final available = devices.any((device) => device.kind == "videoinput" && device.deviceId.isNotEmpty);
+    if (!mounted || _deviceAvailable == available) {
+      return;
+    }
+
+    setState(() {
+      _deviceAvailable = available;
+    });
+  }
 
   String _describeCameraToggleError(Object error) {
     final message = '$error';
@@ -183,7 +217,9 @@ class _CameraToggleState extends State<CameraToggle> {
 
     try {
       await localParticipant.setCameraEnabled(enabled);
+      widget.controller.pendingLocalMedia.setCameraUnavailable(false);
     } catch (error) {
+      widget.controller.pendingLocalMedia.setCameraUnavailable(true);
       toaster?.show(ShadToast.destructive(description: Text(_describeCameraToggleError(error))));
     } finally {
       if (mounted) {
@@ -203,6 +239,11 @@ class _CameraToggleState extends State<CameraToggle> {
         final enabled = localParticipant.isCameraEnabled();
         final pending = widget.controller.pendingLocalMedia.cameraPending;
         final showEnabled = enabled || pending;
+        final unavailable = (widget.controller.pendingLocalMedia.cameraUnavailable || !_deviceAvailable) && !showEnabled;
+        final toggleColor = unavailable ? ShadTheme.of(context).colorScheme.destructive : ShadTheme.of(context).colorScheme.greenCustom;
+        final toggleForeground = unavailable
+            ? ShadTheme.of(context).colorScheme.destructiveForeground
+            : ShadTheme.of(context).colorScheme.greenCustomForeground;
 
         return _MeetingControlsButon(
           text: pending
@@ -211,10 +252,10 @@ class _CameraToggleState extends State<CameraToggle> {
               ? "Turn off camera"
               : "Turn on camera",
           on: showEnabled,
-          onColor: Colors.black,
-          onForeground: Colors.white,
-          offColor: ShadTheme.of(context).colorScheme.destructive,
-          offForeground: Colors.white,
+          onColor: toggleColor,
+          onForeground: toggleForeground,
+          offColor: toggleColor,
+          offForeground: toggleForeground,
           icon: showEnabled ? LucideIcons.video : LucideIcons.videoOff,
           loading: pending || _processing,
           onPressed: (_processing || pending) ? null : () => unawaited(_toggleCamera(localParticipant, !enabled)),
@@ -235,6 +276,39 @@ class MicToggle extends StatefulWidget {
 
 class _MicToggleState extends State<MicToggle> {
   bool _processing = false;
+  bool _deviceAvailable = true;
+  StreamSubscription<List<livekit.MediaDevice>>? _deviceSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_refreshDeviceAvailability());
+    _deviceSubscription = livekit.Hardware.instance.onDeviceChange.stream.listen((devices) {
+      _updateDeviceAvailability(devices);
+    });
+  }
+
+  @override
+  void dispose() {
+    _deviceSubscription?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _refreshDeviceAvailability() async {
+    final devices = await livekit.Hardware.instance.enumerateDevices();
+    _updateDeviceAvailability(devices);
+  }
+
+  void _updateDeviceAvailability(List<livekit.MediaDevice> devices) {
+    final available = devices.any((device) => device.kind == "audioinput" && device.deviceId.isNotEmpty);
+    if (!mounted || _deviceAvailable == available) {
+      return;
+    }
+
+    setState(() {
+      _deviceAvailable = available;
+    });
+  }
 
   String _describeMicrophoneToggleError(Object error) {
     final message = '$error';
@@ -259,7 +333,9 @@ class _MicToggleState extends State<MicToggle> {
 
     try {
       await localParticipant.setMicrophoneEnabled(enabled);
+      widget.controller.pendingLocalMedia.setMicrophoneUnavailable(false);
     } catch (error) {
+      widget.controller.pendingLocalMedia.setMicrophoneUnavailable(true);
       toaster?.show(ShadToast.destructive(description: Text(_describeMicrophoneToggleError(error))));
     } finally {
       if (mounted) {
@@ -279,6 +355,11 @@ class _MicToggleState extends State<MicToggle> {
         final enabled = localParticipant.isMicrophoneEnabled();
         final pending = widget.controller.pendingLocalMedia.microphonePending;
         final showEnabled = enabled || pending;
+        final unavailable = (widget.controller.pendingLocalMedia.microphoneUnavailable || !_deviceAvailable) && !showEnabled;
+        final toggleColor = unavailable ? ShadTheme.of(context).colorScheme.destructive : ShadTheme.of(context).colorScheme.greenCustom;
+        final toggleForeground = unavailable
+            ? ShadTheme.of(context).colorScheme.destructiveForeground
+            : ShadTheme.of(context).colorScheme.greenCustomForeground;
 
         return _MeetingControlsButon(
           text: pending
@@ -287,10 +368,10 @@ class _MicToggleState extends State<MicToggle> {
               ? "Turn off mic"
               : "Turn on mic",
           on: showEnabled,
-          onColor: Colors.black,
-          onForeground: Colors.white,
-          offColor: ShadTheme.of(context).colorScheme.destructive,
-          offForeground: Colors.white,
+          onColor: toggleColor,
+          onForeground: toggleForeground,
+          offColor: toggleColor,
+          offForeground: toggleForeground,
           icon: showEnabled ? LucideIcons.mic : LucideIcons.micOff,
           loading: pending || _processing,
           onPressed: (_processing || pending) ? null : () => unawaited(_toggleMicrophone(localParticipant, !enabled)),
@@ -475,6 +556,8 @@ class _ChangeSettings extends StatelessWidget {
       selectedVideoInputDeviceId: () => room.selectedVideoInputDeviceId,
       selectedAudioInputDeviceId: () => room.selectedAudioInputDeviceId,
       selectedAudioOutputDeviceId: () => room.selectedAudioOutputDeviceId,
+      cameraUnavailable: MeetingController.maybeOf(context)?.pendingLocalMedia.cameraUnavailable ?? false,
+      microphoneUnavailable: MeetingController.maybeOf(context)?.pendingLocalMedia.microphoneUnavailable ?? false,
     );
   }
 }
@@ -487,6 +570,8 @@ class _ChangeDeviceButton extends StatefulWidget {
     this.selectedVideoInputDeviceId,
     this.selectedAudioInputDeviceId,
     this.selectedAudioOutputDeviceId,
+    this.cameraUnavailable = false,
+    this.microphoneUnavailable = false,
   });
 
   final Future<void> Function(livekit.MediaDevice device) onChangeVideoInput;
@@ -495,6 +580,8 @@ class _ChangeDeviceButton extends StatefulWidget {
   final String? Function()? selectedVideoInputDeviceId;
   final String? Function()? selectedAudioInputDeviceId;
   final String? Function()? selectedAudioOutputDeviceId;
+  final bool cameraUnavailable;
+  final bool microphoneUnavailable;
 
   @override
   _ChangeDeviceButtonState createState() => _ChangeDeviceButtonState();
@@ -668,6 +755,8 @@ class _ChangeDeviceButtonState extends State<_ChangeDeviceButton> {
         selectedVideoInputDeviceId: widget.selectedVideoInputDeviceId,
         selectedAudioInputDeviceId: widget.selectedAudioInputDeviceId,
         selectedAudioOutputDeviceId: widget.selectedAudioOutputDeviceId,
+        cameraUnavailable: widget.cameraUnavailable,
+        microphoneUnavailable: widget.microphoneUnavailable,
       ),
     );
   }
@@ -702,6 +791,8 @@ class _ChangeDeviceDialog extends StatefulWidget {
     this.selectedVideoInputDeviceId,
     this.selectedAudioInputDeviceId,
     this.selectedAudioOutputDeviceId,
+    this.cameraUnavailable = false,
+    this.microphoneUnavailable = false,
   });
 
   final SharedPreferences preferences;
@@ -714,6 +805,8 @@ class _ChangeDeviceDialog extends StatefulWidget {
   final String? Function()? selectedVideoInputDeviceId;
   final String? Function()? selectedAudioInputDeviceId;
   final String? Function()? selectedAudioOutputDeviceId;
+  final bool cameraUnavailable;
+  final bool microphoneUnavailable;
 
   @override
   State<_ChangeDeviceDialog> createState() => _ChangeDeviceDialogState();
@@ -817,6 +910,7 @@ class _ChangeDeviceDialogState extends State<_ChangeDeviceDialog> {
                 disabledIcon: LucideIcons.videoOff,
                 disabledLabel: "Camera disabled",
                 disabledDescription: _disabledDeviceDescription,
+                unavailable: widget.cameraUnavailable,
               ),
               const SizedBox(height: 16),
               _DeviceSettingsSection(
@@ -828,6 +922,7 @@ class _ChangeDeviceDialogState extends State<_ChangeDeviceDialog> {
                 disabledIcon: LucideIcons.micOff,
                 disabledLabel: "Microphone disabled",
                 disabledDescription: _disabledDeviceDescription,
+                unavailable: widget.microphoneUnavailable,
               ),
               if (kIsWeb) ...[
                 const SizedBox(height: 16),
@@ -860,6 +955,7 @@ class _DeviceSettingsSection extends StatelessWidget {
     required this.disabledIcon,
     required this.disabledLabel,
     required this.disabledDescription,
+    this.unavailable = false,
   });
 
   final String label;
@@ -870,11 +966,12 @@ class _DeviceSettingsSection extends StatelessWidget {
   final IconData disabledIcon;
   final String disabledLabel;
   final String disabledDescription;
+  final bool unavailable;
 
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
-    final isDisabled = selectedDevice == null;
+    final isDisabled = selectedDevice == null || unavailable;
     final accentColor = isDisabled ? theme.colorScheme.destructive : theme.colorScheme.foreground;
 
     return Column(
