@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 import 'package:meshagent/room_server_client.dart';
+import 'package:meshagent_flutter_shadcn/chat/chat.dart';
 import "package:meshagent_flutter_shadcn/file_preview/file_preview.dart";
 
 import "file/image.dart";
@@ -11,6 +12,8 @@ Widget? fileViewer(RoomClient client, String path) {
   final kind = classifyFile(path);
 
   switch (kind) {
+    case FileKind.thread:
+      return ChatThreadLoader(path: path, room: client, includeLocalParticipant: client.localParticipant != null);
     case FileKind.pdf:
     case FileKind.code:
     case FileKind.markdown:
