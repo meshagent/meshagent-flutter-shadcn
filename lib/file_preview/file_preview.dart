@@ -52,6 +52,13 @@ FileKind classifyFile(String path) {
   return FileKind.unknown;
 }
 
+bool filePreviewLoadsFromRoomStorage(String path) {
+  return switch (classifyFile(path)) {
+    FileKind.markdown || FileKind.pdf || FileKind.code => true,
+    _ => false,
+  };
+}
+
 Widget filePreview({Key? key, required RoomClient room, required String filename, required Uri url, BoxFit fit = BoxFit.cover}) {
   final kind = classifyFile(filename);
 
@@ -94,8 +101,28 @@ class FilePreview extends StatefulWidget {
 class _FilePreviewState extends State<FilePreview> {
   late final Future<String> urlLookup = widget.room.storage.downloadUrl(widget.path);
 
+  Widget? _buildStorageBackedPreview() {
+    final kind = classifyFile(widget.path);
+    return switch (kind) {
+      FileKind.markdown => MarkdownPreview(filename: widget.path, room: widget.room),
+      FileKind.pdf => PdfPreview(room: widget.room, path: widget.path),
+      FileKind.code => CodePreview(room: widget.room, filename: widget.path),
+      _ => null,
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
+    // Text/code-like previews load directly from room storage, so they should
+    // not block on signed download URL generation.
+    if (filePreviewLoadsFromRoomStorage(widget.path)) {
+      final storageBackedPreview = _buildStorageBackedPreview();
+      if (storageBackedPreview == null) {
+        return ColoredBox(color: ShadTheme.of(context).colorScheme.background);
+      }
+      return storageBackedPreview;
+    }
+
     return FutureBuilder(
       future: urlLookup,
       builder: (context, snapshot) {
@@ -111,6 +138,17 @@ class _FilePreviewState extends State<FilePreview> {
               ),
             ],
             child: filePreview(room: widget.room, filename: widget.path, url: Uri.parse(snapshot.data!), fit: widget.fit),
+          );
+        } else if (snapshot.hasError) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Text(
+                'Unable to load file preview: ${snapshot.error}',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: ShadTheme.of(context).colorScheme.destructive),
+              ),
+            ),
           );
         } else {
           return ColoredBox(color: ShadTheme.of(context).colorScheme.background);
