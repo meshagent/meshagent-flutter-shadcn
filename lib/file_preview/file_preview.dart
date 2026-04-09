@@ -13,12 +13,13 @@ import "video.dart";
 import "markdown.dart";
 import "../chat/chat.dart";
 
-enum FileKind { image, video, audio, pdf, code, parquet, office, markdown, thread, custom, unknown }
+enum FileKind { image, video, audio, pdf, code, parquet, office, markdown, thread, lance, custom, unknown }
 
 final imageExtensions = <String>{"png", "jpg", "jpeg", "jfif", "heic", "heif", "webp", "tif", "tiff", "gif", "svg", "bmp"};
 final pdfExtensions = <String>{"pdf"};
 final markdownExtensions = <String>{"md"};
 final threadExtensions = <String>{"thread"};
+final lanceExtensions = <String>{"lance", "table"};
 final videoExtensions = <String>{"mp4", "mkv", "mov"};
 final audioExtensions = <String>{"mp3", "ogg", "wav"};
 final officeExtensions = <String>{"docx", "pptx", "xlsx"};
@@ -36,6 +37,7 @@ FileKind classifyFile(String path) {
   final ext = _ext(path);
   if (markdownExtensions.contains(ext)) return FileKind.markdown;
   if (threadExtensions.contains(ext)) return FileKind.thread;
+  if (lanceExtensions.contains(ext)) return FileKind.lance;
   if (customViewers.containsKey(ext)) return FileKind.custom;
   if (imageExtensions.contains(ext)) return FileKind.image;
   if (videoExtensions.contains(ext)) return FileKind.video;
@@ -67,6 +69,8 @@ Widget filePreview({Key? key, required RoomClient room, required String filename
       return MarkdownPreview(filename: filename, room: room, key: key);
     case FileKind.thread:
       return Text(url.pathSegments.last);
+    case FileKind.lance:
+      return const Center(child: Text("File preview not supported"));
     case FileKind.image:
       return ImagePreview(url: url, key: key, fit: fit);
     case FileKind.video:

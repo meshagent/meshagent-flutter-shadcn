@@ -6,6 +6,7 @@ import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_flutter_shadcn/chat/chat.dart';
 import 'package:meshagent_flutter_shadcn/file_preview/file_preview.dart';
 import 'package:meshagent_flutter_shadcn/viewers/file.dart';
+import 'package:meshagent_flutter_shadcn/viewers/file/lance.dart';
 
 class _NoopProtocolChannel extends ProtocolChannel {
   @override
@@ -41,5 +42,17 @@ void main() {
 
     final viewer = fileViewer(room, 'agents/assistant/threads/main.thread');
     expect(viewer, isA<ChatThreadLoader>());
+  });
+
+  test('classifyFile detects lance files explicitly', () {
+    expect(classifyFile('.database/.1234.table'), FileKind.lance);
+  });
+
+  test('fileViewer returns the lance viewer for lance files', () {
+    final room = RoomClient(protocol: Protocol(channel: _NoopProtocolChannel()));
+    addTearDown(room.dispose);
+
+    final viewer = fileViewer(room, '.database/.1234.table');
+    expect(viewer, isA<LanceViewer>());
   });
 }

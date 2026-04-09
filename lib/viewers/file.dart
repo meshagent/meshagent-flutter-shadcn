@@ -6,6 +6,7 @@ import "package:meshagent_flutter_shadcn/file_preview/file_preview.dart";
 import "file/image.dart";
 import "file/video.dart";
 import "file/audio.dart";
+import "file/lance.dart";
 import "file/parquet.dart";
 
 Widget? fileViewer(RoomClient client, String path) {
@@ -14,6 +15,8 @@ Widget? fileViewer(RoomClient client, String path) {
   switch (kind) {
     case FileKind.thread:
       return ChatThreadLoader(path: path, room: client, includeLocalParticipant: client.localParticipant != null);
+    case FileKind.lance:
+      return const LanceViewer();
     case FileKind.pdf:
     case FileKind.code:
     case FileKind.markdown:
