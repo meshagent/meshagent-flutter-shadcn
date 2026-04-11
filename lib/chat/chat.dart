@@ -743,7 +743,6 @@ class ChatThreadController extends ChangeNotifier {
     textFieldController.addListener(notifyListeners);
   }
 
-  final List<ToolkitBuilderOption> toolkits = [];
   final RoomClient room;
   final TextEditingController textFieldController = ShadTextEditingController();
   final ScrollController threadScrollController = ScrollController();
@@ -781,18 +780,6 @@ class ChatThreadController extends ChangeNotifier {
   }
 
   List<FileAttachment> get attachmentUploads => List<FileAttachment>.unmodifiable(_attachmentUploads);
-
-  bool toggleToolkit(ToolkitBuilderOption toolkit) {
-    if (toolkits.contains(toolkit)) {
-      toolkits.remove(toolkit);
-      notifyListeners();
-      return false;
-    } else {
-      toolkits.add(toolkit);
-      notifyListeners();
-      return true;
-    }
-  }
 
   List<PendingAgentMessage> get pendingAgentMessages => List<PendingAgentMessage>.unmodifiable(_pendingAgentMessages.values);
 
@@ -1186,7 +1173,6 @@ class ChatThreadController extends ChangeNotifier {
           "thread_id": path,
           "message_id": message.id,
           "content": _agentInputContentFromMessage(message),
-          "toolkits": [for (final tk in toolkits) (await tk.build(room)).toJson()],
         };
         if (isSteer && turnId != null && turnId.trim().isNotEmpty) {
           payload["turn_id"] = turnId;
@@ -1195,12 +1181,10 @@ class ChatThreadController extends ChangeNotifier {
         return;
       }
 
-      final tools = [for (final tk in toolkits) (await tk.build(room)).toJson()];
       await room.messaging.sendMessage(
         to: participant,
         type: messageType,
         message: {
-          "tools": tools,
           "path": path,
           "text": message.text,
           "attachments": message.attachments.map((a) => {"path": a}).toList(),
@@ -1514,26 +1498,13 @@ class ChatThreadAttachButton extends StatefulWidget {
   const ChatThreadAttachButton({
     required this.controller,
     super.key,
-    this.toolkits = const [],
     this.alwaysShowAttachFiles,
-    this.availableConnectors,
-    this.onConnectorSetup,
-    this.agentName,
     this.availableRooms,
     this.connectRoomClient,
   });
 
-  final String? agentName;
   final bool? alwaysShowAttachFiles;
-
-  final List<ToolkitBuilderOption> toolkits;
-
   final ChatThreadController controller;
-
-  final Future<List<Connector>> Function()? availableConnectors;
-
-  final Future<void> Function(Connector connector)? onConnectorSetup;
-
   final Future<List<Room>> Function()? availableRooms;
   final Future<RoomClient> Function(String roomName)? connectRoomClient;
 
@@ -1573,7 +1544,7 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
     return destinationPath;
   }
 
-  Future<void> _onSelectAttachment(ToolkitBuilderOption? storage) async {
+  Future<void> _onSelectAttachment() async {
     final picked = await FilePicker.platform.pickFiles(dialogTitle: "Select files", allowMultiple: true, withReadStream: true);
 
     if (picked == null) {
@@ -1583,16 +1554,9 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
     for (final file in picked.files) {
       await widget.controller.uploadFile(file.name, file.readStream!.map(Uint8List.fromList), file.size);
     }
-
-    if (storage != null) {
-      if (!widget.controller.toolkits.contains(storage)) {
-        widget.controller.toggleToolkit(storage);
-        setState(() {});
-      }
-    }
   }
 
-  Future<void> _onSelectPhoto(ToolkitBuilderOption? storage) async {
+  Future<void> _onSelectPhoto() async {
     final picker = ImagePicker();
 
     List<XFile> picked = const [];
@@ -1622,16 +1586,9 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
 
       await widget.controller.uploadFile(fileName, stream, size);
     }
-
-    if (storage != null) {
-      if (!widget.controller.toolkits.contains(storage)) {
-        widget.controller.toggleToolkit(storage);
-        setState(() {});
-      }
-    }
   }
 
-  Future<void> _onBrowseFiles(ToolkitBuilderOption? storage) async {
+  Future<void> _onBrowseFiles() async {
     final currentRoomName = widget.controller.room.roomName?.trim() ?? "";
     String selectedRoomName = currentRoomName;
     RoomClient selectedRoomClient = widget.controller.room;
@@ -1763,392 +1720,59 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
     }
   }
 
-  ShadPopoverController popoverController = ShadPopoverController();
-  ShadPopoverController addMcpController = ShadPopoverController();
-
-  List<Connector> _availableConnectors = const [];
-  bool _loadingAvailableConnectors = false;
-  Object? _availableConnectorsError;
-  int _connectorLoadVersion = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    addMcpController.addListener(_onAddMcpControllerChanged);
-  }
-
-  @override
-  void didUpdateWidget(covariant ChatThreadAttachButton oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    final loaderAvailabilityChanged = (oldWidget.availableConnectors == null) != (widget.availableConnectors == null);
-    if (loaderAvailabilityChanged) {
-      _availableConnectors = const [];
-      _availableConnectorsError = null;
-      _loadingAvailableConnectors = false;
-      _connectorLoadVersion++;
-      if (addMcpController.isOpen) {
-        unawaited(_refreshAvailableConnectors());
-      }
-    }
-  }
-
-  void _onAddMcpControllerChanged() {
-    if (addMcpController.isOpen) {
-      unawaited(_refreshAvailableConnectors());
-    }
-  }
-
-  Future<void> _refreshAvailableConnectors() async {
-    final loader = widget.availableConnectors;
-    if (loader == null) {
-      if (_availableConnectors.isEmpty && _availableConnectorsError == null && !_loadingAvailableConnectors) {
-        return;
-      }
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _availableConnectors = const [];
-        _availableConnectorsError = null;
-        _loadingAvailableConnectors = false;
-      });
-      return;
-    }
-
-    final loadVersion = ++_connectorLoadVersion;
-    if (mounted) {
-      setState(() {
-        _loadingAvailableConnectors = true;
-        _availableConnectorsError = null;
-      });
-    }
-
-    try {
-      final connectors = await loader();
-      if (!mounted || loadVersion != _connectorLoadVersion) {
-        return;
-      }
-      setState(() {
-        _availableConnectors = connectors;
-        _loadingAvailableConnectors = false;
-      });
-    } catch (error) {
-      if (!mounted || loadVersion != _connectorLoadVersion) {
-        return;
-      }
-      setState(() {
-        _availableConnectors = const [];
-        _loadingAvailableConnectors = false;
-        _availableConnectorsError = error;
-      });
-    }
-  }
+  final ShadPopoverController popoverController = ShadPopoverController();
 
   @override
   void dispose() {
-    addMcpController.removeListener(_onAddMcpControllerChanged);
-    addMcpController.dispose();
     popoverController.dispose();
     super.dispose();
   }
 
-  Set<Connector> setup = {};
-
   @override
   Widget build(BuildContext context) {
-    if (widget.toolkits.isEmpty && widget.alwaysShowAttachFiles != true) {
-      return SizedBox(width: 0, height: 22);
+    if (widget.alwaysShowAttachFiles == false) {
+      return const SizedBox(width: 0, height: 22);
     }
 
-    final storageToolkit = widget.toolkits.where((x) => x is StaticToolkitBuilderOption && x.config is StorageConfig).firstOrNull;
-    final canUpload = widget.alwaysShowAttachFiles == true || storageToolkit != null;
-    final attachMenuItemCount = (canUpload ? (kIsWeb ? 1 : 2) : 0) + 1 + widget.toolkits.length;
-    final attachMenuHeight = attachMenuItemCount * 40.0 + (widget.toolkits.isNotEmpty ? 8.0 : 0.0);
+    final attachMenuItemCount = (kIsWeb ? 1 : 2) + 1;
+    final attachMenuHeight = attachMenuItemCount * 40.0;
 
     return ListenableBuilder(
       listenable: popoverController,
-      builder: (context, _) => Wrap(
-        alignment: WrapAlignment.start,
-        runAlignment: WrapAlignment.center,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
-          CoordinatedShadContextMenu(
-            constraints: BoxConstraints(minWidth: 175),
-            estimatedMenuWidth: 175,
-            estimatedMenuHeight: attachMenuHeight,
-            items: [
-              if (canUpload) ...[
-                if (!kIsWeb)
-                  ShadContextMenuItem(
-                    leading: Icon(LucideIcons.imageUp),
-                    onPressed: () => _onSelectPhoto(storageToolkit),
-                    child: Text("Upload a photo..."),
-                  ),
-                ShadContextMenuItem(
-                  leading: Icon(LucideIcons.paperclip),
-                  onPressed: () => _onSelectAttachment(storageToolkit),
-                  child: Text("Upload a file..."),
-                ),
-              ],
-              ShadContextMenuItem(
-                leading: Icon(LucideIcons.download),
-                onPressed: () => _onBrowseFiles(storageToolkit),
-                child: Text("Add from room..."),
-              ),
-
-              if (widget.toolkits.isNotEmpty) ShadSeparator.horizontal(margin: EdgeInsets.symmetric(vertical: 3)),
-
-              for (final tk in widget.toolkits)
-                Builder(
-                  builder: (context) => ShadContextMenuItem(
-                    textStyle: widget.controller.toolkits.contains(tk)
-                        ? ShadTheme.of(context).contextMenuTheme.textStyle!.copyWith(color: Colors.blue)
-                        : null,
-                    leading: Icon(tk.icon, color: widget.controller.toolkits.contains(tk) ? Colors.blue : null),
-                    onPressed: () {
-                      widget.controller.toggleToolkit(tk);
-                    },
-                    trailing: widget.controller.toolkits.contains(tk)
-                        ? Icon(LucideIcons.check, color: widget.controller.toolkits.contains(tk) ? Colors.blue : null)
-                        : null,
-                    child: Text(tk.text),
-                  ),
-                ),
-            ],
-            controller: popoverController,
-            child: ShadIconButton.ghost(
-              hoverBackgroundColor: ShadTheme.of(context).colorScheme.background,
-              decoration: ShadDecoration(shape: BoxShape.circle),
-              onPressed: popoverController.toggle,
-              iconSize: 16,
-              width: 32,
-              height: 32,
-              icon: Icon(LucideIcons.plus),
+      builder: (context, _) => CoordinatedShadContextMenu(
+        constraints: const BoxConstraints(minWidth: 175),
+        estimatedMenuWidth: 175,
+        estimatedMenuHeight: attachMenuHeight,
+        items: [
+          if (!kIsWeb)
+            ShadContextMenuItem(
+              leading: const Icon(LucideIcons.imageUp),
+              onPressed: _onSelectPhoto,
+              child: const Text("Upload a photo..."),
             ),
+          ShadContextMenuItem(
+            leading: const Icon(LucideIcons.paperclip),
+            onPressed: _onSelectAttachment,
+            child: const Text("Upload a file..."),
           ),
-          for (final tool in widget.controller.toolkits) ...[
-            Builder(
-              builder: (context) {
-                void removeToolkit() {
-                  setState(() {
-                    widget.controller.toggleToolkit(tool);
-                  });
-                }
-
-                final isConnectorToolkit = tool is ConnectorToolkitBuilderOption;
-
-                return ShadButton.ghost(
-                  trailing: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: removeToolkit,
-                    child: Padding(padding: EdgeInsets.all(2), child: Icon(LucideIcons.x, size: 14)),
-                  ),
-                  hoverBackgroundColor: ShadTheme.of(context).colorScheme.background,
-                  decoration: ShadDecoration(border: ShadBorder.all(radius: BorderRadius.circular(30))),
-                  onPressed: isConnectorToolkit ? () {} : removeToolkit,
-                  child: Text(tool.selectedText),
-                );
-              },
-            ),
-            if (tool is ConnectorToolkitBuilderOption) ...[
-              if (widget.agentName != null)
-                CoordinatedShadContextMenu(
-                  controller: addMcpController,
-                  constraints: BoxConstraints(minWidth: 175),
-                  estimatedMenuWidth: 175,
-                  estimatedMenuHeight: (_loadingAvailableConnectors || _availableConnectorsError != null || _availableConnectors.isEmpty)
-                      ? 48
-                      : _availableConnectors.length * 40.0 + 8.0,
-                  items: [
-                    if (_loadingAvailableConnectors) ShadContextMenuItem(child: Text("Loading connectors...")),
-                    if (!_loadingAvailableConnectors && _availableConnectorsError != null)
-                      ShadContextMenuItem(
-                        leading: Icon(LucideIcons.refreshCw),
-                        onPressed: _refreshAvailableConnectors,
-                        child: Text("Unable to load connectors"),
-                      ),
-                    if (!_loadingAvailableConnectors && _availableConnectorsError == null && _availableConnectors.isEmpty)
-                      ShadContextMenuItem(child: Text("No connectors are configured for this room")),
-                    for (final connector in _availableConnectors)
-                      ConnectorContextMenuItem(
-                        selected:
-                            widget.controller.toolkits.whereType<ConnectorToolkitBuilderOption>().firstOrNull?.connectors.firstWhereOrNull(
-                              (c) => c.name == connector.name,
-                            ) !=
-                            null,
-                        agentName: widget.agentName!,
-                        room: widget.controller.room,
-                        connector: connector,
-                        onSelectedChanged: (selected) async {
-                          if (!selected) {
-                            widget.controller.toolkits.whereType<ConnectorToolkitBuilderOption>().firstOrNull?.connectors.removeWhere(
-                              (c) => c.name == connector.name,
-                            );
-                            setState(() {});
-                          } else {
-                            try {
-                              if (widget.onConnectorSetup == null) {
-                                throw Exception("Connector setup handler is not configured");
-                              }
-                              await widget.onConnectorSetup!(connector);
-                              var mcp =
-                                  widget.controller.toolkits.firstWhereOrNull((c) => c is ConnectorToolkitBuilderOption)
-                                      as ConnectorToolkitBuilderOption?;
-                              if (mounted) {
-                                if (mcp!.connectors.firstWhereOrNull((c) => c.name == connector.name) == null) {
-                                  setState(() {
-                                    mcp.connectors.add(connector);
-                                  });
-                                }
-                              }
-                            } catch (error) {
-                              if (mounted) {
-                                ShadToaster.of(this.context).show(
-                                  ShadToast.destructive(title: Text("Failed to connect ${connector.name}"), description: Text("$error")),
-                                );
-                              }
-                            }
-                          }
-                        },
-                        onConnectorSetup: widget.onConnectorSetup,
-                      ),
-                  ],
-                  child: ListenableBuilder(
-                    listenable: addMcpController,
-                    builder: (context, _) => ShadButton.ghost(
-                      decoration: ShadDecoration(border: ShadBorder.all(radius: BorderRadius.circular(30))),
-                      onPressed: addMcpController.toggle,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        spacing: 8,
-                        children: [Icon(LucideIcons.cable), Text("${tool.connectors.length}"), Icon(LucideIcons.chevronDown)],
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          ],
+          ShadContextMenuItem(
+            leading: const Icon(LucideIcons.download),
+            onPressed: _onBrowseFiles,
+            child: const Text("Add from room..."),
+          ),
         ],
+        controller: popoverController,
+        child: ShadIconButton.ghost(
+          hoverBackgroundColor: ShadTheme.of(context).colorScheme.background,
+          decoration: const ShadDecoration(shape: BoxShape.circle),
+          onPressed: popoverController.toggle,
+          iconSize: 16,
+          width: 32,
+          height: 32,
+          icon: const Icon(LucideIcons.plus),
+        ),
       ),
     );
-  }
-}
-
-class ConnectorContextMenuItem extends StatefulWidget {
-  const ConnectorContextMenuItem({
-    required this.room,
-    required this.agentName,
-    required this.connector,
-    super.key,
-    required this.onConnectorSetup,
-    required this.selected,
-    required this.onSelectedChanged,
-  });
-
-  final RoomClient room;
-  final Connector connector;
-  final String agentName;
-  final bool selected;
-
-  final void Function(bool selected)? onSelectedChanged;
-
-  final Future<void> Function(Connector connector)? onConnectorSetup;
-
-  @override
-  State createState() => _ConnectorContextMenuItem();
-}
-
-class _ConnectorContextMenuItem extends State<ConnectorContextMenuItem> {
-  bool? connected;
-
-  Future<void> _loadConnectedState() async {
-    try {
-      final value = await widget.connector.isConnected(widget.room, widget.agentName);
-      if (mounted) {
-        setState(() {
-          connected = value;
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          // Fall back to showing "Connect" when status checks fail.
-          connected = false;
-        });
-      }
-    }
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _loadConnectedState();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ShadContextMenuItem(
-      trailing: Visibility(
-        maintainSize: true,
-        maintainState: true,
-        maintainAnimation: true,
-        visible: connected != null,
-        child: connected != true
-            ? Text("Connect", style: TextStyle(color: ShadTheme.of(context).colorScheme.mutedForeground))
-            : ShadSwitch(
-                onChanged: (value) {
-                  if (widget.onSelectedChanged != null) {
-                    widget.onSelectedChanged!(value);
-                  }
-                },
-                value: widget.selected,
-              ),
-      ),
-      onPressed: () async {
-        if (widget.onSelectedChanged != null) {
-          widget.onSelectedChanged!(!widget.selected);
-        }
-      },
-      child: Text(widget.connector.name),
-    );
-  }
-}
-
-abstract class ToolkitBuilderOption {
-  ToolkitBuilderOption({required this.icon, required this.text, required this.selectedText});
-
-  final String text;
-  final String selectedText;
-  final IconData icon;
-
-  Future<ToolkitConfig> build(RoomClient room);
-}
-
-class StaticToolkitBuilderOption extends ToolkitBuilderOption {
-  StaticToolkitBuilderOption({required super.icon, required super.text, required super.selectedText, required this.config});
-
-  final ToolkitConfig config;
-  @override
-  Future<ToolkitConfig> build(RoomClient room) async {
-    return config;
-  }
-}
-
-class ConnectorToolkitBuilderOption extends ToolkitBuilderOption {
-  ConnectorToolkitBuilderOption({required super.icon, required super.text, required super.selectedText, required this.connectors});
-
-  final List<Connector> connectors;
-
-  @override
-  Future<ToolkitConfig> build(RoomClient room) async {
-    //for (final connector in connectors) {
-    //await connector.authenticate(room);
-
-    // TODO: connector.server.copyWith(authorization: await connector.authenticate(room))
-    //}
-
-    final servers = [for (final connector in connectors) connector.server];
-    return MCPConfig(servers: servers);
   }
 }
 
@@ -3229,16 +2853,8 @@ class _ChatThreadState extends State<ChatThread> {
       sendPendingText: waitingForOnlineMessage == null
           ? null
           : "Waiting for ${_displayParticipantName(widget.agentName ?? "agent")} to come online.",
-      leading: controller.toolkits.isNotEmpty
-          ? null
-          : widget.toolsBuilder == null
-          ? null
-          : widget.toolsBuilder!(context, controller, state),
-      footer: controller.toolkits.isEmpty
-          ? null
-          : widget.toolsBuilder == null
-          ? null
-          : widget.toolsBuilder!(context, controller, state),
+      leading: widget.toolsBuilder == null ? null : widget.toolsBuilder!(context, controller, state),
+      footer: null,
       trailing: null,
       room: widget.room,
       onSend: (value, attachments) async {
@@ -6262,12 +5878,6 @@ Widget defaultMessageHeaderBuilder(
   }
 }
 
-class ThreadToolkitBuilder {
-  ThreadToolkitBuilder({required this.name});
-
-  final String name;
-}
-
 class ChatThreadSnapshot {
   ChatThreadSnapshot({
     required this.messages,
@@ -6275,7 +5885,6 @@ class ChatThreadSnapshot {
     required this.offline,
     required this.typing,
     required this.listening,
-    required this.availableTools,
     required this.agentOnline,
     required this.threadStatus,
     required this.threadStatusStartedAt,
@@ -6292,7 +5901,6 @@ class ChatThreadSnapshot {
   final List<String> offline;
   final List<String> typing;
   final List<String> listening;
-  final List<ThreadToolkitBuilder> availableTools;
   final String? threadStatus;
   final DateTime? threadStatusStartedAt;
   final String? threadStatusMode;
@@ -6369,7 +5977,6 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
 
       if (online) {
         widget.room.messaging.sendMessage(to: agent, type: "opened", message: {"path": widget.path});
-        widget.room.messaging.sendMessage(to: agent, type: "get_thread_toolkit_builders", message: {"path": widget.path});
       }
     }
   }
@@ -6410,14 +6017,6 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
 
     if (event is RoomMessageEvent) {
       _getThreadStatus();
-
-      if (event.message.type == "set_thread_tool_providers") {
-        if (mounted) {
-          setState(() {
-            availableTools = [for (final json in event.message.message["tool_providers"] as List) ThreadToolkitBuilder(name: json["name"])];
-          });
-        }
-      }
 
       if (event.message.type == _agentRoomMessageType) {
         final payload = event.message.message["payload"];
@@ -6541,8 +6140,6 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
     });
   }
 
-  List<ThreadToolkitBuilder> availableTools = [];
-
   @override
   Widget build(BuildContext context) {
     return widget.builder(
@@ -6554,7 +6151,6 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         offline: offlineParticipants.toList(),
         typing: typing.keys.toList(),
         listening: listening.toList(),
-        availableTools: availableTools.toList(),
         threadStatus: threadStatus,
         threadStatusStartedAt: threadStatusStartedAt,
         threadStatusMode: threadStatusMode,

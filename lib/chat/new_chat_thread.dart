@@ -42,14 +42,10 @@ class NewChatThread extends StatefulWidget {
 }
 
 class _NewChatThreadState extends State<NewChatThread> {
-  static const _toolProviderProbePath = ".new-thread";
-
   late ChatThreadController _controller;
   late bool _ownsController;
   StreamSubscription<RoomEvent>? _roomSubscription;
   RemoteParticipant? _agent;
-  List<ThreadToolkitBuilder> _availableTools = const [];
-  String? _requestedToolProvidersFromParticipantId;
   bool _creatingNewThread = false;
   bool _waitingForAgent = false;
   DateTime? _creatingNewThreadStartedAt;
@@ -100,8 +96,6 @@ class _NewChatThreadState extends State<NewChatThread> {
       }
       _ownsController = widget.controller == null;
       _controller = widget.controller ?? ChatThreadController(room: widget.room);
-      _availableTools = const [];
-      _requestedToolProvidersFromParticipantId = null;
       _creatingNewThreadStartedAt = null;
       _cancelWaitingForAgent();
       _onMessagingChanged();
@@ -116,8 +110,6 @@ class _NewChatThreadState extends State<NewChatThread> {
       _creatingNewThreadStartedAt = null;
       _pendingMessageText = null;
       _pendingAttachmentPaths = const [];
-      _availableTools = const [];
-      _requestedToolProvidersFromParticipantId = null;
       _cancelWaitingForAgent();
       _controller.clear();
       _onMessagingChanged();
@@ -136,47 +128,10 @@ class _NewChatThreadState extends State<NewChatThread> {
   }
 
   void _onRoomEvent(RoomEvent event) {
-    if (event is! RoomMessageEvent || event.message.type != "set_thread_tool_providers") {
+    if (event is! RoomMessageEvent) {
       return;
     }
-
-    final providers = event.message.message["tool_providers"];
-    if (providers is! List) {
-      return;
-    }
-
-    final nextTools = <ThreadToolkitBuilder>[];
-    for (final provider in providers) {
-      if (provider is Map && provider["name"] is String) {
-        nextTools.add(ThreadToolkitBuilder(name: provider["name"] as String));
-      }
-    }
-
-    final changed =
-        nextTools.length != _availableTools.length || nextTools.indexed.any((entry) => entry.$2.name != _availableTools[entry.$1].name);
-    if (!changed || !mounted) {
-      return;
-    }
-
-    setState(() {
-      _availableTools = nextTools;
-    });
     _signalWaitingForAgentReady();
-  }
-
-  Future<void> _requestToolProviders() async {
-    final agent = _agent;
-    if (agent == null) {
-      return;
-    }
-    if (_requestedToolProvidersFromParticipantId == agent.id) {
-      return;
-    }
-
-    _requestedToolProvidersFromParticipantId = agent.id;
-    try {
-      await widget.room.messaging.sendMessage(to: agent, type: "get_thread_toolkit_builders", message: {"path": _toolProviderProbePath});
-    } catch (_) {}
   }
 
   void _onMessagingChanged() {
@@ -188,17 +143,12 @@ class _NewChatThreadState extends State<NewChatThread> {
       (participant) => participant.getAttribute("name") == widget.agentName,
     );
     if (nextAgent == _agent) {
-      unawaited(_requestToolProviders());
       _signalWaitingForAgentReady();
       return;
     }
 
     setState(() {
       _agent = nextAgent;
-      if (nextAgent == null) {
-        _availableTools = const [];
-        _requestedToolProvidersFromParticipantId = null;
-      }
     });
 
     final waitCompleter = _waitForAgentCompleter;
@@ -207,7 +157,6 @@ class _NewChatThreadState extends State<NewChatThread> {
       _waitForAgentCompleter = null;
     }
 
-    unawaited(_requestToolProviders());
     _signalWaitingForAgentReady();
   }
 
@@ -251,7 +200,6 @@ class _NewChatThreadState extends State<NewChatThread> {
   Future<void> _waitForToolkitAvailable({required String toolkitName}) async {
     while (true) {
       final agent = _agent ?? await _waitForAgentOnline();
-      await _requestToolProviders();
 
       try {
         final toolkits = await widget.room.agents.listToolkits(participantId: agent.id, timeout: 1000);
@@ -326,11 +274,6 @@ class _NewChatThreadState extends State<NewChatThread> {
         });
       }
 
-      final tools = <Map<String, dynamic>>[];
-      for (final toolkit in _controller.toolkits) {
-        tools.add((await toolkit.build(widget.room)).toJson());
-      }
-
       final result = await widget.room.agents.invokeTool(
         toolkit: widget.toolkit,
         tool: widget.tool,
@@ -343,7 +286,6 @@ class _NewChatThreadState extends State<NewChatThread> {
                 "attachments": [
                   for (final path in attachmentPaths) {"path": path},
                 ],
-                "tools": tools,
               },
             },
           ),
@@ -490,7 +432,6 @@ class _NewChatThreadState extends State<NewChatThread> {
       offline: const [],
       typing: const [],
       listening: const [],
-      availableTools: _availableTools,
       agentOnline: _agent != null,
       threadStatus: null,
       threadStatusStartedAt: null,
@@ -562,16 +503,8 @@ class _NewChatThreadState extends State<NewChatThread> {
                 room: widget.room,
                 controller: _controller,
                 autoFocus: false,
-                leading: toolsBuilder == null
-                    ? null
-                    : _controller.toolkits.isNotEmpty
-                    ? null
-                    : toolsBuilder(context, _controller, snapshot),
-                footer: toolsBuilder == null
-                    ? null
-                    : _controller.toolkits.isEmpty
-                    ? null
-                    : Padding(padding: const EdgeInsets.only(top: 8), child: toolsBuilder(context, _controller, snapshot)),
+                leading: toolsBuilder == null ? null : toolsBuilder(context, _controller, snapshot),
+                footer: null,
                 trailing: null,
                 onSend: (text, attachments) async {
                   if (text.isNotEmpty || attachments.isNotEmpty) {
@@ -621,16 +554,8 @@ class _NewChatThreadState extends State<NewChatThread> {
       sendPendingText: _waitingForAgent ? "Waiting for ${widget.agentName} to be ready." : null,
       onCancelSend: _waitingForAgent ? _cancelPendingNewThread : null,
       placeholder: Text(_chatPlaceholderText()),
-      leading: toolsBuilder == null
-          ? null
-          : _controller.toolkits.isNotEmpty
-          ? null
-          : toolsBuilder(context, _controller, snapshot),
-      footer: toolsBuilder == null
-          ? null
-          : _controller.toolkits.isEmpty
-          ? null
-          : Padding(padding: const EdgeInsets.only(top: 8), child: toolsBuilder(context, _controller, snapshot)),
+      leading: toolsBuilder == null ? null : toolsBuilder(context, _controller, snapshot),
+      footer: null,
       trailing: null,
       onSend: (value, attachments) async {
         if (value.isEmpty && attachments.isEmpty) {

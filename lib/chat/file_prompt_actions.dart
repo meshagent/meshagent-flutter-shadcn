@@ -130,7 +130,6 @@ Future<String> startNewChatThread({
             "attachments": [
               for (final path in attachmentPaths) {"path": path},
             ],
-            "tools": const [],
           },
         },
       ),
