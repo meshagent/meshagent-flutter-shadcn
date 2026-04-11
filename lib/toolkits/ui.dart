@@ -390,8 +390,8 @@ class _JsonFormState extends State<JsonForm> {
   }
 }
 
-class UIToolkit extends RemoteToolkit {
-  UIToolkit(BuildContext context, {required super.room, required void Function(String path)? opener})
+class UIToolkit extends Toolkit {
+  UIToolkit(BuildContext context, {required void Function(String path)? opener})
     : super(
         name: "ui",
         title: "interface",
@@ -402,6 +402,7 @@ class UIToolkit extends RemoteToolkit {
           AskUserForFile(context: context),
           ShowToast(context: context),
         ],
+        rules: const [],
       );
 }
 
@@ -428,12 +429,13 @@ class GetLocalTime extends FunctionTool {
   }
 }
 
-class LocalizationToolkit extends RemoteToolkit {
-  LocalizationToolkit(BuildContext context, {required super.room})
+class LocalizationToolkit extends Toolkit {
+  LocalizationToolkit(BuildContext context)
     : super(
         name: "localization",
         title: "localization",
         description: "tools to find out information about the current user",
         tools: [GetLocalTime(context: context)],
+        rules: const [],
       );
 }
