@@ -247,4 +247,30 @@ void main() {
     expect(find.text("No visible messages"), findsNothing);
     expect(emptyCallbackCount, 0);
   });
+
+  testWidgets('renders tool footers below the thread composer', (tester) async {
+    final room = RoomClient(protocol: Protocol(channel: _NoopProtocolChannel()));
+    final document = _createThreadDocument();
+    addTearDown(room.dispose);
+    addTearDown(document.dispose);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox.expand(
+            child: ChatThread(
+              path: "/threads/test",
+              document: document,
+              room: room,
+              toolsBuilder: (context, controller, state) => const ChatThreadToolArea(leading: Text("Attach"), footer: Text("MCP footer")),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text("Attach"), findsOneWidget);
+    expect(find.text("MCP footer"), findsOneWidget);
+  });
 }

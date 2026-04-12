@@ -437,6 +437,8 @@ class _NewChatThreadState extends State<NewChatThread> {
       threadStatusStartedAt: null,
       threadStatusMode: null,
       supportsAgentMessages: _agent?.getAttribute("supports_agent_messages") == true,
+      supportsMcp: _agent?.getAttribute("supports_mcp") == true,
+      toolkits: const {},
       threadTurnId: null,
       pendingMessages: const [],
       pendingItemId: null,
@@ -446,6 +448,7 @@ class _NewChatThreadState extends State<NewChatThread> {
   Widget _buildPendingThreadView({required bool allowCancel}) {
     final snapshot = _buildSnapshot();
     final toolsBuilder = widget.toolsBuilder;
+    final toolArea = resolveChatThreadToolArea(toolsBuilder == null ? null : toolsBuilder(context, _controller, snapshot));
     final pendingText = _pendingMessageText;
     final hasPendingContent = (pendingText != null && pendingText.isNotEmpty) || _pendingAttachmentPaths.isNotEmpty;
     final pendingMessage = hasPendingContent
@@ -503,8 +506,8 @@ class _NewChatThreadState extends State<NewChatThread> {
                 room: widget.room,
                 controller: _controller,
                 autoFocus: false,
-                leading: toolsBuilder == null ? null : toolsBuilder(context, _controller, snapshot),
-                footer: null,
+                leading: toolArea.leading,
+                footer: toolArea.footer,
                 trailing: null,
                 onSend: (text, attachments) async {
                   if (text.isNotEmpty || attachments.isNotEmpty) {
@@ -545,6 +548,7 @@ class _NewChatThreadState extends State<NewChatThread> {
   Widget _buildNewThreadComposer(BuildContext context) {
     final snapshot = _buildSnapshot();
     final toolsBuilder = widget.toolsBuilder;
+    final toolArea = resolveChatThreadToolArea(toolsBuilder == null ? null : toolsBuilder(context, _controller, snapshot));
     final headingStyle = ShadTheme.of(context).textTheme.h4;
     final input = ChatThreadInput(
       room: widget.room,
@@ -554,8 +558,8 @@ class _NewChatThreadState extends State<NewChatThread> {
       sendPendingText: _waitingForAgent ? "Waiting for ${widget.agentName} to be ready." : null,
       onCancelSend: _waitingForAgent ? _cancelPendingNewThread : null,
       placeholder: Text(_chatPlaceholderText()),
-      leading: toolsBuilder == null ? null : toolsBuilder(context, _controller, snapshot),
-      footer: null,
+      leading: toolArea.leading,
+      footer: toolArea.footer,
       trailing: null,
       onSend: (value, attachments) async {
         if (value.isEmpty && attachments.isEmpty) {

@@ -19,6 +19,7 @@ import 'package:meshagent_flutter_shadcn/code_language_resolver.dart';
 import 'package:meshagent_flutter_shadcn/storage/file_browser.dart';
 import 'package:meshagent_flutter_shadcn/ui/coordinated_context_menu.dart';
 import 'package:meshagent_flutter_shadcn/ui/ui.dart';
+import 'package:meshagent_flutter_shadcn/src/web_context_menu_manager/enable_web_context_menu.dart';
 import 'package:re_highlight/styles/monokai-sublime.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:super_clipboard/super_clipboard.dart';
@@ -55,6 +56,8 @@ const String _agentTurnStartType = "meshagent.agent.turn.start";
 const String _agentTurnSteerType = "meshagent.agent.turn.steer";
 const String _agentTurnInterruptType = "meshagent.agent.turn.interrupt";
 const String _agentThreadClearType = "meshagent.agent.thread.clear";
+const String _agentCapabilitiesRequestType = "meshagent.agent.capabilities_request";
+const String _agentCapabilitiesResponseType = "meshagent.agent.capabilities_response";
 const String _agentToolApproveType = "meshagent.agent.tool_call.approve";
 const String _agentToolRejectType = "meshagent.agent.tool_call.reject";
 const String _agentTurnStartAcceptedType = "meshagent.agent.turn.start.accepted";
@@ -296,6 +299,14 @@ bool _supportsAgentMessages(Participant participant) {
   return participant.getAttribute("supports_agent_messages") == true;
 }
 
+bool _supportsMcp(Participant participant) {
+  if (participant is! RemoteParticipant) {
+    return false;
+  }
+
+  return participant.getAttribute("supports_mcp") == true;
+}
+
 String _displayParticipantName(String name) {
   return name.split("@").first.trim();
 }
@@ -319,6 +330,14 @@ String? _normalizeAgentAttachmentUrl(String path) {
   return "room:///$roomPath";
 }
 
+String _connectorSelectionKey(Connector connector) {
+  return jsonEncode({
+    "name": connector.name,
+    "server": connector.server.toJson(),
+    if (connector.oauth != null) "oauth": connector.oauth!.toJson(),
+  });
+}
+
 List<Map<String, dynamic>> _agentInputContentFromMessage(ChatMessage message) {
   final content = <Map<String, dynamic>>[];
   if (message.text.trim().isNotEmpty) {
@@ -334,6 +353,120 @@ List<Map<String, dynamic>> _agentInputContentFromMessage(ChatMessage message) {
   }
 
   return content;
+}
+
+class AgentTurnToolkitConfig {
+  const AgentTurnToolkitConfig({this.clientOptions});
+
+  final Map<String, dynamic>? clientOptions;
+
+  Map<String, dynamic> toJson() {
+    return {if (clientOptions != null) "client_options": clientOptions};
+  }
+}
+
+class AgentToolChoice {
+  const AgentToolChoice({required this.toolkitName, required this.toolName});
+
+  final String toolkitName;
+  final String toolName;
+
+  Map<String, dynamic> toJson() {
+    return {"toolkit_name": toolkitName, "tool_name": toolName};
+  }
+}
+
+class AgentToolCapabilities {
+  const AgentToolCapabilities({required this.name, this.title, this.description});
+
+  final String name;
+  final String? title;
+  final String? description;
+
+  factory AgentToolCapabilities.fromJson(Map<String, dynamic> json) {
+    return AgentToolCapabilities(
+      name: json["name"] as String,
+      title: json["title"] as String?,
+      description: json["description"] as String?,
+    );
+  }
+}
+
+class AgentToolkitCapabilities {
+  const AgentToolkitCapabilities({
+    required this.name,
+    this.title,
+    this.description,
+    this.thumbnailUrl,
+    this.rules = const [],
+    this.clientOptions,
+    this.hidden = false,
+    this.tools = const [],
+  });
+
+  final String name;
+  final String? title;
+  final String? description;
+  final String? thumbnailUrl;
+  final List<String> rules;
+  final Map<String, dynamic>? clientOptions;
+  final bool hidden;
+  final List<AgentToolCapabilities> tools;
+
+  factory AgentToolkitCapabilities.fromJson(Map<String, dynamic> json) {
+    final rawRules = json["rules"];
+    final rawTools = json["tools"];
+    final rawClientOptions = json["client_options"];
+    return AgentToolkitCapabilities(
+      name: json["name"] as String,
+      title: json["title"] as String?,
+      description: json["description"] as String?,
+      thumbnailUrl: json["thumbnail_url"] as String?,
+      rules: rawRules is List ? rawRules.whereType<String>().toList() : const [],
+      clientOptions: rawClientOptions is Map ? Map<String, dynamic>.from(rawClientOptions) : null,
+      hidden: json["hidden"] == true,
+      tools: rawTools is List
+          ? [
+              for (final tool in rawTools)
+                if (tool is Map<String, dynamic>)
+                  AgentToolCapabilities.fromJson(tool)
+                else if (tool is Map)
+                  AgentToolCapabilities.fromJson(Map<String, dynamic>.from(tool)),
+            ]
+          : const [],
+    );
+  }
+}
+
+class AgentCapabilitiesResponse {
+  const AgentCapabilitiesResponse({required this.threadId, required this.sourceMessageId, required this.version, required this.toolkits});
+
+  final String threadId;
+  final String sourceMessageId;
+  final String version;
+  final List<AgentToolkitCapabilities> toolkits;
+
+  Map<String, AgentToolkitCapabilities> get toolkitsByName {
+    return {for (final toolkit in toolkits) toolkit.name: toolkit};
+  }
+
+  factory AgentCapabilitiesResponse.fromJson(Map<String, dynamic> json) {
+    final rawToolkits = json["toolkits"];
+    return AgentCapabilitiesResponse(
+      threadId: json["thread_id"] as String,
+      sourceMessageId: json["source_message_id"] as String,
+      version: json["version"] as String,
+      toolkits: rawToolkits is List
+          ? [
+              for (final toolkit in rawToolkits)
+                if (toolkit is Map<String, dynamic>)
+                  AgentToolkitCapabilities.fromJson(toolkit)
+                else if (toolkit is Map)
+                  AgentToolkitCapabilities.fromJson(Map<String, dynamic>.from(toolkit)),
+            ]
+          : const [],
+    );
+  }
 }
 
 class PendingAgentMessage {
@@ -750,6 +883,56 @@ class ChatThreadController extends ChangeNotifier {
   final OutboundMessageStatusQueue outboundStatus = OutboundMessageStatusQueue();
   final LinkedHashMap<String, PendingAgentMessage> _pendingAgentMessages = LinkedHashMap<String, PendingAgentMessage>();
   final LinkedHashMap<String, _PendingSendWait> _pendingSendWaits = LinkedHashMap<String, _PendingSendWait>();
+  final Set<String> _enabledToolkits = <String>{};
+  final LinkedHashMap<String, Connector> _selectedMcpConnectors = LinkedHashMap<String, Connector>();
+
+  bool isToolkitEnabled(String toolkitName) {
+    return _enabledToolkits.contains(toolkitName);
+  }
+
+  bool toggleToolkit(String toolkitName) {
+    if (_enabledToolkits.contains(toolkitName)) {
+      _enabledToolkits.remove(toolkitName);
+      notifyListeners();
+      return false;
+    }
+
+    _enabledToolkits.add(toolkitName);
+    notifyListeners();
+    return true;
+  }
+
+  List<Connector> get selectedMcpConnectors {
+    return List<Connector>.unmodifiable(_selectedMcpConnectors.values);
+  }
+
+  bool isMcpConnectorSelected(Connector connector) {
+    return _selectedMcpConnectors.containsKey(_connectorSelectionKey(connector));
+  }
+
+  void setMcpConnectorSelected(Connector connector, bool selected) {
+    final key = _connectorSelectionKey(connector);
+    if (selected) {
+      _selectedMcpConnectors[key] = connector;
+      notifyListeners();
+      return;
+    }
+
+    if (_selectedMcpConnectors.remove(key) != null) {
+      notifyListeners();
+    }
+  }
+
+  void clearMcpConnectorSelections({bool notify = true}) {
+    if (_selectedMcpConnectors.isEmpty) {
+      return;
+    }
+
+    _selectedMcpConnectors.clear();
+    if (notify) {
+      notifyListeners();
+    }
+  }
 
   void scrollThreadToBottom({bool animated = true}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1163,6 +1346,8 @@ class ChatThreadController extends ChangeNotifier {
     String messageType = "chat",
     bool useAgentMessages = false,
     String? turnId,
+    Map<String, AgentTurnToolkitConfig>? toolkits,
+    AgentToolChoice? toolChoice,
     bool store = false,
   }) async {
     if (message.text.trim().isNotEmpty || message.attachments.isNotEmpty) {
@@ -1176,6 +1361,12 @@ class ChatThreadController extends ChangeNotifier {
         };
         if (isSteer && turnId != null && turnId.trim().isNotEmpty) {
           payload["turn_id"] = turnId;
+        }
+        if (!isSteer && toolkits != null && toolkits.isNotEmpty) {
+          payload["toolkits"] = {for (final entry in toolkits.entries) entry.key: entry.value.toJson()};
+        }
+        if (!isSteer && toolChoice != null) {
+          payload["tool_choice"] = toolChoice.toJson();
         }
         await room.messaging.sendMessage(to: participant, type: _agentRoomMessageType, message: {"payload": payload});
         return;
@@ -1230,6 +1421,8 @@ class ChatThreadController extends ChangeNotifier {
     bool storeLocally = true,
     bool useAgentMessages = false,
     String? turnId,
+    Map<String, AgentTurnToolkitConfig>? toolkits,
+    AgentToolChoice? toolChoice,
     void Function(ChatMessage)? onMessageSent,
   }) async {
     if (message.text.trim().isNotEmpty || message.attachments.isNotEmpty) {
@@ -1290,6 +1483,8 @@ class ChatThreadController extends ChangeNotifier {
                 messageType: messageType,
                 useAgentMessages: useAgentMessages,
                 turnId: turnId,
+                toolkits: toolkits,
+                toolChoice: toolChoice,
                 store: shouldStoreRemotely,
               ),
             );
@@ -1494,6 +1689,28 @@ class ChatThreadViewportBody extends StatelessWidget {
   }
 }
 
+class ChatThreadToolArea extends StatelessWidget {
+  const ChatThreadToolArea({super.key, this.leading, this.footer});
+
+  final Widget? leading;
+  final Widget? footer;
+
+  @override
+  Widget build(BuildContext context) {
+    return leading ?? footer ?? const SizedBox.shrink();
+  }
+}
+
+ChatThreadToolArea resolveChatThreadToolArea(Widget? tools) {
+  if (tools == null) {
+    return const ChatThreadToolArea();
+  }
+  if (tools is ChatThreadToolArea) {
+    return tools;
+  }
+  return ChatThreadToolArea(leading: tools);
+}
+
 class ChatThreadAttachButton extends StatefulWidget {
   const ChatThreadAttachButton({
     required this.controller,
@@ -1501,18 +1718,29 @@ class ChatThreadAttachButton extends StatefulWidget {
     this.alwaysShowAttachFiles,
     this.availableRooms,
     this.connectRoomClient,
+    this.agentName,
+    this.showMcpConnectors = false,
   });
 
   final bool? alwaysShowAttachFiles;
   final ChatThreadController controller;
   final Future<List<Room>> Function()? availableRooms;
   final Future<RoomClient> Function(String roomName)? connectRoomClient;
+  final String? agentName;
+  final bool showMcpConnectors;
 
   @override
   State createState() => _ChatThreadAttachButton();
 }
 
 class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
+  final ShadPopoverController popoverController = ShadPopoverController();
+
+  bool get _canShowMcpConnectors {
+    final normalizedAgentName = widget.agentName?.trim();
+    return widget.showMcpConnectors && normalizedAgentName != null && normalizedAgentName.isNotEmpty;
+  }
+
   Future<String> _resolveImportedPath(String requestedPath) async {
     String candidate = requestedPath.split("/").last;
     final dotIndex = candidate.lastIndexOf('.');
@@ -1720,7 +1948,60 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
     }
   }
 
-  final ShadPopoverController popoverController = ShadPopoverController();
+  Widget _buildAttachButton(BuildContext context) {
+    final attachMenuItemCount = (kIsWeb ? 1 : 2) + 1;
+    final showMcpMenuItem = _canShowMcpConnectors;
+    final attachMenuHeight = (attachMenuItemCount + (showMcpMenuItem ? 1 : 0)) * 40.0;
+
+    return ListenableBuilder(
+      listenable: widget.controller,
+      builder: (context, _) => ListenableBuilder(
+        listenable: popoverController,
+        builder: (context, _) => CoordinatedShadContextMenu(
+          constraints: const BoxConstraints(minWidth: 175),
+          estimatedMenuWidth: 175,
+          estimatedMenuHeight: attachMenuHeight,
+          items: [
+            if (!kIsWeb)
+              ShadContextMenuItem(
+                leading: const Icon(LucideIcons.imageUp),
+                onPressed: _onSelectPhoto,
+                child: const Text("Upload a photo..."),
+              ),
+            ShadContextMenuItem(
+              leading: const Icon(LucideIcons.paperclip),
+              onPressed: _onSelectAttachment,
+              child: const Text("Upload a file..."),
+            ),
+            ShadContextMenuItem(
+              leading: const Icon(LucideIcons.download),
+              onPressed: _onBrowseFiles,
+              child: const Text("Add from room..."),
+            ),
+            if (showMcpMenuItem)
+              ShadContextMenuItem(
+                leading: const Icon(LucideIcons.plug),
+                trailing: widget.controller.isToolkitEnabled("mcp") ? const Icon(LucideIcons.check, size: 16) : null,
+                onPressed: () {
+                  widget.controller.toggleToolkit("mcp");
+                },
+                child: const Text("MCP"),
+              ),
+          ],
+          controller: popoverController,
+          child: ShadIconButton.ghost(
+            hoverBackgroundColor: ShadTheme.of(context).colorScheme.background,
+            decoration: const ShadDecoration(shape: BoxShape.circle),
+            onPressed: popoverController.toggle,
+            iconSize: 16,
+            width: 32,
+            height: 32,
+            icon: const Icon(LucideIcons.plus),
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   void dispose() {
@@ -1730,45 +2011,357 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.alwaysShowAttachFiles == false) {
+    final showAttachFiles = widget.alwaysShowAttachFiles != false;
+
+    if (!showAttachFiles && !_canShowMcpConnectors) {
       return const SizedBox(width: 0, height: 22);
     }
 
-    final attachMenuItemCount = (kIsWeb ? 1 : 2) + 1;
-    final attachMenuHeight = attachMenuItemCount * 40.0;
+    return ListenableBuilder(
+      listenable: widget.controller,
+      builder: (context, _) {
+        final showMcpConnectors = _canShowMcpConnectors && widget.controller.isToolkitEnabled("mcp");
+        if (!showAttachFiles && !showMcpConnectors) {
+          return const SizedBox(width: 0, height: 22);
+        }
+
+        return showAttachFiles ? _buildAttachButton(context) : const SizedBox(width: 0, height: 22);
+      },
+    );
+  }
+}
+
+class ChatThreadMcpFooter extends StatefulWidget {
+  const ChatThreadMcpFooter({
+    required this.controller,
+    super.key,
+    required this.agentName,
+    this.showMcpConnectors = false,
+    this.availableConnectors,
+    this.onConnectorSetup,
+    this.onAddMcpConnector,
+  });
+
+  final ChatThreadController controller;
+  final String? agentName;
+  final bool showMcpConnectors;
+  final Future<List<Connector>> Function()? availableConnectors;
+  final Future<void> Function(Connector connector)? onConnectorSetup;
+  final Future<void> Function()? onAddMcpConnector;
+
+  @override
+  State createState() => _ChatThreadMcpFooterState();
+}
+
+class _ChatThreadMcpFooterState extends State<ChatThreadMcpFooter> {
+  final Map<String, bool> _connectedConnectors = <String, bool>{};
+  final ShadPopoverController _connectorPopoverController = ShadPopoverController();
+  int _connectorRefreshEpoch = 0;
+  List<Connector> _availableConnectors = const <Connector>[];
+  Object? _availableConnectorsError;
+  bool _loadingAvailableConnectors = false;
+  bool _loadingConnectorState = false;
+  String? _connectingConnectorName;
+
+  bool get _canShowMcpConnectors {
+    final normalizedAgentName = widget.agentName?.trim();
+    return widget.showMcpConnectors && normalizedAgentName != null && normalizedAgentName.isNotEmpty && widget.availableConnectors != null;
+  }
+
+  List<Connector> get _selectedConnectorList {
+    return widget.controller.selectedMcpConnectors;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _connectorPopoverController.addListener(_onConnectorPopoverChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatThreadMcpFooter oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.agentName != widget.agentName || oldWidget.controller.room != widget.controller.room) {
+      widget.controller.clearMcpConnectorSelections(notify: false);
+      _connectorRefreshEpoch++;
+      _availableConnectors = const <Connector>[];
+      _availableConnectorsError = null;
+      _connectedConnectors.clear();
+    }
+
+    if (oldWidget.agentName != widget.agentName ||
+        oldWidget.showMcpConnectors != widget.showMcpConnectors ||
+        oldWidget.controller.room != widget.controller.room) {
+      unawaited(_refreshConnectorState(loadAvailableConnectors: _connectorPopoverController.isOpen));
+    }
+  }
+
+  void _onConnectorPopoverChanged() {
+    if (_connectorPopoverController.isOpen) {
+      unawaited(_refreshConnectorState(loadAvailableConnectors: true));
+    }
+  }
+
+  Future<void> _refreshConnectorState({bool loadAvailableConnectors = false}) async {
+    final refreshEpoch = ++_connectorRefreshEpoch;
+    if (!_canShowMcpConnectors) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _availableConnectors = const <Connector>[];
+        _availableConnectorsError = null;
+        _loadingAvailableConnectors = false;
+        _loadingConnectorState = false;
+        _connectedConnectors.clear();
+      });
+      return;
+    }
+
+    List<Connector> connectors = _availableConnectors;
+    if (loadAvailableConnectors || connectors.isEmpty) {
+      final loader = widget.availableConnectors;
+      if (loader == null) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _availableConnectors = const <Connector>[];
+          _availableConnectorsError = null;
+          _loadingAvailableConnectors = false;
+          _loadingConnectorState = false;
+          _connectedConnectors.clear();
+        });
+        return;
+      }
+
+      setState(() {
+        _loadingAvailableConnectors = true;
+        _availableConnectorsError = null;
+      });
+
+      try {
+        connectors = await loader();
+      } catch (error) {
+        if (!mounted || refreshEpoch != _connectorRefreshEpoch) {
+          return;
+        }
+        setState(() {
+          _availableConnectors = const <Connector>[];
+          _availableConnectorsError = error;
+          _loadingAvailableConnectors = false;
+          _loadingConnectorState = false;
+          _connectedConnectors.clear();
+        });
+        return;
+      }
+    }
+
+    setState(() {
+      _loadingAvailableConnectors = loadAvailableConnectors;
+      _loadingConnectorState = true;
+    });
+
+    final normalizedAgentName = widget.agentName!.trim();
+    final statuses = await Future.wait(
+      connectors.map((connector) async {
+        try {
+          final connected = await connector.isConnected(widget.controller.room, normalizedAgentName);
+          return MapEntry(_connectorSelectionKey(connector), connected);
+        } catch (_) {
+          return MapEntry(_connectorSelectionKey(connector), false);
+        }
+      }),
+    );
+
+    if (!mounted || refreshEpoch != _connectorRefreshEpoch) {
+      return;
+    }
+
+    setState(() {
+      _availableConnectors = connectors;
+      _availableConnectorsError = null;
+      _loadingAvailableConnectors = false;
+      _loadingConnectorState = false;
+      _connectedConnectors
+        ..clear()
+        ..addEntries(statuses);
+    });
+  }
+
+  Future<void> _connectConnector(Connector connector) async {
+    final onConnectorSetup = widget.onConnectorSetup;
+    if (onConnectorSetup == null || _connectingConnectorName != null) {
+      return;
+    }
+
+    _connectorPopoverController.hide();
+    setState(() {
+      _connectingConnectorName = connector.name;
+    });
+
+    try {
+      await onConnectorSetup(connector);
+      widget.controller.setMcpConnectorSelected(connector, true);
+    } catch (error) {
+      if (mounted) {
+        ShadToaster.of(
+          context,
+        ).show(ShadToast.destructive(title: Text("Unable to connect ${connector.name}"), description: Text("$error")));
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _connectingConnectorName = null;
+        });
+      }
+      await _refreshConnectorState();
+    }
+  }
+
+  Future<void> _toggleConnectorSelection(Connector connector) async {
+    if (widget.controller.isMcpConnectorSelected(connector)) {
+      widget.controller.setMcpConnectorSelected(connector, false);
+      return;
+    }
+
+    final connectorKey = _connectorSelectionKey(connector);
+    final isConnected = _connectedConnectors[connectorKey] == true;
+    final connectorRef = Connector.buildConnectorRef(server: connector.server, oauth: connector.oauth);
+    final requiresSetup = connectorRef != null || connector.oauth != null;
+    if (isConnected || !requiresSetup) {
+      widget.controller.setMcpConnectorSelected(connector, true);
+      return;
+    }
+
+    await _connectConnector(connector);
+  }
+
+  Future<void> _addMcpConnector() async {
+    final onAddMcpConnector = widget.onAddMcpConnector;
+    if (onAddMcpConnector == null) {
+      return;
+    }
+
+    _connectorPopoverController.hide();
+    try {
+      await onAddMcpConnector();
+    } finally {
+      await _refreshConnectorState(loadAvailableConnectors: true);
+    }
+  }
+
+  Widget _buildMcpConnectorControl(BuildContext context) {
+    final selectedConnectors = _selectedConnectorList;
+    final isLoading = _loadingAvailableConnectors || _loadingConnectorState;
+    final estimatedMenuHeight = math.max(48.0, (_availableConnectors.length + (widget.onAddMcpConnector != null ? 1 : 0)) * 40.0);
+    final menuItems = <Widget>[
+      if (_loadingAvailableConnectors && _availableConnectors.isEmpty) const ShadContextMenuItem(child: Text("Loading connectors...")),
+      if (!_loadingAvailableConnectors && _availableConnectorsError != null)
+        ShadContextMenuItem(
+          leading: const Icon(LucideIcons.refreshCw),
+          onPressed: () => _refreshConnectorState(loadAvailableConnectors: true),
+          child: const Text("Unable to load connectors"),
+        ),
+      if (!_loadingAvailableConnectors && _availableConnectorsError == null && _availableConnectors.isEmpty)
+        const ShadContextMenuItem(child: Text("No connectors are configured for this room")),
+      for (final connector in _availableConnectors)
+        Builder(
+          builder: (context) {
+            final connectorKey = _connectorSelectionKey(connector);
+            final selected = widget.controller.isMcpConnectorSelected(connector);
+            final isConnected = _connectedConnectors[connectorKey] == true;
+            final connectorRef = Connector.buildConnectorRef(server: connector.server, oauth: connector.oauth);
+            final requiresSetup = connectorRef != null || connector.oauth != null;
+
+            Widget? trailing;
+            if (_connectingConnectorName == connector.name) {
+              trailing = const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2));
+            } else if (selected) {
+              trailing = const Icon(LucideIcons.check, size: 16);
+            } else if (isConnected || !requiresSetup) {
+              trailing = Text(
+                "Connected",
+                style: ShadTheme.of(context).textTheme.small.copyWith(color: ShadTheme.of(context).colorScheme.mutedForeground),
+              );
+            } else {
+              trailing = Text(
+                "Connect",
+                style: ShadTheme.of(context).textTheme.small.copyWith(color: ShadTheme.of(context).colorScheme.mutedForeground),
+              );
+            }
+
+            return ShadContextMenuItem(
+              enabled: _connectingConnectorName == null,
+              trailing: trailing,
+              onPressed: () => _toggleConnectorSelection(connector),
+              child: Text(connector.name),
+            );
+          },
+        ),
+      if (widget.onAddMcpConnector != null) const ShadSeparator.horizontal(margin: EdgeInsets.symmetric(vertical: 3)),
+      if (widget.onAddMcpConnector != null)
+        ShadContextMenuItem(
+          leading: const Icon(LucideIcons.plus),
+          enabled: _connectingConnectorName == null,
+          onPressed: _addMcpConnector,
+          child: const Text("Add..."),
+        ),
+    ];
 
     return ListenableBuilder(
-      listenable: popoverController,
+      listenable: _connectorPopoverController,
       builder: (context, _) => CoordinatedShadContextMenu(
-        constraints: const BoxConstraints(minWidth: 175),
-        estimatedMenuWidth: 175,
-        estimatedMenuHeight: attachMenuHeight,
-        items: [
-          if (!kIsWeb)
-            ShadContextMenuItem(
-              leading: const Icon(LucideIcons.imageUp),
-              onPressed: _onSelectPhoto,
-              child: const Text("Upload a photo..."),
-            ),
-          ShadContextMenuItem(
-            leading: const Icon(LucideIcons.paperclip),
-            onPressed: _onSelectAttachment,
-            child: const Text("Upload a file..."),
+        constraints: const BoxConstraints(minWidth: 220),
+        estimatedMenuWidth: 220,
+        estimatedMenuHeight: estimatedMenuHeight,
+        items: menuItems,
+        controller: _connectorPopoverController,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(999),
+          onTap: _connectingConnectorName == null ? _connectorPopoverController.toggle : null,
+          child: Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 4,
+            runSpacing: 4,
+            children: [
+              ShadBadge.outline(child: const Text("MCP")),
+              for (final connector in selectedConnectors.take(4)) ShadBadge(child: Text(connector.name)),
+              if (selectedConnectors.length > 4) ShadBadge(child: Text("+${selectedConnectors.length - 4}")),
+              Padding(
+                padding: const EdgeInsets.only(left: 2),
+                child: Text(
+                  "Add",
+                  style: ShadTheme.of(context).textTheme.small.copyWith(color: ShadTheme.of(context).colorScheme.foreground),
+                ),
+              ),
+              if (isLoading)
+                const Padding(
+                  padding: EdgeInsets.only(left: 2),
+                  child: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+                ),
+            ],
           ),
-          ShadContextMenuItem(leading: const Icon(LucideIcons.download), onPressed: _onBrowseFiles, child: const Text("Add from room...")),
-        ],
-        controller: popoverController,
-        child: ShadIconButton.ghost(
-          hoverBackgroundColor: ShadTheme.of(context).colorScheme.background,
-          decoration: const ShadDecoration(shape: BoxShape.circle),
-          onPressed: popoverController.toggle,
-          iconSize: 16,
-          width: 32,
-          height: 32,
-          icon: const Icon(LucideIcons.plus),
         ),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _connectorPopoverController.removeListener(_onConnectorPopoverChanged);
+    _connectorPopoverController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final showMcpConnectors = _canShowMcpConnectors && widget.controller.isToolkitEnabled("mcp");
+    if (!showMcpConnectors) {
+      return const SizedBox.shrink();
+    }
+
+    return Align(alignment: Alignment.centerLeft, child: _buildMcpConnectorControl(context));
   }
 }
 
@@ -2133,88 +2726,97 @@ class _ChatThreadInput extends State<ChatThreadInput> {
                 ),
               )
             : null);
+    final reservedFooterTrailer = trailer ?? const SizedBox(width: 32, height: 32);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
         if (widget.header != null) widget.header!,
-        ShadInput(
-          contextMenuBuilder: (context, editableTextState) =>
-              AdaptiveTextSelectionToolbar.editableText(editableTextState: editableTextState),
-          top: ListenableBuilder(
-            listenable: widget.controller,
-            builder: (context, _) {
-              if (attachments.isEmpty) {
-                return SizedBox.shrink();
-              }
+        EnableWebContextMenu(
+          child: ShadInput(
+            contextMenuBuilder: (context, editableTextState) =>
+                AdaptiveTextSelectionToolbar.editableText(editableTextState: editableTextState),
+            top: ListenableBuilder(
+              listenable: widget.controller,
+              builder: (context, _) {
+                if (attachments.isEmpty) {
+                  return SizedBox.shrink();
+                }
 
-              return Padding(
-                padding: EdgeInsets.all(8),
-                child: LayoutBuilder(
-                  builder: (context, constraints) => SizedBox(
-                    height: 40,
-                    child: Center(
-                      child: ListView.separated(
-                        itemCount: attachments.length,
-                        separatorBuilder: (context, index) => const SizedBox(width: 10),
-                        scrollDirection: Axis.horizontal,
-                        itemBuilder: (context, index) {
-                          final attachment = attachments[index];
+                return Padding(
+                  padding: EdgeInsets.all(8),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) => SizedBox(
+                      height: 40,
+                      child: Center(
+                        child: ListView.separated(
+                          itemCount: attachments.length,
+                          separatorBuilder: (context, index) => const SizedBox(width: 10),
+                          scrollDirection: Axis.horizontal,
+                          itemBuilder: (context, index) {
+                            final attachment = attachments[index];
 
-                          if (widget.attachmentBuilder != null) {
-                            return widget.attachmentBuilder!(context, attachment);
-                          }
+                            if (widget.attachmentBuilder != null) {
+                              return widget.attachmentBuilder!(context, attachment);
+                            }
 
-                          return FileDefaultAttachmentPreview(
-                            key: ValueKey(attachment.path),
-                            attachment: attachment,
-                            maxWidth: constraints.maxWidth - 50,
-                            onRemove: () {
-                              widget.controller.removeFileUpload(attachment);
-                            },
-                          );
-                        },
+                            return FileDefaultAttachmentPreview(
+                              key: ValueKey(attachment.path),
+                              attachment: attachment,
+                              maxWidth: constraints.maxWidth - 50,
+                              onRemove: () {
+                                widget.controller.removeFileUpload(attachment);
+                              },
+                            );
+                          },
+                        ),
                       ),
                     ),
                   ),
-                ),
+                );
+              },
+            ),
+            crossAxisAlignment: CrossAxisAlignment.center,
+            inputPadding: EdgeInsets.all(2),
+            leading: widget.leading ?? SizedBox(width: 3),
+            trailing: widget.footer == null ? trailer : null,
+            padding: EdgeInsets.only(left: 5, right: 5, top: widget.footer == null ? 5 : 10, bottom: widget.footer == null ? 5 : 0),
+            decoration: (() {
+              final theme = ShadTheme.of(context);
+              final composerRadius = theme.radius.resolve(Directionality.of(context));
+              final composerBorder = ShadBorder.all(radius: composerRadius, color: theme.colorScheme.border, width: 2);
+              final composerFocusedBorder = ShadBorder.all(radius: composerRadius, color: theme.colorScheme.foreground, width: 2);
+              return ShadDecoration(
+                color: theme.colorScheme.card,
+                border: composerBorder,
+                focusedBorder: composerFocusedBorder,
+                secondaryBorder: ShadBorder.none,
+                secondaryFocusedBorder: ShadBorder.none,
               );
-            },
-          ),
-          crossAxisAlignment: CrossAxisAlignment.center,
-          inputPadding: EdgeInsets.all(2),
-          leading: widget.leading ?? SizedBox(width: 3),
-          trailing: widget.footer == null ? trailer : null,
-          padding: EdgeInsets.only(left: 5, right: 5, top: widget.footer == null ? 5 : 10, bottom: 5),
-          decoration: (() {
-            final theme = ShadTheme.of(context);
-            final composerRadius = theme.radius.resolve(Directionality.of(context));
-            final composerBorder = ShadBorder.all(radius: composerRadius, color: theme.colorScheme.border, width: 2);
-            final composerFocusedBorder = ShadBorder.all(radius: composerRadius, color: theme.colorScheme.foreground, width: 2);
-            return ShadDecoration(
-              color: theme.colorScheme.card,
-              border: composerBorder,
-              focusedBorder: composerFocusedBorder,
-              secondaryBorder: ShadBorder.none,
-              secondaryFocusedBorder: ShadBorder.none,
-            );
-          })(),
-          maxLines: 8,
-          minLines: 1,
-          placeholder: widget.placeholder,
-          focusNode: focusNode,
-          controller: widget.controller.textFieldController,
-          bottom: widget.footer == null
-              ? null
-              : Padding(
-                  padding: EdgeInsets.only(left: 5, right: 5, top: 5, bottom: 0),
-                  child: Row(
-                    children: [
-                      Expanded(child: widget.footer!),
-                      ?trailer,
-                    ],
+            })(),
+            maxLines: 8,
+            minLines: 1,
+            placeholder: widget.placeholder,
+            focusNode: focusNode,
+            controller: widget.controller.textFieldController,
+            bottom: widget.footer == null
+                ? null
+                : Padding(
+                    padding: EdgeInsets.only(left: 5, right: 5, top: 5, bottom: 5),
+                    child: Row(
+                      children: [
+                        Expanded(child: widget.footer!),
+                        Visibility(
+                          visible: trailer != null,
+                          maintainState: true,
+                          maintainAnimation: true,
+                          maintainSize: true,
+                          child: reservedFooterTrailer,
+                        ),
+                      ],
+                    ),
                   ),
-                ),
+          ),
         ),
       ],
     );
@@ -2742,6 +3344,22 @@ class _ChatThreadState extends State<ChatThread> {
     );
   }
 
+  ChatThreadToolArea _buildToolArea(BuildContext context, ChatThreadSnapshot state) {
+    return resolveChatThreadToolArea(widget.toolsBuilder == null ? null : widget.toolsBuilder!(context, controller, state));
+  }
+
+  Future<AgentTurnToolkitConfig?> _buildMcpTurnToolkitConfig({required ChatThreadSnapshot state}) async {
+    if (!state.supportsMcp || !controller.isToolkitEnabled("mcp")) {
+      return null;
+    }
+
+    final servers = [for (final connector in controller.selectedMcpConnectors) connector.server.toJson()];
+    if (servers.isEmpty) {
+      return null;
+    }
+    return AgentTurnToolkitConfig(clientOptions: {"servers": servers});
+  }
+
   @override
   void initState() {
     super.initState();
@@ -2821,6 +3439,7 @@ class _ChatThreadState extends State<ChatThread> {
     final waitingForTurnStart = _isWaitingForTurnStart(state: state, pendingMessages: pendingMessages);
     final waitingForOnlineMessage = pendingMessages.firstWhereOrNull((message) => message.awaitingOnline);
     final canInterruptActiveTurn = _canInterruptActiveTurn(state: state, pendingMessages: pendingMessages);
+    final toolArea = _buildToolArea(context, state);
 
     return ChatThreadInput(
       focusTrigger: widget.path,
@@ -2849,14 +3468,16 @@ class _ChatThreadState extends State<ChatThread> {
       sendPendingText: waitingForOnlineMessage == null
           ? null
           : "Waiting for ${_displayParticipantName(widget.agentName ?? "agent")} to come online.",
-      leading: widget.toolsBuilder == null ? null : widget.toolsBuilder!(context, controller, state),
-      footer: null,
+      leading: toolArea.leading,
+      footer: toolArea.footer,
       trailing: null,
       room: widget.room,
       onSend: (value, attachments) async {
         final messageType = state.threadStatusMode == "steerable" && state.threadTurnId != null ? "steer" : "chat";
         final normalizedAgentName = widget.agentName?.trim();
         final hasConfiguredAgent = normalizedAgentName != null && normalizedAgentName.isNotEmpty;
+        final mcpToolkitConfig = await _buildMcpTurnToolkitConfig(state: state);
+        final turnToolkits = <String, AgentTurnToolkitConfig>{if (mcpToolkitConfig != null) "mcp": mcpToolkitConfig};
         await controller.send(
           thread: widget.document,
           path: widget.path,
@@ -2866,6 +3487,7 @@ class _ChatThreadState extends State<ChatThread> {
           storeLocally: _shouldStoreLocally(hasConfiguredAgent: hasConfiguredAgent, useAgentMessages: state.supportsAgentMessages),
           useAgentMessages: state.supportsAgentMessages,
           turnId: state.threadTurnId,
+          toolkits: turnToolkits.isEmpty ? null : turnToolkits,
           onMessageSent: widget.onMessageSent,
         );
       },
@@ -5886,6 +6508,8 @@ class ChatThreadSnapshot {
     required this.threadStatusStartedAt,
     required this.threadStatusMode,
     required this.supportsAgentMessages,
+    required this.supportsMcp,
+    required this.toolkits,
     required this.threadTurnId,
     required this.pendingMessages,
     required this.pendingItemId,
@@ -5901,6 +6525,8 @@ class ChatThreadSnapshot {
   final DateTime? threadStatusStartedAt;
   final String? threadStatusMode;
   final bool supportsAgentMessages;
+  final bool supportsMcp;
+  final Map<String, AgentToolkitCapabilities> toolkits;
   final String? threadTurnId;
   final List<PendingAgentMessage> pendingMessages;
   final String? pendingItemId;
@@ -5940,9 +6566,12 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
   DateTime? threadStatusStartedAt;
   String? threadStatusMode;
   bool supportsAgentMessages = false;
+  Map<String, AgentToolkitCapabilities> toolkits = const {};
   String? threadTurnId;
   List<PendingAgentMessage> pendingMessages = const [];
   String? pendingItemId;
+  String? _capabilitiesRequestKey;
+  String? _capabilitiesResponseKey;
 
   @override
   void initState() {
@@ -5959,21 +6588,117 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
     _checkAgent();
   }
 
+  @override
+  void didUpdateWidget(covariant ChatThreadBuilder oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.room != widget.room) {
+      sub.cancel();
+      oldWidget.room.messaging.removeListener(_onMessagingChanged);
+      sub = widget.room.listen(_onRoomMessage);
+      widget.room.messaging.addListener(_onMessagingChanged);
+    }
+
+    if (oldWidget.document != widget.document) {
+      oldWidget.document.removeListener(_onDocumentChanged);
+      widget.document.addListener(_onDocumentChanged);
+    }
+
+    if (oldWidget.room != widget.room || oldWidget.path != widget.path || oldWidget.agentName != widget.agentName) {
+      _clearCapabilities();
+    }
+
+    _getParticipants();
+    _getMessages();
+    _getThreadStatus();
+    _checkAgent();
+  }
+
   bool agentOnline = false;
+
+  void _clearCapabilities() {
+    toolkits = const {};
+    _capabilitiesRequestKey = null;
+    _capabilitiesResponseKey = null;
+  }
+
+  Future<void> _requestCapabilities({required RemoteParticipant agent}) async {
+    if (!_supportsAgentMessages(agent) && !_supportsMcp(agent)) {
+      return;
+    }
+
+    final requestKey = "${agent.id}:${widget.path}";
+    if (_capabilitiesRequestKey == requestKey || _capabilitiesResponseKey == requestKey) {
+      return;
+    }
+
+    _capabilitiesRequestKey = requestKey;
+    try {
+      await widget.room.messaging.sendMessage(
+        to: agent,
+        type: _agentRoomMessageType,
+        message: {
+          "payload": {"type": _agentCapabilitiesRequestType, "thread_id": widget.path, "message_id": const Uuid().v4()},
+        },
+      );
+    } catch (_) {
+      if (_capabilitiesRequestKey == requestKey) {
+        _capabilitiesRequestKey = null;
+      }
+    }
+  }
+
+  bool _handleCapabilitiesPayload({required RoomMessageEvent event, required Map<String, dynamic> payload}) {
+    final type = payload["type"];
+    if (type != _agentCapabilitiesResponseType) {
+      return false;
+    }
+
+    if (payload["thread_id"] != widget.path) {
+      return true;
+    }
+
+    final currentAgent = widget.room.messaging.remoteParticipants.firstWhereOrNull(
+      (participant) => participant.id == event.message.fromParticipantId,
+    );
+    if (currentAgent == null) {
+      return true;
+    }
+
+    try {
+      final response = AgentCapabilitiesResponse.fromJson(payload);
+      toolkits = response.toolkitsByName;
+      _capabilitiesRequestKey = null;
+      _capabilitiesResponseKey = "${currentAgent.id}:${response.threadId}";
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (_) {}
+
+    return true;
+  }
+
   void _checkAgent() {
-    final agent = widget.room.messaging.remoteParticipants.firstWhereOrNull((x) => x.getAttribute("name") == widget.agentName);
+    final agent = widget.room.messaging.remoteParticipants.firstWhereOrNull(
+      (participant) => participant.getAttribute("name") == widget.agentName,
+    );
     final online = agent != null;
     if (online != agentOnline) {
-      if (!mounted) {
-        return;
+      agentOnline = online;
+      if (!online) {
+        _clearCapabilities();
       }
-      setState(() {
-        agentOnline = online;
-      });
+      if (mounted) {
+        setState(() {});
+      }
 
       if (online) {
         widget.room.messaging.sendMessage(to: agent, type: "opened", message: {"path": widget.path});
       }
+    }
+
+    if (agent != null) {
+      unawaited(_requestCapabilities(agent: agent));
     }
   }
 
@@ -6017,9 +6742,16 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
       if (event.message.type == _agentRoomMessageType) {
         final payload = event.message.message["payload"];
         if (payload is Map<String, dynamic>) {
+          if (_handleCapabilitiesPayload(event: event, payload: payload)) {
+            return;
+          }
           widget.controller.handleAgentMessagePayload(payload);
         } else if (payload is Map) {
-          widget.controller.handleAgentMessagePayload(Map<String, dynamic>.from(payload));
+          final normalized = Map<String, dynamic>.from(payload);
+          if (_handleCapabilitiesPayload(event: event, payload: normalized)) {
+            return;
+          }
+          widget.controller.handleAgentMessagePayload(normalized);
         }
       }
 
@@ -6138,6 +6870,11 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
 
   @override
   Widget build(BuildContext context) {
+    final supportsMcp =
+        toolkits.containsKey("mcp") ||
+        widget.room.messaging.remoteParticipants.any(
+          (participant) => participant.getAttribute("name") == widget.agentName && _supportsMcp(participant),
+        );
     return widget.builder(
       context,
       ChatThreadSnapshot(
@@ -6151,6 +6888,8 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         threadStatusStartedAt: threadStatusStartedAt,
         threadStatusMode: threadStatusMode,
         supportsAgentMessages: supportsAgentMessages,
+        supportsMcp: supportsMcp,
+        toolkits: toolkits,
         threadTurnId: threadTurnId,
         pendingMessages: pendingMessages,
         pendingItemId: pendingItemId,
