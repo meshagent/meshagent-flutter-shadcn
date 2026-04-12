@@ -1755,11 +1755,7 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
             onPressed: _onSelectAttachment,
             child: const Text("Upload a file..."),
           ),
-          ShadContextMenuItem(
-            leading: const Icon(LucideIcons.download),
-            onPressed: _onBrowseFiles,
-            child: const Text("Add from room..."),
-          ),
+          ShadContextMenuItem(leading: const Icon(LucideIcons.download), onPressed: _onBrowseFiles, child: const Text("Add from room...")),
         ],
         controller: popoverController,
         child: ShadIconButton.ghost(
