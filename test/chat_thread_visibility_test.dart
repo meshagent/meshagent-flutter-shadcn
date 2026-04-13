@@ -157,7 +157,7 @@ void main() {
     VisibilityDetectorController.instance.updateInterval = previousVisibilityUpdateInterval;
   });
 
-  testWidgets('filters empty standard messages from the thread display', (tester) async {
+  testWidgets('filters empty standard messages from the thread display without showing an empty state', (tester) async {
     final room = RoomClient(protocol: Protocol(channel: _NoopProtocolChannel()));
     final document = _createThreadDocument();
     addTearDown(room.dispose);
@@ -194,7 +194,8 @@ void main() {
     await tester.pump();
 
     expect(find.byType(ChatBubble), findsNothing);
-    expect(find.text("No visible messages"), findsOneWidget);
+    expect(find.text("No visible messages"), findsNothing);
+    expect(find.byType(ChatThreadEmptyStateContent), findsNothing);
     expect(emptyCallbackCount, 1);
   });
 

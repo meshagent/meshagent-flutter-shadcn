@@ -4867,24 +4867,8 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   @override
   Widget build(BuildContext context) {
     final visibleMessages = messages.where(_shouldRenderThreadMessage).toList();
-    bool bottomAlign = !startChatCentered || visibleMessages.isNotEmpty;
+    const bool bottomAlign = true;
     final feedImages = _collectThreadImages();
-    final rawCenteredTitle = emptyStateTitle?.trim();
-    final participantCenteredTitle = online.firstOrNull?.getAttribute("empty_state_title");
-    final participantCenteredDescription = online.firstOrNull?.getAttribute("empty_state_description");
-    final centeredTitle = rawCenteredTitle != null && rawCenteredTitle.isNotEmpty
-        ? rawCenteredTitle
-        : participantCenteredTitle is String && participantCenteredTitle.trim().isNotEmpty
-        ? participantCenteredTitle.trim()
-        : startChatCentered
-        ? "How can I help you?"
-        : null;
-    final rawCenteredDescription = emptyStateDescription?.trim();
-    final centeredDescription = rawCenteredDescription != null && rawCenteredDescription.isNotEmpty
-        ? rawCenteredDescription
-        : participantCenteredDescription is String && participantCenteredDescription.trim().isNotEmpty
-        ? participantCenteredDescription.trim()
-        : null;
 
     final messageWidgets = <Widget>[];
     for (var message in visibleMessages.indexed) {
@@ -4905,15 +4889,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     final threadView = ChatThreadViewportBody(
       scrollController: widget.scrollController,
       bottomAlign: bottomAlign,
-      centerContent: visibleMessages.isEmpty
-          ? emptyState ??
-                (centeredTitle != null
-                    ? Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
-                        child: ChatThreadEmptyStateContent(title: centeredTitle, description: centeredDescription),
-                      )
-                    : null)
-          : null,
+      centerContent: null,
       bottomSpacer: showTyping ? 20 : 0,
       overlays: [
         if (showTyping)
