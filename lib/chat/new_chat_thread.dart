@@ -58,6 +58,24 @@ class _NewChatThreadState extends State<NewChatThread> {
   Completer<void>? _waitForAgentReadyCompleter;
   final GlobalKey _sendingStatusKey = GlobalKey();
 
+  String? _pendingSenderDisplayName() {
+    final rawName = widget.room.localParticipant?.getAttribute("name");
+    if (rawName is! String) {
+      return null;
+    }
+
+    final trimmedName = rawName.trim();
+    if (trimmedName.isEmpty) {
+      return null;
+    }
+
+    return trimmedName.split("@").first.trim();
+  }
+
+  DateTime _pendingCreatedAt() {
+    return _creatingNewThreadStartedAt ?? DateTime.now();
+  }
+
   String _chatPlaceholderText() {
     final normalizedAgentName = widget.agentName.trim();
     if (normalizedAgentName.isEmpty) {
@@ -450,11 +468,22 @@ class _NewChatThreadState extends State<NewChatThread> {
     final toolsBuilder = widget.toolsBuilder;
     final toolArea = resolveChatThreadToolArea(toolsBuilder == null ? null : toolsBuilder(context, _controller, snapshot));
     final pendingText = _pendingMessageText;
+    final pendingSenderDisplayName = _pendingSenderDisplayName();
+    final pendingCreatedAt = _pendingCreatedAt();
     final hasPendingContent = (pendingText != null && pendingText.isNotEmpty) || _pendingAttachmentPaths.isNotEmpty;
     final pendingMessage = hasPendingContent
         ? Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
+              if (pendingSenderDisplayName != null)
+                Padding(
+                  padding: const EdgeInsets.only(left: 85, right: 5, bottom: 6),
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: ChatThreadAuthorHeader(authorName: pendingSenderDisplayName, createdAt: pendingCreatedAt, text: pendingText),
+                  ),
+                ),
               if (pendingText != null && pendingText.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 0),

@@ -97,10 +97,6 @@ TextStyle _emojiTextStyle({double size = 14}) {
   );
 }
 
-bool _shouldShowAuthorNames({required MeshDocument thread, String? localParticipantName}) {
-  return true;
-}
-
 List<String> _parseEventDetailLines(String raw) {
   final value = raw.trim();
   if (value.isEmpty) {
@@ -2850,6 +2846,7 @@ class ChatThread extends StatefulWidget {
     this.agentName,
     this.onVisibleMessagesEmpty,
     this.initialShowCompletedToolCalls = false,
+    this.shouldShowAuthorNames = true,
   });
 
   final String? agentName;
@@ -2867,6 +2864,7 @@ class ChatThread extends StatefulWidget {
   final Widget? emptyState;
   final FutureOr<void> Function()? onVisibleMessagesEmpty;
   final bool initialShowCompletedToolCalls;
+  final bool shouldShowAuthorNames;
 
   final Widget Function(BuildContext, MeshDocument, MeshElement)? messageHeaderBuilder;
   final Widget Function(BuildContext, List<String>)? waitingForParticipantsBuilder;
@@ -3536,6 +3534,7 @@ class _ChatThreadState extends State<ChatThread> {
                   path: widget.path,
                   scrollController: controller.threadScrollController,
                   agentName: widget.agentName,
+                  shouldShowAuthorNames: widget.shouldShowAuthorNames,
                   showCompletedToolCalls: _showCompletedToolCalls,
                   onShowCompletedToolCallsChanged: (value) {
                     setState(() {
@@ -3664,6 +3663,7 @@ class ChatThreadMessages extends StatefulWidget {
     required this.messages,
     required this.online,
     required this.showCompletedToolCalls,
+    this.shouldShowAuthorNames = true,
 
     this.startChatCentered = false,
     this.showTyping = false,
@@ -3691,6 +3691,7 @@ class ChatThreadMessages extends StatefulWidget {
   final String path;
   final ScrollController scrollController;
   final String? agentName;
+  final bool shouldShowAuthorNames;
   final bool showCompletedToolCalls;
   final bool startChatCentered;
   final bool showTyping;
@@ -4712,16 +4713,6 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     return _shouldRenderThreadMessageElement(message, showCompletedToolCalls: widget.showCompletedToolCalls);
   }
 
-  bool _defaultHeaderWillRender({required MeshElement message}) {
-    final doc = message.doc;
-    if (doc is! MeshDocument) {
-      return false;
-    }
-
-    final localParticipantName = room.localParticipant?.getAttribute("name");
-    return _shouldShowAuthorNames(thread: doc, localParticipantName: localParticipantName is String ? localParticipantName : null);
-  }
-
   Widget _buildMessage(
     BuildContext context,
     MeshElement? previous,
@@ -4729,14 +4720,11 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     MeshElement? next, {
     required List<_ThreadFeedImage> feedImages,
   }) {
-    final isSameAuthor = message.getAttribute("author_name") == previous?.getAttribute("author_name");
     final localParticipantName = room.localParticipant?.getAttribute("name");
     final localParticipantReactionName = _localParticipantName();
     final mine = message.getAttribute("author_name") == localParticipantName;
     final useDefaultHeaderBuilder = messageHeaderBuilder == null;
-    final isLastVisibleMessage = next == null;
-    final shouldShowHeader =
-        (!isSameAuthor && (!useDefaultHeaderBuilder || _defaultHeaderWillRender(message: message))) || isLastVisibleMessage;
+    final shouldShowHeader = !useDefaultHeaderBuilder || widget.shouldShowAuthorNames;
 
     final id = message.getAttribute("id");
     final text = message.getAttribute("text");
@@ -4793,13 +4781,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                 alignment: mine ? .centerRight : .centerLeft,
                 child:
                     messageHeaderBuilder?.call(context, message.doc as MeshDocument, message) ??
-                    defaultMessageHeaderBuilder(
-                      context,
-                      message.doc as MeshDocument,
-                      message,
-                      localParticipantName: localParticipantName is String ? localParticipantName : null,
-                      isLastMessage: isLastVisibleMessage,
-                    ),
+                    defaultMessageHeaderBuilder(context, message, shouldShowAuthorNames: widget.shouldShowAuthorNames),
               ),
             ),
 
@@ -6424,37 +6406,35 @@ class _PreviewSweepOverlayState extends State<_PreviewSweepOverlay> with SingleT
   }
 }
 
-Widget defaultMessageHeaderBuilder(
-  BuildContext context,
-  MeshDocument thread,
-  MeshElement message, {
-  String? localParticipantName,
-  bool isLastMessage = false,
-}) {
-  final theme = ShadTheme.of(context);
-  final tt = theme.textTheme;
-  final cs = theme.colorScheme;
-  final isDesktopScreen = MediaQuery.sizeOf(context).width >= 600;
+class ChatThreadAuthorHeader extends StatelessWidget {
+  const ChatThreadAuthorHeader({super.key, required this.authorName, required this.createdAt, this.text});
 
-  final name = message.getAttribute("author_name") ?? "";
-  final createdAt = message.getAttribute("created_at") == null ? DateTime.now() : DateTime.parse(message.getAttribute("created_at"));
+  final String authorName;
+  final DateTime createdAt;
+  final String? text;
 
-  if (isLastMessage || _shouldShowAuthorNames(thread: thread, localParticipantName: localParticipantName)) {
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final tt = theme.textTheme;
+    final cs = theme.colorScheme;
+    final isDesktopScreen = MediaQuery.sizeOf(context).width >= 600;
+
     return Container(
       padding: _chatBubbleContentPadding,
-      width: ((message.getAttribute("text") as String?)?.isEmpty ?? true) ? 250 : double.infinity,
+      width: ((text)?.isEmpty ?? true) ? 250 : double.infinity,
       child: SelectionArea(
         child: Row(
           spacing: 8,
           children: [
             Expanded(
               child: Text(
-                _displayParticipantName(name),
+                _displayParticipantName(authorName),
                 style: isDesktopScreen
                     ? GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700, color: cs.foreground)
                     : tt.small.copyWith(color: cs.foreground),
                 maxLines: 1,
-                overflow: .ellipsis,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
             Text(
@@ -6467,6 +6447,15 @@ Widget defaultMessageHeaderBuilder(
         ),
       ),
     );
+  }
+}
+
+Widget defaultMessageHeaderBuilder(BuildContext context, MeshElement message, {bool shouldShowAuthorNames = true}) {
+  final name = message.getAttribute("author_name") ?? "";
+  final createdAt = message.getAttribute("created_at") == null ? DateTime.now() : DateTime.parse(message.getAttribute("created_at"));
+
+  if (shouldShowAuthorNames) {
+    return ChatThreadAuthorHeader(authorName: name.toString(), createdAt: createdAt, text: message.getAttribute("text") as String?);
   } else {
     return SizedBox(height: 0);
   }

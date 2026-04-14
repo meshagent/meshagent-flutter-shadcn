@@ -249,6 +249,70 @@ void main() {
     expect(emptyCallbackCount, 0);
   });
 
+  testWidgets('shows author headers for consecutive messages by default', (tester) async {
+    final room = RoomClient(protocol: Protocol(channel: _NoopProtocolChannel()));
+    final document = _createThreadDocument();
+    addTearDown(room.dispose);
+    addTearDown(document.dispose);
+
+    final messages = _messagesElement(document);
+    _insertElement(
+      document: document,
+      targetId: messages.id,
+      tagName: "message",
+      elementId: "message-one",
+      attributes: {"text": "hello", "author_name": "assistant"},
+    );
+    _insertElement(
+      document: document,
+      targetId: messages.id,
+      tagName: "message",
+      elementId: "message-two",
+      attributes: {"text": "again", "author_name": "assistant"},
+    );
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox.expand(
+            child: ChatThread(path: "/threads/test", document: document, room: room),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text("assistant"), findsNWidgets(2));
+  });
+
+  testWidgets('can hide author headers explicitly', (tester) async {
+    final room = RoomClient(protocol: Protocol(channel: _NoopProtocolChannel()));
+    final document = _createThreadDocument();
+    addTearDown(room.dispose);
+    addTearDown(document.dispose);
+
+    _insertElement(
+      document: document,
+      targetId: _messagesElement(document).id,
+      tagName: "message",
+      elementId: "message-one",
+      attributes: {"text": "hello", "author_name": "assistant"},
+    );
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox.expand(
+            child: ChatThread(path: "/threads/test", document: document, room: room, shouldShowAuthorNames: false),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text("assistant"), findsNothing);
+  });
+
   testWidgets('renders tool footers below the thread composer', (tester) async {
     final room = RoomClient(protocol: Protocol(channel: _NoopProtocolChannel()));
     final document = _createThreadDocument();
