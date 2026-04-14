@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:markdown_widget/markdown_widget.dart';
 import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_flutter_shadcn/chat_bubble_markdown_config.dart';
@@ -52,12 +52,16 @@ class MarkdownViewer extends StatelessWidget {
   Widget build(BuildContext context) {
     return MediaQuery(
       data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
-      child: MarkdownWidget(
-        padding: const EdgeInsets.all(20),
-        config: buildChatBubbleMarkdownConfig(context),
-        shrinkWrap: true,
-        selectable: true,
-        data: markdown,
+      child: SelectionArea(
+        contextMenuBuilder: (context, selectableRegionState) =>
+            AdaptiveTextSelectionToolbar.selectableRegion(selectableRegionState: selectableRegionState),
+        child: MarkdownWidget(
+          padding: const EdgeInsets.all(20),
+          config: buildChatBubbleMarkdownConfig(context),
+          shrinkWrap: true,
+          selectable: false,
+          data: markdown,
+        ),
       ),
     );
   }
