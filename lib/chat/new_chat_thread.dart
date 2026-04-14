@@ -24,6 +24,8 @@ class NewChatThread extends StatefulWidget {
     this.onThreadPathChanged,
     this.centerComposer = true,
     this.emptyState,
+    this.inputContextMenuBuilder,
+    this.inputOnPressedOutside,
   });
 
   final RoomClient room;
@@ -36,6 +38,8 @@ class NewChatThread extends StatefulWidget {
   final ValueChanged<String?>? onThreadPathChanged;
   final bool centerComposer;
   final Widget? emptyState;
+  final EditableTextContextMenuBuilder? inputContextMenuBuilder;
+  final TapRegionCallback? inputOnPressedOutside;
 
   @override
   State<NewChatThread> createState() => _NewChatThreadState();
@@ -543,6 +547,8 @@ class _NewChatThreadState extends State<NewChatThread> {
                     return;
                   }
                 },
+                contextMenuBuilder: widget.inputContextMenuBuilder,
+                onPressedOutside: widget.inputOnPressedOutside,
               ),
             ),
           ),
@@ -598,6 +604,8 @@ class _NewChatThreadState extends State<NewChatThread> {
           await _startNewThread();
         }
       },
+      contextMenuBuilder: widget.inputContextMenuBuilder,
+      onPressedOutside: widget.inputOnPressedOutside,
     );
 
     final content = !widget.centerComposer

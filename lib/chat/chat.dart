@@ -2382,6 +2382,8 @@ class ChatThreadInput extends StatefulWidget {
     this.onInterrupt,
     this.onCancelSend,
     this.sendPendingText,
+    this.contextMenuBuilder,
+    this.onPressedOutside,
   });
 
   final Widget? placeholder;
@@ -2403,6 +2405,8 @@ class ChatThreadInput extends StatefulWidget {
   final Widget? trailing;
   final Widget? header;
   final Widget? footer;
+  final EditableTextContextMenuBuilder? contextMenuBuilder;
+  final TapRegionCallback? onPressedOutside;
   @override
   State createState() => _ChatThreadInput();
 }
@@ -2730,8 +2734,10 @@ class _ChatThreadInput extends State<ChatThreadInput> {
         if (widget.header != null) widget.header!,
         EnableWebContextMenu(
           child: ShadInput(
-            contextMenuBuilder: (context, editableTextState) =>
-                AdaptiveTextSelectionToolbar.editableText(editableTextState: editableTextState),
+            contextMenuBuilder:
+                widget.contextMenuBuilder ??
+                (context, editableTextState) => AdaptiveTextSelectionToolbar.editableText(editableTextState: editableTextState),
+            onPressedOutside: widget.onPressedOutside,
             top: ListenableBuilder(
               listenable: widget.controller,
               builder: (context, _) {
@@ -2847,6 +2853,8 @@ class ChatThread extends StatefulWidget {
     this.onVisibleMessagesEmpty,
     this.initialShowCompletedToolCalls = false,
     this.shouldShowAuthorNames = true,
+    this.inputContextMenuBuilder,
+    this.inputOnPressedOutside,
   });
 
   final String? agentName;
@@ -2873,6 +2881,8 @@ class ChatThread extends StatefulWidget {
   final Widget Function(BuildContext context, Widget chatBox)? chatInputBoxBuilder;
   final FutureOr<void> Function(String path)? openFile;
   final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
+  final EditableTextContextMenuBuilder? inputContextMenuBuilder;
+  final TapRegionCallback? inputOnPressedOutside;
 
   @override
   State createState() => _ChatThreadState();
@@ -3498,6 +3508,8 @@ class _ChatThreadState extends State<ChatThread> {
       },
       controller: controller,
       attachmentBuilder: widget.attachmentBuilder,
+      contextMenuBuilder: widget.inputContextMenuBuilder,
+      onPressedOutside: widget.inputOnPressedOutside,
     );
   }
 
