@@ -71,9 +71,13 @@ class PendingLocalMediaState extends ChangeNotifier {
   bool _microphonePending = false;
   bool _cameraAwaitingEnableConfirmation = false;
   bool _microphoneAwaitingEnableConfirmation = false;
+  bool _cameraUnavailable = false;
+  bool _microphoneUnavailable = false;
 
   bool get cameraPending => _cameraPending;
   bool get microphonePending => _microphonePending;
+  bool get cameraUnavailable => _cameraUnavailable;
+  bool get microphoneUnavailable => _microphoneUnavailable;
 
   void setCameraPending(bool value, {bool awaitEnableConfirmation = false}) {
     if (_cameraPending == value && _cameraAwaitingEnableConfirmation == awaitEnableConfirmation) {
@@ -92,6 +96,24 @@ class PendingLocalMediaState extends ChangeNotifier {
 
     _microphonePending = value;
     _microphoneAwaitingEnableConfirmation = value && awaitEnableConfirmation;
+    notifyListeners();
+  }
+
+  void setCameraUnavailable(bool value) {
+    if (_cameraUnavailable == value) {
+      return;
+    }
+
+    _cameraUnavailable = value;
+    notifyListeners();
+  }
+
+  void setMicrophoneUnavailable(bool value) {
+    if (_microphoneUnavailable == value) {
+      return;
+    }
+
+    _microphoneUnavailable = value;
     notifyListeners();
   }
 
@@ -116,7 +138,22 @@ class PendingLocalMediaState extends ChangeNotifier {
   }
 
   void clear() {
-    setPending(cameraPending: false, microphonePending: false);
+    if (!_cameraPending &&
+        !_microphonePending &&
+        !_cameraAwaitingEnableConfirmation &&
+        !_microphoneAwaitingEnableConfirmation &&
+        !_cameraUnavailable &&
+        !_microphoneUnavailable) {
+      return;
+    }
+
+    _cameraPending = false;
+    _microphonePending = false;
+    _cameraAwaitingEnableConfirmation = false;
+    _microphoneAwaitingEnableConfirmation = false;
+    _cameraUnavailable = false;
+    _microphoneUnavailable = false;
+    notifyListeners();
   }
 }
 
@@ -175,8 +212,14 @@ class MeetingController extends ChangeNotifier {
     if (pendingLocalMedia._cameraAwaitingEnableConfirmation && (localParticipant?.isCameraEnabled() ?? false)) {
       pendingLocalMedia.setCameraPending(false);
     }
+    if (localParticipant?.isCameraEnabled() ?? false) {
+      pendingLocalMedia.setCameraUnavailable(false);
+    }
     if (pendingLocalMedia._microphoneAwaitingEnableConfirmation && (localParticipant?.isMicrophoneEnabled() ?? false)) {
       pendingLocalMedia.setMicrophonePending(false);
+    }
+    if (localParticipant?.isMicrophoneEnabled() ?? false) {
+      pendingLocalMedia.setMicrophoneUnavailable(false);
     }
   }
 
@@ -209,6 +252,8 @@ class MeetingController extends ChangeNotifier {
       throw Exception("The controller has not been configured");
     }
 
+    pendingLocalMedia.setCameraUnavailable(false);
+    pendingLocalMedia.setMicrophoneUnavailable(false);
     pendingLocalMedia.setPending(
       cameraPending: fastConnectOptions?.camera.enabled == true,
       microphonePending: fastConnectOptions?.microphone.enabled == true,
@@ -222,23 +267,29 @@ class MeetingController extends ChangeNotifier {
       if (fastConnectOptions?.camera.enabled == true) {
         try {
           await localParticipant?.setCameraEnabled(true);
+          pendingLocalMedia.setCameraUnavailable(false);
         } catch (error) {
           pendingLocalMedia.setCameraPending(false);
+          pendingLocalMedia.setCameraUnavailable(true);
           Logger.root.warning("unable to enable camera after connecting $error");
         }
       } else {
         pendingLocalMedia.setCameraPending(false);
+        pendingLocalMedia.setCameraUnavailable(false);
       }
 
       if (fastConnectOptions?.microphone.enabled == true) {
         try {
           await localParticipant?.setMicrophoneEnabled(true);
+          pendingLocalMedia.setMicrophoneUnavailable(false);
         } catch (error) {
           pendingLocalMedia.setMicrophonePending(false);
+          pendingLocalMedia.setMicrophoneUnavailable(true);
           Logger.root.warning("unable to enable microphone after connecting $error");
         }
       } else {
         pendingLocalMedia.setMicrophonePending(false);
+        pendingLocalMedia.setMicrophoneUnavailable(false);
       }
 
       _syncPendingLocalMediaState();
