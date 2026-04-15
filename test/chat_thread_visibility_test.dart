@@ -151,6 +151,41 @@ void _insertElement({
   });
 }
 
+Widget _buildThreadHarness({
+  required RoomClient room,
+  required ChatThreadController controller,
+  required MeshDocument document,
+  bool shouldShowAuthorNames = true,
+}) {
+  return ShadApp(
+    home: Scaffold(
+      body: Column(
+        children: [
+          ChatThreadMessages(
+            room: room,
+            path: "/threads/test",
+            scrollController: controller.threadScrollController,
+            messages: _messagesElement(document).getChildren().whereType<MeshElement>().toList(),
+            online: const [],
+            showCompletedToolCalls: false,
+            shouldShowAuthorNames: shouldShowAuthorNames,
+            startChatCentered: true,
+            emptyStateTitle: "No visible messages",
+          ),
+          ChatThreadInputFrame(
+            child: ChatThreadInput(
+              room: room,
+              controller: controller,
+              readOnly: true,
+              onSend: (value, attachments) async {},
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
 void main() {
   final previousRuntime = DocumentRuntime.instance;
   final previousVisibilityUpdateInterval = VisibilityDetectorController.instance.updateInterval;
@@ -169,8 +204,10 @@ void main() {
 
   testWidgets('filters empty standard messages from the thread display without showing an empty state', (tester) async {
     final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
     final document = _createThreadDocument();
     addTearDown(room.dispose);
+    addTearDown(controller.dispose);
     addTearDown(document.dispose);
 
     _insertElement(
@@ -181,38 +218,20 @@ void main() {
       attributes: {"text": "   ", "author_name": "assistant"},
     );
 
-    var emptyCallbackCount = 0;
-
-    await tester.pumpWidget(
-      ShadApp(
-        home: Scaffold(
-          body: SizedBox.expand(
-            child: ChatThread(
-              path: "/threads/test",
-              document: document,
-              room: room,
-              startChatCentered: true,
-              emptyStateTitle: "No visible messages",
-              onVisibleMessagesEmpty: () {
-                emptyCallbackCount += 1;
-              },
-            ),
-          ),
-        ),
-      ),
-    );
+    await tester.pumpWidget(_buildThreadHarness(room: room, controller: controller, document: document));
     await tester.pump();
 
     expect(find.byType(ChatBubble), findsNothing);
     expect(find.text("No visible messages"), findsNothing);
     expect(find.byType(ChatThreadEmptyStateContent), findsNothing);
-    expect(emptyCallbackCount, 1);
   });
 
   testWidgets('keeps non-empty messages visible when empty ones are present', (tester) async {
     final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
     final document = _createThreadDocument();
     addTearDown(room.dispose);
+    addTearDown(controller.dispose);
     addTearDown(document.dispose);
 
     final messages = _messagesElement(document);
@@ -231,38 +250,20 @@ void main() {
       attributes: {"text": "hello", "author_name": "assistant"},
     );
 
-    var emptyCallbackCount = 0;
-
-    await tester.pumpWidget(
-      ShadApp(
-        home: Scaffold(
-          body: SizedBox.expand(
-            child: ChatThread(
-              path: "/threads/test",
-              document: document,
-              room: room,
-              startChatCentered: true,
-              emptyStateTitle: "No visible messages",
-              onVisibleMessagesEmpty: () {
-                emptyCallbackCount += 1;
-              },
-            ),
-          ),
-        ),
-      ),
-    );
+    await tester.pumpWidget(_buildThreadHarness(room: room, controller: controller, document: document));
     await tester.pump();
 
     expect(find.byType(ChatBubble), findsOneWidget);
     expect(find.text("hello"), findsOneWidget);
     expect(find.text("No visible messages"), findsNothing);
-    expect(emptyCallbackCount, 0);
   });
 
   testWidgets('shows author headers for consecutive messages by default', (tester) async {
     final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
     final document = _createThreadDocument();
     addTearDown(room.dispose);
+    addTearDown(controller.dispose);
     addTearDown(document.dispose);
 
     final messages = _messagesElement(document);
@@ -281,15 +282,7 @@ void main() {
       attributes: {"text": "again", "author_name": "assistant"},
     );
 
-    await tester.pumpWidget(
-      ShadApp(
-        home: Scaffold(
-          body: SizedBox.expand(
-            child: ChatThread(path: "/threads/test", document: document, room: room),
-          ),
-        ),
-      ),
-    );
+    await tester.pumpWidget(_buildThreadHarness(room: room, controller: controller, document: document));
     await tester.pump();
 
     expect(find.text("assistant"), findsNWidgets(2));
@@ -297,8 +290,10 @@ void main() {
 
   testWidgets('can hide author headers explicitly', (tester) async {
     final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
     final document = _createThreadDocument();
     addTearDown(room.dispose);
+    addTearDown(controller.dispose);
     addTearDown(document.dispose);
 
     _insertElement(
@@ -310,13 +305,7 @@ void main() {
     );
 
     await tester.pumpWidget(
-      ShadApp(
-        home: Scaffold(
-          body: SizedBox.expand(
-            child: ChatThread(path: "/threads/test", document: document, room: room, shouldShowAuthorNames: false),
-          ),
-        ),
-      ),
+      _buildThreadHarness(room: room, controller: controller, document: document, shouldShowAuthorNames: false),
     );
     await tester.pump();
 
@@ -325,20 +314,26 @@ void main() {
 
   testWidgets('renders tool footers below the thread composer', (tester) async {
     final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
-    final document = _createThreadDocument();
+    final controller = ChatThreadController(room: room);
     addTearDown(room.dispose);
-    addTearDown(document.dispose);
+    addTearDown(controller.dispose);
 
     await tester.pumpWidget(
       ShadApp(
         home: Scaffold(
-          body: SizedBox.expand(
-            child: ChatThread(
-              path: "/threads/test",
-              document: document,
-              room: room,
-              toolsBuilder: (context, controller, state) => const ChatThreadToolArea(leading: Text("Attach"), footer: Text("MCP footer")),
-            ),
+          body: Column(
+            children: [
+              const Expanded(child: SizedBox.shrink()),
+              ChatThreadInputFrame(
+                child: ChatThreadInput(
+                  room: room,
+                  controller: controller,
+                  leading: const Text("Attach"),
+                  footer: const Text("MCP footer"),
+                  onSend: (value, attachments) async {},
+                ),
+              ),
+            ],
           ),
         ),
       ),

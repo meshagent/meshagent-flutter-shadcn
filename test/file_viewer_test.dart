@@ -41,7 +41,7 @@ void main() {
     addTearDown(room.dispose);
 
     final viewer = fileViewer(room, 'agents/assistant/threads/main.thread');
-    expect(viewer, isA<ChatThreadLoader>());
+    expect(viewer, isA<ChatThread>());
   });
 
   test('classifyFile detects lance files explicitly', () {

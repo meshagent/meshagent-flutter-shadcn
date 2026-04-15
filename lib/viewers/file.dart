@@ -14,7 +14,7 @@ Widget? fileViewer(RoomClient client, String path) {
 
   switch (kind) {
     case FileKind.thread:
-      return ChatThreadLoader(path: path, room: client, includeLocalParticipant: client.localParticipant != null);
+      return ChatThread(path: path, room: client, includeLocalParticipant: client.localParticipant != null);
     case FileKind.lance:
       return const LanceViewer();
     case FileKind.pdf:
