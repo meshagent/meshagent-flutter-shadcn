@@ -274,6 +274,7 @@ class AudioAgentEmptyStateContent extends StatelessWidget {
     final isMobileScreen = MediaQuery.sizeOf(context).width < _mobileScreenWidthMax;
     final scale = _titleScale(availableWidth);
     final titleStyle = theme.textTheme.h1;
+    final descriptionStyle = isMobileScreen ? theme.textTheme.p.copyWith(height: 24 / 16) : theme.textTheme.p;
     final titleFontSize = (titleStyle.fontSize ?? 64) * scale;
     final showDescription = description.isNotEmpty && (availableWidth >= _descriptionVisibilityMinWidth || isMobileScreen);
 
@@ -285,7 +286,7 @@ class AudioAgentEmptyStateContent extends StatelessWidget {
           style: titleStyle.copyWith(fontSize: titleFontSize),
           textAlign: TextAlign.center,
         ),
-        if (showDescription) ...[const SizedBox(height: 8), Text(description, style: theme.textTheme.p, textAlign: TextAlign.center)],
+        if (showDescription) ...[const SizedBox(height: 8), Text(description, style: descriptionStyle, textAlign: TextAlign.center)],
       ],
     );
   }
