@@ -4997,7 +4997,7 @@ class ChatThreadEmptyStateContent extends StatelessWidget {
       builder: (context, constraints) {
         final scale = titleScaleOverride ?? _titleScale(constraints.maxWidth);
         final titleStyle = theme.textTheme.h1;
-        final descriptionStyle = theme.textTheme.p;
+        final descriptionStyle = theme.textTheme.p.copyWith(height: 24 / 16);
         final titleFontSize = (titleStyle.fontSize ?? 64) * scale;
         final showDescription =
             description != null &&
