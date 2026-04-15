@@ -29,6 +29,16 @@ class _FakeDocumentRuntime extends DocumentRuntime {
   void registerDocument(RuntimeDocument document) {}
 
   @override
+  String getState({required String documentId, String? vectorBase64}) {
+    return '';
+  }
+
+  @override
+  String getStateVector({required String documentId}) {
+    return '';
+  }
+
+  @override
   void sendChanges(Map<String, dynamic> message) {}
 
   @override
@@ -158,7 +168,7 @@ void main() {
   });
 
   testWidgets('filters empty standard messages from the thread display without showing an empty state', (tester) async {
-    final room = RoomClient(protocol: Protocol(channel: _NoopProtocolChannel()));
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     final document = _createThreadDocument();
     addTearDown(room.dispose);
     addTearDown(document.dispose);
@@ -200,7 +210,7 @@ void main() {
   });
 
   testWidgets('keeps non-empty messages visible when empty ones are present', (tester) async {
-    final room = RoomClient(protocol: Protocol(channel: _NoopProtocolChannel()));
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     final document = _createThreadDocument();
     addTearDown(room.dispose);
     addTearDown(document.dispose);
@@ -250,7 +260,7 @@ void main() {
   });
 
   testWidgets('shows author headers for consecutive messages by default', (tester) async {
-    final room = RoomClient(protocol: Protocol(channel: _NoopProtocolChannel()));
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     final document = _createThreadDocument();
     addTearDown(room.dispose);
     addTearDown(document.dispose);
@@ -286,7 +296,7 @@ void main() {
   });
 
   testWidgets('can hide author headers explicitly', (tester) async {
-    final room = RoomClient(protocol: Protocol(channel: _NoopProtocolChannel()));
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     final document = _createThreadDocument();
     addTearDown(room.dispose);
     addTearDown(document.dispose);
@@ -314,7 +324,7 @@ void main() {
   });
 
   testWidgets('renders tool footers below the thread composer', (tester) async {
-    final room = RoomClient(protocol: Protocol(channel: _NoopProtocolChannel()));
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     final document = _createThreadDocument();
     addTearDown(room.dispose);
     addTearDown(document.dispose);

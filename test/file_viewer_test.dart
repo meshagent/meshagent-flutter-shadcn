@@ -37,7 +37,7 @@ void main() {
   });
 
   test('fileViewer returns the thread viewer for thread files', () {
-    final room = RoomClient(protocol: Protocol(channel: _NoopProtocolChannel()));
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     addTearDown(room.dispose);
 
     final viewer = fileViewer(room, 'agents/assistant/threads/main.thread');
@@ -49,7 +49,7 @@ void main() {
   });
 
   test('fileViewer returns the lance viewer for lance files', () {
-    final room = RoomClient(protocol: Protocol(channel: _NoopProtocolChannel()));
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     addTearDown(room.dispose);
 
     final viewer = fileViewer(room, '.database/.1234.table');

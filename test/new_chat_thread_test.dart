@@ -21,7 +21,7 @@ class _NoopProtocolChannel extends ProtocolChannel {
 
 void main() {
   test('controller clear preserves enabled toolkits and selected MCP connectors', () {
-    final room = RoomClient(protocol: Protocol(channel: _NoopProtocolChannel()));
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     addTearDown(room.dispose);
 
     final controller = ChatThreadController(room: room);
@@ -39,7 +39,7 @@ void main() {
   });
 
   testWidgets('wraps the new thread composer in a file drop area', (tester) async {
-    final room = RoomClient(protocol: Protocol(channel: _NoopProtocolChannel()));
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     addTearDown(room.dispose);
 
     await tester.pumpWidget(
@@ -62,7 +62,7 @@ void main() {
   });
 
   testWidgets('renders tool footers below the new thread composer', (tester) async {
-    final room = RoomClient(protocol: Protocol(channel: _NoopProtocolChannel()));
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     addTearDown(room.dispose);
 
     await tester.pumpWidget(
@@ -85,7 +85,7 @@ void main() {
   });
 
   testWidgets('footer width stays stable when send button visibility changes', (tester) async {
-    final room = RoomClient(protocol: Protocol(channel: _NoopProtocolChannel()));
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     final controller = ChatThreadController(room: room);
     final footerKey = GlobalKey();
     addTearDown(room.dispose);
@@ -118,7 +118,7 @@ void main() {
   });
 
   testWidgets('mcp footer keeps row content visible while connectors load', (tester) async {
-    final room = RoomClient(protocol: Protocol(channel: _NoopProtocolChannel()));
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     final controller = ChatThreadController(room: room);
     final completer = Completer<List<Connector>>();
     addTearDown(room.dispose);
