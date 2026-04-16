@@ -173,12 +173,7 @@ Widget _buildThreadHarness({
             emptyStateTitle: "No visible messages",
           ),
           ChatThreadInputFrame(
-            child: ChatThreadInput(
-              room: room,
-              controller: controller,
-              readOnly: true,
-              onSend: (value, attachments) async {},
-            ),
+            child: ChatThreadInput(room: room, controller: controller, readOnly: true, onSend: (value, attachments) async {}),
           ),
         ],
       ),
@@ -304,9 +299,7 @@ void main() {
       attributes: {"text": "hello", "author_name": "assistant"},
     );
 
-    await tester.pumpWidget(
-      _buildThreadHarness(room: room, controller: controller, document: document, shouldShowAuthorNames: false),
-    );
+    await tester.pumpWidget(_buildThreadHarness(room: room, controller: controller, document: document, shouldShowAuthorNames: false));
     await tester.pump();
 
     expect(find.text("assistant"), findsNothing);
