@@ -1098,6 +1098,17 @@ class ChatThreadController extends ChangeNotifier {
     }
   }
 
+  List<RemoteParticipant> _uniqueRemoteParticipantsById(Iterable<RemoteParticipant> participants) {
+    final seenParticipantIds = <String>{};
+    final uniqueParticipants = <RemoteParticipant>[];
+    for (final participant in participants) {
+      if (seenParticipantIds.add(participant.id)) {
+        uniqueParticipants.add(participant);
+      }
+    }
+    return uniqueParticipants;
+  }
+
   List<RemoteParticipant> _matchingRecipients({
     required MeshDocument thread,
     required bool useAgentMessages,
@@ -1105,15 +1116,17 @@ class ChatThreadController extends ChangeNotifier {
   }) {
     final normalizedParticipantName = participantName?.trim();
     if (useAgentMessages) {
-      return getAgentParticipants(thread, participantName: normalizedParticipantName).toList();
+      return _uniqueRemoteParticipantsById(getAgentParticipants(thread, participantName: normalizedParticipantName));
     }
 
-    return getOnlineParticipants(thread).whereType<RemoteParticipant>().where((participant) {
-      if (normalizedParticipantName == null || normalizedParticipantName.isEmpty) {
-        return true;
-      }
-      return participant.getAttribute("name") == normalizedParticipantName;
-    }).toList();
+    return _uniqueRemoteParticipantsById(
+      getOnlineParticipants(thread).whereType<RemoteParticipant>().where((participant) {
+        if (normalizedParticipantName == null || normalizedParticipantName.isEmpty) {
+          return true;
+        }
+        return participant.getAttribute("name") == normalizedParticipantName;
+      }),
+    );
   }
 
   bool hasPendingSendWait(String threadPath) {
@@ -1299,11 +1312,13 @@ class ChatThreadController extends ChangeNotifier {
   }
 
   Iterable<String> getParticipantNames(MeshDocument document) sync* {
+    final seenParticipantNames = <String>{};
     for (final child in document.root.getChildren().whereType<MeshElement>()) {
       if (child.tagName == "members") {
         for (final member in child.getChildren().whereType<MeshElement>()) {
-          if (member.getAttribute("name") != null) {
-            yield member.getAttribute("name");
+          final participantName = member.getAttribute("name");
+          if (participantName is String && participantName.isNotEmpty && seenParticipantNames.add(participantName)) {
+            yield participantName;
           }
         }
       }
@@ -1324,12 +1339,18 @@ class ChatThreadController extends ChangeNotifier {
   }
 
   Iterable<Participant> getOnlineParticipants(MeshDocument document) sync* {
+    final seenParticipantIds = <String>{};
     for (final participantName in getParticipantNames(document)) {
       if (participantName == room.localParticipant?.getAttribute("name")) {
-        yield room.localParticipant!;
+        final localParticipant = room.localParticipant;
+        if (localParticipant != null && seenParticipantIds.add(localParticipant.id)) {
+          yield localParticipant;
+        }
       }
       for (final part in room.messaging.remoteParticipants.where((x) => x.getAttribute("name") == participantName)) {
-        yield part;
+        if (seenParticipantIds.add(part.id)) {
+          yield part;
+        }
       }
     }
   }
