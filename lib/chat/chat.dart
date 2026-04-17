@@ -3326,7 +3326,6 @@ class ChatMessage {
 class _ChatThreadState extends State<ChatThread> {
   late final ChatThreadController controller;
   late Key _composerInputKey;
-  OutboundEntry? _currentStatusEntry;
   bool _didNotifyVisibleMessagesEmpty = false;
   late bool _showCompletedToolCalls;
   MeshDocument? _managedDocument;
@@ -3488,16 +3487,6 @@ class _ChatThreadState extends State<ChatThread> {
     );
   }
 
-  void _handleOutboundStatusChanged() {
-    if (!mounted) {
-      return;
-    }
-
-    setState(() {
-      _currentStatusEntry = controller.outboundStatus.currentEntry();
-    });
-  }
-
   Future<void> _clearThread(MeshDocument document, ChatThreadSnapshot state) async {
     await controller.clearThread(widget.path, document, useAgentMessages: state.supportsAgentMessages, participantName: widget.agentName);
   }
@@ -3550,12 +3539,10 @@ class _ChatThreadState extends State<ChatThread> {
     _showCompletedToolCalls = widget.initialShowCompletedToolCalls;
     _configureDocumentSource();
     _maybeSendInitialMessage();
-    controller.outboundStatus.addListener(_handleOutboundStatusChanged);
   }
 
   @override
   void dispose() {
-    controller.outboundStatus.removeListener(_handleOutboundStatusChanged);
     _documentGeneration++;
     if (_managesDocumentConnection) {
       unawaited(_closeManagedDocument(room: widget.room, path: widget.path));
@@ -3787,7 +3774,6 @@ class _ChatThreadState extends State<ChatThread> {
                   messageHeaderBuilder: widget.messageHeaderBuilder,
                   fileInThreadBuilder: widget.fileInThreadBuilder,
                   openFile: widget.openFile,
-                  currentStatusEntry: _currentStatusEntry,
                   emptyStateTitle: widget.emptyStateTitle,
                   emptyStateDescription: widget.emptyStateDescription,
                   emptyState: widget.emptyState,
@@ -3929,7 +3915,6 @@ class ChatThreadMessages extends StatefulWidget {
     this.messageHeaderBuilder,
     this.fileInThreadBuilder,
     this.openFile,
-    this.currentStatusEntry,
     this.messageBuilders,
     this.emptyStateTitle,
     this.emptyStateDescription,
@@ -3955,7 +3940,6 @@ class ChatThreadMessages extends StatefulWidget {
   final void Function()? onCancel;
   final List<MeshElement> messages;
   final List<Participant> online;
-  final OutboundEntry? currentStatusEntry;
   final String? emptyStateTitle;
   final String? emptyStateDescription;
   final Widget? emptyState;
@@ -4062,7 +4046,6 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   void Function()? get onCancel => widget.onCancel;
   List<MeshElement> get messages => widget.messages;
   List<Participant> get online => widget.online;
-  OutboundEntry? get currentStatusEntry => widget.currentStatusEntry;
   String? get emptyStateTitle => widget.emptyStateTitle;
   String? get emptyStateDescription => widget.emptyStateDescription;
   Widget? get emptyState => widget.emptyState;
@@ -5079,20 +5062,6 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
           ],
 
           _buildReactionRow(context, message: message, mine: mine, target: _reactionTargetMessage, showAddWhenEmpty: false),
-
-          if (currentStatusEntry != null && currentStatusEntry?.messageId == id)
-            Padding(
-              padding: .only(top: 0),
-              child: Align(
-                alignment: .centerRight,
-                child: Text(
-                  currentStatusEntry!.state.status.name,
-                  style: ShadTheme.of(
-                    context,
-                  ).textTheme.p.copyWith(fontSize: 12, fontWeight: .w700, color: Color(currentStatusEntry!.state.status.colorValue)),
-                ),
-              ),
-            ),
         ],
       ),
     );
