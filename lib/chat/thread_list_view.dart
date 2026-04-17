@@ -126,15 +126,6 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
     return entries;
   }
 
-  _ChatThreadListEntry? _entryForPath(String path) {
-    for (final entry in _entries()) {
-      if (entry.path == path) {
-        return entry;
-      }
-    }
-    return null;
-  }
-
   Future<String?> _showRenameDialog(String initialValue) {
     final formKey = GlobalKey<ShadFormState>();
 
@@ -373,14 +364,8 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
   Widget build(BuildContext context) {
     final entries = _entries();
     final selectedThreadPath = _normalizePath(widget.selectedThreadPath);
-    final selectedEntry = selectedThreadPath == null ? null : _entryForPath(selectedThreadPath);
-    final selectedThreadDisplayName = (() {
-      final normalized = widget.selectedThreadDisplayName?.trim();
-      if (normalized == null || normalized.isEmpty) {
-        return null;
-      }
-      return normalized;
-    })();
+    final hasSelectedEntry = selectedThreadPath != null && entries.any((entry) => entry.path == selectedThreadPath);
+    final showPendingNewThreadSelection = selectedThreadPath == null || !hasSelectedEntry;
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -393,11 +378,6 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
       );
     }
 
-    final hasSelectedEntry = selectedEntry != null;
-    final pendingSelectedThreadTitle = selectedThreadPath == null
-        ? null
-        : selectedThreadDisplayName ?? defaultThreadDisplayNameFromPath(selectedThreadPath);
-
     return ListView(
       padding: const EdgeInsets.only(top: 4, bottom: 10),
       children: [
@@ -405,22 +385,14 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
           _buildRow(
             context,
             title: "New thread",
-            selected: selectedThreadPath == null,
-            fallbackIcon: selectedThreadPath == null ? LucideIcons.check : LucideIcons.messageSquarePlus,
+            selected: showPendingNewThreadSelection,
+            fallbackIcon: showPendingNewThreadSelection ? LucideIcons.check : LucideIcons.messageSquarePlus,
             onTap: () {
               widget.onSelectedThreadPathChanged(null);
               widget.onSelectedThreadResolved?.call(null, null);
             },
           ),
-        if (selectedThreadPath != null && !hasSelectedEntry)
-          _buildRow(
-            context,
-            title: pendingSelectedThreadTitle!,
-            selected: true,
-            status: resolveChatThreadStatus(room: widget.room, path: selectedThreadPath, agentName: widget.agentName),
-            onTap: () {},
-          ),
-        if (entries.isEmpty && selectedThreadPath == null)
+        if (entries.isEmpty && showPendingNewThreadSelection)
           Padding(
             padding: const EdgeInsets.all(16),
             child: Text("No threads yet", textAlign: TextAlign.center, style: ShadTheme.of(context).textTheme.muted),
