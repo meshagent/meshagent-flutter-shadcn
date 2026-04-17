@@ -58,15 +58,10 @@ typedef FileBrowserEmptyBuilder = Widget Function(BuildContext context);
 const String _defaultUntitledThreadName = 'New Chat';
 const String _threadIndexFileName = 'index.threadl';
 final RegExp _uuidPattern = RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$', caseSensitive: false);
-const int _maxThreadDisplayNameLength = 64;
 
 bool _isThreadFileName(String fileName) => fileName.toLowerCase().endsWith('.thread');
 
 bool _isThreadPath(String path) => _isThreadFileName(p.posix.basename(path));
-
-bool _shouldReadThreadDocumentForDisplayName(String path) {
-  return p.posix.basename(path).toLowerCase() != 'main.thread';
-}
 
 String _defaultThreadDisplayNameFromPath(String path) {
   final basename = p.posix.basename(path);
@@ -92,50 +87,15 @@ String _threadFileDisplayNameFromPath(String path, {String? threadDisplayName}) 
   final resolvedName = (threadDisplayName?.trim().isNotEmpty ?? false)
       ? threadDisplayName!.trim()
       : _defaultThreadDisplayNameFromPath(path);
-  return resolvedName.toLowerCase().endsWith('.thread') ? resolvedName : '$resolvedName.thread';
+  return _stripThreadExtension(resolvedName);
+}
+
+String _stripThreadExtension(String value) {
+  return value.toLowerCase().endsWith('.thread') ? value.substring(0, value.length - '.thread'.length) : value;
 }
 
 String _displayFileName(String fileName) {
   return formatTranscriptFileNameForDisplay(fileName);
-}
-
-bool _shouldBackfillThreadDisplayName(String? displayName) {
-  final trimmed = displayName?.trim();
-  return trimmed == null || trimmed.isEmpty || trimmed == _defaultUntitledThreadName;
-}
-
-String? _deriveThreadDisplayNameFromDocument(MeshDocument document) {
-  final messagesElement = document.root.getChildren().whereType<MeshElement>().firstWhereOrNull((child) => child.tagName == 'messages');
-  if (messagesElement == null) {
-    return null;
-  }
-
-  for (final child in messagesElement.getChildren().whereType<MeshElement>()) {
-    if (child.tagName != 'message') {
-      continue;
-    }
-
-    final text = child.getAttribute('text');
-    if (text is! String) {
-      continue;
-    }
-
-    final firstLine = text.split(RegExp(r'\r?\n')).map((line) => line.trim()).firstWhereOrNull((line) => line.isNotEmpty);
-    if (firstLine == null) {
-      continue;
-    }
-
-    final normalized = firstLine.replaceAll(RegExp(r'\s+'), ' ').trim();
-    if (normalized.isEmpty) {
-      continue;
-    }
-
-    return normalized.length <= _maxThreadDisplayNameLength
-        ? normalized
-        : '${normalized.substring(0, _maxThreadDisplayNameLength - 1).trimRight()}…';
-  }
-
-  return null;
 }
 
 class FileBrowser extends StatefulWidget {
@@ -270,14 +230,12 @@ class _FileBrowser extends State<FileBrowser> {
 
   void _onThreadIndexChanged() {
     _refreshThreadDisplayNames();
-    unawaited(_backfillThreadDisplayNames());
   }
 
   Future<void> _rebindThreadIndexDocument() async {
     final nextThreadIndexPath = _threadIndexPathForFolder(path);
     if (_threadIndexPath == nextThreadIndexPath && _threadIndexDocument != null) {
       _refreshThreadDisplayNames();
-      unawaited(_backfillThreadDisplayNames());
       return;
     }
 
@@ -307,7 +265,6 @@ class _FileBrowser extends State<FileBrowser> {
       _threadIndexDocument = document;
       _threadIndexPath = nextThreadIndexPath;
       _refreshThreadDisplayNames();
-      unawaited(_backfillThreadDisplayNames());
     } catch (_) {
       if (!mounted) {
         return;
@@ -357,73 +314,6 @@ class _FileBrowser extends State<FileBrowser> {
       } else {
         _threadDisplayNamesByPath = next;
       }
-    }
-  }
-
-  Future<void> _backfillThreadDisplayNames() async {
-    final currentFiles = files;
-    if (!mounted || currentFiles == null) {
-      return;
-    }
-
-    final currentFolder = path;
-    for (final entry in currentFiles) {
-      if (entry.isFolder || !_isThreadFileName(entry.name)) {
-        continue;
-      }
-
-      final fullPath = join(currentFolder, entry.name);
-      if (!_shouldReadThreadDocumentForDisplayName(fullPath)) {
-        continue;
-      }
-
-      final currentDisplayName = _threadDisplayNamesByPath[fullPath];
-      if (!_shouldBackfillThreadDisplayName(currentDisplayName) || _threadTitleResolutionsInFlight.contains(fullPath)) {
-        continue;
-      }
-
-      _threadTitleResolutionsInFlight.add(fullPath);
-      unawaited(_resolveAndStoreThreadDisplayName(path: fullPath));
-    }
-  }
-
-  MeshElement? _threadNodeForPath(String fullPath) {
-    final document = _threadIndexDocument;
-    if (document == null) {
-      return null;
-    }
-
-    return document.root.getChildren().whereType<MeshElement>().firstWhereOrNull((node) {
-      return node.tagName == 'thread' && node.getAttribute('path') == fullPath;
-    });
-  }
-
-  Future<void> _resolveAndStoreThreadDisplayName({required String path}) async {
-    try {
-      final document = await widget.room.sync.open(path);
-      try {
-        final resolvedName = _deriveThreadDisplayNameFromDocument(document);
-        if (!mounted || resolvedName == null || resolvedName.trim().isEmpty) {
-          return;
-        }
-
-        final latestNode = _threadNodeForPath(path);
-        if (latestNode != null && _shouldBackfillThreadDisplayName(latestNode.getAttribute('name') as String?)) {
-          latestNode.setAttribute('name', resolvedName);
-        }
-
-        setState(() {
-          _threadDisplayNamesByPath = <String, String>{..._threadDisplayNamesByPath, path: resolvedName};
-        });
-      } finally {
-        try {
-          await widget.room.sync.close(path);
-        } catch (_) {}
-      }
-    } catch (_) {
-      return;
-    } finally {
-      _threadTitleResolutionsInFlight.remove(path);
     }
   }
 
@@ -572,6 +462,9 @@ class _FileBrowser extends State<FileBrowser> {
     final selected = selection.contains(fullPath);
     final currentSelectionCount = files!.where((entry) => selection.contains(join(path, entry.name))).length;
     final canActivate = widget.selectionMode == FileBrowserSelectionMode.folders || !file.isFolder || currentSelectionCount == 0;
+    final iconData = selected
+        ? LucideIcons.check
+        : (file.isFolder ? LucideIcons.folder : (_isThreadFileName(file.name) ? LucideIcons.messageSquareText : LucideIcons.file));
 
     return ShadButton.ghost(
       backgroundColor: selected ? theme.colorScheme.selection : null,
@@ -582,10 +475,7 @@ class _FileBrowser extends State<FileBrowser> {
         mainAxisSize: MainAxisSize.min,
         spacing: 8,
         children: [
-          Icon(
-            selected ? LucideIcons.check : (file.isFolder ? LucideIcons.folder : LucideIcons.file),
-            color: (file.isFolder ? const Color.fromARGB(0xff, 0xe0, 0xa0, 0x30) : null),
-          ),
+          Icon(iconData, color: (file.isFolder ? const Color.fromARGB(0xff, 0xe0, 0xa0, 0x30) : null)),
           Text(_displayNameForEntry(file), overflow: TextOverflow.ellipsis),
         ],
       ),
