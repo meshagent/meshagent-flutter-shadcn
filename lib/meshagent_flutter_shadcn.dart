@@ -1,6 +1,10 @@
 export "chat/chat.dart";
+export "chat/chat_bot_view.dart";
+export "chat/conversation_descriptor.dart";
 export "chat/file_prompt_actions.dart";
+export "chat/multi_thread_view.dart";
 export "chat/new_chat_thread.dart";
+export "chat/thread_list_view.dart";
 export "theme/colors.dart";
 export "voice/voice.dart";
 export "toolkits/ui.dart";

@@ -29,7 +29,6 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 import 'package:markdown/markdown.dart' as md;
 
-import 'package:meshagent_flutter/meshagent_flutter.dart';
 import 'package:meshagent_flutter_shadcn/file_preview/file_preview.dart';
 import 'package:meshagent_flutter_shadcn/file_preview/image.dart';
 
@@ -1099,6 +1098,17 @@ class ChatThreadController extends ChangeNotifier {
     }
   }
 
+  List<RemoteParticipant> _uniqueRemoteParticipantsById(Iterable<RemoteParticipant> participants) {
+    final seenParticipantIds = <String>{};
+    final uniqueParticipants = <RemoteParticipant>[];
+    for (final participant in participants) {
+      if (seenParticipantIds.add(participant.id)) {
+        uniqueParticipants.add(participant);
+      }
+    }
+    return uniqueParticipants;
+  }
+
   List<RemoteParticipant> _matchingRecipients({
     required MeshDocument thread,
     required bool useAgentMessages,
@@ -1106,15 +1116,17 @@ class ChatThreadController extends ChangeNotifier {
   }) {
     final normalizedParticipantName = participantName?.trim();
     if (useAgentMessages) {
-      return getAgentParticipants(thread, participantName: normalizedParticipantName).toList();
+      return _uniqueRemoteParticipantsById(getAgentParticipants(thread, participantName: normalizedParticipantName));
     }
 
-    return getOnlineParticipants(thread).whereType<RemoteParticipant>().where((participant) {
-      if (normalizedParticipantName == null || normalizedParticipantName.isEmpty) {
-        return true;
-      }
-      return participant.getAttribute("name") == normalizedParticipantName;
-    }).toList();
+    return _uniqueRemoteParticipantsById(
+      getOnlineParticipants(thread).whereType<RemoteParticipant>().where((participant) {
+        if (normalizedParticipantName == null || normalizedParticipantName.isEmpty) {
+          return true;
+        }
+        return participant.getAttribute("name") == normalizedParticipantName;
+      }),
+    );
   }
 
   bool hasPendingSendWait(String threadPath) {
@@ -1300,11 +1312,13 @@ class ChatThreadController extends ChangeNotifier {
   }
 
   Iterable<String> getParticipantNames(MeshDocument document) sync* {
+    final seenParticipantNames = <String>{};
     for (final child in document.root.getChildren().whereType<MeshElement>()) {
       if (child.tagName == "members") {
         for (final member in child.getChildren().whereType<MeshElement>()) {
-          if (member.getAttribute("name") != null) {
-            yield member.getAttribute("name");
+          final participantName = member.getAttribute("name");
+          if (participantName is String && participantName.isNotEmpty && seenParticipantNames.add(participantName)) {
+            yield participantName;
           }
         }
       }
@@ -1325,12 +1339,18 @@ class ChatThreadController extends ChangeNotifier {
   }
 
   Iterable<Participant> getOnlineParticipants(MeshDocument document) sync* {
+    final seenParticipantIds = <String>{};
     for (final participantName in getParticipantNames(document)) {
       if (participantName == room.localParticipant?.getAttribute("name")) {
-        yield room.localParticipant!;
+        final localParticipant = room.localParticipant;
+        if (localParticipant != null && seenParticipantIds.add(localParticipant.id)) {
+          yield localParticipant;
+        }
       }
       for (final part in room.messaging.remoteParticipants.where((x) => x.getAttribute("name") == participantName)) {
-        yield part;
+        if (seenParticipantIds.add(part.id)) {
+          yield part;
+        }
       }
     }
   }
@@ -1523,82 +1543,6 @@ class ChatThreadController extends ChangeNotifier {
     }
 
     super.dispose();
-  }
-}
-
-class ChatThreadLoader extends StatelessWidget {
-  const ChatThreadLoader({
-    super.key,
-    required this.path,
-    required this.room,
-    this.participants,
-    this.participantNames,
-    this.includeLocalParticipant = true,
-    this.builder,
-    this.loadingBuilder,
-  });
-
-  final String path;
-  final RoomClient room;
-  final List<Participant>? participants;
-  final List<String>? participantNames;
-  final bool includeLocalParticipant;
-  final Widget Function(BuildContext, MeshDocument)? builder;
-  final Widget Function(BuildContext)? loadingBuilder;
-
-  void _ensureParticipants(MeshDocument document) {
-    final participantsList = <Participant>[if (participants != null) ...participants!, if (includeLocalParticipant) room.localParticipant!];
-
-    if (participants != null || participantNames != null) {
-      Set<String> existing = {};
-
-      for (final child in document.root.getChildren().whereType<MeshElement>()) {
-        if (child.tagName == "members") {
-          for (final member in child.getChildren().whereType<MeshElement>()) {
-            if (member.getAttribute("name") != null) {
-              existing.add(member.getAttribute("name"));
-            }
-          }
-
-          for (final part in participantsList) {
-            if (!existing.contains(part.getAttribute("name"))) {
-              child.createChildElement("member", {"name": part.getAttribute("name")});
-              existing.add(part.getAttribute("name"));
-            }
-          }
-
-          if (participantNames != null) {
-            for (final part in participantNames!) {
-              if (!existing.contains(part)) {
-                child.createChildElement("member", {"name": part});
-                existing.add(part);
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return DocumentConnectionScope(
-      key: ValueKey(path),
-      path: path,
-      room: room,
-      builder: (context, document, error) {
-        if (error != null) {
-          return Center(child: Text("Unable to load thread", style: ShadTheme.of(context).textTheme.p));
-        }
-
-        if (document == null) {
-          return loadingBuilder == null ? const Center(child: CircularProgressIndicator()) : loadingBuilder!(context);
-        }
-        _ensureParticipants(document);
-
-        return builder?.call(context, document) ?? ChatThread(path: path, document: document, room: room);
-      },
-    );
   }
 }
 
@@ -2371,6 +2315,8 @@ class ChatThreadInput extends StatefulWidget {
     this.focusTrigger,
     this.sendEnabled = true,
     this.sendDisabledReason,
+    this.readOnly = false,
+    this.clearOnSend = true,
     this.placeholder,
     this.onChanged,
     this.attachmentBuilder,
@@ -2391,6 +2337,8 @@ class ChatThreadInput extends StatefulWidget {
   final Object? focusTrigger;
   final bool sendEnabled;
   final String? sendDisabledReason;
+  final bool readOnly;
+  final bool clearOnSend;
 
   final RoomClient room;
   final Future<void> Function(String, List<FileAttachment>) onSend;
@@ -2442,6 +2390,10 @@ class _ChatThreadInput extends State<ChatThreadInput> {
       return;
     }
 
+    if (widget.readOnly) {
+      return;
+    }
+
     if (!widget.sendEnabled) {
       _showSendDisabledToast();
       return;
@@ -2453,8 +2405,11 @@ class _ChatThreadInput extends State<ChatThreadInput> {
       sending = true;
     });
     final sendFuture = widget.onSend(draftText, draftAttachments);
-    widget.controller.clear();
+    if (widget.clearOnSend) {
+      widget.controller.clear();
+    }
     widget.controller.scrollThreadToBottom();
+    _restoreComposerFocus();
 
     try {
       await sendFuture;
@@ -2471,6 +2426,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
           }
         }
       }
+      _restoreComposerFocus();
     } catch (error) {
       if (!mounted) {
         return;
@@ -2486,12 +2442,14 @@ class _ChatThreadInput extends State<ChatThreadInput> {
       }
 
       ShadToaster.of(context).show(ShadToast.destructive(title: const Text("Unable to send message"), description: Text("$error")));
+      _restoreComposerFocus();
     } finally {
       if (mounted) {
         setState(() {
           sending = false;
         });
       }
+      _restoreComposerFocus();
     }
   }
 
@@ -2519,6 +2477,10 @@ class _ChatThreadInput extends State<ChatThreadInput> {
       return KeyEventResult.ignored;
     },
   );
+
+  Widget _wrapAccessoryTapRegion(Widget child) {
+    return TextFieldTapRegion(child: child);
+  }
 
   void _onTextChanged() {
     final newText = widget.controller.text;
@@ -2576,6 +2538,23 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     });
   }
 
+  void _restoreComposerFocus() {
+    if (!mounted || widget.readOnly) {
+      return;
+    }
+
+    if (!focusNode.hasFocus) {
+      focusNode.requestFocus();
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || widget.readOnly || focusNode.hasFocus) {
+        return;
+      }
+      focusNode.requestFocus();
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -2614,11 +2593,14 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   }
 
   Future<void> onFileDrop(String name, Stream<Uint8List> dataStream, int size) async {
+    if (widget.readOnly) {
+      return;
+    }
     widget.controller.uploadFile(name, dataStream, size);
   }
 
   void onPasteEvent(ClipboardReadEvent event) async {
-    if (focusNode.hasFocus) {
+    if (focusNode.hasFocus && !widget.readOnly) {
       final reader = await event.getClipboardReader();
 
       for (final item in reader.items) {
@@ -2641,6 +2623,9 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   }
 
   void onTextPaste(String text) async {
+    if (widget.readOnly) {
+      return;
+    }
     final controller = widget.controller;
 
     final currentText = controller.textFieldController.text;
@@ -2663,35 +2648,84 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
-    final cancelSendButton = ShadTooltip(
-      waitDuration: const Duration(seconds: 1),
-      builder: (context) =>
-          Text(widget.sendPendingText?.trim().isNotEmpty == true ? widget.sendPendingText!.trim() : "Waiting for agent to come online."),
-      child: ShadGestureDetector(
-        cursor: widget.onCancelSend == null ? SystemMouseCursors.basic : SystemMouseCursors.click,
-        onTapDown: widget.onCancelSend == null
-            ? null
-            : (_) {
-                widget.onCancelSend!();
-              },
-        child: Opacity(
-          opacity: widget.onCancelSend == null ? 0.55 : 1,
-          child: SizedBox(
-            width: 32,
-            height: 32,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                const Positioned.fill(
-                  child: Padding(padding: EdgeInsets.all(1), child: _CyclingProgressIndicator(strokeWidth: 2)),
-                ),
-                Container(
-                  width: 18,
-                  height: 18,
-                  decoration: BoxDecoration(shape: BoxShape.circle, color: theme.colorScheme.background),
-                  child: Icon(LucideIcons.x, color: theme.colorScheme.foreground, size: 16),
-                ),
-              ],
+    Widget wrapReadOnlyControls(Widget child) {
+      if (!widget.readOnly) {
+        return child;
+      }
+
+      return IgnorePointer(ignoring: true, child: Opacity(opacity: 0.6, child: child));
+    }
+
+    final cancelSendButton = _wrapAccessoryTapRegion(
+      ShadTooltip(
+        waitDuration: const Duration(seconds: 1),
+        builder: (context) =>
+            Text(widget.sendPendingText?.trim().isNotEmpty == true ? widget.sendPendingText!.trim() : "Waiting for agent to come online."),
+        child: ShadGestureDetector(
+          cursor: widget.onCancelSend == null ? SystemMouseCursors.basic : SystemMouseCursors.click,
+          onTapDown: widget.onCancelSend == null
+              ? null
+              : (_) {
+                  _restoreComposerFocus();
+                  widget.onCancelSend!();
+                },
+          child: Opacity(
+            opacity: widget.onCancelSend == null ? 0.55 : 1,
+            child: SizedBox(
+              width: 32,
+              height: 32,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  const Positioned.fill(
+                    child: Padding(padding: EdgeInsets.all(1), child: _CyclingProgressIndicator(strokeWidth: 2)),
+                  ),
+                  Container(
+                    width: 18,
+                    height: 18,
+                    decoration: BoxDecoration(shape: BoxShape.circle, color: theme.colorScheme.background),
+                    child: Icon(LucideIcons.x, color: theme.colorScheme.foreground, size: 16),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    final sendButton = _wrapAccessoryTapRegion(
+      ShadTooltip(
+        waitDuration: const Duration(seconds: 1),
+        builder: (context) => Text(
+          widget.sendEnabled
+              ? "Send"
+              : (widget.sendDisabledReason?.trim().isNotEmpty ?? false)
+              ? widget.sendDisabledReason!.trim()
+              : "Wait for the current turn to start",
+        ),
+        child: Focus(
+          canRequestFocus: false,
+          skipTraversal: true,
+          descendantsAreFocusable: false,
+          descendantsAreTraversable: false,
+          child: ShadGestureDetector(
+            cursor: widget.sendEnabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+            onTapDown: (_) {
+              _restoreComposerFocus();
+            },
+            onTap: widget.sendEnabled
+                ? () {
+                    unawaited(_handleSend());
+                  }
+                : null,
+            child: Opacity(
+              opacity: widget.sendEnabled ? 1 : 0.55,
+              child: Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(shape: BoxShape.circle, color: theme.colorScheme.foreground),
+                child: Center(child: Icon(LucideIcons.arrowUp, color: theme.colorScheme.background, size: 16)),
+              ),
             ),
           ),
         ),
@@ -2702,29 +2736,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
         (sending
             ? cancelSendButton
             : showSendButton && allAttachmentsUploaded
-            ? ShadTooltip(
-                waitDuration: Duration(seconds: 1),
-                builder: (context) => Text(
-                  widget.sendEnabled
-                      ? "Send"
-                      : (widget.sendDisabledReason?.trim().isNotEmpty ?? false)
-                      ? widget.sendDisabledReason!.trim()
-                      : "Wait for the current turn to start",
-                ),
-                child: ShadIconButton(
-                  cursor: widget.sendEnabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
-                  onPressed: widget.sendEnabled
-                      ? () {
-                          unawaited(_handleSend());
-                        }
-                      : null,
-                  width: 32,
-                  height: 32,
-                  iconSize: 16,
-                  decoration: ShadDecoration(shape: BoxShape.circle, color: ShadTheme.of(context).colorScheme.foreground),
-                  icon: Icon(LucideIcons.arrowUp, color: ShadTheme.of(context).colorScheme.background),
-                ),
-              )
+            ? sendButton
             : null);
     final reservedFooterTrailer = trailer ?? const SizedBox(width: 32, height: 32);
     return Column(
@@ -2745,32 +2757,36 @@ class _ChatThreadInput extends State<ChatThreadInput> {
                   return SizedBox.shrink();
                 }
 
-                return Padding(
-                  padding: EdgeInsets.all(8),
-                  child: LayoutBuilder(
-                    builder: (context, constraints) => SizedBox(
-                      height: 40,
-                      child: Center(
-                        child: ListView.separated(
-                          itemCount: attachments.length,
-                          separatorBuilder: (context, index) => const SizedBox(width: 10),
-                          scrollDirection: Axis.horizontal,
-                          itemBuilder: (context, index) {
-                            final attachment = attachments[index];
+                return _wrapAccessoryTapRegion(
+                  wrapReadOnlyControls(
+                    Padding(
+                      padding: EdgeInsets.all(8),
+                      child: LayoutBuilder(
+                        builder: (context, constraints) => SizedBox(
+                          height: 40,
+                          child: Center(
+                            child: ListView.separated(
+                              itemCount: attachments.length,
+                              separatorBuilder: (context, index) => const SizedBox(width: 10),
+                              scrollDirection: Axis.horizontal,
+                              itemBuilder: (context, index) {
+                                final attachment = attachments[index];
 
-                            if (widget.attachmentBuilder != null) {
-                              return widget.attachmentBuilder!(context, attachment);
-                            }
+                                if (widget.attachmentBuilder != null) {
+                                  return widget.attachmentBuilder!(context, attachment);
+                                }
 
-                            return FileDefaultAttachmentPreview(
-                              key: ValueKey(attachment.path),
-                              attachment: attachment,
-                              maxWidth: constraints.maxWidth - 50,
-                              onRemove: () {
-                                widget.controller.removeFileUpload(attachment);
+                                return FileDefaultAttachmentPreview(
+                                  key: ValueKey(attachment.path),
+                                  attachment: attachment,
+                                  maxWidth: constraints.maxWidth - 50,
+                                  onRemove: () {
+                                    widget.controller.removeFileUpload(attachment);
+                                  },
+                                );
                               },
-                            );
-                          },
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -2780,7 +2796,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
             ),
             crossAxisAlignment: CrossAxisAlignment.center,
             inputPadding: EdgeInsets.all(2),
-            leading: widget.leading ?? SizedBox(width: 3),
+            leading: widget.leading == null ? SizedBox(width: 3) : _wrapAccessoryTapRegion(wrapReadOnlyControls(widget.leading!)),
             trailing: widget.footer == null ? trailer : null,
             padding: EdgeInsets.only(left: 5, right: 5, top: widget.footer == null ? 5 : 10, bottom: widget.footer == null ? 5 : 0),
             decoration: (() {
@@ -2801,19 +2817,20 @@ class _ChatThreadInput extends State<ChatThreadInput> {
             placeholder: widget.placeholder,
             focusNode: focusNode,
             controller: widget.controller.textFieldController,
+            readOnly: widget.readOnly,
             bottom: widget.footer == null
                 ? null
                 : Padding(
                     padding: EdgeInsets.only(left: 5, right: 5, top: 5, bottom: 5),
                     child: Row(
                       children: [
-                        Expanded(child: widget.footer!),
+                        Expanded(child: _wrapAccessoryTapRegion(wrapReadOnlyControls(widget.footer!))),
                         Visibility(
                           visible: trailer != null,
                           maintainState: true,
                           maintainAnimation: true,
                           maintainSize: true,
-                          child: reservedFooterTrailer,
+                          child: _wrapAccessoryTapRegion(reservedFooterTrailer),
                         ),
                       ],
                     ),
@@ -2829,8 +2846,11 @@ class ChatThread extends StatefulWidget {
   const ChatThread({
     super.key,
     required this.path,
-    required this.document,
     required this.room,
+    this.composerKey,
+    this.participants,
+    this.participantNames,
+    this.includeLocalParticipant = true,
 
     this.startChatCentered = false,
     this.initialMessage,
@@ -2860,8 +2880,11 @@ class ChatThread extends StatefulWidget {
   final String? agentName;
 
   final String path;
-  final MeshDocument document;
   final RoomClient room;
+  final GlobalKey? composerKey;
+  final List<Participant>? participants;
+  final List<String>? participantNames;
+  final bool includeLocalParticipant;
   final bool startChatCentered;
   final ChatMessage? initialMessage;
   final void Function(ChatMessage message)? onMessageSent;
@@ -3311,9 +3334,17 @@ class ChatMessage {
 
 class _ChatThreadState extends State<ChatThread> {
   late final ChatThreadController controller;
+  late Key _composerInputKey;
   OutboundEntry? _currentStatusEntry;
   bool _didNotifyVisibleMessagesEmpty = false;
   late bool _showCompletedToolCalls;
+  MeshDocument? _managedDocument;
+  Object? _documentError;
+  int _documentGeneration = 0;
+  bool _managesDocumentConnection = false;
+  bool _initialMessageSent = false;
+
+  MeshDocument? get _resolvedDocument => _managedDocument;
 
   bool _shouldStoreLocally({required bool hasConfiguredAgent, required bool useAgentMessages}) {
     return !hasConfiguredAgent && !useAgentMessages;
@@ -3343,17 +3374,168 @@ class _ChatThreadState extends State<ChatThread> {
     return state.supportsAgentMessages && state.threadTurnId != null && pendingMessages.isNotEmpty;
   }
 
-  Future<void> _clearThread(ChatThreadSnapshot state) async {
-    await controller.clearThread(
-      widget.path,
-      widget.document,
-      useAgentMessages: state.supportsAgentMessages,
-      participantName: widget.agentName,
+  void _ensureParticipants(MeshDocument document) {
+    final participantsList = <Participant>[
+      if (widget.participants != null) ...widget.participants!,
+      if (widget.includeLocalParticipant && widget.room.localParticipant != null) widget.room.localParticipant!,
+    ];
+
+    if (widget.participants == null && widget.participantNames == null) {
+      return;
+    }
+
+    final existing = <String>{};
+    for (final child in document.root.getChildren().whereType<MeshElement>()) {
+      if (child.tagName != "members") {
+        continue;
+      }
+
+      for (final member in child.getChildren().whereType<MeshElement>()) {
+        final name = member.getAttribute("name");
+        if (name is String && name.isNotEmpty) {
+          existing.add(name);
+        }
+      }
+
+      for (final participant in participantsList) {
+        final name = participant.getAttribute("name");
+        if (name is String && name.isNotEmpty && !existing.contains(name)) {
+          child.createChildElement("member", {"name": name});
+          existing.add(name);
+        }
+      }
+
+      if (widget.participantNames != null) {
+        for (final participantName in widget.participantNames!) {
+          if (!existing.contains(participantName)) {
+            child.createChildElement("member", {"name": participantName});
+            existing.add(participantName);
+          }
+        }
+      }
+    }
+  }
+
+  Future<void> _closeManagedDocument({required RoomClient room, required String path}) async {
+    try {
+      await room.sync.close(path);
+    } catch (_) {}
+  }
+
+  Future<void> _syncManagedDocument({required int generation, required RoomClient room, required String path}) async {
+    var nextRetryCount = 0;
+
+    while (generation == _documentGeneration) {
+      try {
+        final document = await room.sync.open(path);
+
+        if (!mounted || generation != _documentGeneration) {
+          await _closeManagedDocument(room: room, path: path);
+          return;
+        }
+
+        setState(() {
+          _managedDocument = document;
+          _documentError = null;
+        });
+        _maybeSendInitialMessage();
+        return;
+      } catch (error) {
+        if (!mounted || generation != _documentGeneration) {
+          return;
+        }
+
+        setState(() {
+          _managedDocument = null;
+          _documentError = error;
+        });
+
+        final delay = math.min(60000, math.pow(2, nextRetryCount).toInt() * 500);
+        nextRetryCount++;
+        await Future.delayed(Duration(milliseconds: delay));
+
+        if (!mounted || generation != _documentGeneration) {
+          return;
+        }
+      }
+    }
+  }
+
+  void _startManagedSync() {
+    final generation = ++_documentGeneration;
+    _managesDocumentConnection = true;
+    unawaited(_syncManagedDocument(generation: generation, room: widget.room, path: widget.path));
+  }
+
+  void _configureDocumentSource() {
+    _documentError = null;
+    _managedDocument = null;
+    _startManagedSync();
+  }
+
+  void _maybeSendInitialMessage() {
+    final initialMessage = widget.initialMessage;
+    final document = _resolvedDocument;
+    if (_initialMessageSent || initialMessage == null || document == null) {
+      return;
+    }
+
+    _initialMessageSent = true;
+    final normalizedAgentName = widget.agentName?.trim();
+    final hasConfiguredAgent = normalizedAgentName != null && normalizedAgentName.isNotEmpty;
+    final useAgentMessages = hasConfiguredAgent
+        ? controller.getAgentParticipants(document, participantName: normalizedAgentName).isNotEmpty
+        : controller.getAgentParticipants(document).isNotEmpty;
+    controller.send(
+      thread: document,
+      path: widget.path,
+      message: initialMessage,
+      remoteStoreParticipantName: hasConfiguredAgent ? normalizedAgentName : null,
+      storeLocally: _shouldStoreLocally(hasConfiguredAgent: hasConfiguredAgent, useAgentMessages: useAgentMessages),
+      useAgentMessages: useAgentMessages,
+      onMessageSent: widget.onMessageSent,
     );
+  }
+
+  void _handleOutboundStatusChanged() {
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _currentStatusEntry = controller.outboundStatus.currentEntry();
+    });
+  }
+
+  Future<void> _clearThread(MeshDocument document, ChatThreadSnapshot state) async {
+    await controller.clearThread(widget.path, document, useAgentMessages: state.supportsAgentMessages, participantName: widget.agentName);
   }
 
   ChatThreadToolArea _buildToolArea(BuildContext context, ChatThreadSnapshot state) {
     return resolveChatThreadToolArea(widget.toolsBuilder == null ? null : widget.toolsBuilder!(context, controller, state));
+  }
+
+  ChatThreadSnapshot _buildLoadingSnapshot() {
+    final agent = widget.room.messaging.remoteParticipants.firstWhereOrNull(
+      (participant) => participant.getAttribute("name") == widget.agentName,
+    );
+    return ChatThreadSnapshot(
+      messages: const [],
+      online: agent == null ? const [] : [agent],
+      offline: const [],
+      typing: const [],
+      listening: const [],
+      agentOnline: agent != null,
+      threadStatus: null,
+      threadStatusStartedAt: null,
+      threadStatusMode: null,
+      supportsAgentMessages: agent != null && _supportsAgentMessages(agent),
+      supportsMcp: agent != null && _supportsMcp(agent),
+      toolkits: const {},
+      threadTurnId: null,
+      pendingMessages: controller.pendingAgentMessagesForPath(widget.path),
+      pendingItemId: null,
+    );
   }
 
   Future<AgentTurnToolkitConfig?> _buildMcpTurnToolkitConfig({required ChatThreadSnapshot state}) async {
@@ -3373,47 +3555,63 @@ class _ChatThreadState extends State<ChatThread> {
     super.initState();
 
     controller = widget.controller ?? ChatThreadController(room: widget.room);
+    _composerInputKey = widget.composerKey ?? GlobalObjectKey(controller);
     _showCompletedToolCalls = widget.initialShowCompletedToolCalls;
-
-    if (widget.initialMessage != null) {
-      final normalizedAgentName = widget.agentName?.trim();
-      final hasConfiguredAgent = normalizedAgentName != null && normalizedAgentName.isNotEmpty;
-      final useAgentMessages = hasConfiguredAgent
-          ? controller.getAgentParticipants(widget.document, participantName: normalizedAgentName).isNotEmpty
-          : controller.getAgentParticipants(widget.document).isNotEmpty;
-      controller.send(
-        thread: widget.document,
-        path: widget.path,
-        message: widget.initialMessage!,
-        remoteStoreParticipantName: hasConfiguredAgent ? normalizedAgentName : null,
-        storeLocally: _shouldStoreLocally(hasConfiguredAgent: hasConfiguredAgent, useAgentMessages: useAgentMessages),
-        useAgentMessages: useAgentMessages,
-        onMessageSent: widget.onMessageSent,
-      );
-    }
-
-    controller.outboundStatus.addListener(() {
-      setState(() {
-        _currentStatusEntry = controller.outboundStatus.currentEntry();
-      });
-    });
+    _configureDocumentSource();
+    _maybeSendInitialMessage();
+    controller.outboundStatus.addListener(_handleOutboundStatusChanged);
   }
 
   @override
   void dispose() {
-    super.dispose();
-
+    controller.outboundStatus.removeListener(_handleOutboundStatusChanged);
+    _documentGeneration++;
+    if (_managesDocumentConnection) {
+      unawaited(_closeManagedDocument(room: widget.room, path: widget.path));
+    }
     if (widget.controller == null) {
       controller.dispose();
     }
+
+    super.dispose();
   }
 
   @override
   void didUpdateWidget(covariant ChatThread oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.path != widget.path || oldWidget.document != widget.document) {
+    if (oldWidget.composerKey != widget.composerKey) {
+      _composerInputKey = widget.composerKey ?? GlobalObjectKey(controller);
+    }
+    if (oldWidget.path != widget.path) {
       _didNotifyVisibleMessagesEmpty = false;
     }
+
+    if (oldWidget.path == widget.path && oldWidget.room == widget.room) {
+      if (oldWidget.initialMessage != widget.initialMessage) {
+        _initialMessageSent = false;
+        _maybeSendInitialMessage();
+      }
+      return;
+    }
+
+    final oldRoom = oldWidget.room;
+    final oldPath = oldWidget.path;
+    final shouldCloseOld = _managesDocumentConnection;
+    _documentGeneration++;
+    _initialMessageSent = false;
+
+    setState(() {
+      _managedDocument = null;
+      _documentError = null;
+      _managesDocumentConnection = false;
+      _composerInputKey = widget.composerKey ?? GlobalObjectKey(controller);
+      _configureDocumentSource();
+    });
+
+    if (shouldCloseOld) {
+      unawaited(_closeManagedDocument(room: oldRoom, path: oldPath));
+    }
+    _maybeSendInitialMessage();
   }
 
   void _handleVisibleMessages(List<MeshElement> messages) {
@@ -3443,25 +3641,31 @@ class _ChatThreadState extends State<ChatThread> {
     });
   }
 
-  Widget _buildInputChatBox(BuildContext context, List<PendingAgentMessage> pendingMessages, ChatThreadSnapshot state) {
+  Widget _buildInputChatBox(
+    BuildContext context,
+    MeshDocument document,
+    List<PendingAgentMessage> pendingMessages,
+    ChatThreadSnapshot state,
+  ) {
     final waitingForTurnStart = _isWaitingForTurnStart(state: state, pendingMessages: pendingMessages);
     final waitingForOnlineMessage = pendingMessages.firstWhereOrNull((message) => message.awaitingOnline);
     final canInterruptActiveTurn = _canInterruptActiveTurn(state: state, pendingMessages: pendingMessages);
     final toolArea = _buildToolArea(context, state);
 
     return ChatThreadInput(
-      focusTrigger: widget.path,
+      key: _composerInputKey,
+      focusTrigger: controller,
       sendEnabled: !waitingForTurnStart,
       sendDisabledReason: waitingForTurnStart ? "Wait for the previous message to start before sending another one." : null,
       placeholder: widget.inputPlaceholder,
       onClear: () {
-        _clearThread(state);
+        _clearThread(document, state);
       },
       onInterrupt: canInterruptActiveTurn
           ? () {
               controller.cancel(
                 widget.path,
-                widget.document,
+                document,
                 useAgentMessages: state.supportsAgentMessages,
                 turnId: state.threadTurnId,
                 participantName: widget.agentName,
@@ -3487,7 +3691,7 @@ class _ChatThreadState extends State<ChatThread> {
         final mcpToolkitConfig = await _buildMcpTurnToolkitConfig(state: state);
         final turnToolkits = <String, AgentTurnToolkitConfig>{if (mcpToolkitConfig != null) "mcp": mcpToolkitConfig};
         await controller.send(
-          thread: widget.document,
+          thread: document,
           path: widget.path,
           message: ChatMessage(id: const Uuid().v4(), text: value, attachments: attachments.map((x) => x.path).toList()),
           messageType: messageType,
@@ -3500,9 +3704,9 @@ class _ChatThreadState extends State<ChatThread> {
         );
       },
       onChanged: (value, attachments) {
-        for (final part in controller.getOnlineParticipants(widget.document)) {
-          if (part.id != widget.room.localParticipant?.id) {
-            widget.room.messaging.sendMessage(to: part, type: "typing", message: {"path": widget.path});
+        for (final participant in controller.getOnlineParticipants(document)) {
+          if (participant.id != widget.room.localParticipant?.id) {
+            widget.room.messaging.sendMessage(to: participant, type: "typing", message: {"path": widget.path});
           }
         }
       },
@@ -3513,11 +3717,31 @@ class _ChatThreadState extends State<ChatThread> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildConnectingInputBox(BuildContext context) {
+    final toolArea = _buildToolArea(context, _buildLoadingSnapshot());
+    return ChatThreadInput(
+      key: _composerInputKey,
+      focusTrigger: controller,
+      sendEnabled: false,
+      sendDisabledReason: _documentError == null ? "Thread is loading." : "Thread is reconnecting.",
+      readOnly: false,
+      placeholder: widget.inputPlaceholder,
+      leading: toolArea.leading,
+      footer: toolArea.footer,
+      trailing: null,
+      room: widget.room,
+      onSend: (value, attachments) async {},
+      controller: controller,
+      attachmentBuilder: widget.attachmentBuilder,
+    );
+  }
+
+  Widget _buildResolvedThread(BuildContext context, MeshDocument document) {
+    _ensureParticipants(document);
+
     return ChatThreadBuilder(
       path: widget.path,
-      document: widget.document,
+      document: document,
       room: widget.room,
       controller: controller,
       agentName: widget.agentName,
@@ -3531,15 +3755,15 @@ class _ChatThreadState extends State<ChatThread> {
         final hasVisibleMessages = state.messages.any(
           (message) => _shouldRenderThreadMessageElement(message, showCompletedToolCalls: _showCompletedToolCalls),
         );
-        bool bottomAlign = !widget.startChatCentered || hasVisibleMessages;
+        final bottomAlign = !widget.startChatCentered || hasVisibleMessages;
 
         return ShadContextMenuBoundary(
           child: FileDropArea(
             onFileDrop: (name, dataStream, size) async {
-              widget.controller?.uploadFile(name, dataStream, size ?? 0);
+              controller.uploadFile(name, dataStream, size ?? 0);
             },
             child: Column(
-              mainAxisAlignment: bottomAlign ? .end : .center,
+              mainAxisAlignment: bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
               children: [
                 ChatThreadMessages(
                   room: widget.room,
@@ -3565,7 +3789,7 @@ class _ChatThreadState extends State<ChatThread> {
                   onCancel: () {
                     controller.cancel(
                       widget.path,
-                      widget.document,
+                      document,
                       useAgentMessages: state.supportsAgentMessages,
                       turnId: state.threadTurnId,
                       participantName: widget.agentName,
@@ -3640,9 +3864,9 @@ class _ChatThreadState extends State<ChatThread> {
                               ),
                             ),
                           if (widget.chatInputBoxBuilder != null)
-                            widget.chatInputBoxBuilder!(context, _buildInputChatBox(context, pendingMessages, state))
+                            widget.chatInputBoxBuilder!(context, _buildInputChatBox(context, document, pendingMessages, state))
                           else
-                            _buildInputChatBox(context, pendingMessages, state),
+                            _buildInputChatBox(context, document, pendingMessages, state),
                         ],
                       ),
                     );
@@ -3654,6 +3878,33 @@ class _ChatThreadState extends State<ChatThread> {
         );
       },
     );
+  }
+
+  Widget _buildConnectingThread(BuildContext context) {
+    final input = widget.chatInputBoxBuilder != null
+        ? widget.chatInputBoxBuilder!(context, _buildConnectingInputBox(context))
+        : _buildConnectingInputBox(context);
+
+    return Column(
+      children: [
+        Expanded(
+          child: _documentError == null
+              ? const SizedBox.shrink()
+              : Center(child: Text("Unable to load thread", style: ShadTheme.of(context).textTheme.p)),
+        ),
+        ChatThreadInputFrame(child: input),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final document = _resolvedDocument;
+    if (document == null) {
+      return _buildConnectingThread(context);
+    }
+
+    return _buildResolvedThread(context, document);
   }
 }
 

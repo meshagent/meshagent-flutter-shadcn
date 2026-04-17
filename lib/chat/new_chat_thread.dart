@@ -7,8 +7,7 @@ import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_flutter_shadcn/chat/chat.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
-typedef NewChatThreadBuilder =
-    Widget Function(BuildContext context, String threadPath, Widget Function(BuildContext context)? loadingBuilder);
+typedef NewChatThreadBuilder = Widget Function(BuildContext context, String threadPath);
 typedef NewChatThreadToolsBuilder = Widget Function(BuildContext context, ChatThreadController controller, ChatThreadSnapshot state);
 
 class NewChatThread extends StatefulWidget {
@@ -18,10 +17,13 @@ class NewChatThread extends StatefulWidget {
     required this.agentName,
     required this.builder,
     this.controller,
+    this.composerKey,
     this.toolkit = "chat",
     this.tool = "new_thread",
     this.toolsBuilder,
+    this.selectedThreadPath,
     this.onThreadPathChanged,
+    this.onThreadResolved,
     this.centerComposer = true,
     this.emptyState,
     this.inputContextMenuBuilder,
@@ -32,10 +34,13 @@ class NewChatThread extends StatefulWidget {
   final String agentName;
   final NewChatThreadBuilder builder;
   final ChatThreadController? controller;
+  final GlobalKey? composerKey;
   final String toolkit;
   final String tool;
   final NewChatThreadToolsBuilder? toolsBuilder;
+  final String? selectedThreadPath;
   final ValueChanged<String?>? onThreadPathChanged;
+  final void Function(String? path, String? displayName)? onThreadResolved;
   final bool centerComposer;
   final Widget? emptyState;
   final EditableTextContextMenuBuilder? inputContextMenuBuilder;
@@ -47,37 +52,31 @@ class NewChatThread extends StatefulWidget {
 
 class _NewChatThreadState extends State<NewChatThread> {
   late ChatThreadController _controller;
+  late Key _composerInputKey;
   late bool _ownsController;
   StreamSubscription<RoomEvent>? _roomSubscription;
   RemoteParticipant? _agent;
   bool _creatingNewThread = false;
   bool _waitingForAgent = false;
-  DateTime? _creatingNewThreadStartedAt;
   String? _newThreadError;
   String? _threadPath;
-  String? _pendingMessageText;
-  List<String> _pendingAttachmentPaths = const [];
   int _newThreadOperationId = 0;
   Completer<RemoteParticipant>? _waitForAgentCompleter;
   Completer<void>? _waitForAgentReadyCompleter;
-  final GlobalKey _sendingStatusKey = GlobalKey();
 
-  String? _pendingSenderDisplayName() {
-    final rawName = widget.room.localParticipant?.getAttribute("name");
-    if (rawName is! String) {
-      return null;
+  bool get _composerLocked => _creatingNewThread || _waitingForAgent;
+
+  String? get _activeThreadPath {
+    final externalPath = widget.selectedThreadPath?.trim();
+    if (externalPath != null && externalPath.isNotEmpty) {
+      return externalPath;
     }
 
-    final trimmedName = rawName.trim();
-    if (trimmedName.isEmpty) {
+    final localPath = _threadPath?.trim();
+    if (localPath == null || localPath.isEmpty) {
       return null;
     }
-
-    return trimmedName.split("@").first.trim();
-  }
-
-  DateTime _pendingCreatedAt() {
-    return _creatingNewThreadStartedAt ?? DateTime.now();
+    return localPath;
   }
 
   String _chatPlaceholderText() {
@@ -89,8 +88,12 @@ class _NewChatThreadState extends State<NewChatThread> {
     return "Type a message or @$normalizedAgentName";
   }
 
-  void _notifyThreadPathChanged() {
-    widget.onThreadPathChanged?.call(_threadPath);
+  void _notifyThreadPathChanged(String? path) {
+    widget.onThreadPathChanged?.call(path);
+  }
+
+  void _notifyThreadResolved(String? path, String? displayName) {
+    widget.onThreadResolved?.call(path, displayName);
   }
 
   @override
@@ -98,6 +101,7 @@ class _NewChatThreadState extends State<NewChatThread> {
     super.initState();
     _ownsController = widget.controller == null;
     _controller = widget.controller ?? ChatThreadController(room: widget.room);
+    _composerInputKey = widget.composerKey ?? GlobalObjectKey(_controller);
     _roomSubscription = widget.room.listen(_onRoomEvent);
     widget.room.messaging.addListener(_onMessagingChanged);
     _onMessagingChanged();
@@ -106,6 +110,10 @@ class _NewChatThreadState extends State<NewChatThread> {
   @override
   void didUpdateWidget(covariant NewChatThread oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.composerKey != widget.composerKey) {
+      _composerInputKey = widget.composerKey ?? GlobalObjectKey(_controller);
+    }
+
     if (oldWidget.room != widget.room || oldWidget.controller != widget.controller) {
       _newThreadOperationId++;
       _roomSubscription?.cancel();
@@ -118,20 +126,22 @@ class _NewChatThreadState extends State<NewChatThread> {
       }
       _ownsController = widget.controller == null;
       _controller = widget.controller ?? ChatThreadController(room: widget.room);
-      _creatingNewThreadStartedAt = null;
+      _composerInputKey = widget.composerKey ?? GlobalObjectKey(_controller);
+      _threadPath = null;
+      _newThreadError = null;
+      _creatingNewThread = false;
+      _waitingForAgent = false;
       _cancelWaitingForAgent();
       _onMessagingChanged();
     }
 
     if (oldWidget.agentName != widget.agentName) {
       _newThreadOperationId++;
+      _composerInputKey = widget.composerKey ?? GlobalObjectKey(_controller);
       _threadPath = null;
       _newThreadError = null;
       _creatingNewThread = false;
       _waitingForAgent = false;
-      _creatingNewThreadStartedAt = null;
-      _pendingMessageText = null;
-      _pendingAttachmentPaths = const [];
       _cancelWaitingForAgent();
       _controller.clear();
       _onMessagingChanged();
@@ -244,17 +254,6 @@ class _NewChatThreadState extends State<NewChatThread> {
     }
   }
 
-  Future<void> _waitForThreadCreated({required String path}) async {
-    for (var i = 0; i < 50; i++) {
-      try {
-        if (await widget.room.storage.exists(path)) {
-          return;
-        }
-      } catch (_) {}
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-    }
-  }
-
   Future<void> _startNewThread() async {
     final prompt = _controller.text.trim();
     final attachments = _controller.attachmentUploads;
@@ -267,18 +266,13 @@ class _NewChatThreadState extends State<NewChatThread> {
       return;
     }
 
-    FocusManager.instance.primaryFocus?.unfocus();
     final operationId = ++_newThreadOperationId;
     final waitingForAgent = _agent == null;
     setState(() {
       _creatingNewThread = !waitingForAgent;
       _waitingForAgent = waitingForAgent;
-      _creatingNewThreadStartedAt = waitingForAgent ? null : DateTime.now();
       _newThreadError = null;
-      _pendingMessageText = prompt;
-      _pendingAttachmentPaths = attachmentPaths;
     });
-    _controller.clear();
 
     try {
       final agent = _agent ?? await _waitForAgentOnline();
@@ -292,7 +286,6 @@ class _NewChatThreadState extends State<NewChatThread> {
         setState(() {
           _waitingForAgent = false;
           _creatingNewThread = true;
-          _creatingNewThreadStartedAt = DateTime.now();
         });
       }
 
@@ -328,82 +321,41 @@ class _NewChatThreadState extends State<NewChatThread> {
         throw RoomServerException("${widget.toolkit}.${widget.tool} response missing path");
       }
       final path = responsePath.trim();
-
-      await _waitForThreadCreated(path: path);
-
+      final responseName = content.json["name"];
+      final threadName = responseName is String && responseName.trim().isNotEmpty ? responseName.trim() : null;
       if (!mounted || operationId != _newThreadOperationId) {
         return;
       }
 
-      _controller.clear();
+      final defersToParent = widget.onThreadPathChanged != null || widget.onThreadResolved != null;
       setState(() {
-        _threadPath = path;
+        _threadPath = defersToParent ? null : path;
         _newThreadError = null;
         _creatingNewThread = false;
         _waitingForAgent = false;
-        _creatingNewThreadStartedAt = null;
       });
-      _notifyThreadPathChanged();
+      _notifyThreadResolved(path, threadName);
+      _notifyThreadPathChanged(path);
+      _controller.clear();
     } on ChatSendCancelledException {
       if (!mounted || operationId != _newThreadOperationId) {
         return;
       }
-      _restoreDraft(text: prompt, attachmentPaths: attachmentPaths);
       setState(() {
         _creatingNewThread = false;
         _waitingForAgent = false;
-        _creatingNewThreadStartedAt = null;
-        _pendingMessageText = null;
-        _pendingAttachmentPaths = const [];
         _newThreadError = null;
       });
     } catch (e) {
       if (!mounted || operationId != _newThreadOperationId) {
         return;
       }
-      _restoreDraft(text: prompt, attachmentPaths: attachmentPaths);
       setState(() {
         _creatingNewThread = false;
         _waitingForAgent = false;
-        _creatingNewThreadStartedAt = null;
-        _pendingMessageText = null;
-        _pendingAttachmentPaths = const [];
         _newThreadError = "$e";
       });
     }
-  }
-
-  void _restoreDraft({required String text, required List<String> attachmentPaths}) {
-    _controller.textFieldController.text = text;
-    final existingAttachments = _controller.attachmentUploads.map((attachment) => attachment.path).toSet();
-    for (final path in attachmentPaths) {
-      if (!existingAttachments.contains(path)) {
-        _controller.attachFile(path);
-      }
-    }
-  }
-
-  Widget _buildPendingAttachmentPreviews() {
-    if (_pendingAttachmentPaths.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        for (final path in _pendingAttachmentPaths)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 5),
-            child: Container(
-              margin: const EdgeInsets.only(top: 0),
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: ChatThreadPreview(room: widget.room, path: path),
-              ),
-            ),
-          ),
-      ],
-    );
   }
 
   void _cancelPendingNewThread() {
@@ -413,37 +365,29 @@ class _NewChatThreadState extends State<NewChatThread> {
 
     _newThreadOperationId++;
     _cancelWaitingForAgent();
-    final pendingText = _pendingMessageText ?? "";
-    final pendingAttachmentPaths = [for (final path in _pendingAttachmentPaths) path];
-    _restoreDraft(text: pendingText, attachmentPaths: pendingAttachmentPaths);
 
     setState(() {
       _creatingNewThread = false;
       _waitingForAgent = false;
-      _creatingNewThreadStartedAt = null;
       _newThreadError = null;
-      _pendingMessageText = null;
-      _pendingAttachmentPaths = const [];
     });
   }
 
   void _goToNewMessageScreen() {
-    if (_creatingNewThread) {
+    if (_creatingNewThread || _waitingForAgent) {
       _cancelPendingNewThread();
       return;
     }
-    if (_threadPath == null) {
+    if (_activeThreadPath == null) {
       return;
     }
     setState(() {
       _threadPath = null;
       _newThreadError = null;
       _waitingForAgent = false;
-      _creatingNewThreadStartedAt = null;
-      _pendingMessageText = null;
-      _pendingAttachmentPaths = const [];
     });
-    _notifyThreadPathChanged();
+    _notifyThreadResolved(null, null);
+    _notifyThreadPathChanged(null);
     _controller.clear();
   }
 
@@ -467,101 +411,10 @@ class _NewChatThreadState extends State<NewChatThread> {
     );
   }
 
-  Widget _buildPendingThreadView({required bool allowCancel}) {
-    final snapshot = _buildSnapshot();
-    final toolsBuilder = widget.toolsBuilder;
-    final toolArea = resolveChatThreadToolArea(toolsBuilder == null ? null : toolsBuilder(context, _controller, snapshot));
-    final pendingText = _pendingMessageText;
-    final pendingSenderDisplayName = _pendingSenderDisplayName();
-    final pendingCreatedAt = _pendingCreatedAt();
-    final hasPendingContent = (pendingText != null && pendingText.isNotEmpty) || _pendingAttachmentPaths.isNotEmpty;
-    final pendingMessage = hasPendingContent
-        ? Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              if (pendingSenderDisplayName != null)
-                Padding(
-                  padding: const EdgeInsets.only(left: 85, right: 5, bottom: 6),
-                  child: Align(
-                    alignment: Alignment.centerRight,
-                    child: ChatThreadAuthorHeader(authorName: pendingSenderDisplayName, createdAt: pendingCreatedAt, text: pendingText),
-                  ),
-                ),
-              if (pendingText != null && pendingText.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 0),
-                  child: ChatBubble(mine: true, text: pendingText),
-                ),
-              if (_pendingAttachmentPaths.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 5),
-                  child: Container(margin: const EdgeInsets.only(top: 0), child: _buildPendingAttachmentPreviews()),
-                ),
-            ],
-          )
-        : null;
-
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.end,
-      children: [
-        Expanded(
-          child: ChatThreadViewportBody(
-            bottomAlign: true,
-            bottomSpacer: 20,
-            overlays: [
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: LayoutBuilder(
-                  builder: (context, constraints) => Padding(
-                    padding: EdgeInsets.symmetric(horizontal: chatThreadStatusHorizontalPadding(constraints.maxWidth)),
-                    child: ChatThreadProcessingStatusRow(
-                      key: _sendingStatusKey,
-                      text: "Sending message",
-                      startedAt: _creatingNewThreadStartedAt,
-                      onCancel: allowCancel ? _cancelPendingNewThread : null,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-            children: [if (pendingMessage != null) pendingMessage],
-          ),
-        ),
-        ChatThreadInputFrame(
-          child: IgnorePointer(
-            ignoring: true,
-            child: Opacity(
-              opacity: 0.6,
-              child: ChatThreadInput(
-                room: widget.room,
-                controller: _controller,
-                autoFocus: false,
-                leading: toolArea.leading,
-                footer: toolArea.footer,
-                trailing: null,
-                onSend: (text, attachments) async {
-                  if (text.isNotEmpty || attachments.isNotEmpty) {
-                    return;
-                  }
-                },
-                contextMenuBuilder: widget.inputContextMenuBuilder,
-                onPressedOutside: widget.inputOnPressedOutside,
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    final content = switch ((_threadPath, _creatingNewThread)) {
-      (final threadPath?, _) => widget.builder(context, threadPath, (context) => _buildPendingThreadView(allowCancel: false)),
-      (_, true) => _buildPendingThreadView(allowCancel: true),
+    final content = switch (_activeThreadPath) {
+      final threadPath? => widget.builder(context, threadPath),
       _ => _buildNewThreadComposer(context),
     };
 
@@ -574,6 +427,9 @@ class _NewChatThreadState extends State<NewChatThread> {
   Widget _buildComposerDropArea({required Widget child}) {
     return FileDropArea(
       onFileDrop: (name, dataStream, fileSize) async {
+        if (_composerLocked) {
+          return;
+        }
         await _controller.uploadFile(name, dataStream, fileSize ?? 0);
       },
       child: child,
@@ -586,12 +442,16 @@ class _NewChatThreadState extends State<NewChatThread> {
     final toolArea = resolveChatThreadToolArea(toolsBuilder == null ? null : toolsBuilder(context, _controller, snapshot));
     final headingStyle = ShadTheme.of(context).textTheme.h4;
     final input = ChatThreadInput(
+      key: _composerInputKey,
+      focusTrigger: _controller,
       room: widget.room,
       controller: _controller,
-      sendEnabled: !_creatingNewThread && !_waitingForAgent,
+      sendEnabled: !_composerLocked,
       sendDisabledReason: _waitingForAgent ? "Waiting for ${widget.agentName} to be ready." : "Wait for the message to be accepted.",
-      sendPendingText: _waitingForAgent ? "Waiting for ${widget.agentName} to be ready." : null,
-      onCancelSend: _waitingForAgent ? _cancelPendingNewThread : null,
+      sendPendingText: _waitingForAgent ? "Waiting for ${widget.agentName} to be ready." : "Wait for the message to be accepted.",
+      onCancelSend: _composerLocked ? _cancelPendingNewThread : null,
+      readOnly: false,
+      clearOnSend: false,
       placeholder: Text(_chatPlaceholderText()),
       leading: toolArea.leading,
       footer: toolArea.footer,
@@ -638,10 +498,6 @@ class _NewChatThreadState extends State<NewChatThread> {
                     input,
                     if (_newThreadError != null) ...[
                       ShadAlert.destructive(title: const Text("Unable to start thread"), description: Text(_newThreadError!)),
-                    ] else ...[
-                      // Reserve matching space below the composer so the heading above
-                      // doesn't visually push the input downward in the centered state.
-                      Opacity(opacity: 0, child: Text("Start a new thread", style: headingStyle)),
                     ],
                   ],
                 ),
