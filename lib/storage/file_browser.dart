@@ -57,6 +57,8 @@ typedef FileBrowserEmptyBuilder = Widget Function(BuildContext context);
 
 const String _defaultUntitledThreadName = 'New Chat';
 const String _threadIndexFileName = 'index.threadl';
+const Color _threadFileIconColor = Color(0xFFA074C4);
+const double _threadFileIconSize = 20;
 final RegExp _uuidPattern = RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$', caseSensitive: false);
 
 bool _isThreadFileName(String fileName) => fileName.toLowerCase().endsWith('.thread');
@@ -462,9 +464,10 @@ class _FileBrowser extends State<FileBrowser> {
     final selected = selection.contains(fullPath);
     final currentSelectionCount = files!.where((entry) => selection.contains(join(path, entry.name))).length;
     final canActivate = widget.selectionMode == FileBrowserSelectionMode.folders || !file.isFolder || currentSelectionCount == 0;
+    final isThreadFile = _isThreadFileName(file.name);
     final iconData = selected
         ? LucideIcons.check
-        : (file.isFolder ? LucideIcons.folder : (_isThreadFileName(file.name) ? LucideIcons.messageSquareText : LucideIcons.file));
+        : (file.isFolder ? LucideIcons.folder : (isThreadFile ? LucideIcons.messageSquare : LucideIcons.file));
 
     return ShadButton.ghost(
       backgroundColor: selected ? theme.colorScheme.selection : null,
@@ -475,7 +478,13 @@ class _FileBrowser extends State<FileBrowser> {
         mainAxisSize: MainAxisSize.min,
         spacing: 8,
         children: [
-          Icon(iconData, color: (file.isFolder ? const Color.fromARGB(0xff, 0xe0, 0xa0, 0x30) : null)),
+          Icon(
+            iconData,
+            size: selected ? null : (isThreadFile ? _threadFileIconSize : null),
+            color: selected
+                ? null
+                : (file.isFolder ? const Color.fromARGB(0xff, 0xe0, 0xa0, 0x30) : (isThreadFile ? _threadFileIconColor : null)),
+          ),
           Text(_displayNameForEntry(file), overflow: TextOverflow.ellipsis),
         ],
       ),
