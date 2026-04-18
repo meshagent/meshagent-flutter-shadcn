@@ -20,6 +20,7 @@ import 'package:meshagent_flutter_shadcn/storage/file_browser.dart';
 import 'package:meshagent_flutter_shadcn/ui/coordinated_context_menu.dart';
 import 'package:meshagent_flutter_shadcn/ui/ui.dart';
 import 'package:meshagent_flutter_shadcn/src/web_context_menu_manager/enable_web_context_menu.dart';
+import 'package:meshagent_flutter_shadcn/chat/thread_attachment_share.dart';
 import 'package:re_highlight/styles/monokai-sublime.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:super_clipboard/super_clipboard.dart';
@@ -67,6 +68,11 @@ const String _agentTurnSteerAcceptedType = "meshagent.agent.turn.steer.accepted"
 const String _agentTurnSteerRejectedType = "meshagent.agent.turn.steer.rejected";
 const String _agentTurnEndedType = "meshagent.agent.turn.ended";
 const String _agentThreadClearedType = "meshagent.agent.thread.cleared";
+const double _mobileScreenWidthMax = 600;
+
+bool _usesMobileContextLayout(BuildContext context) {
+  return MediaQuery.sizeOf(context).width < _mobileScreenWidthMax;
+}
 
 String _normalizeEmojiPresentationKey(String value) {
   return value.replaceAll('\u{FE0F}', '').replaceAll('\u{FE0E}', '').replaceAll('\u{200D}', '').trim();
@@ -4090,6 +4096,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   final LinkedHashMap<String, int> _imageCacheSizes = LinkedHashMap<String, int>();
   final Map<String, Future<_ThreadImageRecord?>> _imageInFlight = <String, Future<_ThreadImageRecord?>>{};
   int _imageCacheBytes = 0;
+  bool _attachmentShareInFlight = false;
 
   String? _localParticipantName() {
     final name = room.localParticipant?.getAttribute("name");
@@ -4441,11 +4448,20 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                   final users = entry.value;
                   final tooltipText = _reactionUsersTooltipText(groupedDisplayNames[entry.key]?.values ?? const <String>[]);
                   final isMine = mineValues.contains(entry.key);
+                  final isMobileReactionChip = _usesMobileContextLayout(context);
+                  final reactionEmojiSize = isMobileReactionChip ? 16.0 : 14.0;
+                  final reactionEmojiYOffset = isMobileReactionChip ? 2.0 : 0.0;
+                  final reactionCountYOffset = isMobileReactionChip ? 1.0 : 0.0;
+                  final reactionCountStyle = theme.textTheme.small.copyWith(
+                    fontWeight: isMine ? FontWeight.w700 : FontWeight.w500,
+                    fontSize: isMobileReactionChip ? ((theme.textTheme.small.fontSize ?? 14) - 1) : null,
+                    height: 1,
+                  );
                   Widget reactionChip({required VoidCallback? onPressed}) {
                     return Tooltip(
                       message: tooltipText,
                       child: ShadButton.ghost(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: EdgeInsets.symmetric(horizontal: isMobileReactionChip ? 9 : 8, vertical: isMobileReactionChip ? 5 : 4),
                         backgroundColor: isMine ? theme.colorScheme.accent.withValues(alpha: 0.2) : theme.colorScheme.muted,
                         hoverBackgroundColor: isMine
                             ? theme.colorScheme.accent.withValues(alpha: 0.25)
@@ -4453,12 +4469,16 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                         onPressed: onPressed,
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
-                            Text(entry.key, style: _emojiTextStyle(size: 14)),
-                            const SizedBox(width: 4),
-                            Text(
-                              "${users.length}",
-                              style: theme.textTheme.small.copyWith(fontWeight: isMine ? FontWeight.w700 : FontWeight.w500),
+                            Transform.translate(
+                              offset: Offset(0, reactionEmojiYOffset),
+                              child: Text(entry.key, style: _emojiTextStyle(size: reactionEmojiSize)),
+                            ),
+                            SizedBox(width: isMobileReactionChip ? 5 : 4),
+                            Transform.translate(
+                              offset: Offset(0, reactionCountYOffset),
+                              child: Text("${users.length}", style: reactionCountStyle),
                             ),
                           ],
                         ),
@@ -4738,14 +4758,16 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
         return ShadDialog(
           crossAxisAlignment: CrossAxisAlignment.start,
           title: Text("File: $path"),
-          actions: [
-            ShadButton(
-              onPressed: () async {
-                await _downloadPath(path);
-              },
-              child: Text("Download"),
-            ),
-          ],
+          actions: _usesMobileContextLayout(context)
+              ? const <Widget>[]
+              : [
+                  ShadButton(
+                    onPressed: () async {
+                      await _downloadPath(path);
+                    },
+                    child: Text("Download"),
+                  ),
+                ],
           child: FilePreview(room: room, path: path, fit: BoxFit.contain),
         );
       },
@@ -4768,43 +4790,47 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
 
   Widget _buildFileImageInThread(BuildContext context, String path, _ThreadImageRecord? imageRecord, bool loading) {
     final items = _buildAttachmentOptions(imageRecord: imageRecord, path: path);
-
-    return CoordinatedShadContextMenuRegion(
-      items: items,
-      child: _wrapTapTarget(
-        SizedBox(
-          width: 312.5,
-          height: 312.5,
-          child: _wrapWithCorners(
-            ColoredBox(
-              color: ShadTheme.of(context).colorScheme.background,
-              child: imageRecord == null
-                  ? Center(
-                      child: loading
-                          ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
-                          : Icon(LucideIcons.imageOff, size: 20, color: ShadTheme.of(context).colorScheme.mutedForeground),
-                    )
-                  : _ImageMime.isSvg(imageRecord.mimeType)
-                  ? SvgPicture.memory(imageRecord.data, fit: BoxFit.cover)
-                  : UniversalImage(imageRecord.data, fit: BoxFit.cover),
-            ),
+    final child = _wrapTapTarget(
+      SizedBox(
+        width: 312.5,
+        height: 312.5,
+        child: _wrapWithCorners(
+          ColoredBox(
+            color: ShadTheme.of(context).colorScheme.background,
+            child: imageRecord == null
+                ? Center(
+                    child: loading
+                        ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                        : Icon(LucideIcons.imageOff, size: 20, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                  )
+                : _ImageMime.isSvg(imageRecord.mimeType)
+                ? SvgPicture.memory(imageRecord.data, fit: BoxFit.cover)
+                : UniversalImage(imageRecord.data, fit: BoxFit.cover),
           ),
         ),
-        path,
       ),
+      path,
     );
+
+    if (_usesMobileContextLayout(context)) {
+      return child;
+    }
+
+    return CoordinatedShadContextMenuRegion(items: items, child: child);
   }
 
   Widget _buildFileInThread(BuildContext context, String path) {
     final items = _buildAttachmentOptions(path: path);
-
-    return CoordinatedShadContextMenuRegion(
-      items: items,
-      child: _wrapTapTarget(
-        fileInThreadBuilder != null ? fileInThreadBuilder!(context, path) : ChatThreadPreview(room: room, path: path),
-        path,
-      ),
+    final child = _wrapTapTarget(
+      fileInThreadBuilder != null ? fileInThreadBuilder!(context, path) : ChatThreadPreview(room: room, path: path),
+      path,
     );
+
+    if (_usesMobileContextLayout(context)) {
+      return child;
+    }
+
+    return CoordinatedShadContextMenuRegion(items: items, child: child);
   }
 
   Widget _buildImageInThread(BuildContext context, MeshElement attachment, {required List<_ThreadFeedImage> feedImages}) {
@@ -4936,6 +4962,8 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   }
 
   List<ShadContextMenuItem> _buildAttachmentOptions({_ThreadImageRecord? imageRecord, String? path}) {
+    final isMobile = _usesMobileContextLayout(context);
+
     return [
       if (path != null)
         ShadContextMenuItem(
@@ -4955,7 +4983,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
           leading: const Icon(LucideIcons.copy, size: 14),
           child: const Text("Copy"),
         ),
-      if (path != null)
+      if (path != null && !isMobile)
         ShadContextMenuItem(
           height: 40,
           onPressed: () async {
@@ -4968,6 +4996,54 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   }
 
   List<Widget> _buildAttachmentActions({_ThreadImageRecord? imageRecord, String? path}) {
+    if (_usesMobileContextLayout(context) && path != null && supportsNativeThreadAttachmentShare) {
+      final theme = ShadTheme.of(context);
+
+      return [
+        Semantics(
+          label: "Share attachment",
+          button: true,
+          child: ShadIconButton.ghost(
+            width: 40,
+            height: 40,
+            padding: EdgeInsets.zero,
+            icon: _attachmentShareInFlight
+                ? SizedBox(
+                    width: 19,
+                    height: 19,
+                    child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation(theme.colorScheme.mutedForeground)),
+                  )
+                : Icon(LucideIcons.share, size: 19, color: theme.colorScheme.mutedForeground),
+            onPressed: _attachmentShareInFlight
+                ? null
+                : () async {
+                    setState(() {
+                      _attachmentShareInFlight = true;
+                    });
+
+                    try {
+                      await shareThreadAttachment(context: context, room: room, path: path);
+                    } catch (error) {
+                      if (!mounted) {
+                        return;
+                      }
+
+                      ShadToaster.of(
+                        context,
+                      ).show(ShadToast.destructive(title: const Text("Unable to share attachment"), description: Text("$error")));
+                    } finally {
+                      if (mounted) {
+                        setState(() {
+                          _attachmentShareInFlight = false;
+                        });
+                      }
+                    }
+                  },
+          ),
+        ),
+      ];
+    }
+
     final items = _buildAttachmentOptions(imageRecord: imageRecord, path: path);
     return [_AttachmentOptionsButton(items: items)];
   }
@@ -5738,6 +5814,10 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
   }
 
   Widget _wrapContextMenu({required _ThreadImageRecord image, required Widget child}) {
+    if (_usesMobileContextLayout(context)) {
+      return child;
+    }
+
     return CoordinatedShadContextMenuRegion(
       items: [
         ShadContextMenuItem(height: 40, onPressed: () => _onSaveImage(image), child: const Text("Save As...")),

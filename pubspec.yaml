@@ -68,6 +68,8 @@ dependencies:
   super_native_extensions: ^0.9.1
   collection: ^1.19.1
   mime: ^2.0.0
+  path_provider: ^2.1.5
+  share_plus: ^10.1.4
   wakelock_plus: ^1.4.0
   markdown: ^7.3.0
   flutter_timezone: ^5.0.1
