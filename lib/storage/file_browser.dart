@@ -65,6 +65,16 @@ bool _isThreadFileName(String fileName) => fileName.toLowerCase().endsWith('.thr
 
 bool _isThreadPath(String path) => _isThreadFileName(p.posix.basename(path));
 
+String _normalizeThreadStoragePath(String path) {
+  final trimmed = path.trim();
+  if (trimmed.isEmpty) {
+    return '';
+  }
+
+  final normalized = p.posix.normalize(trimmed);
+  return normalized.startsWith('/') ? normalized.substring(1) : normalized;
+}
+
 String _defaultThreadDisplayNameFromPath(String path) {
   final basename = p.posix.basename(path);
   final rawName = basename.endsWith('.thread') ? basename.substring(0, basename.length - '.thread'.length) : basename;
@@ -182,7 +192,8 @@ class _FileBrowser extends State<FileBrowser> {
   String _displayNameForPath(String fullPath) {
     final fileName = fullPath.split('/').where((segment) => segment.isNotEmpty).lastOrNull ?? fullPath;
     if (_isThreadPath(fullPath)) {
-      return _threadFileDisplayNameFromPath(fullPath, threadDisplayName: _threadDisplayNamesByPath[fullPath]);
+      final normalizedPath = _normalizeThreadStoragePath(fullPath);
+      return _threadFileDisplayNameFromPath(fullPath, threadDisplayName: _threadDisplayNamesByPath[normalizedPath]);
     }
     return _displayFileName(fileName);
   }
@@ -290,7 +301,7 @@ class _FileBrowser extends State<FileBrowser> {
         if (rawPath is! String) {
           continue;
         }
-        final threadPath = rawPath.trim();
+        final threadPath = _normalizeThreadStoragePath(rawPath);
         if (threadPath.isEmpty) {
           continue;
         }
