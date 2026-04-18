@@ -24,6 +24,11 @@ final videoExtensions = <String>{"mp4", "mkv", "mov"};
 final audioExtensions = <String>{"mp3", "ogg", "wav"};
 final officeExtensions = <String>{"docx", "pptx", "xlsx"};
 final parquetExtensions = <String>{"parquet"};
+const double _mobilePreviewScreenWidthMax = 600;
+
+bool _usesMobilePreviewLayout(BuildContext context) {
+  return MediaQuery.sizeOf(context).width < _mobilePreviewScreenWidthMax;
+}
 
 final Map<String, Widget Function({Key? key, required RoomClient room, required String filename, required Uri url})> customViewers = {};
 
@@ -131,6 +136,11 @@ class _FilePreviewState extends State<FilePreview> {
       future: urlLookup,
       builder: (context, snapshot) {
         if (snapshot.hasData) {
+          final preview = filePreview(room: widget.room, filename: widget.path, url: Uri.parse(snapshot.data!), fit: widget.fit);
+          if (_usesMobilePreviewLayout(context)) {
+            return preview;
+          }
+
           return CoordinatedShadContextMenuRegion(
             items: [
               ShadContextMenuItem(
@@ -141,7 +151,7 @@ class _FilePreviewState extends State<FilePreview> {
                 child: Text("Download"),
               ),
             ],
-            child: filePreview(room: widget.room, filename: widget.path, url: Uri.parse(snapshot.data!), fit: widget.fit),
+            child: preview,
           );
         } else if (snapshot.hasError) {
           return Center(
