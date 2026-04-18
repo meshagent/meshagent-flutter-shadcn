@@ -263,34 +263,41 @@ class MeetingController extends ChangeNotifier {
     try {
       await livekitRoom.connect(config.url, config.token, fastConnectOptions: fastConnectOptions);
       final localParticipant = livekitRoom.localParticipant;
+      final mediaEnableFutures = <Future<void>>[];
 
       if (fastConnectOptions?.camera.enabled == true) {
-        try {
-          await localParticipant?.setCameraEnabled(true);
-          pendingLocalMedia.setCameraUnavailable(false);
-        } catch (error) {
-          pendingLocalMedia.setCameraPending(false);
-          pendingLocalMedia.setCameraUnavailable(true);
-          Logger.root.warning("unable to enable camera after connecting $error");
-        }
+        mediaEnableFutures.add(() async {
+          try {
+            await localParticipant?.setCameraEnabled(true);
+            pendingLocalMedia.setCameraUnavailable(false);
+          } catch (error) {
+            pendingLocalMedia.setCameraPending(false);
+            pendingLocalMedia.setCameraUnavailable(true);
+            Logger.root.warning("unable to enable camera after connecting $error");
+          }
+        }());
       } else {
         pendingLocalMedia.setCameraPending(false);
         pendingLocalMedia.setCameraUnavailable(false);
       }
 
       if (fastConnectOptions?.microphone.enabled == true) {
-        try {
-          await localParticipant?.setMicrophoneEnabled(true);
-          pendingLocalMedia.setMicrophoneUnavailable(false);
-        } catch (error) {
-          pendingLocalMedia.setMicrophonePending(false);
-          pendingLocalMedia.setMicrophoneUnavailable(true);
-          Logger.root.warning("unable to enable microphone after connecting $error");
-        }
+        mediaEnableFutures.add(() async {
+          try {
+            await localParticipant?.setMicrophoneEnabled(true);
+            pendingLocalMedia.setMicrophoneUnavailable(false);
+          } catch (error) {
+            pendingLocalMedia.setMicrophonePending(false);
+            pendingLocalMedia.setMicrophoneUnavailable(true);
+            Logger.root.warning("unable to enable microphone after connecting $error");
+          }
+        }());
       } else {
         pendingLocalMedia.setMicrophonePending(false);
         pendingLocalMedia.setMicrophoneUnavailable(false);
       }
+
+      await Future.wait(mediaEnableFutures);
 
       _syncPendingLocalMediaState();
     } catch (error) {
