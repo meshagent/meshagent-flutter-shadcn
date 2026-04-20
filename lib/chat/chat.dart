@@ -3782,13 +3782,14 @@ class _ChatThreadState extends State<ChatThread> {
                   listenable: controller,
                   builder: (context, _) {
                     final pendingMessages = _combinedPendingMessages(state);
+                    final queuedPendingMessages = pendingMessages.where((message) => !message.awaitingAcceptance).toList(growable: false);
                     final canInterruptActiveTurn = _canInterruptActiveTurn(state: state, pendingMessages: pendingMessages);
                     return ChatThreadInputFrame(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          if (pendingMessages.isNotEmpty)
+                          if (queuedPendingMessages.isNotEmpty)
                             Padding(
                               padding: const EdgeInsets.only(bottom: 10),
                               child: Row(
@@ -3807,7 +3808,7 @@ class _ChatThreadState extends State<ChatThread> {
                                           style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
                                         ),
                                         const SizedBox(height: 4),
-                                        for (final pending in pendingMessages)
+                                        for (final pending in queuedPendingMessages)
                                           Padding(
                                             padding: const EdgeInsets.only(bottom: 4),
                                             child: Text(
@@ -3817,9 +3818,7 @@ class _ChatThreadState extends State<ChatThread> {
                                                 if (pending.attachments.isNotEmpty)
                                                   "${pending.attachments.length} attachment${pending.attachments.length == 1 ? "" : "s"}",
                                                 if (pending.awaitingOnline)
-                                                  "(waiting for @${_displayParticipantName(widget.agentName ?? "agent")} to come online)"
-                                                else if (pending.awaitingAcceptance)
-                                                  "(waiting for acceptance)",
+                                                  "(waiting for @${_displayParticipantName(widget.agentName ?? "agent")} to come online)",
                                               ].join(" "),
                                               style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
                                             ),
