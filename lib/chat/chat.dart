@@ -48,6 +48,8 @@ const double _mobileReactionFlowDialogMaxHeightFactor = 0.72;
 const double _mobileReactionFlowDialogCornerRadius = 28;
 const double _mobileReactionFlowDialogTopPadding = 30;
 const double _mobileReactionFlowDialogBottomPadding = 28;
+const double _mobileStorageSaveFlowDialogMaxWidth = 420;
+const double _mobileStorageSaveFlowDialogViewportTopGap = 20;
 const EdgeInsets _chatBubbleContentPadding = EdgeInsets.only(
   left: _chatBubbleContentHorizontalPadding,
   right: _chatBubbleContentHorizontalPadding,
@@ -90,6 +92,59 @@ bool _usesNativeMobileReactionFlowDialog(BuildContext context) {
     TargetPlatform.fuchsia || TargetPlatform.linux || TargetPlatform.macOS || TargetPlatform.windows => false,
   };
 }
+
+String _defaultSuggestedFileNameFromPath(String path) {
+  final trimmed = path.trim();
+  if (trimmed.isEmpty) {
+    return "file";
+  }
+
+  final slash = trimmed.lastIndexOf("/");
+  if (slash < 0 || slash == trimmed.length - 1) {
+    return trimmed.isEmpty ? "file" : trimmed;
+  }
+
+  return trimmed.substring(slash + 1);
+}
+
+String _applySuggestedFileExtension(String rawPath, {required String suggestedFileName}) {
+  final trimmed = rawPath.trim();
+  if (trimmed.isEmpty) {
+    return suggestedFileName;
+  }
+
+  final lastSlash = trimmed.lastIndexOf("/");
+  final fileName = lastSlash >= 0 ? trimmed.substring(lastSlash + 1) : trimmed;
+  if (fileName.contains(".")) {
+    return trimmed;
+  }
+
+  final suggestedDot = suggestedFileName.lastIndexOf(".");
+  if (suggestedDot <= 0 || suggestedDot == suggestedFileName.length - 1) {
+    return trimmed;
+  }
+
+  final extension = suggestedFileName.substring(suggestedDot);
+  return "$trimmed$extension";
+}
+
+class ThreadStorageSaveSurfaceRequest {
+  const ThreadStorageSaveSurfaceRequest({
+    required this.room,
+    required this.title,
+    required this.suggestedFileName,
+    required this.fileNameLabel,
+    required this.loadContent,
+  });
+
+  final RoomClient room;
+  final String title;
+  final String suggestedFileName;
+  final String fileNameLabel;
+  final Future<FileContent> Function() loadContent;
+}
+
+typedef ThreadStorageSaveSurfacePresenter = Future<void> Function(BuildContext context, ThreadStorageSaveSurfaceRequest request);
 
 String _normalizeEmojiPresentationKey(String value) {
   return value.replaceAll('\u{FE0F}', '').replaceAll('\u{FE0E}', '').replaceAll('\u{200D}', '').trim();
@@ -172,6 +227,84 @@ Future<void> _showReactionPickerSurface(
     context: context,
     builder: (dialogContext) =>
         _ReactionPickerDesktopDialog(reactionOptions: reactionOptions, selectedReaction: selectedReaction, onSelected: onSelected),
+  );
+}
+
+Future<bool> _showStorageOverwriteConfirmation(BuildContext context, {required String title, required String message}) async {
+  final overwrite = await showShadDialog<bool>(
+    context: context,
+    builder: (dialogContext) => ShadDialog(
+      title: Text(title),
+      description: Text(message),
+      actions: [
+        ShadButton.secondary(
+          onPressed: () {
+            Navigator.of(dialogContext).pop(false);
+          },
+          child: const Text("Cancel"),
+        ),
+        ShadButton(
+          onPressed: () {
+            Navigator.of(dialogContext).pop(true);
+          },
+          child: const Text("Overwrite"),
+        ),
+      ],
+    ),
+  );
+
+  return overwrite == true;
+}
+
+Future<void> _showThreadStorageSaveSurface(
+  BuildContext context, {
+  required RoomClient room,
+  required String title,
+  required String suggestedFileName,
+  required String fileNameLabel,
+  required Future<FileContent> Function() loadContent,
+  ThreadStorageSaveSurfacePresenter? mobilePresenter,
+}) async {
+  if (_usesNativeMobileReactionFlowDialog(context)) {
+    if (mobilePresenter != null) {
+      await mobilePresenter(
+        context,
+        ThreadStorageSaveSurfaceRequest(
+          room: room,
+          title: title,
+          suggestedFileName: suggestedFileName,
+          fileNameLabel: fileNameLabel,
+          loadContent: loadContent,
+        ),
+      );
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      useSafeArea: false,
+      builder: (dialogContext) => _ThreadStorageSaveFlowDialog(
+        room: room,
+        title: title,
+        suggestedFileName: suggestedFileName,
+        fileNameLabel: fileNameLabel,
+        loadContent: loadContent,
+      ),
+    );
+    return;
+  }
+
+  await showShadDialog<void>(
+    context: context,
+    builder: (dialogContext) => _ThreadStorageSaveDesktopDialog(
+      room: room,
+      title: title,
+      suggestedFileName: suggestedFileName,
+      fileNameLabel: fileNameLabel,
+      loadContent: loadContent,
+    ),
   );
 }
 
@@ -2954,6 +3087,7 @@ class ChatThread extends StatefulWidget {
     this.shouldShowAuthorNames = true,
     this.inputContextMenuBuilder,
     this.inputOnPressedOutside,
+    this.mobileStorageSaveSurfacePresenter,
   });
 
   final String? agentName;
@@ -2985,6 +3119,7 @@ class ChatThread extends StatefulWidget {
   final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
   final EditableTextContextMenuBuilder? inputContextMenuBuilder;
   final TapRegionCallback? inputOnPressedOutside;
+  final ThreadStorageSaveSurfacePresenter? mobileStorageSaveSurfacePresenter;
 
   @override
   State createState() => _ChatThreadState();
@@ -3000,6 +3135,7 @@ class ChatBubble extends StatefulWidget {
     this.reactionActionBuilder,
     this.showReactionAction = false,
     this.onReactFromMenu,
+    this.mobileStorageSaveSurfacePresenter,
   });
 
   final RoomClient? room;
@@ -3009,6 +3145,7 @@ class ChatBubble extends StatefulWidget {
   final Widget Function(ShadContextMenuController controller)? reactionActionBuilder;
   final bool showReactionAction;
   final VoidCallback? onReactFromMenu;
+  final ThreadStorageSaveSurfacePresenter? mobileStorageSaveSurfacePresenter;
 
   @override
   State createState() => _ChatBubble();
@@ -3126,114 +3263,16 @@ class _ChatBubble extends State<ChatBubble> {
   }
 
   Future<void> _onSave(RoomClient room) async {
-    final fileNameController = TextEditingController();
-    String path = "";
-
-    showShadDialog<void>(
-      context: context,
-      builder: (context) {
-        final theme = ShadTheme.of(context);
-        final tt = theme.textTheme;
-
-        return ShadDialog(
-          title: Text("Save comment file as ..."),
-          crossAxisAlignment: CrossAxisAlignment.start,
-          constraints: BoxConstraints(maxWidth: 700, maxHeight: 544),
-          scrollable: false,
-          actions: [
-            ShadButton.secondary(
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-              child: Text("Cancel"),
-            ),
-            ShadButton(
-              onPressed: () async {
-                final room = widget.room;
-                if (room == null) {
-                  return;
-                }
-
-                final f = fileNameController.text.trim();
-                String fileName = f.isEmpty ? "chat-comment.md" : f;
-
-                if (!fileName.endsWith(".md")) {
-                  fileName = "$fileName.md";
-                }
-
-                final fullPath = path.isEmpty ? fileName : "$path/$fileName";
-
-                // Check if file exists
-                final exists = await room.storage.exists(fullPath);
-
-                if (exists && context.mounted) {
-                  // Show overwrite confirmation
-                  final overwrite = await showShadDialog<bool>(
-                    context: context,
-                    builder: (context) => ShadDialog(
-                      title: Text("File already exists"),
-                      description: Text(
-                        "A file with the name '$fileName' already exists in the selected folder. Do you want to overwrite it?",
-                      ),
-                      actions: [
-                        ShadButton.secondary(
-                          onPressed: () {
-                            Navigator.of(context).pop(false);
-                          },
-                          child: Text("Cancel"),
-                        ),
-                        ShadButton(
-                          onPressed: () {
-                            Navigator.of(context).pop(true);
-                          },
-                          child: Text("Overwrite"),
-                        ),
-                      ],
-                    ),
-                  );
-
-                  if (overwrite != true) {
-                    return;
-                  }
-                }
-
-                final bytes = Uint8List.fromList(utf8.encode(widget.text));
-                await room.storage.uploadStream(fullPath, Stream.value(bytes), overwrite: true, size: bytes.length);
-
-                if (context.mounted) {
-                  Navigator.of(context).pop();
-                }
-              },
-              child: Text("Save"),
-            ),
-          ],
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: FileBrowser(
-                  onSelectionChanged: (selection) {
-                    path = selection.join("/");
-                  },
-                  room: room,
-                  multiple: false,
-                  selectionMode: FileBrowserSelectionMode.folders,
-                  rootLabel: "Folders",
-                ),
-              ),
-              Padding(
-                padding: .only(top: 12.0),
-                child: ShadInputFormField(
-                  label: Text('Enter File Name', style: tt.small.copyWith(fontWeight: FontWeight.bold)),
-                  placeholder: const Text('chat-comment.md'),
-                  keyboardType: TextInputType.emailAddress,
-                  controller: fileNameController,
-                ),
-              ),
-            ],
-          ),
-        );
+    await _showThreadStorageSaveSurface(
+      context,
+      room: room,
+      title: "Save comment file as ...",
+      suggestedFileName: "chat-comment.md",
+      fileNameLabel: "Enter File Name",
+      mobilePresenter: widget.mobileStorageSaveSurfacePresenter,
+      loadContent: () async {
+        final bytes = Uint8List.fromList(utf8.encode(widget.text));
+        return FileContent(data: bytes, name: "chat-comment.md", mimeType: "text/markdown");
       },
     );
   }
@@ -3881,6 +3920,7 @@ class _ChatThreadState extends State<ChatThread> {
                   emptyStateTitle: widget.emptyStateTitle,
                   emptyStateDescription: widget.emptyStateDescription,
                   emptyState: widget.emptyState,
+                  mobileStorageSaveSurfacePresenter: widget.mobileStorageSaveSurfacePresenter,
                 ),
                 ListenableBuilder(
                   listenable: controller,
@@ -4025,6 +4065,7 @@ class ChatThreadMessages extends StatefulWidget {
     this.emptyStateDescription,
     this.emptyState,
     this.onShowCompletedToolCallsChanged,
+    this.mobileStorageSaveSurfacePresenter,
   });
 
   final Map<String, MessageBuilder>? messageBuilders;
@@ -4050,6 +4091,7 @@ class ChatThreadMessages extends StatefulWidget {
   final String? emptyStateDescription;
   final Widget? emptyState;
   final ValueChanged<bool>? onShowCompletedToolCallsChanged;
+  final ThreadStorageSaveSurfacePresenter? mobileStorageSaveSurfacePresenter;
 
   final Widget Function(BuildContext, MeshDocument, MeshElement)? messageHeaderBuilder;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
@@ -4160,6 +4202,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   Widget Function(BuildContext, MeshDocument, MeshElement)? get messageHeaderBuilder => widget.messageHeaderBuilder;
   Widget Function(BuildContext context, String path)? get fileInThreadBuilder => widget.fileInThreadBuilder;
   FutureOr<void> Function(String path)? get openFile => widget.openFile;
+  ThreadStorageSaveSurfacePresenter? get mobileStorageSaveSurfacePresenter => widget.mobileStorageSaveSurfacePresenter;
 
   final OverlayPortalController _imageViewerController = OverlayPortalController();
   List<_ThreadFeedImage> _overlayImages = const <_ThreadFeedImage>[];
@@ -4781,6 +4824,18 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     await launchUrl(Uri.parse(url));
   }
 
+  Future<void> _saveStoragePath(String path) async {
+    await _showThreadStorageSaveSurface(
+      context,
+      room: room,
+      title: "Save file as ...",
+      suggestedFileName: _defaultSuggestedFileNameFromPath(path),
+      fileNameLabel: "File name or path",
+      mobilePresenter: mobileStorageSaveSurfacePresenter,
+      loadContent: () => room.storage.download(path),
+    );
+  }
+
   Future<void> _confirmDeleteMessage(MeshElement message) async {
     await showShadDialog<void>(
       context: context,
@@ -4930,7 +4985,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
           },
           child: const Text("React"),
         ),
-      if (path != null) ShadContextMenuItem(height: 40, onPressed: () => _downloadPath(path), child: const Text("Save as...")),
+      if (path != null) ShadContextMenuItem(height: 40, onPressed: () => _saveStoragePath(path), child: const Text("Save as...")),
       ShadContextMenuItem(height: 40, onPressed: () => _confirmDeleteMessage(message), child: const Text("Delete")),
     ];
   }
@@ -5248,6 +5303,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                 mine: mine,
                 text: messageText,
                 onDelete: message.delete,
+                mobileStorageSaveSurfacePresenter: mobileStorageSaveSurfacePresenter,
                 reactionActionBuilder: localParticipantReactionName == null
                     ? null
                     : (controller) => _ReactionPickerButton(
@@ -5731,6 +5787,255 @@ class _ReactionPickerFlowDialog extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+class _ThreadStorageSaveDesktopDialog extends StatelessWidget {
+  const _ThreadStorageSaveDesktopDialog({
+    required this.room,
+    required this.title,
+    required this.suggestedFileName,
+    required this.fileNameLabel,
+    required this.loadContent,
+  });
+
+  final RoomClient room;
+  final String title;
+  final String suggestedFileName;
+  final String fileNameLabel;
+  final Future<FileContent> Function() loadContent;
+
+  @override
+  Widget build(BuildContext context) {
+    return _ThreadStorageSaveSurfaceScaffold(
+      room: room,
+      title: title,
+      suggestedFileName: suggestedFileName,
+      fileNameLabel: fileNameLabel,
+      loadContent: loadContent,
+      useMobileFlowPresentation: false,
+    );
+  }
+}
+
+class _ThreadStorageSaveFlowDialog extends StatelessWidget {
+  const _ThreadStorageSaveFlowDialog({
+    required this.room,
+    required this.title,
+    required this.suggestedFileName,
+    required this.fileNameLabel,
+    required this.loadContent,
+  });
+
+  final RoomClient room;
+  final String title;
+  final String suggestedFileName;
+  final String fileNameLabel;
+  final Future<FileContent> Function() loadContent;
+
+  @override
+  Widget build(BuildContext context) {
+    return _ThreadStorageSaveSurfaceScaffold(
+      room: room,
+      title: title,
+      suggestedFileName: suggestedFileName,
+      fileNameLabel: fileNameLabel,
+      loadContent: loadContent,
+      useMobileFlowPresentation: true,
+    );
+  }
+}
+
+class _ThreadStorageSaveSurfaceScaffold extends StatefulWidget {
+  const _ThreadStorageSaveSurfaceScaffold({
+    required this.room,
+    required this.title,
+    required this.suggestedFileName,
+    required this.fileNameLabel,
+    required this.loadContent,
+    required this.useMobileFlowPresentation,
+  });
+
+  final RoomClient room;
+  final String title;
+  final String suggestedFileName;
+  final String fileNameLabel;
+  final Future<FileContent> Function() loadContent;
+  final bool useMobileFlowPresentation;
+
+  @override
+  State<_ThreadStorageSaveSurfaceScaffold> createState() => _ThreadStorageSaveSurfaceScaffoldState();
+}
+
+class _ThreadStorageSaveSurfaceScaffoldState extends State<_ThreadStorageSaveSurfaceScaffold> {
+  late final TextEditingController _fileNameController = TextEditingController();
+  String _selectedFolder = "";
+  bool _saving = false;
+
+  String _resolvedFullPath() {
+    final rawValue = _fileNameController.text.trim();
+    var fullPath = rawValue.isEmpty ? widget.suggestedFileName : rawValue;
+
+    if (!fullPath.contains("/")) {
+      fullPath = _selectedFolder.isEmpty ? fullPath : "$_selectedFolder/$fullPath";
+    }
+
+    return _applySuggestedFileExtension(fullPath, suggestedFileName: widget.suggestedFileName);
+  }
+
+  Future<void> _onSavePressed() async {
+    if (_saving) {
+      return;
+    }
+
+    final fullPath = _resolvedFullPath();
+    final exists = await widget.room.storage.exists(fullPath);
+    if (exists && mounted) {
+      final overwrite = await _showStorageOverwriteConfirmation(
+        context,
+        title: "File already exists",
+        message: "A file at '$fullPath' already exists in room storage. Do you want to overwrite it?",
+      );
+
+      if (!overwrite || !mounted) {
+        return;
+      }
+    }
+
+    setState(() {
+      _saving = true;
+    });
+
+    try {
+      final content = await widget.loadContent();
+      await widget.room.storage.uploadStream(
+        fullPath,
+        Stream.value(content.data),
+        overwrite: true,
+        size: content.data.length,
+        name: _defaultSuggestedFileNameFromPath(fullPath),
+        mimeType: content.mimeType,
+      );
+
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+        });
+      }
+    }
+  }
+
+  Widget _buildSurfaceBody(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final tt = theme.textTheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: ColoredBox(
+              color: theme.colorScheme.background,
+              child: FileBrowser(
+                onSelectionChanged: (selection) {
+                  setState(() {
+                    _selectedFolder = selection.join("/");
+                  });
+                },
+                room: widget.room,
+                multiple: false,
+                selectionMode: FileBrowserSelectionMode.folders,
+                rootLabel: "Folders",
+              ),
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: ShadInputFormField(
+            label: Text(widget.fileNameLabel, style: tt.small.copyWith(fontWeight: FontWeight.bold)),
+            placeholder: Text(widget.suggestedFileName),
+            keyboardType: TextInputType.emailAddress,
+            controller: _fileNameController,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMobileSurface(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final mediaQuery = MediaQuery.of(context);
+    final maxHeight = math.max(360.0, mediaQuery.size.height - mediaQuery.padding.top - _mobileStorageSaveFlowDialogViewportTopGap);
+    return ShadMobileFlowDialogSurface(
+      constraints: BoxConstraints(maxWidth: _mobileStorageSaveFlowDialogMaxWidth, minHeight: maxHeight, maxHeight: maxHeight),
+      backgroundColor: theme.colorScheme.card,
+      radius: const BorderRadius.vertical(top: Radius.circular(28)),
+      border: Border.all(color: theme.colorScheme.border),
+      shadows: null,
+      padding: shadMobileFlowDialogCompactPadding.copyWith(bottom: mediaQuery.padding.bottom + shadMobileFlowDialogCompactPadding.bottom),
+      title: ShadMobileFlowDialogCenteredTitleBar(
+        title: Text(
+          widget.title,
+          textAlign: TextAlign.center,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.large.copyWith(color: theme.colorScheme.foreground),
+        ),
+        onClose: _saving ? null : () => Navigator.of(context).pop(),
+      ),
+      description: null,
+      body: _buildSurfaceBody(context),
+      actions: [
+        ShadButton.secondary(onPressed: _saving ? null : () => Navigator.of(context).pop(), child: const Text("Cancel")),
+        ShadButton(
+          onPressed: _saving ? null : _onSavePressed,
+          child: _saving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Text("Save"),
+        ),
+      ],
+      gap: 16,
+      actionsGap: 12,
+      bodyBehavior: ShadMobileFlowDialogBodyBehavior.fill,
+      usesHorizontalActionRow: true,
+      keyboardInset: mediaQuery.viewInsets.bottom,
+      hideActionsWhenKeyboardVisible: false,
+    );
+  }
+
+  Widget _buildDesktopSurface(BuildContext context) {
+    return ShadDialog(
+      title: Text(widget.title),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      constraints: const BoxConstraints(maxWidth: 700, maxHeight: 544),
+      scrollable: false,
+      actions: [
+        ShadButton.secondary(onPressed: _saving ? null : () => Navigator.of(context).pop(), child: const Text("Cancel")),
+        ShadButton(
+          onPressed: _saving ? null : _onSavePressed,
+          child: _saving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Text("Save"),
+        ),
+      ],
+      child: _buildSurfaceBody(context),
+    );
+  }
+
+  @override
+  void dispose() {
+    _fileNameController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.useMobileFlowPresentation) {
+      return _buildMobileSurface(context);
+    }
+
+    return _buildDesktopSurface(context);
   }
 }
 

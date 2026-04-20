@@ -43,6 +43,7 @@ class ChatBotView extends StatefulWidget {
     this.emptyState,
     this.inputContextMenuBuilder,
     this.inputOnPressedOutside,
+    this.mobileStorageSaveSurfacePresenter,
     this.centerComposer = false,
     this.hideChatInput = false,
     this.showThreadList = true,
@@ -83,6 +84,7 @@ class ChatBotView extends StatefulWidget {
   final Widget? emptyState;
   final EditableTextContextMenuBuilder? inputContextMenuBuilder;
   final TapRegionCallback? inputOnPressedOutside;
+  final ThreadStorageSaveSurfacePresenter? mobileStorageSaveSurfacePresenter;
   final bool centerComposer;
   final bool hideChatInput;
   final bool showThreadList;
@@ -187,6 +189,7 @@ class _ChatBotViewState extends State<ChatBotView> {
       emptyState: widget.emptyState,
       inputContextMenuBuilder: widget.inputContextMenuBuilder,
       inputOnPressedOutside: widget.inputOnPressedOutside,
+      mobileStorageSaveSurfacePresenter: widget.mobileStorageSaveSurfacePresenter,
       agentName: widget.agentName,
       initialShowCompletedToolCalls: widget.initialShowCompletedToolCalls,
       shouldShowAuthorNames: widget.shouldShowAuthorNames,

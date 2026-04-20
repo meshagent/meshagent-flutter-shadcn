@@ -123,6 +123,7 @@ class FileBrowser extends StatefulWidget {
     this.rowBuilder,
     this.separatorBuilder,
     this.emptyBuilder,
+    this.showFilesWhenSelectingFolders = false,
   });
 
   final RoomClient room;
@@ -135,6 +136,7 @@ class FileBrowser extends StatefulWidget {
   final FileBrowserRowBuilder? rowBuilder;
   final FileBrowserSeparatorBuilder? separatorBuilder;
   final FileBrowserEmptyBuilder? emptyBuilder;
+  final bool showFilesWhenSelectingFolders;
 
   @override
   State createState() => _FileBrowser();
@@ -512,7 +514,8 @@ class _FileBrowser extends State<FileBrowser> {
       return Center(child: CircularProgressIndicator());
     }
 
-    final filteredFiles = widget.selectionMode == FileBrowserSelectionMode.folders ? files!.where((x) => x.isFolder) : files!;
+    final showingFoldersOnly = widget.selectionMode == FileBrowserSelectionMode.folders && !widget.showFilesWhenSelectingFolders;
+    final filteredFiles = showingFoldersOnly ? files!.where((x) => x.isFolder) : files!;
     final currentSelectionCount = filteredFiles.where((file) => selection.contains(join(path, file.name))).length;
 
     final fileItems = path.split("/");
@@ -545,6 +548,15 @@ class _FileBrowser extends State<FileBrowser> {
                     final file = filteredFiles.elementAt(index);
                     final fullPath = join(path, file.name);
 
+                    final canActivate = switch (widget.selectionMode) {
+                      FileBrowserSelectionMode.folders => file.isFolder,
+                      FileBrowserSelectionMode.files => !file.isFolder || currentSelectionCount == 0,
+                    };
+                    final canToggleSelection = switch (widget.selectionMode) {
+                      FileBrowserSelectionMode.folders => file.isFolder,
+                      FileBrowserSelectionMode.files => !file.isFolder,
+                    };
+
                     return widget.rowBuilder?.call(
                           context,
                           FileBrowserRowViewModel(
@@ -552,12 +564,11 @@ class _FileBrowser extends State<FileBrowser> {
                             fullPath: fullPath,
                             displayName: _displayNameForEntry(file),
                             selected: selection.contains(fullPath),
-                            canActivate:
-                                widget.selectionMode == FileBrowserSelectionMode.folders || !file.isFolder || currentSelectionCount == 0,
+                            canActivate: canActivate,
                             onPressed: () => _onEntryPressed(file),
-                            canToggleSelection: widget.selectionMode == FileBrowserSelectionMode.folders || !file.isFolder,
+                            canToggleSelection: canToggleSelection,
                             onToggleSelection: widget.selectionMode == FileBrowserSelectionMode.folders
-                                ? () => _onEntryPressed(file)
+                                ? (file.isFolder ? () => _onEntryPressed(file) : null)
                                 : (file.isFolder ? null : () => _toggleFileSelection(file)),
                           ),
                         ) ??

@@ -1,6 +1,8 @@
 import 'package:flutter/widgets.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
+export 'mobile_flow_dialog.dart';
+
 String timeAgo(DateTime d) {
   Duration diff = DateTime.now().difference(d);
   String ago;
