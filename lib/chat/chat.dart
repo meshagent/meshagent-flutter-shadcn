@@ -265,21 +265,21 @@ Future<void> _showThreadStorageSaveSurface(
   required Future<FileContent> Function() loadContent,
   ThreadStorageSaveSurfacePresenter? mobilePresenter,
 }) async {
-  if (_usesNativeMobileReactionFlowDialog(context)) {
-    if (mobilePresenter != null) {
-      await mobilePresenter(
-        context,
-        ThreadStorageSaveSurfaceRequest(
-          room: room,
-          title: title,
-          suggestedFileName: suggestedFileName,
-          fileNameLabel: fileNameLabel,
-          loadContent: loadContent,
-        ),
-      );
-      return;
-    }
+  if (mobilePresenter != null) {
+    await mobilePresenter(
+      context,
+      ThreadStorageSaveSurfaceRequest(
+        room: room,
+        title: title,
+        suggestedFileName: suggestedFileName,
+        fileNameLabel: fileNameLabel,
+        loadContent: loadContent,
+      ),
+    );
+    return;
+  }
 
+  if (_usesNativeMobileReactionFlowDialog(context)) {
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
