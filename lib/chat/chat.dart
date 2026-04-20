@@ -5390,14 +5390,18 @@ class _ReactionPickerButtonState extends State<_ReactionPickerButton> {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
+    final isMobile = _usesMobileContextLayout(context);
+    final triggerSize = isMobile ? 40.0 : 30.0;
+    final iconSize = isMobile ? 19.0 : 14.0;
     final trigger =
         widget.triggerBuilder?.call(_controller.toggle) ??
         Tooltip(
           message: "Add reaction",
           child: ShadIconButton.ghost(
-            width: 30,
-            height: 30,
-            icon: const Icon(LucideIcons.smilePlus, size: 14),
+            width: triggerSize,
+            height: triggerSize,
+            padding: EdgeInsets.zero,
+            icon: Icon(LucideIcons.smilePlus, size: iconSize),
             onPressed: _controller.toggle,
           ),
         );
