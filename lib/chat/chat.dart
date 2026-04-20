@@ -42,6 +42,12 @@ const List<String> _emojiFontFamilyFallback = <String>['Apple Color Emoji', 'Seg
 const double _chatBubbleContentHorizontalPadding = 16;
 const double _chatBubbleContentTopPadding = 4;
 const double _chatBubbleContentBottomPadding = 2;
+const double _mobileReactionFlowDialogMaxWidth = 420;
+const double _mobileReactionFlowDialogViewportTopGap = 20;
+const double _mobileReactionFlowDialogMaxHeightFactor = 0.72;
+const double _mobileReactionFlowDialogCornerRadius = 28;
+const double _mobileReactionFlowDialogTopPadding = 30;
+const double _mobileReactionFlowDialogBottomPadding = 28;
 const EdgeInsets _chatBubbleContentPadding = EdgeInsets.only(
   left: _chatBubbleContentHorizontalPadding,
   right: _chatBubbleContentHorizontalPadding,
@@ -74,6 +80,17 @@ bool _usesMobileContextLayout(BuildContext context) {
   return MediaQuery.sizeOf(context).width < _mobileScreenWidthMax;
 }
 
+bool _usesNativeMobileReactionFlowDialog(BuildContext context) {
+  if (kIsWeb || !_usesMobileContextLayout(context)) {
+    return false;
+  }
+
+  return switch (defaultTargetPlatform) {
+    TargetPlatform.iOS || TargetPlatform.android => true,
+    TargetPlatform.fuchsia || TargetPlatform.linux || TargetPlatform.macOS || TargetPlatform.windows => false,
+  };
+}
+
 String _normalizeEmojiPresentationKey(String value) {
   return value.replaceAll('\u{FE0F}', '').replaceAll('\u{FE0E}', '').replaceAll('\u{200D}', '').trim();
 }
@@ -99,6 +116,62 @@ TextStyle _emojiTextStyle({double size = 14}) {
     height: 1,
     fontFamily: _primaryEmojiFontFamily(),
     fontFamilyFallback: _emojiFontFamilyFallback,
+  );
+}
+
+List<Widget> _buildReactionOptionButtons({
+  required BuildContext context,
+  required List<String> reactionOptions,
+  required String? selectedReaction,
+  required ValueChanged<String> onSelected,
+  required double buttonSize,
+  required double emojiSize,
+}) {
+  final theme = ShadTheme.of(context);
+  return <Widget>[
+    for (final reaction in reactionOptions)
+      Builder(
+        builder: (context) {
+          final selected =
+              selectedReaction != null && _normalizeEmojiPresentationKey(selectedReaction) == _normalizeEmojiPresentationKey(reaction);
+          return ShadButton.ghost(
+            width: buttonSize,
+            height: buttonSize,
+            padding: EdgeInsets.zero,
+            backgroundColor: selected ? theme.colorScheme.foreground.withValues(alpha: 0.16) : null,
+            hoverBackgroundColor: selected
+                ? theme.colorScheme.foreground.withValues(alpha: 0.24)
+                : theme.colorScheme.muted.withValues(alpha: 0.55),
+            onPressed: () => onSelected(reaction),
+            child: Text(reaction, style: _emojiTextStyle(size: emojiSize)),
+          );
+        },
+      ),
+  ];
+}
+
+Future<void> _showReactionPickerSurface(
+  BuildContext context, {
+  required List<String> reactionOptions,
+  required String? selectedReaction,
+  required ValueChanged<String> onSelected,
+}) async {
+  if (_usesNativeMobileReactionFlowDialog(context)) {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      useSafeArea: false,
+      builder: (dialogContext) =>
+          _ReactionPickerFlowDialog(reactionOptions: reactionOptions, selectedReaction: selectedReaction, onSelected: onSelected),
+    );
+    return;
+  }
+
+  await showShadDialog<void>(
+    context: context,
+    builder: (dialogContext) =>
+        _ReactionPickerDesktopDialog(reactionOptions: reactionOptions, selectedReaction: selectedReaction, onSelected: onSelected),
   );
 }
 
@@ -4269,49 +4342,11 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     required String? selectedReaction,
     required ValueChanged<String> onSelected,
   }) async {
-    await showShadDialog<void>(
-      context: context,
-      builder: (context) {
-        final theme = ShadTheme.of(context);
-        return ShadDialog(
-          title: const Text("React"),
-          constraints: const BoxConstraints(maxWidth: 320),
-          actions: [ShadButton.ghost(onPressed: () => Navigator.of(context).pop(), child: const Text("Close"))],
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 360),
-            child: SingleChildScrollView(
-              child: Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  for (final reaction in _defaultReactionOptions)
-                    Builder(
-                      builder: (context) {
-                        final selected =
-                            selectedReaction != null &&
-                            _normalizeEmojiPresentationKey(selectedReaction) == _normalizeEmojiPresentationKey(reaction);
-                        return ShadButton.ghost(
-                          width: 34,
-                          height: 34,
-                          padding: EdgeInsets.zero,
-                          backgroundColor: selected ? theme.colorScheme.foreground.withValues(alpha: 0.16) : null,
-                          hoverBackgroundColor: selected
-                              ? theme.colorScheme.foreground.withValues(alpha: 0.24)
-                              : theme.colorScheme.muted.withValues(alpha: 0.55),
-                          onPressed: () {
-                            onSelected(reaction);
-                            Navigator.of(context).pop();
-                          },
-                          child: Text(reaction, style: _emojiTextStyle(size: 18)),
-                        );
-                      },
-                    ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
+    await _showReactionPickerSurface(
+      context,
+      reactionOptions: _defaultReactionOptions,
+      selectedReaction: selectedReaction,
+      onSelected: onSelected,
     );
   }
 
@@ -5454,6 +5489,7 @@ class _ReactionPickerButton extends StatefulWidget {
 
 class _ReactionPickerButtonState extends State<_ReactionPickerButton> {
   late final ShadContextMenuController _internalController = ShadContextMenuController();
+  bool _didDispose = false;
 
   ShadContextMenuController get _controller => widget.controller ?? _internalController;
 
@@ -5462,8 +5498,34 @@ class _ReactionPickerButtonState extends State<_ReactionPickerButton> {
     _controller.hide();
   }
 
+  Future<void> _handleTriggerPressed() async {
+    if (_usesNativeMobileReactionFlowDialog(context)) {
+      if (_controller.isOpen || _didDispose) {
+        return;
+      }
+
+      _controller.show();
+      try {
+        await _showReactionPickerSurface(
+          context,
+          reactionOptions: widget.reactionOptions,
+          selectedReaction: widget.selectedReaction,
+          onSelected: widget.onSelected,
+        );
+      } finally {
+        if (!_didDispose) {
+          _controller.hide();
+        }
+      }
+      return;
+    }
+
+    _controller.toggle();
+  }
+
   @override
   void dispose() {
+    _didDispose = true;
     if (widget.controller == null) {
       _internalController.dispose();
     }
@@ -5472,22 +5534,34 @@ class _ReactionPickerButtonState extends State<_ReactionPickerButton> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = ShadTheme.of(context);
+    final usesNativeMobileFlowDialog = _usesNativeMobileReactionFlowDialog(context);
     final isMobile = _usesMobileContextLayout(context);
     final triggerSize = isMobile ? 40.0 : 30.0;
     final iconSize = isMobile ? 19.0 : 14.0;
     final trigger =
-        widget.triggerBuilder?.call(_controller.toggle) ??
-        Tooltip(
-          message: "Add reaction",
-          child: ShadIconButton.ghost(
-            width: triggerSize,
-            height: triggerSize,
-            padding: EdgeInsets.zero,
-            icon: Icon(LucideIcons.smilePlus, size: iconSize),
-            onPressed: _controller.toggle,
-          ),
-        );
+        widget.triggerBuilder?.call(_handleTriggerPressed) ??
+        (usesNativeMobileFlowDialog
+            ? ShadIconButton.ghost(
+                width: triggerSize,
+                height: triggerSize,
+                padding: EdgeInsets.zero,
+                icon: Icon(LucideIcons.smilePlus, size: iconSize),
+                onPressed: _handleTriggerPressed,
+              )
+            : Tooltip(
+                message: "Add reaction",
+                child: ShadIconButton.ghost(
+                  width: triggerSize,
+                  height: triggerSize,
+                  padding: EdgeInsets.zero,
+                  icon: Icon(LucideIcons.smilePlus, size: iconSize),
+                  onPressed: _handleTriggerPressed,
+                ),
+              ));
+
+    if (usesNativeMobileFlowDialog) {
+      return trigger;
+    }
 
     return CoordinatedShadContextMenu(
       controller: _controller,
@@ -5504,33 +5578,158 @@ class _ReactionPickerButtonState extends State<_ReactionPickerButton> {
               child: Wrap(
                 spacing: 4,
                 runSpacing: 4,
-                children: [
-                  for (final reaction in widget.reactionOptions)
-                    Builder(
-                      builder: (context) {
-                        final selected =
-                            widget.selectedReaction != null &&
-                            _normalizeEmojiPresentationKey(widget.selectedReaction!) == _normalizeEmojiPresentationKey(reaction);
-                        return ShadButton.ghost(
-                          width: 32,
-                          height: 32,
-                          padding: EdgeInsets.zero,
-                          backgroundColor: selected ? theme.colorScheme.foreground.withValues(alpha: 0.16) : null,
-                          hoverBackgroundColor: selected
-                              ? theme.colorScheme.foreground.withValues(alpha: 0.24)
-                              : theme.colorScheme.muted.withValues(alpha: 0.55),
-                          onPressed: () => _onSelectReaction(reaction),
-                          child: Text(reaction, style: _emojiTextStyle(size: 18)),
-                        );
-                      },
-                    ),
-                ],
+                children: _buildReactionOptionButtons(
+                  context: context,
+                  reactionOptions: widget.reactionOptions,
+                  selectedReaction: widget.selectedReaction,
+                  onSelected: _onSelectReaction,
+                  buttonSize: 32,
+                  emojiSize: 18,
+                ),
               ),
             ),
           ),
         ),
       ],
       child: trigger,
+    );
+  }
+}
+
+class _ReactionPickerDesktopDialog extends StatelessWidget {
+  const _ReactionPickerDesktopDialog({required this.reactionOptions, required this.selectedReaction, required this.onSelected});
+
+  final List<String> reactionOptions;
+  final String? selectedReaction;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return ShadDialog(
+      title: const Text("React"),
+      constraints: const BoxConstraints(maxWidth: 320),
+      actions: [ShadButton.ghost(onPressed: () => Navigator.of(context).pop(), child: const Text("Close"))],
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 360),
+        child: SingleChildScrollView(
+          child: Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: _buildReactionOptionButtons(
+              context: context,
+              reactionOptions: reactionOptions,
+              selectedReaction: selectedReaction,
+              onSelected: (reaction) {
+                onSelected(reaction);
+                Navigator.of(context).pop();
+              },
+              buttonSize: 34,
+              emojiSize: 18,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ReactionPickerFlowDialog extends StatelessWidget {
+  const _ReactionPickerFlowDialog({required this.reactionOptions, required this.selectedReaction, required this.onSelected});
+
+  final List<String> reactionOptions;
+  final String? selectedReaction;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final mediaQuery = MediaQuery.of(context);
+    final maxHeight = math
+        .max(
+          280.0,
+          math.min(
+            mediaQuery.size.height - mediaQuery.padding.top - _mobileReactionFlowDialogViewportTopGap,
+            mediaQuery.size.height * _mobileReactionFlowDialogMaxHeightFactor,
+          ),
+        )
+        .toDouble();
+
+    return Padding(
+      padding: EdgeInsets.only(top: mediaQuery.padding.top + _mobileReactionFlowDialogViewportTopGap),
+      child: Align(
+        alignment: Alignment.bottomCenter,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: _mobileReactionFlowDialogMaxWidth, maxHeight: maxHeight),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: theme.colorScheme.card,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(_mobileReactionFlowDialogCornerRadius)),
+              border: Border.all(color: theme.colorScheme.border),
+            ),
+            child: SafeArea(
+              top: false,
+              child: Padding(
+                padding: EdgeInsets.only(
+                  left: 24,
+                  right: 24,
+                  top: _mobileReactionFlowDialogTopPadding,
+                  bottom: mediaQuery.padding.bottom + _mobileReactionFlowDialogBottomPadding,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        const SizedBox(width: 40),
+                        Expanded(
+                          child: Text(
+                            "React",
+                            textAlign: TextAlign.center,
+                            style: theme.textTheme.large.copyWith(color: theme.colorScheme.foreground),
+                          ),
+                        ),
+                        ShadIconButton.ghost(
+                          width: 40,
+                          height: 40,
+                          padding: EdgeInsets.zero,
+                          icon: Icon(LucideIcons.x, size: 20, color: theme.colorScheme.foreground),
+                          onPressed: () => Navigator.of(context).pop(),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Flexible(
+                      fit: FlexFit.loose,
+                      child: SingleChildScrollView(
+                        child: Align(
+                          alignment: Alignment.topCenter,
+                          child: Wrap(
+                            spacing: 12,
+                            runSpacing: 12,
+                            alignment: WrapAlignment.center,
+                            children: _buildReactionOptionButtons(
+                              context: context,
+                              reactionOptions: reactionOptions,
+                              selectedReaction: selectedReaction,
+                              onSelected: (reaction) {
+                                onSelected(reaction);
+                                Navigator.of(context).pop();
+                              },
+                              buttonSize: 48,
+                              emojiSize: 24,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
