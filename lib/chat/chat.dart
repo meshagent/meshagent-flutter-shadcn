@@ -3049,7 +3049,7 @@ class _ChatBubble extends State<ChatBubble> {
       ]);
     }
 
-    await clipboard.write([DataWriterItem(suggestedName: "meshwidget.widget")..add(EncodedData(reps))]);
+    await clipboard.write([DataWriterItem()..add(EncodedData(reps))]);
   }
 
   Future<void> _onSave(RoomClient room) async {
@@ -4746,6 +4746,31 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     await launchUrl(Uri.parse(url));
   }
 
+  Future<void> _confirmDeleteMessage(MeshElement message) async {
+    await showShadDialog<void>(
+      context: context,
+      builder: (context) => ShadDialog(
+        title: const Text("Delete Message"),
+        description: const Text("Are you sure you want to delete this message? This action cannot be undone."),
+        actions: [
+          ShadButton.secondary(
+            onPressed: () {
+              Navigator.of(context).pop();
+            },
+            child: const Text("Cancel"),
+          ),
+          ShadButton(
+            onPressed: () {
+              message.delete();
+              Navigator.of(context).pop();
+            },
+            child: const Text("Delete"),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _openPath(String path) async {
     if (widget.openFile != null) {
       await widget.openFile!(path);
@@ -4788,8 +4813,13 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     );
   }
 
-  Widget _buildFileImageInThread(BuildContext context, String path, _ThreadImageRecord? imageRecord, bool loading) {
-    final items = _buildAttachmentOptions(imageRecord: imageRecord, path: path);
+  Widget _buildFileImageInThread(
+    BuildContext context,
+    String path,
+    _ThreadImageRecord? imageRecord,
+    bool loading, {
+    required List<ShadContextMenuItem> items,
+  }) {
     final child = _wrapTapTarget(
       SizedBox(
         width: 312.5,
@@ -4813,24 +4843,61 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     );
 
     if (_usesMobileContextLayout(context)) {
-      return child;
+      return CoordinatedShadContextMenuRegion(items: items, tapEnabled: false, child: child);
     }
 
     return CoordinatedShadContextMenuRegion(items: items, child: child);
   }
 
-  Widget _buildFileInThread(BuildContext context, String path) {
-    final items = _buildAttachmentOptions(path: path);
+  Widget _buildFileInThread(BuildContext context, String path, {required List<ShadContextMenuItem> items}) {
     final child = _wrapTapTarget(
       fileInThreadBuilder != null ? fileInThreadBuilder!(context, path) : ChatThreadPreview(room: room, path: path),
       path,
     );
 
     if (_usesMobileContextLayout(context)) {
-      return child;
+      return CoordinatedShadContextMenuRegion(items: items, tapEnabled: false, child: child);
     }
 
     return CoordinatedShadContextMenuRegion(items: items, child: child);
+  }
+
+  List<ShadContextMenuItem> _buildMobileAttachmentOptions({
+    required MeshElement message,
+    required String? attachmentRef,
+    _ThreadImageRecord? imageRecord,
+    String? path,
+  }) {
+    final canReact = attachmentRef != null && _localParticipantName() != null;
+    final selectedReaction = canReact
+        ? _selectedReactionForTarget(message: message, target: _reactionTargetAttachment, attachmentRef: attachmentRef)
+        : null;
+
+    return [
+      if (imageRecord != null) ShadContextMenuItem(height: 40, onPressed: () => _copyImageRecord(imageRecord), child: const Text("Copy")),
+      if (canReact)
+        ShadContextMenuItem(
+          height: 40,
+          onPressed: () {
+            _showReactionPickerDialog(
+              context,
+              selectedReaction: selectedReaction,
+              onSelected: (reaction) {
+                _toggleReaction(
+                  message: message,
+                  reaction: reaction,
+                  target: _reactionTargetAttachment,
+                  attachmentRef: attachmentRef,
+                  removeIfSame: true,
+                );
+              },
+            );
+          },
+          child: const Text("React"),
+        ),
+      if (path != null) ShadContextMenuItem(height: 40, onPressed: () => _downloadPath(path), child: const Text("Save as...")),
+      ShadContextMenuItem(height: 40, onPressed: () => _confirmDeleteMessage(message), child: const Text("Delete")),
+    ];
   }
 
   Widget _buildImageInThread(BuildContext context, MeshElement attachment, {required List<_ThreadFeedImage> feedImages}) {
@@ -4924,11 +4991,19 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
         builder: (context, snapshot) {
           final imageRecord = snapshot.data;
           final loading = snapshot.connectionState != ConnectionState.done;
+          final items = _usesMobileContextLayout(context)
+              ? _buildMobileAttachmentOptions(
+                  message: message,
+                  attachmentRef: normalizedAttachmentRef,
+                  imageRecord: imageRecord,
+                  path: normalizedPath,
+                )
+              : _buildAttachmentOptions(imageRecord: imageRecord, path: normalizedPath);
 
           return Column(
             crossAxisAlignment: mine ? .end : .start,
             children: [
-              _buildFileImageInThread(context, normalizedPath, imageRecord, loading),
+              _buildFileImageInThread(context, normalizedPath, imageRecord, loading, items: items),
               if (normalizedAttachmentRef != null)
                 _buildReactionRow(
                   context,
@@ -4947,7 +5022,13 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     return Column(
       crossAxisAlignment: mine ? .end : .start,
       children: [
-        _buildFileInThread(context, normalizedPath),
+        _buildFileInThread(
+          context,
+          normalizedPath,
+          items: _usesMobileContextLayout(context)
+              ? _buildMobileAttachmentOptions(message: message, attachmentRef: normalizedAttachmentRef, path: normalizedPath)
+              : _buildAttachmentOptions(path: normalizedPath),
+        ),
         if (normalizedAttachmentRef != null)
           _buildReactionRow(
             context,
@@ -5259,20 +5340,22 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
       ],
       children: messageWidgets,
     );
-    final threadViewWithContextMenu = CoordinatedShadContextMenuRegion(
-      constraints: const BoxConstraints(minWidth: 180),
-      tapEnabled: false,
-      items: [
-        ShadContextMenuItem(
-          onPressed: widget.onShowCompletedToolCallsChanged == null
-              ? null
-              : () => widget.onShowCompletedToolCallsChanged!(!widget.showCompletedToolCalls),
-          leading: Icon(widget.showCompletedToolCalls ? LucideIcons.squareCheckBig : LucideIcons.square),
-          child: const Text("Show tool calls"),
-        ),
-      ],
-      child: threadView,
-    );
+    final threadViewWithContextMenu = _usesMobileContextLayout(context)
+        ? threadView
+        : CoordinatedShadContextMenuRegion(
+            constraints: const BoxConstraints(minWidth: 180),
+            tapEnabled: false,
+            items: [
+              ShadContextMenuItem(
+                onPressed: widget.onShowCompletedToolCallsChanged == null
+                    ? null
+                    : () => widget.onShowCompletedToolCallsChanged!(!widget.showCompletedToolCalls),
+                leading: Icon(widget.showCompletedToolCalls ? LucideIcons.squareCheckBig : LucideIcons.square),
+                child: const Text("Show tool calls"),
+              ),
+            ],
+            child: threadView,
+          );
 
     return Expanded(
       child: OverlayPortal(
