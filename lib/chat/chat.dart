@@ -77,6 +77,8 @@ const String _agentTurnSteerRejectedType = "meshagent.agent.turn.steer.rejected"
 const String _agentTurnEndedType = "meshagent.agent.turn.ended";
 const String _agentThreadClearedType = "meshagent.agent.thread.cleared";
 const double _mobileScreenWidthMax = 600;
+const double _mobileComposerPillCornerRadius = 999;
+const double _mobileComposerCornerRadius = 18;
 
 bool _usesMobileContextLayout(BuildContext context) {
   return MediaQuery.sizeOf(context).width < _mobileScreenWidthMax;
@@ -2575,6 +2577,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   bool showSendButton = false;
   bool allAttachmentsUploaded = true;
   bool sending = false;
+  int composerLineCount = 1;
 
   String text = "";
   List<FileAttachment> attachments = [];
@@ -2736,6 +2739,16 @@ class _ChatThreadInput extends State<ChatThreadInput> {
         showSendButton = value;
       });
     }
+  }
+
+  void _onComposerLineCountChanged(int value) {
+    if (composerLineCount == value) {
+      return;
+    }
+
+    setState(() {
+      composerLineCount = value;
+    });
   }
 
   void _scheduleAutoFocus() {
@@ -3011,9 +3024,13 @@ class _ChatThreadInput extends State<ChatThreadInput> {
             leading: widget.leading == null ? SizedBox(width: 3) : _wrapAccessoryTapRegion(wrapReadOnlyControls(widget.leading!)),
             trailing: widget.footer == null ? trailer : null,
             padding: EdgeInsets.only(left: 5, right: 5, top: widget.footer == null ? 5 : 10, bottom: widget.footer == null ? 5 : 0),
+            onLineCountChange: _onComposerLineCountChanged,
             decoration: (() {
               final theme = ShadTheme.of(context);
-              final composerRadius = theme.radius.resolve(Directionality.of(context));
+              final usesCompactMobileComposerShape = _usesMobileContextLayout(context) && attachments.isEmpty && composerLineCount <= 1;
+              final composerRadius = _usesMobileContextLayout(context)
+                  ? BorderRadius.circular(usesCompactMobileComposerShape ? _mobileComposerPillCornerRadius : _mobileComposerCornerRadius)
+                  : theme.radius.resolve(Directionality.of(context));
               final composerBorder = ShadBorder.all(radius: composerRadius, color: theme.colorScheme.border, width: 2);
               final composerFocusedBorder = ShadBorder.all(radius: composerRadius, color: theme.colorScheme.foreground, width: 2);
               return ShadDecoration(
