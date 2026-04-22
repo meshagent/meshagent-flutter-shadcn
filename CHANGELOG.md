@@ -1,3 +1,16 @@
+## [0.38.2]
+- RoomContainer now includes a `ports` list parsed from server responses.
+- Flutter dev container table displays container ports using the updated container model.
+
+## [0.38.1]
+- Breaking: `updateUser` now requires `canUseLlmProxy`, and user-management calls accept the new permission flag.
+- Flutter meeting connections now enable camera and microphone in parallel to improve join behavior and keep pending media state accurate.
+- Dart examples were refreshed to use the `websocketProtocol` helper for room connections, add `SimpleValue` types and richer element descriptions in schema examples, and remove the schema-registry example.
+
+## [0.38.0]
+- Added `llm_proxy` to the full OAuth scope set.
+- Breaking: `LoginScope` now defaults to the full OAuth scope rather than `profile` only.
+
 ## [0.37.2]
 - Stability
 

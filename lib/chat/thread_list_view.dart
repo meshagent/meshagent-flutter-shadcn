@@ -41,6 +41,7 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
   String? _openedPath;
   Object? _error;
   bool _loading = true;
+  final Set<RemoteParticipant> _listenedParticipants = <RemoteParticipant>{};
 
   String? _normalizePath(String? path) {
     final normalized = path?.trim();
@@ -200,6 +201,52 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
     setState(() {});
   }
 
+  void _onParticipantChanged() {
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {});
+  }
+
+  bool _rebindParticipantListeners() {
+    final nextParticipants = widget.room.messaging.remoteParticipants.toSet();
+    var changed = false;
+
+    for (final participant in _listenedParticipants.difference(nextParticipants)) {
+      participant.removeListener(_onParticipantChanged);
+      changed = true;
+    }
+
+    for (final participant in nextParticipants.difference(_listenedParticipants)) {
+      participant.addListener(_onParticipantChanged);
+      changed = true;
+    }
+
+    if (changed || _listenedParticipants.length != nextParticipants.length) {
+      _listenedParticipants
+        ..clear()
+        ..addAll(nextParticipants);
+      return true;
+    }
+
+    return false;
+  }
+
+  void _unbindParticipantListeners() {
+    for (final participant in _listenedParticipants) {
+      participant.removeListener(_onParticipantChanged);
+    }
+    _listenedParticipants.clear();
+  }
+
+  void _onMessagingChanged() {
+    final participantSetChanged = _rebindParticipantListeners();
+    if (participantSetChanged && mounted) {
+      setState(() {});
+    }
+  }
+
   Future<void> _closeDocument() async {
     final document = _document;
     final openedPath = _openedPath;
@@ -273,12 +320,20 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
   @override
   void initState() {
     super.initState();
+    widget.room.messaging.addListener(_onMessagingChanged);
+    _rebindParticipantListeners();
     unawaited(_rebindDocument());
   }
 
   @override
   void didUpdateWidget(covariant ChatThreadListView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.room != widget.room) {
+      _unbindParticipantListeners();
+      oldWidget.room.messaging.removeListener(_onMessagingChanged);
+      widget.room.messaging.addListener(_onMessagingChanged);
+      _rebindParticipantListeners();
+    }
     if (oldWidget.room != widget.room || oldWidget.threadListPath != widget.threadListPath) {
       unawaited(_rebindDocument());
     }
@@ -293,6 +348,8 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
 
   @override
   void dispose() {
+    _unbindParticipantListeners();
+    widget.room.messaging.removeListener(_onMessagingChanged);
     unawaited(_closeDocument());
     super.dispose();
   }
