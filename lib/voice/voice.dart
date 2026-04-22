@@ -19,6 +19,7 @@ class VoiceAgentCaller extends StatefulWidget {
     this.showDisconnectedAction = true,
     this.emptyStateTitle = "Start an audio session",
     this.emptyStateDescription = "Connect with this agent using your microphone.",
+    this.pinActionToMobileFooter = false,
     this.connectedControlsBuilder,
   });
 
@@ -33,6 +34,7 @@ class VoiceAgentCaller extends StatefulWidget {
   final bool showDisconnectedAction;
   final String emptyStateTitle;
   final String emptyStateDescription;
+  final bool pinActionToMobileFooter;
   final Widget Function(BuildContext context, MeetingController meeting)? connectedControlsBuilder;
 
   @override
@@ -42,6 +44,7 @@ class VoiceAgentCaller extends StatefulWidget {
 class _VoiceAgentCaller extends State<VoiceAgentCaller> {
   static const double _horizontalControlsMinWidth = 520;
   static const double _mobilePrimaryButtonMaxWidth = 360;
+  static const double _mobileFooterPrimaryButtonHeight = 44;
   static const double _mobileScreenWidthMax = 600;
   static const double _connectedControlsReservedHeight = 150;
   static const double _compactConnectedControlsReservedHeight = 220;
@@ -70,137 +73,150 @@ class _VoiceAgentCaller extends State<VoiceAgentCaller> {
     final emptyStateDescription = widget.emptyStateDescription.trim();
     final emptyStateAvailableWidth = widget.emptyStateAvailableWidth;
     final isMobileScreen = MediaQuery.sizeOf(context).width < _mobileScreenWidthMax;
+    final pinActionToMobileFooter = widget.pinActionToMobileFooter && isMobileScreen;
 
-    return Center(
-      child: LayoutBuilder(
-        builder: (context, constraints) => ListenableBuilder(
-          listenable: meeting,
-          builder: (context, _) {
-            if (meeting.livekitRoom.connectionState == livekit.ConnectionState.disconnected) {
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                spacing: 16,
-                children: [
-                  AudioAgentEmptyState(
-                    title: emptyStateTitle,
-                    description: emptyStateDescription,
-                    availableWidth: emptyStateAvailableWidth ?? constraints.maxWidth,
-                    action: !showDisconnectedAction
-                        ? null
-                        : LayoutBuilder(
-                            builder: (context, controlsConstraints) {
-                              final controlsAvailableWidth = emptyStateAvailableWidth ?? controlsConstraints.maxWidth;
-                              final horizontalControls = allowToggleTranscribe && controlsAvailableWidth >= _horizontalControlsMinWidth;
-                              final mobileButtonWidth = controlsAvailableWidth.clamp(220.0, _mobilePrimaryButtonMaxWidth).toDouble();
+    final content = LayoutBuilder(
+      builder: (context, constraints) => ListenableBuilder(
+        listenable: meeting,
+        builder: (context, _) {
+          if (meeting.livekitRoom.connectionState == livekit.ConnectionState.disconnected) {
+            return AudioAgentEmptyState(
+              title: emptyStateTitle,
+              description: emptyStateDescription,
+              availableWidth: emptyStateAvailableWidth ?? constraints.maxWidth,
+              action: !showDisconnectedAction
+                  ? null
+                  : LayoutBuilder(
+                      builder: (context, controlsConstraints) {
+                        final controlsAvailableWidth = emptyStateAvailableWidth ?? controlsConstraints.maxWidth;
+                        final horizontalControls =
+                            !pinActionToMobileFooter && allowToggleTranscribe && controlsAvailableWidth >= _horizontalControlsMinWidth;
+                        final mobileButtonWidth = controlsAvailableWidth.clamp(220.0, _mobilePrimaryButtonMaxWidth).toDouble();
 
-                              final startButton = ShadButton(
-                                width: isMobileScreen && !horizontalControls ? mobileButtonWidth : null,
-                                onPressed: () async {
-                                  final toaster = ShadToaster.maybeOf(context);
+                        final startButton = ShadButton(
+                          width: pinActionToMobileFooter
+                              ? double.infinity
+                              : (isMobileScreen && !horizontalControls ? mobileButtonWidth : null),
+                          height: pinActionToMobileFooter ? _mobileFooterPrimaryButtonHeight : null,
+                          onPressed: () async {
+                            final toaster = ShadToaster.maybeOf(context);
 
-                                  try {
-                                    final breakout = getBreakoutRoom != null ? await getBreakoutRoom(context) : const Uuid().v4();
-                                    if (breakout == null) {
-                                      return;
-                                    }
-                                    await meeting.configure(breakoutRoom: breakout);
-                                    await meeting.connect(livekit.FastConnectOptions(microphone: livekit.TrackOption(enabled: true)));
-                                    await meeting.room.messaging.sendMessage(
-                                      to: participant,
-                                      type: "voice_call",
-                                      message: {
-                                        "breakout_room": breakout,
-                                        if (transcribe)
-                                          "transcript_path":
-                                              "transcripts/${participant.getAttribute("name")}/${meeting.room.localParticipant!.getAttribute("name")}/${buildTranscriptFileName()}",
-                                      },
-                                    );
-                                  } catch (error) {
-                                    toaster?.show(ShadToast.destructive(description: Text(_describeStartSessionError(error))));
-                                  }
-                                },
-                                child: const Text("Start session"),
-                              );
-
-                              final transcribeCheckbox = ShadCheckbox(
-                                onChanged: (value) {
-                                  setState(() {
-                                    transcribe = value;
-                                  });
-                                },
-                                label: Text("Transcribe", style: ShadTheme.of(context).textTheme.small),
-                                value: transcribe,
-                              );
-
-                              if (horizontalControls) {
-                                return Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [startButton, const SizedBox(width: 32), transcribeCheckbox],
-                                );
+                            try {
+                              final breakout = getBreakoutRoom != null ? await getBreakoutRoom(context) : const Uuid().v4();
+                              if (breakout == null) {
+                                return;
                               }
-
-                              return Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  startButton,
-                                  if (allowToggleTranscribe) ...[const SizedBox(height: 16), transcribeCheckbox],
-                                ],
+                              await meeting.configure(breakoutRoom: breakout);
+                              await meeting.connect(livekit.FastConnectOptions(microphone: livekit.TrackOption(enabled: true)));
+                              await meeting.room.messaging.sendMessage(
+                                to: participant,
+                                type: "voice_call",
+                                message: {
+                                  "breakout_room": breakout,
+                                  if (transcribe)
+                                    "transcript_path":
+                                        "transcripts/${participant.getAttribute("name")}/${meeting.room.localParticipant!.getAttribute("name")}/${buildTranscriptFileName()}",
+                                },
                               );
-                            },
-                          ),
-                  ),
-                ],
-              );
-            }
+                            } catch (error) {
+                              toaster?.show(ShadToast.destructive(description: Text(_describeStartSessionError(error))));
+                            }
+                          },
+                          child: const Text("Start session"),
+                        );
 
-            final controls = meeting.livekitRoom.connectionState == livekit.ConnectionState.connected
-                ? (widget.connectedControlsBuilder?.call(context, meeting) ?? MeetingControls(controller: meeting))
-                : null;
+                        final transcribeCheckbox = ShadCheckbox(
+                          onChanged: (value) {
+                            setState(() {
+                              transcribe = value;
+                            });
+                          },
+                          label: Text("Transcribe", style: ShadTheme.of(context).textTheme.small),
+                          value: transcribe,
+                        );
 
-            final availableHeight = constraints.hasBoundedHeight ? constraints.maxHeight : 500.0;
-            final reservedControlsHeight = controls == null
-                ? 0.0
-                : constraints.maxWidth < 420
-                ? _compactConnectedControlsReservedHeight
-                : _connectedControlsReservedHeight;
-            final waveMaxHeight = (availableHeight - reservedControlsHeight).clamp(180.0, 360.0);
+                        if (horizontalControls) {
+                          return Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [startButton, const SizedBox(width: 32), transcribeCheckbox],
+                          );
+                        }
 
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              spacing: 16,
-              children: [
-                ConstrainedBox(
-                  constraints: BoxConstraints(maxWidth: constraints.maxWidth, maxHeight: waveMaxHeight),
-                  child: ListenableBuilder(
-                    listenable: meeting.livekitRoom,
-                    builder: (c, _) {
-                      final participant = meeting.livekitRoom.remoteParticipants.values.firstOrNull;
-                      return participant == null
-                          ? const SizedBox(width: 320, height: 180)
-                          : Padding(
-                              padding: const EdgeInsets.all(24),
-                              child: AspectRatio(
-                                aspectRatio: 1.25,
-                                child: AudioWave(
-                                  room: meeting.livekitRoom,
-                                  participant: participant,
-                                  backgroundColor: Colors.transparent,
-                                  speakingColor: Colors.green,
-                                  notSpeakingColor: Colors.green.withAlpha(50),
-                                ),
-                              ),
-                            );
-                    },
-                  ),
-                ),
-                if (controls != null) controls,
-              ],
+                        return Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: pinActionToMobileFooter ? CrossAxisAlignment.stretch : CrossAxisAlignment.center,
+                          children: [
+                            startButton,
+                            if (allowToggleTranscribe) ...[const SizedBox(height: 14), Center(child: transcribeCheckbox)],
+                          ],
+                        );
+                      },
+                    ),
+              pinActionToMobileFooter: pinActionToMobileFooter,
             );
-          },
-        ),
+          }
+
+          final controls = meeting.livekitRoom.connectionState == livekit.ConnectionState.connected
+              ? (widget.connectedControlsBuilder?.call(context, meeting) ?? MeetingControls(controller: meeting))
+              : null;
+
+          final availableHeight = constraints.hasBoundedHeight ? constraints.maxHeight : 500.0;
+          final reservedControlsHeight = controls == null
+              ? 0.0
+              : constraints.maxWidth < 420
+              ? _compactConnectedControlsReservedHeight
+              : _connectedControlsReservedHeight;
+          final waveMaxHeight = (availableHeight - reservedControlsHeight).clamp(180.0, 360.0);
+
+          final connectedContent = Column(
+            mainAxisSize: MainAxisSize.min,
+            spacing: 16,
+            children: [
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: constraints.maxWidth, maxHeight: waveMaxHeight),
+                child: ListenableBuilder(
+                  listenable: meeting.livekitRoom,
+                  builder: (c, _) {
+                    final participant = meeting.livekitRoom.remoteParticipants.values.firstOrNull;
+                    return participant == null
+                        ? const SizedBox(width: 320, height: 180)
+                        : Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: AspectRatio(
+                              aspectRatio: 1.25,
+                              child: AudioWave(
+                                room: meeting.livekitRoom,
+                                participant: participant,
+                                backgroundColor: Colors.transparent,
+                                speakingColor: Colors.green,
+                                notSpeakingColor: Colors.green.withAlpha(50),
+                              ),
+                            ),
+                          );
+                  },
+                ),
+              ),
+              if (controls != null) controls,
+            ],
+          );
+
+          if (pinActionToMobileFooter) {
+            final connectedHorizontalPadding = constraints.maxWidth < 360 ? 12.0 : 24.0;
+            return Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: connectedHorizontalPadding),
+                child: connectedContent,
+              ),
+            );
+          }
+
+          return connectedContent;
+        },
       ),
     );
+
+    return pinActionToMobileFooter ? SizedBox.expand(child: content) : Center(child: content);
   }
 }
 
@@ -212,6 +228,7 @@ class AudioAgentEmptyState extends StatelessWidget {
     required this.availableWidth,
     this.action,
     this.verticalOffset = defaultVerticalOffset,
+    this.pinActionToMobileFooter = false,
   });
 
   static const double defaultVerticalOffset = -40;
@@ -223,11 +240,14 @@ class AudioAgentEmptyState extends StatelessWidget {
   final double availableWidth;
   final Widget? action;
   final double verticalOffset;
+  final bool pinActionToMobileFooter;
 
   @override
   Widget build(BuildContext context) {
-    return Transform.translate(
-      offset: Offset(0, verticalOffset),
+    final isMobileScreen = MediaQuery.sizeOf(context).width < AudioAgentEmptyStateContent._mobileScreenWidthMax;
+    final effectiveVerticalOffset = pinActionToMobileFooter && isMobileScreen ? 0.0 : verticalOffset;
+    final content = Transform.translate(
+      offset: Offset(0, effectiveVerticalOffset),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: _contentMaxWidth),
         child: Padding(
@@ -238,13 +258,30 @@ class AudioAgentEmptyState extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 AudioAgentEmptyStateContent(title: title, description: description, availableWidth: availableWidth),
-                if (action != null) ...[const SizedBox(height: 24), action!],
+                if (action != null && !(pinActionToMobileFooter && isMobileScreen)) ...[const SizedBox(height: 24), action!],
               ],
             ),
           ),
         ),
       ),
     );
+
+    if (pinActionToMobileFooter && isMobileScreen && action != null) {
+      return SizedBox.expand(
+        child: Column(
+          children: [
+            Expanded(child: Center(child: content)),
+            SafeArea(
+              top: false,
+              minimum: const EdgeInsets.fromLTRB(_horizontalPadding, 16, _horizontalPadding, 32),
+              child: SizedBox(width: double.infinity, child: action!),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return content;
   }
 }
 
