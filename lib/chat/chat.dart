@@ -1784,7 +1784,7 @@ class ChatThreadInputFrame extends StatelessWidget {
   }
 }
 
-class ChatThreadViewportBody extends StatelessWidget {
+class ChatThreadViewportBody extends StatefulWidget {
   const ChatThreadViewportBody({
     super.key,
     required this.children,
@@ -1793,6 +1793,7 @@ class ChatThreadViewportBody extends StatelessWidget {
     this.centerContent,
     this.bottomSpacer = 0,
     this.overlays = const [],
+    this.tapRegionGroupId,
   });
 
   final List<Widget> children;
@@ -1801,42 +1802,126 @@ class ChatThreadViewportBody extends StatelessWidget {
   final Widget? centerContent;
   final double bottomSpacer;
   final List<Widget> overlays;
+  final Object? tapRegionGroupId;
+
+  @override
+  State<ChatThreadViewportBody> createState() => _ChatThreadViewportBodyState();
+}
+
+class _ChatThreadViewportBodyState extends State<ChatThreadViewportBody> {
+  double? _lastKeyboardInset;
+  double _pendingKeyboardInsetDelta = 0;
+  bool _keyboardAdjustmentScheduled = false;
+
+  void _scheduleKeyboardOffsetAdjustment(double delta) {
+    if (widget.scrollController == null || delta.abs() < 0.5) {
+      return;
+    }
+
+    _pendingKeyboardInsetDelta += delta;
+    if (_keyboardAdjustmentScheduled) {
+      return;
+    }
+
+    _keyboardAdjustmentScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _keyboardAdjustmentScheduled = false;
+      if (!mounted) {
+        _pendingKeyboardInsetDelta = 0;
+        return;
+      }
+
+      final scrollController = widget.scrollController;
+      if (scrollController == null || !scrollController.hasClients) {
+        _pendingKeyboardInsetDelta = 0;
+        return;
+      }
+
+      final delta = _pendingKeyboardInsetDelta;
+      _pendingKeyboardInsetDelta = 0;
+      if (delta.abs() < 0.5) {
+        return;
+      }
+
+      final position = scrollController.position;
+      if (position.pixels <= position.minScrollExtent + 1) {
+        return;
+      }
+
+      final nextOffset = (position.pixels + delta).clamp(position.minScrollExtent, position.maxScrollExtent).toDouble();
+      if ((nextOffset - position.pixels).abs() < 0.5) {
+        return;
+      }
+
+      scrollController.jumpTo(nextOffset);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
+    final lastKeyboardInset = _lastKeyboardInset;
+    _lastKeyboardInset = keyboardInset;
+    if (_usesMobileContextLayout(context) && lastKeyboardInset != null && (keyboardInset - lastKeyboardInset).abs() >= 0.5) {
+      _scheduleKeyboardOffsetAdjustment(keyboardInset - lastKeyboardInset);
+    }
+
+    final keyboardDismissBehavior = _usesMobileContextLayout(context)
+        ? ScrollViewKeyboardDismissBehavior.manual
+        : ScrollViewKeyboardDismissBehavior.onDrag;
+    final underHeaderContentPadding = _usesMobileContextLayout(context) ? 40.0 : 0.0;
+    final dismissKeyboardOnTap = _usesMobileContextLayout(context) && keyboardInset > 0
+        ? () => FocusManager.instance.primaryFocus?.unfocus()
+        : null;
+
     return Center(
       child: Stack(
         children: [
-          if (bottomAlign && centerContent != null && children.isEmpty)
+          if (widget.bottomAlign && widget.centerContent != null && widget.children.isEmpty)
             Positioned.fill(
-              child: IgnorePointer(child: Center(child: centerContent!)),
+              child: IgnorePointer(child: Center(child: widget.centerContent!)),
             ),
           Positioned.fill(
             child: Column(
-              mainAxisAlignment: bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
+              mainAxisAlignment: widget.bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
               children: [
                 Expanded(
-                  child: LayoutBuilder(
-                    builder: (context, constraints) => ListView(
-                      controller: scrollController,
-                      reverse: true,
-                      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-                      padding: EdgeInsets.only(
-                        top: 0,
-                        bottom: 16,
-                        left: chatThreadFeedHorizontalPadding(constraints.maxWidth),
-                        right: chatThreadFeedHorizontalPadding(constraints.maxWidth),
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Positioned.fill(
+                        top: -underHeaderContentPadding,
+                        child: TextFieldTapRegion(
+                          groupId: widget.tapRegionGroupId,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.translucent,
+                            onTap: dismissKeyboardOnTap,
+                            child: LayoutBuilder(
+                              builder: (context, constraints) => ListView(
+                                controller: widget.scrollController,
+                                reverse: true,
+                                keyboardDismissBehavior: keyboardDismissBehavior,
+                                padding: EdgeInsets.only(
+                                  top: underHeaderContentPadding,
+                                  bottom: 16,
+                                  left: chatThreadFeedHorizontalPadding(constraints.maxWidth),
+                                  right: chatThreadFeedHorizontalPadding(constraints.maxWidth),
+                                ),
+                                children: widget.children,
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
-                      children: children,
-                    ),
+                    ],
                   ),
                 ),
-                if (!bottomAlign && centerContent != null) centerContent!,
-                if (bottomSpacer > 0) SizedBox(height: bottomSpacer),
+                if (!widget.bottomAlign && widget.centerContent != null) widget.centerContent!,
+                if (widget.bottomSpacer > 0) SizedBox(height: widget.bottomSpacer),
               ],
             ),
           ),
-          ...overlays,
+          ...widget.overlays,
         ],
       ),
     );
@@ -2544,6 +2629,7 @@ class ChatThreadInput extends StatefulWidget {
     this.sendPendingText,
     this.contextMenuBuilder,
     this.onPressedOutside,
+    this.tapRegionGroupId,
   });
 
   final Widget? placeholder;
@@ -2569,6 +2655,7 @@ class ChatThreadInput extends StatefulWidget {
   final Widget? footer;
   final EditableTextContextMenuBuilder? contextMenuBuilder;
   final TapRegionCallback? onPressedOutside;
+  final Object? tapRegionGroupId;
   @override
   State createState() => _ChatThreadInput();
 }
@@ -2581,6 +2668,23 @@ class _ChatThreadInput extends State<ChatThreadInput> {
 
   String text = "";
   List<FileAttachment> attachments = [];
+
+  void _syncDraftStateFromController({bool triggerExternalOnChanged = false}) {
+    final nextText = widget.controller.text;
+    final nextAttachments = widget.controller.attachmentUploads;
+    final nextAllAttachmentsUploaded =
+        nextAttachments.isEmpty || nextAttachments.every((upload) => upload.status == UploadStatus.completed);
+    final nextShowSendButton = nextText.isNotEmpty || nextAttachments.isNotEmpty;
+
+    text = nextText;
+    attachments = nextAttachments;
+    allAttachmentsUploaded = nextAllAttachmentsUploaded;
+    showSendButton = nextShowSendButton;
+
+    if (triggerExternalOnChanged) {
+      widget.onChanged?.call(text, attachments);
+    }
+  }
 
   void _showSendDisabledToast() {
     if (!mounted) {
@@ -2694,7 +2798,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   );
 
   Widget _wrapAccessoryTapRegion(Widget child) {
-    return TextFieldTapRegion(child: child);
+    return TextFieldTapRegion(groupId: widget.tapRegionGroupId, child: child);
   }
 
   void _onTextChanged() {
@@ -2784,6 +2888,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   void initState() {
     super.initState();
 
+    _syncDraftStateFromController();
     widget.controller.textFieldController.addListener(_onTextChanged);
     widget.controller.addListener(_onChanged);
     ClipboardEvents.instance?.registerPasteEventListener(onPasteEvent);
@@ -2793,6 +2898,13 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   @override
   void didUpdateWidget(covariant ChatThreadInput oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_onChanged);
+      oldWidget.controller.textFieldController.removeListener(_onTextChanged);
+      _syncDraftStateFromController();
+      widget.controller.textFieldController.addListener(_onTextChanged);
+      widget.controller.addListener(_onChanged);
+    }
     if ((!oldWidget.autoFocus && widget.autoFocus) || oldWidget.focusTrigger != widget.focusTrigger) {
       _scheduleAutoFocus();
     }
@@ -2971,6 +3083,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
         if (widget.header != null) widget.header!,
         EnableWebContextMenu(
           child: ShadInput(
+            groupId: widget.tapRegionGroupId,
             contextMenuBuilder:
                 widget.contextMenuBuilder ??
                 (context, editableTextState) => AdaptiveTextSelectionToolbar.editableText(editableTextState: editableTextState),
@@ -3470,6 +3583,7 @@ class ChatMessage {
 class _ChatThreadState extends State<ChatThread> {
   late final ChatThreadController controller;
   late Key _composerInputKey;
+  late final Object _composerTapRegionGroupId = Object();
   bool _didNotifyVisibleMessagesEmpty = false;
   late bool _showCompletedToolCalls;
   MeshDocument? _managedDocument;
@@ -3836,6 +3950,7 @@ class _ChatThreadState extends State<ChatThread> {
       attachmentBuilder: widget.attachmentBuilder,
       contextMenuBuilder: widget.inputContextMenuBuilder,
       onPressedOutside: widget.inputOnPressedOutside,
+      tapRegionGroupId: _composerTapRegionGroupId,
     );
   }
 
@@ -3855,6 +3970,7 @@ class _ChatThreadState extends State<ChatThread> {
       onSend: (value, attachments) async {},
       controller: controller,
       attachmentBuilder: widget.attachmentBuilder,
+      tapRegionGroupId: _composerTapRegionGroupId,
     );
   }
 
@@ -3891,6 +4007,7 @@ class _ChatThreadState extends State<ChatThread> {
                   room: widget.room,
                   path: widget.path,
                   scrollController: controller.threadScrollController,
+                  composerTapRegionGroupId: _composerTapRegionGroupId,
                   agentName: widget.agentName,
                   shouldShowAuthorNames: widget.shouldShowAuthorNames,
                   showCompletedToolCalls: _showCompletedToolCalls,
@@ -4044,6 +4161,7 @@ class ChatThreadMessages extends StatefulWidget {
     required this.room,
     required this.path,
     required this.scrollController,
+    this.composerTapRegionGroupId,
     required this.messages,
     required this.online,
     required this.showCompletedToolCalls,
@@ -4074,6 +4192,7 @@ class ChatThreadMessages extends StatefulWidget {
   final RoomClient room;
   final String path;
   final ScrollController scrollController;
+  final Object? composerTapRegionGroupId;
   final String? agentName;
   final bool shouldShowAuthorNames;
   final bool showCompletedToolCalls;
@@ -5366,6 +5485,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     }
     final threadView = ChatThreadViewportBody(
       scrollController: widget.scrollController,
+      tapRegionGroupId: widget.composerTapRegionGroupId,
       bottomAlign: bottomAlign,
       centerContent: null,
       bottomSpacer: showTyping ? 20 : 0,
