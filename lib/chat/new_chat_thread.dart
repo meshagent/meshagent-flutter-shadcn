@@ -82,10 +82,10 @@ class _NewChatThreadState extends State<NewChatThread> {
   String _chatPlaceholderText() {
     final normalizedAgentName = widget.agentName.trim();
     if (normalizedAgentName.isEmpty) {
-      return "Type a message";
+      return "Message...";
     }
 
-    return "Type a message or @$normalizedAgentName";
+    return "Message $normalizedAgentName...";
   }
 
   void _notifyThreadPathChanged(String? path) {
