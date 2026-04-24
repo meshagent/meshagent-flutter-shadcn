@@ -9,8 +9,6 @@ import 'header_label_scope.dart';
 /// When a header has an extent with less than this value,
 /// it should not render a label.
 const _kMinimalLabelRenderingThreshold = 10.0;
-const _kHeaderHorizontalPadding = 8.0;
-const _kHeaderVerticalPadding = 8.0;
 
 enum HeaderStyleState { normal, selected, highlighted }
 
@@ -71,6 +69,7 @@ class _HeaderItemState extends State<HeaderItem> {
       extent: widget.extent,
       index: widget.index,
       label: label,
+      padding: widget.axis == Axis.horizontal ? swayzeStyle.columnHeaderPadding : swayzeStyle.rowHeaderPadding,
       swayzeStyle: swayzeStyle,
     );
   }
@@ -93,6 +92,7 @@ class _HeaderItemPainter extends SingleChildRenderObjectWidget {
   final TextStyle textStyle;
   final Color? backgroundColor;
   final String label;
+  final EdgeInsets padding;
   final SwayzeStyle swayzeStyle;
 
   _HeaderItemPainter({
@@ -102,6 +102,7 @@ class _HeaderItemPainter extends SingleChildRenderObjectWidget {
     required this.extent,
     required this.textStyle,
     required this.label,
+    required this.padding,
     this.backgroundColor,
     required this.swayzeStyle,
   }) : super(
@@ -117,6 +118,7 @@ class _HeaderItemPainter extends SingleChildRenderObjectWidget {
       backgroundColor: backgroundColor,
       mainAxisExtent: extent,
       label: label,
+      padding: padding,
       cellSeparatorStrokeWidth: swayzeStyle.cellSeparatorStrokeWidth,
     );
   }
@@ -129,6 +131,7 @@ class _HeaderItemPainter extends SingleChildRenderObjectWidget {
     renderObject.backgroundColor = backgroundColor;
     renderObject.textStyle = textStyle;
     renderObject.mainAxisExtent = extent;
+    renderObject.padding = padding;
     renderObject.cellSeparatorStrokeWidth = swayzeStyle.cellSeparatorStrokeWidth;
   }
 }
@@ -178,6 +181,18 @@ class _RenderHeaderItem extends RenderBox with RenderObjectWithChildMixin<Render
     markNeedsLayout();
   }
 
+  EdgeInsets _padding;
+
+  EdgeInsets get padding => _padding;
+
+  set padding(EdgeInsets value) {
+    if (_padding == value) {
+      return;
+    }
+    _padding = value;
+    markNeedsLayout();
+  }
+
   /// Background color is given by the parent widget and on the setter method
   ///
   /// Background changes do not alter the shape of the header, therefore it
@@ -212,19 +227,31 @@ class _RenderHeaderItem extends RenderBox with RenderObjectWithChildMixin<Render
 
   /// Text painters may be a little expensive for the paint cycle.
   /// This field caches it to be reused across frames.
-  late final textPainterCache = CachedValue(() {
-    final textSpan = TextSpan(text: label, style: textStyle);
-    final contentWidth = (size.width - _kHeaderHorizontalPadding * 2).clamp(0.0, double.infinity) as double;
+  late final textPainterCache =
+      CachedValue(() {
+            final textSpan = TextSpan(text: label, style: textStyle);
+            final contentWidth = (size.width - padding.horizontal).clamp(0.0, double.infinity) as double;
 
-    return TextPainter(text: textSpan, textAlign: TextAlign.center, textDirection: TextDirection.ltr, maxLines: 1, ellipsis: '...')
-      ..layout(minWidth: 0, maxWidth: contentWidth);
-  }).withDependency<String>(() => label).withDependency<TextStyle>(() => textStyle).withDependency<Size>(() => size);
+            return TextPainter(
+              text: textSpan,
+              textAlign: axis == Axis.horizontal ? TextAlign.left : TextAlign.center,
+              textDirection: TextDirection.ltr,
+              maxLines: 1,
+              ellipsis: '...',
+            )..layout(minWidth: 0, maxWidth: contentWidth);
+          })
+          .withDependency<String>(() => label)
+          .withDependency<TextStyle>(() => textStyle)
+          .withDependency<Size>(() => size)
+          .withDependency<EdgeInsets>(() => padding)
+          .withDependency<Axis>(() => axis);
 
   _RenderHeaderItem({
     required Axis axis,
     required TextStyle textStyle,
     required double mainAxisExtent,
     required String label,
+    required EdgeInsets padding,
     required double cellSeparatorStrokeWidth,
     Color? backgroundColor,
   }) : _axis = axis,
@@ -232,6 +259,7 @@ class _RenderHeaderItem extends RenderBox with RenderObjectWithChildMixin<Render
        _textStyle = textStyle,
        _backgroundColor = backgroundColor,
        _mainAxisExtent = mainAxisExtent,
+       _padding = padding,
        _cellSeparatorStrokeWidth = cellSeparatorStrokeWidth;
 
   @override
@@ -274,13 +302,16 @@ class _RenderHeaderItem extends RenderBox with RenderObjectWithChildMixin<Render
 
     if (mainAxisExtent >= _kMinimalLabelRenderingThreshold) {
       final textPainter = textPainterCache.value;
-      final contentWidth = (size.width - _kHeaderHorizontalPadding * 2).clamp(0.0, double.infinity) as double;
-      final contentHeight = (size.height - _kHeaderVerticalPadding * 2).clamp(0.0, double.infinity) as double;
+      final contentWidth = (size.width - padding.horizontal).clamp(0.0, double.infinity) as double;
+      final contentHeight = (size.height - padding.vertical).clamp(0.0, double.infinity) as double;
 
       if (contentWidth > 0 && contentHeight > 0) {
-        final textHorizontalCenter = _kHeaderHorizontalPadding + (contentWidth - textPainter.width) / 2;
-        final textVerticalCenter = _kHeaderVerticalPadding + (contentHeight - textPainter.height) / 2;
-        textPainter.paint(context.canvas, offset + Offset(textHorizontalCenter, textVerticalCenter));
+        final textHorizontalOffset = switch (axis) {
+          Axis.horizontal => padding.left,
+          Axis.vertical => padding.left + (contentWidth - textPainter.width) / 2,
+        };
+        final textVerticalOffset = padding.top + (contentHeight - textPainter.height) / 2;
+        textPainter.paint(context.canvas, offset + Offset(textHorizontalOffset, textVerticalOffset));
       }
     }
 

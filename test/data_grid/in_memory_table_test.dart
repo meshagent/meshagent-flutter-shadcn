@@ -253,6 +253,177 @@ void main() {
     expect(cellPaddingSize.height, closeTo(textPainter.height.ceilToDouble() + cellPadding.vertical, 0.1));
   });
 
+  testWidgets('wrapped auto sized rows infer vertical padding from the default shad table theme', (tester) async {
+    const maxColumnExtent = 120.0;
+    const inferredPadding = EdgeInsets.symmetric(horizontal: 16, vertical: 16);
+    const longText =
+        'This paragraph should wrap and pick up vertical padding even when the shad table theme only defines horizontal padding.';
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: InMemoryTable(
+                columns: const ['Notes'],
+                rows: const [
+                  [longText],
+                ],
+                autoSizeColumns: true,
+                autoSizeHorizontally: true,
+                autoSizeVertically: true,
+                maxAutoSizeColumnExtent: maxColumnExtent,
+                maxAutoSizeRowExtent: 600,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    final cellTextFinder = find.text(longText);
+    expect(cellTextFinder, findsOneWidget);
+    Element? cellPaddingElement;
+    tester.element(cellTextFinder).visitAncestorElements((ancestor) {
+      final widget = ancestor.widget;
+      if (widget is Padding && widget.padding == inferredPadding) {
+        cellPaddingElement = ancestor;
+        return false;
+      }
+      return true;
+    });
+    expect(cellPaddingElement, isNotNull);
+    final cellPaddingFinder = find.byWidget(cellPaddingElement!.widget);
+
+    final tablePadding = find.byWidgetPredicate((widget) => widget is Padding && widget.padding == const EdgeInsets.symmetric(vertical: 4));
+    final columnExtent = tester.getSize(tablePadding).width - kRowHeaderWidth - 1;
+    expect(columnExtent, closeTo(maxColumnExtent, 0.1));
+
+    final cellPaddingSize = tester.getSize(cellPaddingFinder);
+    final textElement = tester.element(cellTextFinder);
+    final textWidget = tester.widget<Text>(cellTextFinder);
+    final textPainter = TextPainter(
+      text: TextSpan(text: longText, style: textWidget.style),
+      textDirection: Directionality.of(textElement),
+      textScaler: MediaQuery.maybeTextScalerOf(textElement) ?? TextScaler.noScaling,
+      maxLines: null,
+    )..layout(maxWidth: columnExtent - 1 - inferredPadding.horizontal);
+
+    expect(cellPaddingSize.height, closeTo(textPainter.height.ceilToDouble() + inferredPadding.vertical, 0.1));
+  });
+
+  testWidgets('wrapped auto sized rows render text with matching top and side insets', (tester) async {
+    const maxColumnExtent = 120.0;
+    const expectedInset = 16.0;
+    const longText = 'This paragraph should wrap and render with the same visual inset on the top and the left.';
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: InMemoryTable(
+                columns: const ['Notes'],
+                rows: const [
+                  [longText],
+                ],
+                autoSizeColumns: true,
+                autoSizeHorizontally: true,
+                autoSizeVertically: true,
+                maxAutoSizeColumnExtent: maxColumnExtent,
+                maxAutoSizeRowExtent: 600,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    final cellTextFinder = find.text(longText);
+    expect(cellTextFinder, findsOneWidget);
+
+    Element? cellPaddingElement;
+    tester.element(cellTextFinder).visitAncestorElements((ancestor) {
+      final widget = ancestor.widget;
+      if (widget is Padding && widget.padding == const EdgeInsets.symmetric(horizontal: 16, vertical: 16)) {
+        cellPaddingElement = ancestor;
+        return false;
+      }
+      return true;
+    });
+    expect(cellPaddingElement, isNotNull);
+
+    final paddingRect = tester.getRect(find.byWidget(cellPaddingElement!.widget));
+    final textRect = tester.getRect(cellTextFinder);
+    final cellRenderObject = _findAncestorRenderObject(tester.renderObject(cellTextFinder), typeName: '_RenderCellRootPainter');
+    expect(cellRenderObject, isNotNull);
+    final cellRenderBox = cellRenderObject! as RenderBox;
+    final cellRect = Rect.fromLTWH(
+      cellRenderBox.localToGlobal(Offset.zero).dx,
+      cellRenderBox.localToGlobal(Offset.zero).dy,
+      cellRenderBox.size.width,
+      cellRenderBox.size.height,
+    );
+
+    expect(textRect.left - paddingRect.left, closeTo(expectedInset, 0.1));
+    expect(textRect.top - paddingRect.top, closeTo(expectedInset, 0.1));
+    expect(textRect.left - cellRect.left, closeTo(expectedInset, 0.1));
+    expect(textRect.top - cellRect.top, closeTo(expectedInset, 0.1));
+  });
+
+  testWidgets('auto sizing columns includes shad header padding for header-driven widths', (tester) async {
+    const headerLabel = 'A much longer header label';
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 1600,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Align(
+                alignment: Alignment.topLeft,
+                child: InMemoryTable(
+                  columns: const [headerLabel],
+                  rows: const [
+                    ['x'],
+                  ],
+                  autoSizeColumns: true,
+                  autoSizeHorizontally: true,
+                  maxAutoSizeColumnExtent: 1000,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    final tablePadding = find.byWidgetPredicate((widget) => widget is Padding && widget.padding == const EdgeInsets.symmetric(vertical: 4));
+    final columnExtent = tester.getSize(tablePadding).width - kRowHeaderWidth - 1;
+    final tableElement = tester.element(find.byType(InMemoryTable));
+    final theme = ShadTheme.of(tableElement);
+    final headerTextStyle = theme.tableTheme.cellHeaderStyle ?? theme.textTheme.muted.copyWith(fontWeight: FontWeight.w500);
+    final textPainter = TextPainter(
+      text: TextSpan(text: headerLabel, style: headerTextStyle),
+      textDirection: Directionality.of(tableElement),
+      textScaler: MediaQuery.maybeTextScalerOf(tableElement) ?? TextScaler.noScaling,
+      maxLines: 1,
+    )..layout();
+
+    expect(columnExtent, closeTo(textPainter.width + 32, 1.0));
+  });
+
   testWidgets('auto sizing rows honors max row extent', (tester) async {
     const maxRowExtent = 80.0;
 
@@ -327,4 +498,15 @@ void main() {
     expect(clipboardCalls, hasLength(1));
     expect(find.text('Copy'), findsNothing);
   });
+}
+
+RenderObject? _findAncestorRenderObject(RenderObject renderObject, {required String typeName}) {
+  RenderObject? current = renderObject;
+  while (current != null) {
+    if (current.runtimeType.toString() == typeName) {
+      return current;
+    }
+    current = current.parent as RenderObject?;
+  }
+  return null;
 }

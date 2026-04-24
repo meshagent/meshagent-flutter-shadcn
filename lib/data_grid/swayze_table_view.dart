@@ -480,9 +480,8 @@ class _SharedSwayzeGridState extends State<_SharedSwayzeGrid> {
     final tableTheme = theme.tableTheme;
     final headerTextStyle = tableTheme.cellHeaderStyle ?? theme.textTheme.muted.copyWith(fontWeight: FontWeight.w500);
     final cellTextStyle = tableTheme.cellStyle ?? theme.textTheme.muted.copyWith(color: theme.colorScheme.foreground);
-    final cellPadding = (tableTheme.cellPadding ?? const EdgeInsets.symmetric(horizontal: 16, vertical: 12)).resolve(
-      Directionality.of(context),
-    );
+    final cellPadding = _resolveGridCellPadding(context, tableTheme);
+    final columnHeaderPadding = _resolveColumnHeaderPadding(cellPadding);
     return Object.hash(
       widget.controller,
       widget.availableRowCount,
@@ -494,6 +493,7 @@ class _SharedSwayzeGridState extends State<_SharedSwayzeGrid> {
       headerTextStyle,
       cellTextStyle,
       cellPadding,
+      columnHeaderPadding,
       Directionality.of(context),
       MediaQuery.maybeTextScalerOf(context) ?? TextScaler.noScaling,
     );
@@ -570,12 +570,10 @@ class _SharedSwayzeGridState extends State<_SharedSwayzeGrid> {
     final theme = ShadTheme.of(context);
     final tableTheme = theme.tableTheme;
     final cellTextStyle = tableTheme.cellStyle ?? theme.textTheme.muted.copyWith(color: theme.colorScheme.foreground);
-    final cellPadding = (tableTheme.cellPadding ?? const EdgeInsets.symmetric(horizontal: 16, vertical: 12)).resolve(
-      Directionality.of(context),
-    );
+    final cellPadding = _resolveGridCellPadding(context, tableTheme);
     final columnExtents = List<double>.generate(
       columnCount,
-      (index) => _measureHeaderMainAxisExtent(_headerLabelFor(Axis.horizontal, index), style.headerTextStyle, Axis.horizontal),
+      (index) => _measureHeaderMainAxisExtent(_headerLabelFor(Axis.horizontal, index), style, Axis.horizontal),
       growable: false,
     );
 
@@ -614,19 +612,15 @@ class _SharedSwayzeGridState extends State<_SharedSwayzeGrid> {
     final theme = ShadTheme.of(context);
     final tableTheme = theme.tableTheme;
     final cellTextStyle = tableTheme.cellStyle ?? theme.textTheme.muted.copyWith(color: theme.colorScheme.foreground);
-    final cellPadding = (tableTheme.cellPadding ?? const EdgeInsets.symmetric(horizontal: 16, vertical: 12)).resolve(
-      Directionality.of(context),
-    );
+    final cellPadding = _resolveGridCellPadding(context, tableTheme);
     final minimumRowContentExtent = math.max(
       widget.controller.tableDataController.rows.value.defaultHeaderExtent - style.cellSeparatorStrokeWidth,
       _measureSingleLineCellMainAxisExtent(_kAutoFitMeasurementSampleText, cellTextStyle, cellPadding, Axis.vertical),
     );
     final rowExtents = List<double>.generate(
       rowCount,
-      (index) => math.max(
-        _measureHeaderMainAxisExtent(_headerLabelFor(Axis.vertical, index), style.headerTextStyle, Axis.vertical),
-        minimumRowContentExtent,
-      ),
+      (index) =>
+          math.max(_measureHeaderMainAxisExtent(_headerLabelFor(Axis.vertical, index), style, Axis.vertical), minimumRowContentExtent),
       growable: false,
     );
 
@@ -702,9 +696,10 @@ class _SharedSwayzeGridState extends State<_SharedSwayzeGrid> {
     return generateLabelForIndex(axis, index);
   }
 
-  double _measureHeaderMainAxisExtent(String text, TextStyle? style, Axis axis) {
-    final size = _measureText(text, style);
-    return axis == Axis.horizontal ? size.width + (kHeaderAutoFitHorizontalPadding * 2) : size.height + (kHeaderAutoFitVerticalPadding * 2);
+  double _measureHeaderMainAxisExtent(String text, SwayzeStyle style, Axis axis) {
+    final size = _measureText(text, style.headerTextStyle);
+    final padding = axis == Axis.horizontal ? style.columnHeaderPadding : style.rowHeaderPadding;
+    return axis == Axis.horizontal ? size.width + padding.horizontal : size.height + padding.vertical;
   }
 
   double _measureSingleLineCellMainAxisExtent(String text, TextStyle? style, EdgeInsets padding, Axis axis) {
@@ -720,15 +715,24 @@ class _SharedSwayzeGridState extends State<_SharedSwayzeGrid> {
     required double lineWidth,
   }) {
     final displayText = _displayTextForAvailableWidth(text, columnExtent);
-    final availableTextWidth = math.max(0.0, columnExtent - lineWidth - padding.horizontal);
+    final shouldWrapText = displayText != '...' && _wrapCellText;
+    final effectivePadding = _resolveGridCellPaddingForTextLayout(
+      context,
+      text: displayText,
+      style: style,
+      padding: padding,
+      maxWidth: math.max(0.0, columnExtent - lineWidth),
+      shouldWrapText: shouldWrapText,
+    );
+    final availableTextWidth = math.max(0.0, columnExtent - lineWidth - effectivePadding.horizontal);
     final size = _measureText(
       displayText,
       style,
       maxWidth: availableTextWidth,
-      maxLines: displayText == '...' || !_wrapCellText ? 1 : null,
-      ellipsis: displayText == '...' || !_wrapCellText ? '...' : null,
+      maxLines: shouldWrapText ? null : 1,
+      ellipsis: shouldWrapText ? null : '...',
     );
-    return size.height.ceilToDouble() + padding.vertical;
+    return size.height.ceilToDouble() + effectivePadding.vertical;
   }
 
   String _displayTextForAvailableWidth(String text, double width) {
@@ -844,6 +848,7 @@ SwayzeStyle _buildSwayzeStyle(
   final chromeBackground = _tableChromeBackground(theme);
   final cellBackground = _tableCellBackground(theme);
   final headerTextStyle = tableTheme.cellHeaderStyle ?? theme.textTheme.muted.copyWith(fontWeight: FontWeight.w500);
+  final cellPadding = _resolveGridCellPadding(context, tableTheme);
 
   return SwayzeStyle.defaultSwayzeStyle.copyWith(
     defaultHeaderPalette: SwayzeHeaderPalette(background: chromeBackground, foreground: mutedForeground),
@@ -851,6 +856,7 @@ SwayzeStyle _buildSwayzeStyle(
     highlightedHeaderPalette: SwayzeHeaderPalette(background: theme.colorScheme.accent.withValues(alpha: 0.12), foreground: foreground),
     headerSeparatorColor: borderColor,
     headerTextStyle: headerTextStyle,
+    columnHeaderPadding: _resolveColumnHeaderPadding(cellPadding),
     maxAutoFitColumnExtent: maxAutoFitColumnExtent,
     maxAutoFitRowExtent: maxAutoFitRowExtent,
     showLeadingOuterBorders: showLeadingOuterBorders,
@@ -1054,9 +1060,7 @@ class _SharedSwayzeCellLayout extends CellLayout {
     final theme = ShadTheme.of(context);
     final tableTheme = theme.tableTheme;
     final baseTextStyle = tableTheme.cellStyle ?? theme.textTheme.muted.copyWith(color: theme.colorScheme.foreground);
-    final cellPadding = (tableTheme.cellPadding ?? const EdgeInsets.symmetric(horizontal: 16, vertical: 12)).resolve(
-      Directionality.of(context),
-    );
+    final cellPadding = _resolveGridCellPadding(context, tableTheme);
     final textColor = data.isNull ? theme.colorScheme.mutedForeground : (baseTextStyle.color ?? theme.colorScheme.foreground);
 
     return LayoutBuilder(
@@ -1066,11 +1070,19 @@ class _SharedSwayzeCellLayout extends CellLayout {
         final displayText = shouldShowCompactIndicator ? '...' : data.preview;
         final shouldWrapText = wrapText && !shouldShowCompactIndicator && constraints.maxWidth.isFinite;
         final textStyle = baseTextStyle.copyWith(color: textColor);
-        final wrappedTextLayout = _resolveWrappedTextLayout(
+        final effectivePadding = _resolveGridCellPaddingForTextLayout(
           context,
           text: displayText,
           style: textStyle,
           padding: cellPadding,
+          maxWidth: constraints.maxWidth,
+          shouldWrapText: shouldWrapText,
+        );
+        final wrappedTextLayout = _resolveWrappedTextLayout(
+          context,
+          text: displayText,
+          style: textStyle,
+          padding: effectivePadding,
           constraints: constraints,
           shouldWrapText: shouldWrapText,
         );
@@ -1087,7 +1099,7 @@ class _SharedSwayzeCellLayout extends CellLayout {
           controller: controller,
           onCopySelection: onCopySelection,
           child: Padding(
-            padding: cellPadding,
+            padding: effectivePadding,
             child: Align(alignment: data.contentAlignment, child: text),
           ),
         );
@@ -1160,6 +1172,50 @@ _WrappedTextLayout _resolveWrappedTextLayout(
   }
 
   return _WrappedTextLayout(maxLines: math.max(1, fittingLineCount), overflow: TextOverflow.ellipsis);
+}
+
+EdgeInsets _resolveGridCellPadding(BuildContext context, ShadTableTheme tableTheme) {
+  return (tableTheme.cellPadding ?? const EdgeInsets.symmetric(horizontal: 16, vertical: 12)).resolve(Directionality.of(context));
+}
+
+EdgeInsets _resolveColumnHeaderPadding(EdgeInsets cellPadding) {
+  return EdgeInsets.fromLTRB(cellPadding.left, 8, cellPadding.right, 8);
+}
+
+EdgeInsets _resolveGridCellPaddingForTextLayout(
+  BuildContext context, {
+  required String text,
+  required TextStyle? style,
+  required EdgeInsets padding,
+  required double maxWidth,
+  required bool shouldWrapText,
+}) {
+  if (!shouldWrapText || (padding.top > 0 || padding.bottom > 0)) {
+    return padding;
+  }
+
+  final inferredVerticalInset = padding.horizontal / 2;
+  if (inferredVerticalInset <= 0) {
+    return padding;
+  }
+
+  final availableTextWidth = math.max(0.0, maxWidth - padding.horizontal);
+  if (availableTextWidth <= 0) {
+    return padding;
+  }
+
+  final textPainter = TextPainter(
+    text: TextSpan(text: text, style: style),
+    textDirection: Directionality.of(context),
+    textScaler: MediaQuery.maybeTextScalerOf(context) ?? TextScaler.noScaling,
+    maxLines: null,
+  )..layout(maxWidth: availableTextWidth);
+
+  if (textPainter.computeLineMetrics().length <= 1) {
+    return padding;
+  }
+
+  return EdgeInsets.fromLTRB(padding.left, inferredVerticalInset, padding.right, inferredVerticalInset);
 }
 
 class _SharedSwayzeCellContextMenuRegion extends StatefulWidget {

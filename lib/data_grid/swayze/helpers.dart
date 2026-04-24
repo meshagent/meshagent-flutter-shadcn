@@ -16,8 +16,6 @@ export 'src/helpers/label_generator.dart';
 
 const kMinimumResizableColumnExtent = 40.0;
 const kMinimumResizableRowExtent = 24.0;
-const kHeaderAutoFitHorizontalPadding = 8.0;
-const kHeaderAutoFitVerticalPadding = 8.0;
 
 class SwayzeAutoFitMeasurementRequest {
   const SwayzeAutoFitMeasurementRequest({required this.builder, this.width});
@@ -66,9 +64,10 @@ double? maxAutoFitExtentForAxis(SwayzeStyle style, Axis axis) {
 }
 
 SwayzeAutoFitMeasurementRequest createHeaderAutoFitMeasurementRequest({required String label, required SwayzeStyle style}) {
+  final padding = style.columnHeaderPadding;
   return SwayzeAutoFitMeasurementRequest(
     builder: (context) => Padding(
-      padding: const EdgeInsets.symmetric(horizontal: kHeaderAutoFitHorizontalPadding, vertical: kHeaderAutoFitVerticalPadding),
+      padding: padding,
       child: Text(label, maxLines: 1, softWrap: false, style: style.headerTextStyle),
     ),
   );

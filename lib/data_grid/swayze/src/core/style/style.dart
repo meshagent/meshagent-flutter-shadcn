@@ -36,6 +36,8 @@ class SwayzeStyle {
     highlightedHeaderPalette: const SwayzeHeaderPalette(background: Color(0xFFE1E1E1), foreground: Color(0xFF000000)),
     headerSeparatorColor: const Color(0xFFE1E1E1),
     headerTextStyle: const TextStyle(fontSize: 12),
+    columnHeaderPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+    rowHeaderPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
     maxAutoFitColumnExtent: null,
     maxAutoFitRowExtent: null,
     showLeadingOuterBorders: false,
@@ -63,6 +65,12 @@ class SwayzeStyle {
   /// The style of the text in the headers, color will by overwritten by
   /// [SwayzeHeaderPalette.foreground].
   final TextStyle headerTextStyle;
+
+  /// Padding used by column headers.
+  final EdgeInsets columnHeaderPadding;
+
+  /// Padding used by row headers.
+  final EdgeInsets rowHeaderPadding;
 
   /// Optional cap to apply when auto fitting columns.
   final double? maxAutoFitColumnExtent;
@@ -98,6 +106,8 @@ class SwayzeStyle {
     required this.highlightedHeaderPalette,
     required this.headerSeparatorColor,
     required this.headerTextStyle,
+    required this.columnHeaderPadding,
+    required this.rowHeaderPadding,
     required this.maxAutoFitColumnExtent,
     required this.maxAutoFitRowExtent,
     required this.showLeadingOuterBorders,
@@ -118,6 +128,8 @@ class SwayzeStyle {
     SwayzeHeaderPalette? highlightedHeaderPalette,
     Color? headerSeparatorColor,
     TextStyle? headerTextStyle,
+    EdgeInsets? columnHeaderPadding,
+    EdgeInsets? rowHeaderPadding,
     double? maxAutoFitColumnExtent,
     double? maxAutoFitRowExtent,
     bool? showLeadingOuterBorders,
@@ -134,6 +146,8 @@ class SwayzeStyle {
       highlightedHeaderPalette: highlightedHeaderPalette ?? this.highlightedHeaderPalette,
       headerSeparatorColor: headerSeparatorColor ?? this.headerSeparatorColor,
       headerTextStyle: headerTextStyle ?? this.headerTextStyle,
+      columnHeaderPadding: columnHeaderPadding ?? this.columnHeaderPadding,
+      rowHeaderPadding: rowHeaderPadding ?? this.rowHeaderPadding,
       maxAutoFitColumnExtent: maxAutoFitColumnExtent ?? this.maxAutoFitColumnExtent,
       maxAutoFitRowExtent: maxAutoFitRowExtent ?? this.maxAutoFitRowExtent,
       showLeadingOuterBorders: showLeadingOuterBorders ?? this.showLeadingOuterBorders,
@@ -156,6 +170,8 @@ class SwayzeStyle {
           highlightedHeaderPalette == other.highlightedHeaderPalette &&
           headerSeparatorColor == other.headerSeparatorColor &&
           headerTextStyle == other.headerTextStyle &&
+          columnHeaderPadding == other.columnHeaderPadding &&
+          rowHeaderPadding == other.rowHeaderPadding &&
           maxAutoFitColumnExtent == other.maxAutoFitColumnExtent &&
           maxAutoFitRowExtent == other.maxAutoFitRowExtent &&
           showLeadingOuterBorders == other.showLeadingOuterBorders &&
@@ -173,6 +189,8 @@ class SwayzeStyle {
       highlightedHeaderPalette.hashCode ^
       headerSeparatorColor.hashCode ^
       headerTextStyle.hashCode ^
+      columnHeaderPadding.hashCode ^
+      rowHeaderPadding.hashCode ^
       maxAutoFitColumnExtent.hashCode ^
       maxAutoFitRowExtent.hashCode ^
       showLeadingOuterBorders.hashCode ^
