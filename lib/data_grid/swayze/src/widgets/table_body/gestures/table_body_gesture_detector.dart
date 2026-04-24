@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'package:meshagent_flutter_shadcn/data_grid/swayze_math/swayze_math.dart';
 
 import '../../../../intents.dart';
+import '../../../core/scrolling/pointer_scroll_handler.dart';
 import '../../../core/viewport_context/viewport_context.dart';
 import '../../../core/viewport_context/viewport_context_provider.dart';
 import '../../../helpers/scroll/auto_scroll.dart';
@@ -291,6 +292,21 @@ class _TableBodyGestureDetectorState extends State<TableBodyGestureDetector> {
         final screenSize = Size(biggest.width - widget.horizontalDisplacement, biggest.height - widget.verticalDisplacement);
         return Listener(
           behavior: HitTestBehavior.translucent,
+          onPointerSignal: (event) {
+            final scrollController = internalScope.controller.scroll;
+            final horizontalScrollController = scrollController.horizontalScrollController;
+            final verticalScrollController = scrollController.verticalScrollController;
+            if (horizontalScrollController == null || verticalScrollController == null) {
+              return;
+            }
+
+            PointerScrollHandler.handlePointerSignal(
+              context: context,
+              event: event,
+              horizontalScrollController: horizontalScrollController,
+              verticalScrollController: verticalScrollController,
+            );
+          },
           onPointerDown: (details) {
             final isMouse = details.kind == PointerDeviceKind.mouse;
             final isPrimaryMouseButton = details.buttons == kPrimaryMouseButton;

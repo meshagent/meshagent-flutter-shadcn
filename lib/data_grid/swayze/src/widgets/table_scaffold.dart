@@ -1,6 +1,8 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/widgets.dart';
 
 import '../config.dart' as config;
+import '../core/scrolling/pointer_scroll_handler.dart';
 import '../core/scrolling/sliver_scrolling_data_builder.dart';
 import '../core/viewport_context/viewport_context_provider.dart';
 import '../core/virtualization/virtualization_calculator.dart';
@@ -173,19 +175,37 @@ class _HeaderCorner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final style = InternalScope.of(context).style;
+    final scrollController = InternalScope.of(context).controller.scroll;
+    final horizontalScrollController = scrollController.horizontalScrollController;
+    final verticalScrollController = scrollController.verticalScrollController;
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: style.defaultHeaderPalette.background,
-        border: Border(
-          top: style.showLeadingOuterBorders
-              ? BorderSide(color: style.cellSeparatorColor, width: style.cellSeparatorStrokeWidth)
-              : BorderSide.none,
-          left: style.showLeadingOuterBorders
-              ? BorderSide(color: style.cellSeparatorColor, width: style.cellSeparatorStrokeWidth)
-              : BorderSide.none,
-          right: BorderSide(color: style.cellSeparatorColor, width: style.cellSeparatorStrokeWidth),
-          bottom: BorderSide(color: style.cellSeparatorColor, width: style.cellSeparatorStrokeWidth),
+    return Listener(
+      behavior: HitTestBehavior.opaque,
+      onPointerSignal: (PointerSignalEvent event) {
+        if (horizontalScrollController == null || verticalScrollController == null) {
+          return;
+        }
+
+        PointerScrollHandler.handlePointerSignal(
+          context: context,
+          event: event,
+          horizontalScrollController: horizontalScrollController,
+          verticalScrollController: verticalScrollController,
+        );
+      },
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: style.defaultHeaderPalette.background,
+          border: Border(
+            top: style.showLeadingOuterBorders
+                ? BorderSide(color: style.cellSeparatorColor, width: style.cellSeparatorStrokeWidth)
+                : BorderSide.none,
+            left: style.showLeadingOuterBorders
+                ? BorderSide(color: style.cellSeparatorColor, width: style.cellSeparatorStrokeWidth)
+                : BorderSide.none,
+            right: BorderSide(color: style.cellSeparatorColor, width: style.cellSeparatorStrokeWidth),
+            bottom: BorderSide(color: style.cellSeparatorColor, width: style.cellSeparatorStrokeWidth),
+          ),
         ),
       ),
     );

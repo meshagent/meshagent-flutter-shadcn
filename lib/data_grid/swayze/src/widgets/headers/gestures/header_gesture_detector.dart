@@ -8,6 +8,7 @@ import 'package:meshagent_flutter_shadcn/data_grid/swayze_math/swayze_math.dart'
 import '../../../../controller.dart';
 import '../../../../helpers.dart';
 import '../../../../intents.dart';
+import '../../../core/scrolling/pointer_scroll_handler.dart';
 import '../../../core/style/style.dart';
 import '../../../core/viewport_context/viewport_context.dart';
 import '../../../core/viewport_context/viewport_context_provider.dart';
@@ -474,6 +475,21 @@ class _HeaderGestureDetectorState extends State<HeaderGestureDetector> {
       },
       child: Listener(
         behavior: HitTestBehavior.translucent,
+        onPointerSignal: (event) {
+          final scrollController = internalScope.controller.scroll;
+          final horizontalScrollController = scrollController.horizontalScrollController;
+          final verticalScrollController = scrollController.verticalScrollController;
+          if (horizontalScrollController == null || verticalScrollController == null) {
+            return;
+          }
+
+          PointerScrollHandler.handlePointerSignal(
+            context: context,
+            event: event,
+            horizontalScrollController: horizontalScrollController,
+            verticalScrollController: verticalScrollController,
+          );
+        },
         onPointerDown: (event) {
           pressedResizeGestureCache = _getHeaderResizeGestureDetails(
             axis: widget.axis,

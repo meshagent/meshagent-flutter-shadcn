@@ -1,5 +1,6 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -498,6 +499,147 @@ void main() {
     expect(clipboardCalls, hasLength(1));
     expect(find.text('Copy'), findsNothing);
   });
+
+  testWidgets('vertical-dominant wheel scrolling does not move a horizontal-only table and bubbles to the parent', (tester) async {
+    final parentController = ScrollController();
+    addTearDown(parentController.dispose);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox(
+            height: 220,
+            child: SingleChildScrollView(
+              controller: parentController,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: 260,
+                    child: InMemoryTable(
+                      columns: const ['A', 'B', 'C', 'D'],
+                      rows: const [
+                        ['1', '2', '3', '4'],
+                      ],
+                      autoSizeVertically: true,
+                    ),
+                  ),
+                  const SizedBox(height: 800),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    final tableHorizontalScrollView = tester.widget<CustomScrollView>(
+      find.descendant(
+        of: find.byType(InMemoryTable),
+        matching: find.byWidgetPredicate((widget) => widget is CustomScrollView && widget.scrollDirection == Axis.horizontal),
+      ),
+    );
+    final tableHorizontalController = tableHorizontalScrollView.controller;
+    expect(tableHorizontalController, isNotNull);
+    expect(tableHorizontalController!.position.maxScrollExtent, greaterThan(0));
+
+    final tableRect = tester.getRect(find.byType(InMemoryTable));
+    await _sendPointerScroll(tester, tableRect.center, const Offset(8, 120));
+    await tester.pumpAndSettle();
+
+    expect(tableHorizontalController.offset, 0);
+    expect(parentController.offset, greaterThan(0));
+  });
+
+  testWidgets('wheel scrolling over a fully auto sized table bubbles to the parent', (tester) async {
+    final parentController = ScrollController();
+    addTearDown(parentController.dispose);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox(
+            height: 220,
+            child: SingleChildScrollView(
+              controller: parentController,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  InMemoryTable(
+                    columns: const ['Name'],
+                    rows: List.generate(20, (index) => ['Row $index']),
+                    autoSizeHorizontally: true,
+                    autoSizeVertically: true,
+                  ),
+                  const SizedBox(height: 800),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    final cellRect = tester.getRect(find.text('Row 0'));
+    await _sendPointerScroll(tester, cellRect.center, const Offset(0, 120));
+    await tester.pumpAndSettle();
+
+    expect(parentController.offset, greaterThan(0));
+  });
+
+  testWidgets('vertical wheel scrolling bubbles to the parent after the table reaches its vertical extent', (tester) async {
+    final parentController = ScrollController();
+    addTearDown(parentController.dispose);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox(
+            height: 220,
+            child: SingleChildScrollView(
+              controller: parentController,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: 260,
+                    child: InMemoryTable(columns: const ['Name'], rows: List.generate(40, (index) => ['Row $index']), maxHeight: 160),
+                  ),
+                  const SizedBox(height: 800),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    final tableVerticalScrollView = tester.widget<CustomScrollView>(
+      find.descendant(
+        of: find.byType(InMemoryTable),
+        matching: find.byWidgetPredicate((widget) => widget is CustomScrollView && widget.scrollDirection == Axis.vertical),
+      ),
+    );
+    final tableController = tableVerticalScrollView.controller;
+    expect(tableController, isNotNull);
+    expect(tableController!.position.maxScrollExtent, greaterThan(0));
+
+    tableController.jumpTo(tableController.position.maxScrollExtent);
+    await tester.pump();
+
+    final tableRect = tester.getRect(find.byType(InMemoryTable));
+    await _sendPointerScroll(tester, tableRect.center, const Offset(0, 120));
+    await tester.pumpAndSettle();
+
+    expect(tableController.offset, closeTo(tableController.position.maxScrollExtent, 0.1));
+    expect(parentController.offset, greaterThan(0));
+  });
 }
 
 RenderObject? _findAncestorRenderObject(RenderObject renderObject, {required String typeName}) {
@@ -509,4 +651,12 @@ RenderObject? _findAncestorRenderObject(RenderObject renderObject, {required Str
     current = current.parent as RenderObject?;
   }
   return null;
+}
+
+Future<void> _sendPointerScroll(WidgetTester tester, Offset location, Offset delta) async {
+  final pointer = TestPointer(1, PointerDeviceKind.mouse);
+  await tester.sendEventToBinding(pointer.addPointer(location: location));
+  await tester.sendEventToBinding(pointer.hover(location));
+  await tester.sendEventToBinding(pointer.scroll(delta));
+  await tester.sendEventToBinding(pointer.removePointer(location: location));
 }
