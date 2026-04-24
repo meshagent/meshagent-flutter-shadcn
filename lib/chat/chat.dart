@@ -12,10 +12,10 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:interactive_viewer_2/interactive_viewer_2.dart';
-import 'package:markdown_widget/markdown_widget.dart';
 import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_flutter_shadcn/chat_bubble_markdown_config.dart';
 import 'package:meshagent_flutter_shadcn/code_language_resolver.dart';
+import 'package:meshagent_flutter_shadcn/markdown_viewer.dart';
 import 'package:meshagent_flutter_shadcn/storage/file_browser.dart';
 import 'package:meshagent_flutter_shadcn/ui/coordinated_context_menu.dart';
 import 'package:meshagent_flutter_shadcn/ui/ui.dart';
@@ -3295,12 +3295,12 @@ class _ChatBubble extends State<ChatBubble> {
                     decoration: BoxDecoration(color: bubbleColor, borderRadius: BorderRadius.circular(_bubbleRadius)),
                     child: MediaQuery(
                       data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
-                      child: MarkdownWidget(
+                      child: MarkdownViewer(
+                        markdown: text,
                         padding: const EdgeInsets.all(0),
-                        config: buildChatBubbleMarkdownConfig(context, threadTypography: true),
+                        threadTypography: true,
                         shrinkWrap: true,
                         selectable: kIsWeb,
-                        data: text,
                       ),
                     ),
                   ),
@@ -7109,19 +7109,12 @@ class _ReasoningTrace extends State<ReasoningTrace> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: MarkdownWidget(
+                  child: MarkdownViewer(
+                    markdown: widget.message.getAttribute("summary") ?? "",
                     padding: const EdgeInsets.all(0),
-                    config: buildChatBubbleMarkdownConfig(context, threadTypography: true),
+                    threadTypography: true,
                     shrinkWrap: true,
                     selectable: true,
-
-                    /*builders: {
-      "code": CodeElementBuilder(
-          document: ChatDocumentProvider.of(context).document,
-          api: TimuApiProvider.of(context).api,
-          layer: layer),
-},*/
-                    data: widget.message.getAttribute("summary") ?? "",
                   ),
                 ),
               ],
