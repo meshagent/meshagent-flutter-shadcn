@@ -14,6 +14,7 @@ import 'package:meshagent_flutter_shadcn/data_grid/swayze/src/core/internal_stat
 import 'package:meshagent_flutter_shadcn/data_grid/swayze/src/widgets/headers/header_label_scope.dart';
 import 'package:meshagent_flutter_shadcn/data_grid/swayze/widgets.dart';
 import 'package:meshagent_flutter_shadcn/data_grid/swayze_math/swayze_math.dart';
+import 'package:meshagent_flutter_shadcn/ui/coordinated_context_menu.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 class SwayzeTableView extends StatefulWidget {
@@ -33,6 +34,7 @@ class SwayzeTableView extends StatefulWidget {
     this.maxAutoSizeColumnExtent = 300,
     this.maxAutoSizeRowExtent = 300,
     this.showLeadingOuterBorders = false,
+    this.showRowHeaders = true,
   });
 
   final RoomClient room;
@@ -49,6 +51,7 @@ class SwayzeTableView extends StatefulWidget {
   final double? maxAutoSizeColumnExtent;
   final double? maxAutoSizeRowExtent;
   final bool showLeadingOuterBorders;
+  final bool showRowHeaders;
 
   @override
   State<SwayzeTableView> createState() => _SwayzeTableViewState();
@@ -313,6 +316,7 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
               maxAutoSizeColumnExtent: widget.maxAutoSizeColumnExtent,
               maxAutoSizeRowExtent: widget.maxAutoSizeRowExtent,
               showLeadingOuterBorders: widget.showLeadingOuterBorders,
+              showRowHeaders: widget.showRowHeaders,
             ),
           ),
       ],
@@ -333,6 +337,7 @@ class InMemoryTable extends StatefulWidget {
     this.maxAutoSizeColumnExtent = 300,
     this.maxAutoSizeRowExtent = 300,
     this.showLeadingOuterBorders = false,
+    this.showRowHeaders = true,
   });
 
   final List<String> columns;
@@ -345,6 +350,7 @@ class InMemoryTable extends StatefulWidget {
   final double? maxAutoSizeColumnExtent;
   final double? maxAutoSizeRowExtent;
   final bool showLeadingOuterBorders;
+  final bool showRowHeaders;
 
   @override
   State<InMemoryTable> createState() => _InMemoryTableState();
@@ -430,6 +436,7 @@ class _InMemoryTableState extends State<InMemoryTable> {
         maxAutoSizeColumnExtent: widget.maxAutoSizeColumnExtent,
         maxAutoSizeRowExtent: widget.maxAutoSizeRowExtent,
         showLeadingOuterBorders: widget.showLeadingOuterBorders,
+        showRowHeaders: widget.showRowHeaders,
       ),
     );
   }
@@ -448,6 +455,7 @@ class _SharedSwayzeGrid extends StatefulWidget {
     this.maxAutoSizeColumnExtent = 300,
     this.maxAutoSizeRowExtent = 300,
     this.showLeadingOuterBorders = false,
+    this.showRowHeaders = true,
   });
 
   final _SharedSwayzeController controller;
@@ -461,6 +469,7 @@ class _SharedSwayzeGrid extends StatefulWidget {
   final double? maxAutoSizeColumnExtent;
   final double? maxAutoSizeRowExtent;
   final bool showLeadingOuterBorders;
+  final bool showRowHeaders;
 
   @override
   State<_SharedSwayzeGrid> createState() => _SharedSwayzeGridState();
@@ -788,6 +797,7 @@ class _SharedSwayzeGridState extends State<_SharedSwayzeGrid> {
               verticalScrollController: _verticalScrollController,
               horizontalScrollPhysics: widget.autoSizeHorizontally ? const NeverScrollableScrollPhysics() : null,
               style: style,
+              showRowHeaders: widget.showRowHeaders,
               inlineEditorBuilder:
                   (
                     BuildContext context,
@@ -815,8 +825,9 @@ class _SharedSwayzeGridState extends State<_SharedSwayzeGrid> {
       builder: (context, _) {
         final resolvedWidth = _resolveGridWidth(
           controller: widget.controller,
-          lineWidth: style.cellSeparatorStrokeWidth,
+          style: style,
           autoSizeHorizontally: widget.autoSizeHorizontally,
+          showRowHeaders: widget.showRowHeaders,
         );
         final resolvedHeight = _resolveGridHeight(
           controller: widget.controller,
@@ -877,16 +888,30 @@ Color _tableCellBackground(ShadThemeData theme) {
   return theme.cardTheme.backgroundColor ?? theme.colorScheme.background;
 }
 
-double _resolveTableRowHeaderWidth(_SharedSwayzeController controller) {
-  return swayze_config.headerWidthForRange(Range(0, controller.tableDataController.rows.value.totalCount));
+double _resolveTableLeadingWidth(_SharedSwayzeController controller, SwayzeStyle style, {required bool showRowHeaders}) {
+  if (showRowHeaders) {
+    return swayze_config.headerWidthForRange(Range(0, controller.tableDataController.rows.value.totalCount));
+  }
+
+  if (!style.showLeadingOuterBorders || style.cellSeparatorColor.a == 0.0) {
+    return 0.0;
+  }
+  return style.cellSeparatorStrokeWidth;
 }
 
-double? _resolveGridWidth({required _SharedSwayzeController controller, required double lineWidth, required bool autoSizeHorizontally}) {
+double? _resolveGridWidth({
+  required _SharedSwayzeController controller,
+  required SwayzeStyle style,
+  required bool autoSizeHorizontally,
+  required bool showRowHeaders,
+}) {
   if (!autoSizeHorizontally) {
     return null;
   }
 
-  return controller.tableDataController.columns.value.extent + _resolveTableRowHeaderWidth(controller) + lineWidth;
+  return controller.tableDataController.columns.value.extent +
+      _resolveTableLeadingWidth(controller, style, showRowHeaders: showRowHeaders) +
+      style.cellSeparatorStrokeWidth;
 }
 
 double? _resolveGridHeight({
@@ -1098,9 +1123,11 @@ class _SharedSwayzeCellLayout extends CellLayout {
           data: data,
           controller: controller,
           onCopySelection: onCopySelection,
-          child: Padding(
-            padding: effectivePadding,
-            child: Align(alignment: data.contentAlignment, child: text),
+          child: SizedBox.expand(
+            child: Padding(
+              padding: effectivePadding,
+              child: Align(alignment: data.contentAlignment, child: text),
+            ),
           ),
         );
       },
@@ -1303,9 +1330,12 @@ class _SharedSwayzeCellContextMenuRegionState extends State<_SharedSwayzeCellCon
     final longPressEnabled = defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS;
     final isWindows = defaultTargetPlatform == TargetPlatform.windows;
 
-    return ShadContextMenu(
+    return CoordinatedShadContextMenu(
       anchor: _offset == null ? null : ShadGlobalAnchor(_offset!),
       controller: _controller,
+      constraints: const BoxConstraints(minWidth: 160),
+      estimatedMenuWidth: 160,
+      estimatedMenuHeight: 48,
       items: [
         ShadContextMenuItem(
           leading: const Icon(Icons.copy, size: 16),

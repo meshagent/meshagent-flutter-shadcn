@@ -84,6 +84,9 @@ class SliverSwayzeTable<CellDataType extends SwayzeCellData> extends StatefulWid
   /// - [WrapHeaderBuilder]
   final WrapHeaderBuilder? wrapHeader;
 
+  /// Whether to render row-number headers on the leading edge.
+  final bool showRowHeaders;
+
   /// The Builder that generates the widget that will be rendered when the user
   /// will edit a particular cell inline, that is, in the same physical spot
   /// occupied by the cell in the screen.
@@ -114,6 +117,7 @@ class SliverSwayzeTable<CellDataType extends SwayzeCellData> extends StatefulWid
     this.wrapBox,
     this.wrapTableBody,
     this.wrapHeader,
+    this.showRowHeaders = true,
   }) : autofocus = autofocus ?? false,
        style = style ?? SwayzeStyle.defaultSwayzeStyle,
        assert(stickyHeader == null || stickyHeaderSize != null, 'if stickyHeader is not null, stickyHeaderSize must be also not null'),
@@ -138,6 +142,7 @@ class SliverSwayzeTableState extends State<SliverSwayzeTable> {
       verticalScrollController: widget.verticalScrollController,
       horizontalScrollPhysics: widget.horizontalScrollPhysics,
       wrapBox: widget.wrapBox,
+      showRowHeaders: widget.showRowHeaders,
       twoAxisScrollBuilder: (context, verticalDisplacement, horizontalDisplacement, isOffscreen) {
         final child = isOffscreen
             ? const SizedBox.shrink()
@@ -146,6 +151,7 @@ class SliverSwayzeTableState extends State<SliverSwayzeTable> {
                 horizontalDisplacement: horizontalDisplacement,
                 wrapTableBody: widget.wrapTableBody,
                 wrapHeader: widget.wrapHeader,
+                showRowHeaders: widget.showRowHeaders,
               );
 
         return TableShortcuts(

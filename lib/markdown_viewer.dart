@@ -2,6 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:markdown_widget/markdown_widget.dart';
 import 'package:meshagent_flutter_shadcn/chat_bubble_markdown_config.dart';
 import 'package:meshagent_flutter_shadcn/data_grid/in_memory_table.dart';
+import 'package:meshagent_flutter_shadcn/ui/coordinated_context_menu.dart';
 
 class MarkdownViewer extends StatelessWidget {
   const MarkdownViewer({
@@ -92,13 +93,18 @@ class _MarkdownTableNode extends ElementNode {
     }
 
     return WidgetSpan(
-      child: InMemoryTable(
-        columns: columns,
-        rows: rows,
-        autoSizeColumns: true,
-        autoSizeRows: true,
-        autoSizeVertically: true,
-        showLeadingOuterBorders: true,
+      child: SelectionContainer.disabled(
+        child: CoordinatedSecondaryTapBarrier(
+          child: InMemoryTable(
+            columns: columns,
+            rows: rows,
+            autoSizeColumns: true,
+            autoSizeRows: true,
+            autoSizeVertically: true,
+            showLeadingOuterBorders: true,
+            showRowHeaders: false,
+          ),
+        ),
       ),
     );
   }

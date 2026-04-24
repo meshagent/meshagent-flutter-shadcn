@@ -2912,6 +2912,7 @@ class ChatBubble extends StatefulWidget {
     this.reactionActionBuilder,
     this.showReactionAction = false,
     this.onReactFromMenu,
+    this.fullWidth = false,
   });
 
   final RoomClient? room;
@@ -2921,6 +2922,7 @@ class ChatBubble extends StatefulWidget {
   final Widget Function(ShadContextMenuController controller)? reactionActionBuilder;
   final bool showReactionAction;
   final VoidCallback? onReactFromMenu;
+  final bool fullWidth;
 
   @override
   State createState() => _ChatBubble();
@@ -3259,6 +3261,38 @@ class _ChatBubble extends State<ChatBubble> {
       ),
     );
 
+    final bubble = Container(
+      padding: _chatBubbleContentPadding,
+      decoration: BoxDecoration(color: bubbleColor, borderRadius: BorderRadius.circular(_bubbleRadius)),
+      child: MediaQuery(
+        data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
+        child: MarkdownViewer(
+          markdown: text,
+          padding: const EdgeInsets.all(0),
+          threadTypography: true,
+          shrinkWrap: true,
+          selectable: kIsWeb,
+        ),
+      ),
+    );
+
+    final content = widget.fullWidth
+        ? Stack(
+            clipBehavior: Clip.none,
+            children: [
+              SizedBox(width: double.infinity, child: bubble),
+              Positioned(bottom: 0, right: 0, child: actions),
+            ],
+          )
+        : Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (mine) actions,
+              Expanded(child: bubble),
+              if (!mine) actions,
+            ],
+          );
+
     return TapRegion(
       groupId: _contextMenuGroupId,
       onTapOutside: (_) {
@@ -3283,32 +3317,7 @@ class _ChatBubble extends State<ChatBubble> {
         child: Container(
           padding: EdgeInsets.symmetric(horizontal: 5),
           color: Colors.transparent,
-          child: Container(
-            margin: EdgeInsets.only(top: 0),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                if (mine) actions,
-                Expanded(
-                  child: Container(
-                    padding: _chatBubbleContentPadding,
-                    decoration: BoxDecoration(color: bubbleColor, borderRadius: BorderRadius.circular(_bubbleRadius)),
-                    child: MediaQuery(
-                      data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
-                      child: MarkdownViewer(
-                        markdown: text,
-                        padding: const EdgeInsets.all(0),
-                        threadTypography: true,
-                        shrinkWrap: true,
-                        selectable: kIsWeb,
-                      ),
-                    ),
-                  ),
-                ),
-                if (!mine) actions,
-              ],
-            ),
-          ),
+          child: Container(margin: EdgeInsets.only(top: 0), child: content),
         ),
       ),
     );
@@ -4956,7 +4965,9 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   }) {
     final localParticipantName = room.localParticipant?.getAttribute("name");
     final localParticipantReactionName = _localParticipantName();
-    final mine = message.getAttribute("author_name") == localParticipantName;
+    final rawRole = message.getAttribute("role");
+    final isAgentMessage = rawRole is String && rawRole.trim().toLowerCase() == "agent";
+    final mine = !isAgentMessage && message.getAttribute("author_name") == localParticipantName;
     final useDefaultHeaderBuilder = messageHeaderBuilder == null;
     final shouldShowHeader = !useDefaultHeaderBuilder || widget.shouldShowAuthorNames;
 
@@ -5025,6 +5036,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
               child: ChatBubble(
                 room: room,
                 mine: mine,
+                fullWidth: isAgentMessage,
                 text: messageText,
                 onDelete: message.delete,
                 reactionActionBuilder: localParticipantReactionName == null

@@ -51,6 +51,9 @@ class SliverTwoAxisScroll extends StatefulWidget {
   /// See [SliverSwayzeTable.wrapBox]
   final WrapBoxBuilder? wrapBox;
 
+  /// Whether to reserve and render the row-number header column.
+  final bool showRowHeaders;
+
   const SliverTwoAxisScroll({
     Key? key,
     required this.twoAxisScrollBuilder,
@@ -58,6 +61,7 @@ class SliverTwoAxisScroll extends StatefulWidget {
     required this.verticalScrollController,
     this.horizontalScrollPhysics,
     required this.wrapBox,
+    this.showRowHeaders = true,
   }) : super(key: key);
 
   @override
@@ -102,7 +106,10 @@ class _SliverTwoAxisScrollState extends State<SliverTwoAxisScroll> {
                     return ValueListenableBuilder<SwayzeHeaderState>(
                       valueListenable: tableDataController.columns,
                       builder: (context, columnsState, child) {
-                        final rowHeaderWidth = config.headerWidthForRange(verticalVirtualizationState.rangeNotifier.value);
+                        final style = InternalScope.of(context).style;
+                        final rowHeaderWidth = widget.showRowHeaders
+                            ? config.headerWidthForRange(verticalVirtualizationState.rangeNotifier.value)
+                            : _leadingOuterBorderWidth(style);
 
                         // The total width of the table in pixels, including
                         // the rows header.
@@ -200,6 +207,13 @@ class _SliverTwoAxisScrollState extends State<SliverTwoAxisScroll> {
 
     return content;
   }
+}
+
+double _leadingOuterBorderWidth(SwayzeStyle style) {
+  if (!style.showLeadingOuterBorders || style.cellSeparatorColor.a == 0.0) {
+    return 0.0;
+  }
+  return style.cellSeparatorStrokeWidth;
 }
 
 /// A [Widget] that animates between changes on [extent].
