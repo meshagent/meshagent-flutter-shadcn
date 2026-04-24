@@ -6651,7 +6651,7 @@ class ChatThreadAuthorHeader extends StatelessWidget {
               child: Text(
                 _displayParticipantName(authorName),
                 style: isDesktopScreen
-                    ? GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700, color: cs.foreground)
+                    ? tt.small.copyWith(fontSize: 15, fontWeight: FontWeight.w700, color: cs.foreground)
                     : tt.small.copyWith(color: cs.foreground),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,

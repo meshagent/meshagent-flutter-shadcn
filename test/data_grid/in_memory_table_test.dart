@@ -197,6 +197,62 @@ void main() {
     expect(tester.getSize(tablePadding).height, greaterThan(defaultHeight));
   });
 
+  testWidgets('wrapped auto sized rows preserve vertical padding when column width hits the cap', (tester) async {
+    const maxColumnExtent = 120.0;
+    const cellPadding = EdgeInsets.symmetric(horizontal: 16, vertical: 20);
+    const longText =
+        'This paragraph should wrap after the column auto fit reaches its maximum width, while still keeping top and bottom padding.';
+
+    await tester.pumpWidget(
+      ShadApp(
+        theme: ShadThemeData(tableTheme: const ShadTableTheme(cellPadding: cellPadding)),
+        home: Scaffold(
+          body: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: InMemoryTable(
+                columns: const ['Notes'],
+                rows: const [
+                  [longText],
+                ],
+                autoSizeColumns: true,
+                autoSizeHorizontally: true,
+                autoSizeVertically: true,
+                maxAutoSizeColumnExtent: maxColumnExtent,
+                maxAutoSizeRowExtent: 600,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    final cellPaddingFinder = find.byWidgetPredicate((widget) => widget is Padding && widget.padding == cellPadding);
+    expect(cellPaddingFinder, findsOneWidget);
+
+    final cellTextFinder = find.text(longText);
+    expect(cellTextFinder, findsOneWidget);
+
+    final tablePadding = find.byWidgetPredicate((widget) => widget is Padding && widget.padding == const EdgeInsets.symmetric(vertical: 4));
+    final columnExtent = tester.getSize(tablePadding).width - kRowHeaderWidth - 1;
+    expect(columnExtent, closeTo(maxColumnExtent, 0.1));
+
+    final cellPaddingSize = tester.getSize(cellPaddingFinder);
+    final textElement = tester.element(cellTextFinder);
+    final textWidget = tester.widget<Text>(cellTextFinder);
+    final textPainter = TextPainter(
+      text: TextSpan(text: longText, style: textWidget.style),
+      textDirection: Directionality.of(textElement),
+      textScaler: MediaQuery.maybeTextScalerOf(textElement) ?? TextScaler.noScaling,
+      maxLines: null,
+    )..layout(maxWidth: columnExtent - 1 - cellPadding.horizontal);
+
+    expect(cellPaddingSize.height, closeTo(textPainter.height.ceilToDouble() + cellPadding.vertical, 0.1));
+  });
+
   testWidgets('auto sizing rows honors max row extent', (tester) async {
     const maxRowExtent = 80.0;
 

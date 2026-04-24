@@ -8,11 +8,10 @@ import 'package:flutter/services.dart';
 import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_flutter_shadcn/data_grid/swayze/controller.dart';
 import 'package:meshagent_flutter_shadcn/data_grid/swayze/delegates.dart';
+import 'package:meshagent_flutter_shadcn/data_grid/swayze/helpers.dart';
 import 'package:meshagent_flutter_shadcn/data_grid/swayze/src/config.dart' as swayze_config;
-import 'package:meshagent_flutter_shadcn/data_grid/swayze/src/helpers/label_generator.dart';
 import 'package:meshagent_flutter_shadcn/data_grid/swayze/src/core/internal_state/table_focus/table_focus_provider.dart';
 import 'package:meshagent_flutter_shadcn/data_grid/swayze/src/widgets/headers/header_label_scope.dart';
-import 'package:meshagent_flutter_shadcn/data_grid/swayze/src/widgets/shared/auto_fit.dart';
 import 'package:meshagent_flutter_shadcn/data_grid/swayze/widgets.dart';
 import 'package:meshagent_flutter_shadcn/data_grid/swayze_math/swayze_math.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
@@ -553,18 +552,19 @@ class _SharedSwayzeGridState extends State<_SharedSwayzeGrid> {
       maxAutoFitColumnExtent: widget.maxAutoSizeColumnExtent,
       maxAutoFitRowExtent: widget.maxAutoSizeRowExtent,
     );
+    List<double>? resolvedColumnExtents;
     if (widget.autoSizeColumns) {
-      _applyAutoSizeColumns(style);
+      resolvedColumnExtents = _applyAutoSizeColumns(style);
     }
     if (_effectiveAutoSizeRows) {
-      _applyAutoSizeRows(style);
+      _applyAutoSizeRows(style, resolvedColumnExtents: resolvedColumnExtents);
     }
   }
 
-  void _applyAutoSizeColumns(SwayzeStyle style) {
+  List<double> _applyAutoSizeColumns(SwayzeStyle style) {
     final columnCount = widget.columns.length;
     if (columnCount <= 0) {
-      return;
+      return const [];
     }
 
     final theme = ShadTheme.of(context);
@@ -595,15 +595,17 @@ class _SharedSwayzeGridState extends State<_SharedSwayzeGrid> {
       }
     });
 
-    _applyMeasuredExtents(
+    final resolvedColumnExtents = _resolveMeasuredExtents(
       axis: Axis.horizontal,
       extents: columnExtents,
       lineWidth: style.cellSeparatorStrokeWidth,
       maxExtent: widget.maxAutoSizeColumnExtent,
     );
+    _applyResolvedExtents(axis: Axis.horizontal, extents: resolvedColumnExtents);
+    return resolvedColumnExtents;
   }
 
-  void _applyAutoSizeRows(SwayzeStyle style) {
+  void _applyAutoSizeRows(SwayzeStyle style, {List<double>? resolvedColumnExtents}) {
     final rowCount = math.min(widget.availableRowCount, widget.controller.tableDataController.rows.value.count);
     if (rowCount <= 0) {
       return;
@@ -638,7 +640,9 @@ class _SharedSwayzeGridState extends State<_SharedSwayzeGrid> {
         return;
       }
 
-      final columnExtent = widget.controller.tableDataController.columns.value.getHeaderExtentFor(index: colIndex);
+      final columnExtent = resolvedColumnExtents != null && colIndex < resolvedColumnExtents.length
+          ? resolvedColumnExtents[colIndex]
+          : widget.controller.tableDataController.columns.value.getHeaderExtentFor(index: colIndex);
       final cellExtent = _measureWrappedCellHeight(
         cellData.preview,
         style: cellTextStyle,
@@ -651,21 +655,36 @@ class _SharedSwayzeGridState extends State<_SharedSwayzeGrid> {
       }
     });
 
-    _applyMeasuredExtents(
+    final resolvedRowExtents = _resolveMeasuredExtents(
       axis: Axis.vertical,
       extents: rowExtents,
       lineWidth: style.cellSeparatorStrokeWidth,
       maxExtent: widget.maxAutoSizeRowExtent,
     );
+    _applyResolvedExtents(axis: Axis.vertical, extents: resolvedRowExtents);
   }
 
-  void _applyMeasuredExtents({required Axis axis, required List<double> extents, required double lineWidth, required double? maxExtent}) {
+  List<double> _resolveMeasuredExtents({
+    required Axis axis,
+    required List<double> extents,
+    required double lineWidth,
+    required double? maxExtent,
+  }) {
+    return [
+      for (final extent in extents)
+        (maxExtent == null ? extent + lineWidth : math.min(extent + lineWidth, maxExtent)).clamp(
+          minimumResizableExtentForAxis(axis),
+          double.infinity,
+        ),
+    ];
+  }
+
+  void _applyResolvedExtents({required Axis axis, required List<double> extents}) {
     final headerController = widget.controller.tableDataController.getHeaderControllerFor(axis: axis);
     headerController.updateState((state) {
       var nextState = state;
       for (var index = 0; index < extents.length; index++) {
-        final cappedExtent = maxExtent == null ? extents[index] + lineWidth : math.min(extents[index] + lineWidth, maxExtent);
-        final extent = cappedExtent.clamp(minimumResizableExtentForAxis(axis), double.infinity);
+        final extent = extents[index];
         final currentExtent = nextState.getHeaderExtentFor(index: index);
         if ((currentExtent - extent).abs() < 0.001) {
           continue;
@@ -690,7 +709,7 @@ class _SharedSwayzeGridState extends State<_SharedSwayzeGrid> {
 
   double _measureSingleLineCellMainAxisExtent(String text, TextStyle? style, EdgeInsets padding, Axis axis) {
     final size = _measureText(text, style);
-    return axis == Axis.horizontal ? size.width + padding.horizontal : size.height + padding.vertical;
+    return axis == Axis.horizontal ? size.width + padding.horizontal : size.height.ceilToDouble() + padding.vertical;
   }
 
   double _measureWrappedCellHeight(
@@ -709,7 +728,7 @@ class _SharedSwayzeGridState extends State<_SharedSwayzeGrid> {
       maxLines: displayText == '...' || !_wrapCellText ? 1 : null,
       ellipsis: displayText == '...' || !_wrapCellText ? '...' : null,
     );
-    return size.height + padding.vertical;
+    return size.height.ceilToDouble() + padding.vertical;
   }
 
   String _displayTextForAvailableWidth(String text, double width) {
@@ -1035,7 +1054,9 @@ class _SharedSwayzeCellLayout extends CellLayout {
     final theme = ShadTheme.of(context);
     final tableTheme = theme.tableTheme;
     final baseTextStyle = tableTheme.cellStyle ?? theme.textTheme.muted.copyWith(color: theme.colorScheme.foreground);
-    final cellPadding = tableTheme.cellPadding ?? const EdgeInsets.symmetric(horizontal: 16, vertical: 12);
+    final cellPadding = (tableTheme.cellPadding ?? const EdgeInsets.symmetric(horizontal: 16, vertical: 12)).resolve(
+      Directionality.of(context),
+    );
     final textColor = data.isNull ? theme.colorScheme.mutedForeground : (baseTextStyle.color ?? theme.colorScheme.foreground);
 
     return LayoutBuilder(
@@ -1044,12 +1065,21 @@ class _SharedSwayzeCellLayout extends CellLayout {
             constraints.maxWidth.isFinite && constraints.maxWidth <= _kMinimumReadableCellWidth && data.preview.isNotEmpty;
         final displayText = shouldShowCompactIndicator ? '...' : data.preview;
         final shouldWrapText = wrapText && !shouldShowCompactIndicator && constraints.maxWidth.isFinite;
+        final textStyle = baseTextStyle.copyWith(color: textColor);
+        final wrappedTextLayout = _resolveWrappedTextLayout(
+          context,
+          text: displayText,
+          style: textStyle,
+          padding: cellPadding,
+          constraints: constraints,
+          shouldWrapText: shouldWrapText,
+        );
         final text = Text(
           displayText,
-          maxLines: shouldWrapText ? null : 1,
-          overflow: shouldWrapText ? TextOverflow.clip : TextOverflow.ellipsis,
+          maxLines: wrappedTextLayout.maxLines,
+          overflow: wrappedTextLayout.overflow,
           softWrap: shouldWrapText,
-          style: baseTextStyle.copyWith(color: textColor),
+          style: textStyle,
         );
 
         return _SharedSwayzeCellContextMenuRegion(
@@ -1075,6 +1105,61 @@ class _SharedSwayzeCellLayout extends CellLayout {
 
   @override
   bool get isHoverAware => false;
+}
+
+class _WrappedTextLayout {
+  const _WrappedTextLayout({required this.maxLines, required this.overflow});
+
+  final int? maxLines;
+  final TextOverflow overflow;
+}
+
+_WrappedTextLayout _resolveWrappedTextLayout(
+  BuildContext context, {
+  required String text,
+  required TextStyle style,
+  required EdgeInsets padding,
+  required BoxConstraints constraints,
+  required bool shouldWrapText,
+}) {
+  if (!shouldWrapText) {
+    return const _WrappedTextLayout(maxLines: 1, overflow: TextOverflow.ellipsis);
+  }
+
+  if (!constraints.maxHeight.isFinite) {
+    return const _WrappedTextLayout(maxLines: null, overflow: TextOverflow.clip);
+  }
+
+  final availableTextWidth = math.max(0.0, constraints.maxWidth - padding.horizontal);
+  final availableTextHeight = math.max(0.0, constraints.maxHeight - padding.vertical);
+  if (availableTextWidth <= 0 || availableTextHeight <= 0) {
+    return const _WrappedTextLayout(maxLines: 1, overflow: TextOverflow.ellipsis);
+  }
+
+  final textPainter = TextPainter(
+    text: TextSpan(text: text, style: style),
+    textDirection: Directionality.of(context),
+    textScaler: MediaQuery.maybeTextScalerOf(context) ?? TextScaler.noScaling,
+    maxLines: null,
+  )..layout(maxWidth: availableTextWidth);
+
+  if (textPainter.height <= availableTextHeight + 0.001) {
+    return const _WrappedTextLayout(maxLines: null, overflow: TextOverflow.clip);
+  }
+
+  final lineMetrics = textPainter.computeLineMetrics();
+  var fittingLineCount = 0;
+  var usedHeight = 0.0;
+  for (final lineMetric in lineMetrics) {
+    final nextHeight = usedHeight + lineMetric.height;
+    if (nextHeight > availableTextHeight + 0.001) {
+      break;
+    }
+    usedHeight = nextHeight;
+    fittingLineCount++;
+  }
+
+  return _WrappedTextLayout(maxLines: math.max(1, fittingLineCount), overflow: TextOverflow.ellipsis);
 }
 
 class _SharedSwayzeCellContextMenuRegion extends StatefulWidget {

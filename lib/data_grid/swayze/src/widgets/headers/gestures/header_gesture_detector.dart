@@ -6,6 +6,7 @@ import 'package:flutter/widgets.dart';
 import 'package:meshagent_flutter_shadcn/data_grid/swayze_math/swayze_math.dart';
 
 import '../../../../controller.dart';
+import '../../../../helpers.dart';
 import '../../../../intents.dart';
 import '../../../core/style/style.dart';
 import '../../../core/viewport_context/viewport_context.dart';
@@ -14,7 +15,6 @@ import '../../../helpers/label_generator.dart';
 import '../../../helpers/scroll/auto_scroll.dart';
 import '../../internal_scope.dart';
 import '../header_label_scope.dart';
-import '../../shared/auto_fit.dart';
 
 const _kHeaderResizeHandleExtent = 6.0;
 const _kHeaderAutoFitTapSlop = 24.0;
