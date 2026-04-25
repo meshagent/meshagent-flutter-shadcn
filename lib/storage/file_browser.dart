@@ -30,21 +30,46 @@ class _FileBrowser extends State<FileBrowser> {
   String path = "";
 
   List<StorageEntry>? files;
+  Object? error;
+  int _loadGeneration = 0;
   final Set<String> selection = {};
 
   @override
   void initState() {
     super.initState();
     path = widget.initialPath;
+    if (widget.selectionMode == FileBrowserSelectionMode.folders) {
+      selection.add(widget.initialPath);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        widget.onSelectionChanged?.call(selection.toList());
+      });
+    }
 
     load();
   }
 
   void load() async {
-    files = (await widget.room.storage.list(path)).where((x) => !x.name.startsWith(".")).toList()..sort(compare);
+    final generation = ++_loadGeneration;
+    setState(() {
+      files = null;
+      error = null;
+    });
 
-    if (mounted) {
-      setState(() {});
+    try {
+      final loadedFiles = (await widget.room.storage.list(path)).where((x) => !x.name.startsWith(".")).toList()..sort(compare);
+
+      if (mounted && generation == _loadGeneration) {
+        setState(() {
+          files = loadedFiles;
+        });
+      }
+    } catch (err) {
+      if (mounted && generation == _loadGeneration) {
+        setState(() {
+          error = err;
+          files = const [];
+        });
+      }
     }
   }
 
@@ -69,6 +94,10 @@ class _FileBrowser extends State<FileBrowser> {
 
     if (files == null) {
       return Center(child: CircularProgressIndicator());
+    }
+
+    if (error != null) {
+      return ShadAlert.destructive(description: Text("$error"));
     }
 
     final filteredFiles = widget.selectionMode == FileBrowserSelectionMode.folders ? files!.where((x) => x.isFolder) : files!;

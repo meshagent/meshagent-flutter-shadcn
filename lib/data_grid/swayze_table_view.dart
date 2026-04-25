@@ -131,14 +131,14 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
     }
 
     try {
-      final schema = await widget.room.database.inspect(
+      final schema = await widget.room.datasets.inspect(
         widget.tableName,
         namespace: widget.namespace,
         branch: widget.branch,
         version: widget.version,
       );
       final columns = _selectableColumns(schema);
-      final rowCount = await widget.room.database.count(
+      final rowCount = await widget.room.datasets.count(
         table: widget.tableName,
         where: _normalizedFilter,
         namespace: widget.namespace,
@@ -173,7 +173,7 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
       }
 
       var rowOffset = 0;
-      _rowsSubscription = widget.room.database
+      _rowsSubscription = widget.room.datasets
           .searchStream(
             table: widget.tableName,
             where: _normalizedFilter,

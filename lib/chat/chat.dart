@@ -3133,7 +3133,7 @@ class _ChatBubble extends State<ChatBubble> {
                   room: room,
                   multiple: false,
                   selectionMode: FileBrowserSelectionMode.folders,
-                  rootLabel: "Folders",
+                  rootLabel: "Files",
                 ),
               ),
               Padding(
@@ -5509,7 +5509,7 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
       return null;
     }
 
-    final rows = await widget.room.database.search(table: "images", where: {"id": imageId}, limit: 1, select: ["data", "mime_type"]);
+    final rows = await widget.room.datasets.search(table: "images", where: {"id": imageId}, limit: 1, select: ["data", "mime_type"]);
     if (rows.isEmpty) {
       return null;
     }
@@ -5687,7 +5687,7 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
                   room: widget.room,
                   multiple: false,
                   selectionMode: FileBrowserSelectionMode.folders,
-                  rootLabel: "Folders",
+                  rootLabel: "Files",
                 ),
               ),
               Padding(
@@ -5880,7 +5880,7 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
 
   Future<_ThreadImageRecord?> _loadCurrentImage() async {
     final entry = widget.images[_currentIndex];
-    final rows = await widget.room.database.search(table: "images", where: {"id": entry.imageId}, limit: 1, select: ["data", "mime_type"]);
+    final rows = await widget.room.datasets.search(table: "images", where: {"id": entry.imageId}, limit: 1, select: ["data", "mime_type"]);
     if (rows.isEmpty) {
       return null;
     }
@@ -6007,7 +6007,7 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
                   room: widget.room,
                   multiple: false,
                   selectionMode: FileBrowserSelectionMode.folders,
-                  rootLabel: "Folders",
+                  rootLabel: "Files",
                 ),
               ),
               Padding(
@@ -6157,7 +6157,7 @@ class _ThreadFullscreenImage extends StatelessWidget {
   final Future<void> Function(_ThreadImageRecord image)? onSaveImage;
 
   Future<_ThreadImageRecord?> _loadImage() async {
-    final rows = await room.database.search(table: "images", where: {"id": imageId}, limit: 1, select: ["data", "mime_type"]);
+    final rows = await room.datasets.search(table: "images", where: {"id": imageId}, limit: 1, select: ["data", "mime_type"]);
     if (rows.isEmpty) {
       return null;
     }
