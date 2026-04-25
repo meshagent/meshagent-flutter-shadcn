@@ -12,10 +12,10 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:interactive_viewer_2/interactive_viewer_2.dart';
-import 'package:markdown_widget/markdown_widget.dart';
 import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_flutter_shadcn/chat_bubble_markdown_config.dart';
 import 'package:meshagent_flutter_shadcn/code_language_resolver.dart';
+import 'package:meshagent_flutter_shadcn/markdown_viewer.dart';
 import 'package:meshagent_flutter_shadcn/storage/file_browser.dart';
 import 'package:meshagent_flutter_shadcn/ui/coordinated_context_menu.dart';
 import 'package:meshagent_flutter_shadcn/ui/ui.dart';
@@ -3273,6 +3273,7 @@ class ChatBubble extends StatefulWidget {
     this.showReactionAction = false,
     this.onReactFromMenu,
     this.mobileStorageSaveSurfacePresenter,
+    this.fullWidth = false,
   });
 
   final RoomClient? room;
@@ -3283,6 +3284,7 @@ class ChatBubble extends StatefulWidget {
   final bool showReactionAction;
   final VoidCallback? onReactFromMenu;
   final ThreadStorageSaveSurfacePresenter? mobileStorageSaveSurfacePresenter;
+  final bool fullWidth;
 
   @override
   State createState() => _ChatBubble();
@@ -3523,6 +3525,38 @@ class _ChatBubble extends State<ChatBubble> {
       ),
     );
 
+    final bubble = Container(
+      padding: _chatBubbleContentPadding,
+      decoration: BoxDecoration(color: bubbleColor, borderRadius: BorderRadius.circular(_bubbleRadius)),
+      child: MediaQuery(
+        data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
+        child: MarkdownViewer(
+          markdown: text,
+          padding: const EdgeInsets.all(0),
+          threadTypography: true,
+          shrinkWrap: true,
+          selectable: kIsWeb,
+        ),
+      ),
+    );
+
+    final content = widget.fullWidth
+        ? Stack(
+            clipBehavior: Clip.none,
+            children: [
+              SizedBox(width: double.infinity, child: bubble),
+              Positioned(bottom: 0, right: 0, child: actions),
+            ],
+          )
+        : Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (mine) actions,
+              Expanded(child: bubble),
+              if (!mine) actions,
+            ],
+          );
+
     return TapRegion(
       groupId: _contextMenuGroupId,
       onTapOutside: (_) {
@@ -3547,32 +3581,7 @@ class _ChatBubble extends State<ChatBubble> {
         child: Container(
           padding: EdgeInsets.symmetric(horizontal: 5),
           color: Colors.transparent,
-          child: Container(
-            margin: EdgeInsets.only(top: 0),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                if (mine) actions,
-                Expanded(
-                  child: Container(
-                    padding: _chatBubbleContentPadding,
-                    decoration: BoxDecoration(color: bubbleColor, borderRadius: BorderRadius.circular(_bubbleRadius)),
-                    child: MediaQuery(
-                      data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
-                      child: MarkdownWidget(
-                        padding: const EdgeInsets.all(0),
-                        config: buildChatBubbleMarkdownConfig(context, threadTypography: true),
-                        shrinkWrap: true,
-                        selectable: kIsWeb,
-                        data: text,
-                      ),
-                    ),
-                  ),
-                ),
-                if (!mine) actions,
-              ],
-            ),
-          ),
+          child: Container(margin: EdgeInsets.only(top: 0), child: content),
         ),
       ),
     );
@@ -5360,7 +5369,9 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   }) {
     final localParticipantName = room.localParticipant?.getAttribute("name");
     final localParticipantReactionName = _localParticipantName();
-    final mine = message.getAttribute("author_name") == localParticipantName;
+    final rawRole = message.getAttribute("role");
+    final isAgentMessage = rawRole is String && rawRole.trim().toLowerCase() == "agent";
+    final mine = !isAgentMessage && message.getAttribute("author_name") == localParticipantName;
     final useDefaultHeaderBuilder = messageHeaderBuilder == null;
     final shouldShowHeader = !useDefaultHeaderBuilder || widget.shouldShowAuthorNames;
 
@@ -5429,6 +5440,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
               child: ChatBubble(
                 room: room,
                 mine: mine,
+                fullWidth: isAgentMessage,
                 text: messageText,
                 onDelete: message.delete,
                 mobileStorageSaveSurfacePresenter: mobileStorageSaveSurfacePresenter,
@@ -7481,7 +7493,7 @@ class ChatThreadAuthorHeader extends StatelessWidget {
               child: Text(
                 _displayParticipantName(authorName),
                 style: isDesktopScreen
-                    ? GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700, color: cs.foreground)
+                    ? tt.small.copyWith(fontSize: 15, fontWeight: FontWeight.w700, color: cs.foreground)
                     : tt.small.copyWith(color: cs.foreground),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -7939,19 +7951,12 @@ class _ReasoningTrace extends State<ReasoningTrace> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: MarkdownWidget(
+                  child: MarkdownViewer(
+                    markdown: widget.message.getAttribute("summary") ?? "",
                     padding: const EdgeInsets.all(0),
-                    config: buildChatBubbleMarkdownConfig(context, threadTypography: true),
+                    threadTypography: true,
                     shrinkWrap: true,
                     selectable: true,
-
-                    /*builders: {
-      "code": CodeElementBuilder(
-          document: ChatDocumentProvider.of(context).document,
-          api: TimuApiProvider.of(context).api,
-          layer: layer),
-},*/
-                    data: widget.message.getAttribute("summary") ?? "",
                   ),
                 ),
               ],

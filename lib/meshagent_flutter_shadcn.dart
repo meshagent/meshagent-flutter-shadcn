@@ -7,6 +7,8 @@ export "chat/new_chat_thread.dart";
 export "chat/thread_list_view.dart";
 export "forms/select_users.dart";
 export "forms/select_users_dialog.dart";
+export "data_grid/data_grid.dart";
+export "markdown_viewer.dart";
 export "theme/colors.dart";
 export "voice/voice.dart";
 export "toolkits/ui.dart";

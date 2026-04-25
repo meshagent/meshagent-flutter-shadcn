@@ -1,10 +1,9 @@
 import 'package:meshagent/document.dart' as docs;
 import 'package:meshagent/room_server_client.dart';
-import 'package:meshagent_flutter_shadcn/chat_bubble_markdown_config.dart';
+import 'package:meshagent_flutter_shadcn/markdown_viewer.dart';
 import '../file_preview/file_preview.dart';
 import 'package:flutter/material.dart';
 import "builder.dart";
-import 'package:markdown_widget/markdown_widget.dart';
 
 class DocumentViewer extends StatefulWidget {
   const DocumentViewer({required this.document, super.key, required this.client});
@@ -77,11 +76,7 @@ class DocumentViewerElement extends StatelessWidget {
               width: double.infinity,
               child: Padding(
                 padding: EdgeInsets.only(left: 30, right: 30),
-                child: MarkdownWidget(
-                  config: buildChatBubbleMarkdownConfig(context),
-                  data: element.getAttribute("text")!,
-                  shrinkWrap: true,
-                ),
+                child: MarkdownViewer(markdown: element.getAttribute("text")!, padding: EdgeInsets.zero, shrinkWrap: true),
               ),
             ),
           ],
