@@ -1775,8 +1775,11 @@ class ChatThreadInputFrame extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final keyboardOpen = _usesMobileContextLayout(context) && MediaQuery.viewInsetsOf(context).bottom > 0;
+    final bottomPadding = keyboardOpen ? 4.0 : 8.0;
+
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+      padding: EdgeInsets.fromLTRB(15, 8, 15, bottomPadding),
       child: Center(
         child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 912), child: child),
       ),
@@ -1794,6 +1797,7 @@ class ChatThreadViewportBody extends StatefulWidget {
     this.bottomSpacer = 0,
     this.overlays = const [],
     this.tapRegionGroupId,
+    this.mobileUnderHeaderContentPadding,
   });
 
   final List<Widget> children;
@@ -1803,6 +1807,7 @@ class ChatThreadViewportBody extends StatefulWidget {
   final double bottomSpacer;
   final List<Widget> overlays;
   final Object? tapRegionGroupId;
+  final double? mobileUnderHeaderContentPadding;
 
   @override
   State<ChatThreadViewportBody> createState() => _ChatThreadViewportBodyState();
@@ -1869,7 +1874,7 @@ class _ChatThreadViewportBodyState extends State<ChatThreadViewportBody> {
     final keyboardDismissBehavior = _usesMobileContextLayout(context)
         ? ScrollViewKeyboardDismissBehavior.manual
         : ScrollViewKeyboardDismissBehavior.onDrag;
-    final underHeaderContentPadding = _usesMobileContextLayout(context) ? 40.0 : 0.0;
+    final underHeaderContentPadding = _usesMobileContextLayout(context) ? (widget.mobileUnderHeaderContentPadding ?? 40.0) : 0.0;
     final dismissKeyboardOnTap = _usesMobileContextLayout(context) && keyboardInset > 0
         ? () => FocusManager.instance.primaryFocus?.unfocus()
         : null;
@@ -1891,11 +1896,11 @@ class _ChatThreadViewportBodyState extends State<ChatThreadViewportBody> {
                     children: [
                       Positioned.fill(
                         top: -underHeaderContentPadding,
-                        child: TextFieldTapRegion(
-                          groupId: widget.tapRegionGroupId,
-                          child: GestureDetector(
-                            behavior: HitTestBehavior.translucent,
-                            onTap: dismissKeyboardOnTap,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.translucent,
+                          onTap: dismissKeyboardOnTap,
+                          child: TextFieldTapRegion(
+                            groupId: widget.tapRegionGroupId,
                             child: LayoutBuilder(
                               builder: (context, constraints) => ListView(
                                 controller: widget.scrollController,
@@ -3218,6 +3223,7 @@ class ChatThread extends StatefulWidget {
     this.inputContextMenuBuilder,
     this.inputOnPressedOutside,
     this.mobileStorageSaveSurfacePresenter,
+    this.mobileUnderHeaderContentPadding,
   });
 
   final String? agentName;
@@ -3250,6 +3256,7 @@ class ChatThread extends StatefulWidget {
   final EditableTextContextMenuBuilder? inputContextMenuBuilder;
   final TapRegionCallback? inputOnPressedOutside;
   final ThreadStorageSaveSurfacePresenter? mobileStorageSaveSurfacePresenter;
+  final double? mobileUnderHeaderContentPadding;
 
   @override
   State createState() => _ChatThreadState();
@@ -4041,6 +4048,7 @@ class _ChatThreadState extends State<ChatThread> {
                   emptyStateDescription: widget.emptyStateDescription,
                   emptyState: widget.emptyState,
                   mobileStorageSaveSurfacePresenter: widget.mobileStorageSaveSurfacePresenter,
+                  mobileUnderHeaderContentPadding: widget.mobileUnderHeaderContentPadding,
                 ),
                 ListenableBuilder(
                   listenable: controller,
@@ -4185,6 +4193,7 @@ class ChatThreadMessages extends StatefulWidget {
     this.emptyState,
     this.onShowCompletedToolCallsChanged,
     this.mobileStorageSaveSurfacePresenter,
+    this.mobileUnderHeaderContentPadding,
   });
 
   final Map<String, MessageBuilder>? messageBuilders;
@@ -4211,6 +4220,7 @@ class ChatThreadMessages extends StatefulWidget {
   final Widget? emptyState;
   final ValueChanged<bool>? onShowCompletedToolCallsChanged;
   final ThreadStorageSaveSurfacePresenter? mobileStorageSaveSurfacePresenter;
+  final double? mobileUnderHeaderContentPadding;
 
   final Widget Function(BuildContext, MeshDocument, MeshElement)? messageHeaderBuilder;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
@@ -5534,6 +5544,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
             ),
           ),
       ],
+      mobileUnderHeaderContentPadding: widget.mobileUnderHeaderContentPadding,
       children: messageWidgets,
     );
     final threadViewWithContextMenu = _usesMobileContextLayout(context)
