@@ -10,6 +10,9 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:re_editor/re_editor.dart';
 import 'package:flutter_highlight/themes/monokai-sublime.dart';
 import 'package:re_highlight/languages/plaintext.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+const int codePreviewLargeFileThresholdBytes = 1024 * 1024;
 
 bool isCodeFile(String filename) {
   return resolveLanguageIdForFilename(filename) != null;
@@ -125,6 +128,7 @@ class CodePreview extends StatefulWidget {
 class _CodePreview extends State<CodePreview> {
   final theme = monokaiSublimeTheme;
   String? text;
+  _LargeCodeFile? largeFile;
   Object? loadError;
   Object? saveError;
 
@@ -191,6 +195,7 @@ class _CodePreview extends State<CodePreview> {
 
     setState(() {
       text = null;
+      largeFile = null;
       loadError = null;
       saveError = null;
       dirty = false;
@@ -200,14 +205,15 @@ class _CodePreview extends State<CodePreview> {
     widget.controller?._sync(this);
 
     try {
-      final nextText = await _readText();
+      final result = await _readPreviewData();
       if (!mounted || generation != _loadGeneration) {
         return;
       }
 
       setState(() {
-        text = nextText;
-        controller = CodeLineEditingController.fromText(nextText);
+        text = result.text;
+        largeFile = result.largeFile;
+        controller = result.text == null ? null : CodeLineEditingController.fromText(result.text!);
       });
       widget.controller?._sync(this);
     } catch (error) {
@@ -222,16 +228,23 @@ class _CodePreview extends State<CodePreview> {
     }
   }
 
-  Future<String> _readText() async {
+  Future<_CodePreviewLoadResult> _readPreviewData() async {
     final inlineText = widget.text;
     if (inlineText != null) {
-      return inlineText;
+      return _CodePreviewLoadResult.text(inlineText);
     }
 
     final room = widget.room;
     if (room != null) {
+      final entry = await room.storage.stat(widget.filename);
+      final size = entry?.size;
+      if (size != null && size > codePreviewLargeFileThresholdBytes) {
+        final downloadUrl = await room.storage.downloadUrl(widget.filename);
+        return _CodePreviewLoadResult.largeFile(_LargeCodeFile(size: size, downloadUrl: Uri.parse(downloadUrl)));
+      }
+
       final content = await room.storage.download(widget.filename);
-      return utf8.decode(content.data, allowMalformed: true);
+      return _CodePreviewLoadResult.text(utf8.decode(content.data, allowMalformed: true));
     }
 
     final url = widget.url;
@@ -244,7 +257,7 @@ class _CodePreview extends State<CodePreview> {
       throw ClientException("Failed to load file (${response.statusCode})", url);
     }
 
-    return utf8.decode(response.bodyBytes, allowMalformed: true);
+    return _CodePreviewLoadResult.text(utf8.decode(response.bodyBytes, allowMalformed: true));
   }
 
   Future<void> _save() async {
@@ -297,10 +310,11 @@ class _CodePreview extends State<CodePreview> {
   @override
   Widget build(BuildContext context) {
     final mode = resolveModeForFilename(widget.filename) ?? langPlaintext;
+    final showEditorToolbar = !widget.readOnly && widget.showToolbar && largeFile == null;
 
     return Column(
       children: [
-        if (!widget.readOnly && widget.showToolbar)
+        if (showEditorToolbar)
           Container(
             decoration: BoxDecoration(
               color: ShadTheme.of(context).colorScheme.background,
@@ -334,7 +348,9 @@ class _CodePreview extends State<CodePreview> {
             ),
           ),
         Expanded(
-          child: text == null
+          child: largeFile != null
+              ? _LargeCodeFilePreview(filename: widget.filename, file: largeFile!)
+              : text == null
               ? loadError != null
                     ? Center(
                         child: Padding(
@@ -387,4 +403,95 @@ class _CodePreview extends State<CodePreview> {
       ],
     );
   }
+}
+
+class _CodePreviewLoadResult {
+  const _CodePreviewLoadResult._({this.text, this.largeFile});
+
+  factory _CodePreviewLoadResult.text(String text) {
+    return _CodePreviewLoadResult._(text: text);
+  }
+
+  factory _CodePreviewLoadResult.largeFile(_LargeCodeFile largeFile) {
+    return _CodePreviewLoadResult._(largeFile: largeFile);
+  }
+
+  final String? text;
+  final _LargeCodeFile? largeFile;
+}
+
+class _LargeCodeFile {
+  const _LargeCodeFile({required this.size, required this.downloadUrl});
+
+  final int size;
+  final Uri downloadUrl;
+}
+
+class _LargeCodeFilePreview extends StatelessWidget {
+  const _LargeCodeFilePreview({required this.filename, required this.file});
+
+  final String filename;
+  final _LargeCodeFile file;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+
+    return ColoredBox(
+      color: theme.colorScheme.background,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(LucideIcons.fileCode, size: 40, color: theme.colorScheme.mutedForeground),
+                const SizedBox(height: 16),
+                Text(
+                  filename.split("/").last,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.h4,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  "This file is ${_formatBytes(file.size)}, which is too large to preview.",
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.muted,
+                ),
+                const SizedBox(height: 18),
+                ShadButton.secondary(
+                  leading: const Icon(LucideIcons.download),
+                  onPressed: () async {
+                    await launchUrl(file.downloadUrl);
+                  },
+                  child: const Text("Download"),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+String _formatBytes(int bytes) {
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  var value = bytes.toDouble();
+  var unitIndex = 0;
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex++;
+  }
+
+  if (unitIndex == 0) {
+    return "$bytes ${units[unitIndex]}";
+  }
+
+  return "${value.toStringAsFixed(value >= 10 ? 0 : 1)} ${units[unitIndex]}";
 }
