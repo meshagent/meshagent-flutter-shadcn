@@ -8374,8 +8374,13 @@ class _EventLineState extends State<EventLine> {
     final theme = ShadTheme.of(context);
     const previewBackground = Color(0xFF050505);
     const previewHeaderBackground = Color(0xFF111111);
-    final codeTextStyle = GoogleFonts.sourceCodePro(fontSize: 12, color: const Color(0xFFE5E7EB), height: 1.3);
-    final headerTextStyle = GoogleFonts.sourceCodePro(fontSize: 11, color: theme.colorScheme.mutedForeground);
+    final usesMobileTypography = chatBubbleMarkdownUsesMobileTypography(context);
+    final codeTextStyle = GoogleFonts.sourceCodePro(
+      fontSize: usesMobileTypography ? chatBubbleMarkdownMobileBaseFontSize : 12,
+      color: const Color(0xFFE5E7EB),
+      height: usesMobileTypography ? chatBubbleMarkdownMobileCodeLineHeight : 1.3,
+    );
+    final headerTextStyle = GoogleFonts.sourceCodePro(fontSize: usesMobileTypography ? 13 : 11, color: theme.colorScheme.mutedForeground);
     final resolvedLanguageId = resolveLanguageIdForFilename(languageOrFilename) ?? fallbackLanguageId;
     final body = resolvedLanguageId == "diff"
         ? SingleChildScrollView(
