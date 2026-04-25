@@ -66,8 +66,6 @@ class _FileBrowser extends State<FileBrowser> {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
-    final tt = theme.textTheme;
-    final cs = theme.colorScheme;
 
     if (files == null) {
       return Center(child: CircularProgressIndicator());
@@ -88,10 +86,6 @@ class _FileBrowser extends State<FileBrowser> {
             spacing: 8,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                "Path: ",
-                style: tt.small.copyWith(fontWeight: FontWeight.bold, color: cs.primary),
-              ),
               Expanded(
                 child: ShadBreadcrumb(
                   separator: Icon(LucideIcons.chevronRight, size: 16),
@@ -108,7 +102,7 @@ class _FileBrowser extends State<FileBrowser> {
                           load();
                         });
                       },
-                      child: const Text('Home'),
+                      child: Text(widget.rootLabel),
                     ),
 
                     if (path != "")

@@ -20,6 +20,7 @@ Widget? fileViewer(RoomClient client, String path) {
     case FileKind.pdf:
     case FileKind.code:
     case FileKind.markdown:
+    case FileKind.tsv:
     case FileKind.custom:
       return FilePreview(room: client, path: path);
     case FileKind.image:
