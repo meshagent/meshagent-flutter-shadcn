@@ -58,7 +58,7 @@ class SwayzeTableView extends StatefulWidget {
 }
 
 class _SwayzeTableViewState extends State<SwayzeTableView> {
-  StreamSubscription<List<Map<String, dynamic>>>? _rowsSubscription;
+  StreamSubscription<ArrowRecordBatch>? _rowsSubscription;
   _SharedSwayzeController? _controller;
   Object? _error;
   List<String> _columns = const [];
@@ -183,15 +183,20 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
             version: widget.version,
           )
           .listen(
-            (chunk) {
-              if (!mounted || generation != _loadGeneration || chunk.isEmpty) {
+            (batch) {
+              if (!mounted || generation != _loadGeneration) {
+                return;
+              }
+
+              final rows = batch.toRows();
+              if (rows.isEmpty) {
                 return;
               }
 
               controller.cellsController.updateState((modifier) {
-                for (var rowIndex = 0; rowIndex < chunk.length; rowIndex++) {
+                for (var rowIndex = 0; rowIndex < rows.length; rowIndex++) {
                   final absoluteRow = rowOffset + rowIndex;
-                  final row = chunk[rowIndex];
+                  final row = rows[rowIndex];
                   for (var columnIndex = 0; columnIndex < columns.length; columnIndex++) {
                     final columnName = columns[columnIndex];
                     modifier.putCell(
@@ -199,14 +204,13 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
                         id: '$absoluteRow:$columnIndex',
                         position: IntVector2(columnIndex, absoluteRow),
                         value: row[columnName],
-                        dataType: schema[columnName]!,
                       ),
                     );
                   }
                 }
               });
 
-              rowOffset += chunk.length;
+              rowOffset += rows.length;
               setState(() {
                 _loadedRowCount = rowOffset;
               });
@@ -338,6 +342,7 @@ class InMemoryTable extends StatefulWidget {
     this.maxAutoSizeRowExtent = 300,
     this.showLeadingOuterBorders = false,
     this.showRowHeaders = true,
+    this.onSelectedRowsChanged,
   });
 
   final List<String> columns;
@@ -351,6 +356,7 @@ class InMemoryTable extends StatefulWidget {
   final double? maxAutoSizeRowExtent;
   final bool showLeadingOuterBorders;
   final bool showRowHeaders;
+  final ValueChanged<Set<int>>? onSelectedRowsChanged;
 
   @override
   State<InMemoryTable> createState() => _InMemoryTableState();
@@ -363,6 +369,7 @@ class _InMemoryTableState extends State<InMemoryTable> {
   void initState() {
     super.initState();
     _controller = _createController();
+    _controller?.selection.addListener(_handleSelectionChanged);
   }
 
   @override
@@ -370,7 +377,9 @@ class _InMemoryTableState extends State<InMemoryTable> {
     super.didUpdateWidget(oldWidget);
     if (!listEquals(oldWidget.columns, widget.columns) || !_rowsEqual(oldWidget.rows, widget.rows)) {
       final previousController = _controller;
+      previousController?.selection.removeListener(_handleSelectionChanged);
       final nextController = _createController();
+      nextController?.selection.addListener(_handleSelectionChanged);
       setState(() {
         _controller = nextController;
       });
@@ -380,8 +389,22 @@ class _InMemoryTableState extends State<InMemoryTable> {
 
   @override
   void dispose() {
+    _controller?.selection.removeListener(_handleSelectionChanged);
     _controller?.dispose();
     super.dispose();
+  }
+
+  void _handleSelectionChanged() {
+    final callback = widget.onSelectedRowsChanged;
+    if (callback == null) {
+      return;
+    }
+    final controller = _controller;
+    if (controller == null) {
+      callback(const <int>{});
+      return;
+    }
+    callback(_selectedRowIndices(controller, availableRowCount: widget.rows.length));
   }
 
   _SharedSwayzeController? _createController() {
@@ -400,14 +423,7 @@ class _InMemoryTableState extends State<InMemoryTable> {
         final row = widget.rows[rowIndex];
         for (var columnIndex = 0; columnIndex < widget.columns.length; columnIndex++) {
           final value = columnIndex < row.length ? row[columnIndex] : '';
-          modifier.putCell(
-            _SharedSwayzeCellData(
-              id: '$rowIndex:$columnIndex',
-              position: IntVector2(columnIndex, rowIndex),
-              value: value,
-              dataType: TextDataType(),
-            ),
-          );
+          modifier.putCell(_SharedSwayzeCellData(id: '$rowIndex:$columnIndex', position: IntVector2(columnIndex, rowIndex), value: value));
         }
       }
     });
@@ -440,6 +456,33 @@ class _InMemoryTableState extends State<InMemoryTable> {
       ),
     );
   }
+}
+
+Set<int> _selectedRowIndices(_SharedSwayzeController controller, {required int availableRowCount}) {
+  final selectionState = controller.selection.userSelectionState;
+  if (!selectionState.hasVisibleSelection || availableRowCount <= 0) {
+    return const <int>{};
+  }
+
+  final rows = <int>{};
+  for (final selection in selectionState.visibleSelections) {
+    if (selection is HeaderUserSelectionModel && selection.axis == Axis.horizontal) {
+      continue;
+    }
+
+    final boundedSelection = selection.bound(to: controller.tableDataController.tableRange);
+    if (boundedSelection.isNil) {
+      continue;
+    }
+
+    final rowRange = boundedSelection.yRange;
+    final start = math.max(0, math.min(rowRange.start, availableRowCount));
+    final end = math.max(0, math.min(rowRange.end, availableRowCount));
+    for (var rowIndex = start; rowIndex < end; rowIndex++) {
+      rows.add(rowIndex);
+    }
+  }
+  return rows;
 }
 
 class _SharedSwayzeGrid extends StatefulWidget {
@@ -934,44 +977,31 @@ double? _resolveGridHeight({
   return math.min(maxHeight, math.max(minimumHeight, contentHeight));
 }
 
-bool _isLikelyBinaryPayloadColumn({required String columnName, required DataType dataType}) {
-  if (dataType is BinaryDataType) {
-    return true;
+List<String> _selectableColumns(Object schema) {
+  if (schema is! ArrowSchema) {
+    return const [];
   }
 
-  final json = dataType.toJson();
-  final type = json['type'];
-  if (type is String) {
-    final normalizedType = type.toLowerCase();
-    if (normalizedType.contains('binary') || normalizedType.contains('blob')) {
-      return true;
-    }
-  }
-
-  if (dataType is ListDataType && dataType.elementType is IntDataType) {
-    final normalizedName = columnName.toLowerCase();
-    if (normalizedName == 'data' ||
-        normalizedName == 'bytes' ||
-        normalizedName.endsWith('_data') ||
-        normalizedName.endsWith('_bytes') ||
-        normalizedName.contains('binary') ||
-        normalizedName.contains('blob')) {
-      return true;
-    }
-  }
-
-  return false;
+  return [
+    for (final field in schema.fields)
+      if (!_isBinaryColumn(field.type)) field.name,
+  ];
 }
 
-List<String> _selectableColumns(Map<String, DataType> schema) {
-  return schema.entries
-      .where((entry) => !_isLikelyBinaryPayloadColumn(columnName: entry.key, dataType: entry.value))
-      .map((entry) => entry.key)
-      .toList(growable: false);
+int _skippedBinaryColumnCount(Object schema) {
+  if (schema is! ArrowSchema) {
+    return 0;
+  }
+
+  return schema.fields.where((field) => _isBinaryColumn(field.type)).length;
 }
 
-int _skippedBinaryColumnCount(Map<String, DataType> schema) {
-  return schema.entries.where((entry) => _isLikelyBinaryPayloadColumn(columnName: entry.key, dataType: entry.value)).length;
+bool _isBinaryColumn(ArrowDataType type) {
+  if (type is ArrowDictionaryType) {
+    return _isBinaryColumn(type.valueType);
+  }
+
+  return type is ArrowBinaryType || type is ArrowFixedSizeBinaryType;
 }
 
 class _SharedSwayzeController extends SwayzeController {
@@ -1021,10 +1051,9 @@ double _estimateColumnExtent(String columnName) {
 }
 
 class _SharedSwayzeCellData extends SwayzeCellData {
-  const _SharedSwayzeCellData({required super.id, required super.position, required this.value, required this.dataType});
+  const _SharedSwayzeCellData({required super.id, required super.position, required this.value});
 
   final Object? value;
-  final DataType dataType;
 
   bool get isNull => value == null;
 
@@ -1038,10 +1067,10 @@ class _SharedSwayzeCellData extends SwayzeCellData {
 
   @override
   Alignment get contentAlignment {
-    if (dataType is BoolDataType) {
+    if (value is bool) {
       return Alignment.center;
     }
-    if (dataType is IntDataType || dataType is FloatDataType) {
+    if (value is num) {
       return Alignment.centerRight;
     }
     return Alignment.centerLeft;

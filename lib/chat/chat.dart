@@ -5509,21 +5509,7 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
       return null;
     }
 
-    final rows = await widget.room.datasets.search(table: "images", where: {"id": imageId}, limit: 1, select: ["data", "mime_type"]);
-    if (rows.isEmpty) {
-      return null;
-    }
-
-    final row = rows.first;
-    final data = row["data"];
-    if (data is! Uint8List) {
-      return null;
-    }
-
-    final value = row["mime_type"];
-    final mimeType = (value is String && value.trim().isNotEmpty) ? value : (widget.fallbackMimeType ?? "image/png");
-
-    return _ThreadImageRecord(data: data, mimeType: mimeType);
+    return null;
   }
 
   bool _isGeneratingStatus(String? status) {
@@ -5880,20 +5866,10 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
 
   Future<_ThreadImageRecord?> _loadCurrentImage() async {
     final entry = widget.images[_currentIndex];
-    final rows = await widget.room.datasets.search(table: "images", where: {"id": entry.imageId}, limit: 1, select: ["data", "mime_type"]);
-    if (rows.isEmpty) {
+    if (entry.imageId.trim().isEmpty) {
       return null;
     }
-
-    final row = rows.first;
-    final data = row["data"];
-    if (data is! Uint8List) {
-      return null;
-    }
-
-    final mimeTypeValue = row["mime_type"];
-    final mimeType = (mimeTypeValue is String && mimeTypeValue.trim().isNotEmpty) ? mimeTypeValue : (entry.mimeType ?? "image/png");
-    return _ThreadImageRecord(data: data, mimeType: mimeType);
+    return null;
   }
 
   Future<void> _copyImageRecord(_ThreadImageRecord image) async {
@@ -6157,21 +6133,10 @@ class _ThreadFullscreenImage extends StatelessWidget {
   final Future<void> Function(_ThreadImageRecord image)? onSaveImage;
 
   Future<_ThreadImageRecord?> _loadImage() async {
-    final rows = await room.datasets.search(table: "images", where: {"id": imageId}, limit: 1, select: ["data", "mime_type"]);
-    if (rows.isEmpty) {
+    if (imageId.trim().isEmpty) {
       return null;
     }
-
-    final row = rows.first;
-    final data = row["data"];
-    if (data is! Uint8List) {
-      return null;
-    }
-
-    final mimeTypeValue = row["mime_type"];
-    final mimeType = (mimeTypeValue is String && mimeTypeValue.trim().isNotEmpty) ? mimeTypeValue : (fallbackMimeType ?? "image/png");
-
-    return _ThreadImageRecord(data: data, mimeType: mimeType);
+    return null;
   }
 
   bool _isGeneratingStatus(String? value) {
