@@ -24,6 +24,8 @@ class SwayzeTableView extends StatefulWidget {
     required this.tableName,
     required this.namespace,
     this.filter,
+    this.sqlQuery,
+    this.sqlTables,
     this.branch,
     this.version,
     this.reloadToken = 0,
@@ -35,12 +37,17 @@ class SwayzeTableView extends StatefulWidget {
     this.maxAutoSizeRowExtent = 300,
     this.showLeadingOuterBorders = false,
     this.showRowHeaders = true,
+    this.showStatusBar = true,
+    this.cancelToken = 0,
+    this.onStatusChanged,
   });
 
   final RoomClient room;
   final String tableName;
   final List<String>? namespace;
   final String? filter;
+  final String? sqlQuery;
+  final List<TableRef>? sqlTables;
   final String? branch;
   final int? version;
   final int reloadToken;
@@ -52,9 +59,72 @@ class SwayzeTableView extends StatefulWidget {
   final double? maxAutoSizeRowExtent;
   final bool showLeadingOuterBorders;
   final bool showRowHeaders;
+  final bool showStatusBar;
+  final int cancelToken;
+  final ValueChanged<SwayzeTableStatus>? onStatusChanged;
 
   @override
   State<SwayzeTableView> createState() => _SwayzeTableViewState();
+}
+
+class SwayzeTableStatus {
+  const SwayzeTableStatus({
+    required this.isSql,
+    required this.isLoadingMetadata,
+    required this.isLoadingRows,
+    required this.rowCount,
+    required this.loadedRowCount,
+    required this.skippedBinaryCount,
+    required this.statementRowsAffected,
+  });
+
+  final bool isSql;
+  final bool isLoadingMetadata;
+  final bool isLoadingRows;
+  final int? rowCount;
+  final int loadedRowCount;
+  final int skippedBinaryCount;
+  final int? statementRowsAffected;
+
+  bool get isLoading => isLoadingMetadata || isLoadingRows;
+
+  String get primaryText {
+    final rowsAffected = statementRowsAffected;
+    if (rowsAffected != null) {
+      return rowsAffected < 0 ? 'Statement executed.' : 'Statement executed. Rows affected: $rowsAffected';
+    }
+    final count = rowCount;
+    if (count == null) {
+      return 'Loading';
+    }
+    return isSql ? 'Rows: $count' : 'Row Count: $count';
+  }
+
+  String? get secondaryText {
+    if (isLoadingRows) {
+      return isSql ? 'Loaded $loadedRowCount' : 'Loaded $loadedRowCount/$rowCount';
+    }
+    if (skippedBinaryCount > 0) {
+      return 'Skipping $skippedBinaryCount binary ${skippedBinaryCount == 1 ? "column" : "columns"}';
+    }
+    return null;
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other is SwayzeTableStatus &&
+        other.isSql == isSql &&
+        other.isLoadingMetadata == isLoadingMetadata &&
+        other.isLoadingRows == isLoadingRows &&
+        other.rowCount == rowCount &&
+        other.loadedRowCount == loadedRowCount &&
+        other.skippedBinaryCount == skippedBinaryCount &&
+        other.statementRowsAffected == statementRowsAffected;
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(isSql, isLoadingMetadata, isLoadingRows, rowCount, loadedRowCount, skippedBinaryCount, statementRowsAffected);
 }
 
 class _SwayzeTableViewState extends State<SwayzeTableView> {
@@ -68,6 +138,8 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
   bool _isLoadingMetadata = true;
   bool _isLoadingRows = false;
   int _loadGeneration = 0;
+  String? _activeSqlQueryId;
+  SwayzeTableStatus? _lastEmittedStatus;
 
   String? get _normalizedFilter {
     final trimmed = widget.filter?.trim();
@@ -90,16 +162,21 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
         oldWidget.tableName != widget.tableName ||
         !listEquals(oldWidget.namespace, widget.namespace) ||
         oldWidget.filter != widget.filter ||
+        oldWidget.sqlQuery != widget.sqlQuery ||
+        !_tableRefsEqual(oldWidget.sqlTables, widget.sqlTables) ||
         oldWidget.branch != widget.branch ||
         oldWidget.version != widget.version ||
         oldWidget.reloadToken != widget.reloadToken) {
       _reload();
+    } else if (oldWidget.cancelToken != widget.cancelToken) {
+      _cancelCurrentLoad();
     }
   }
 
   @override
   void dispose() {
-    _rowsSubscription?.cancel();
+    unawaited(_rowsSubscription?.cancel());
+    _cancelActiveSqlQuery();
     _disposeController();
     super.dispose();
   }
@@ -113,6 +190,7 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
     final generation = ++_loadGeneration;
     final previousSubscription = _rowsSubscription;
     _rowsSubscription = null;
+    _cancelActiveSqlQuery();
     if (previousSubscription != null) {
       await previousSubscription.cancel();
     }
@@ -127,113 +205,16 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
         _loadedRowCount = 0;
         _isLoadingMetadata = true;
         _isLoadingRows = false;
+        _statementRowsAffected = null;
       });
     }
 
     try {
-      final schema = await widget.room.datasets.inspect(
-        widget.tableName,
-        namespace: widget.namespace,
-        branch: widget.branch,
-        version: widget.version,
-      );
-      final columns = _selectableColumns(schema);
-      final rowCount = await widget.room.datasets.count(
-        table: widget.tableName,
-        where: _normalizedFilter,
-        namespace: widget.namespace,
-        branch: widget.branch,
-        version: widget.version,
-      );
-
-      if (!mounted || generation != _loadGeneration) {
+      if (_normalizedSqlQuery != null) {
+        await _reloadSql(generation);
         return;
       }
-
-      final controller = columns.isNotEmpty && rowCount > 0
-          ? _SharedSwayzeController(
-              id: 'room-table:${widget.namespace?.join("/") ?? ""}:${widget.tableName}',
-              columns: columns,
-              rowCount: rowCount,
-            )
-          : null;
-
-      setState(() {
-        _controller = controller;
-        _columns = columns;
-        _skippedBinaryCount = _skippedBinaryColumnCount(schema);
-        _rowCount = rowCount;
-        _loadedRowCount = 0;
-        _isLoadingMetadata = false;
-        _isLoadingRows = controller != null;
-      });
-
-      if (controller == null) {
-        return;
-      }
-
-      var rowOffset = 0;
-      _rowsSubscription = widget.room.datasets
-          .searchStream(
-            table: widget.tableName,
-            where: _normalizedFilter,
-            select: columns,
-            namespace: widget.namespace,
-            branch: widget.branch,
-            version: widget.version,
-          )
-          .listen(
-            (batch) {
-              if (!mounted || generation != _loadGeneration) {
-                return;
-              }
-
-              final rows = batch.toRows();
-              if (rows.isEmpty) {
-                return;
-              }
-
-              controller.cellsController.updateState((modifier) {
-                for (var rowIndex = 0; rowIndex < rows.length; rowIndex++) {
-                  final absoluteRow = rowOffset + rowIndex;
-                  final row = rows[rowIndex];
-                  for (var columnIndex = 0; columnIndex < columns.length; columnIndex++) {
-                    final columnName = columns[columnIndex];
-                    modifier.putCell(
-                      _SharedSwayzeCellData(
-                        id: '$absoluteRow:$columnIndex',
-                        position: IntVector2(columnIndex, absoluteRow),
-                        value: row[columnName],
-                      ),
-                    );
-                  }
-                }
-              });
-
-              rowOffset += rows.length;
-              setState(() {
-                _loadedRowCount = rowOffset;
-              });
-            },
-            onError: (Object error, StackTrace stackTrace) {
-              if (!mounted || generation != _loadGeneration) {
-                return;
-              }
-              setState(() {
-                _error = error;
-                _isLoadingRows = false;
-              });
-            },
-            onDone: () {
-              if (!mounted || generation != _loadGeneration) {
-                return;
-              }
-              setState(() {
-                _isLoadingRows = false;
-              });
-            },
-            cancelOnError: false,
-          );
+      await _reloadTable(generation);
     } catch (error) {
       if (!mounted || generation != _loadGeneration) {
         return;
@@ -246,8 +227,283 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
     }
   }
 
+  SwayzeTableStatus get _status {
+    return SwayzeTableStatus(
+      isSql: _normalizedSqlQuery != null,
+      isLoadingMetadata: _isLoadingMetadata,
+      isLoadingRows: _isLoadingRows,
+      rowCount: _rowCount,
+      loadedRowCount: _loadedRowCount,
+      skippedBinaryCount: _skippedBinaryCount,
+      statementRowsAffected: _statementRowsAffected,
+    );
+  }
+
+  void _scheduleStatusEmit() {
+    final callback = widget.onStatusChanged;
+    if (callback == null) {
+      return;
+    }
+    final status = _status;
+    if (status == _lastEmittedStatus) {
+      return;
+    }
+    _lastEmittedStatus = status;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        callback(status);
+      }
+    });
+  }
+
+  void _cancelActiveSqlQuery() {
+    final queryId = _activeSqlQueryId;
+    _activeSqlQueryId = null;
+    if (queryId != null) {
+      unawaited(_cancelSqlQueryQuietly(queryId));
+    }
+  }
+
+  Future<void> _cancelSqlQueryQuietly(String queryId) async {
+    try {
+      await widget.room.datasets.cancelSqlQuery(queryId: queryId);
+    } catch (_) {
+      // Cancellation is best effort; stale handles may already be closed.
+    }
+  }
+
+  void _cancelCurrentLoad() {
+    _loadGeneration++;
+    final previousSubscription = _rowsSubscription;
+    _rowsSubscription = null;
+    if (previousSubscription != null) {
+      unawaited(previousSubscription.cancel());
+    }
+    _cancelActiveSqlQuery();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _isLoadingMetadata = false;
+      _isLoadingRows = false;
+      _rowCount ??= _loadedRowCount;
+    });
+  }
+
+  String? get _normalizedSqlQuery {
+    final trimmed = widget.sqlQuery?.trim();
+    if (trimmed == null || trimmed.isEmpty) {
+      return null;
+    }
+    return trimmed;
+  }
+
+  int? _statementRowsAffected;
+
+  Future<void> _reloadTable(int generation) async {
+    final schema = await widget.room.datasets.inspect(
+      widget.tableName,
+      namespace: widget.namespace,
+      branch: widget.branch,
+      version: widget.version,
+    );
+    final columns = _selectableColumns(schema);
+    final rowCount = await widget.room.datasets.count(
+      table: widget.tableName,
+      where: _normalizedFilter,
+      namespace: widget.namespace,
+      branch: widget.branch,
+      version: widget.version,
+    );
+
+    if (!mounted || generation != _loadGeneration) {
+      return;
+    }
+
+    final controller = columns.isNotEmpty && rowCount > 0
+        ? _SharedSwayzeController(
+            id: 'room-table:${widget.namespace?.join("/") ?? ""}:${widget.tableName}',
+            columns: columns,
+            rowCount: rowCount,
+          )
+        : null;
+
+    setState(() {
+      _controller = controller;
+      _columns = columns;
+      _skippedBinaryCount = _skippedBinaryColumnCount(schema);
+      _rowCount = rowCount;
+      _loadedRowCount = 0;
+      _isLoadingMetadata = false;
+      _isLoadingRows = controller != null;
+    });
+
+    if (controller == null) {
+      return;
+    }
+
+    var rowOffset = 0;
+    _rowsSubscription = widget.room.datasets
+        .searchStream(
+          table: widget.tableName,
+          where: _normalizedFilter,
+          select: columns,
+          namespace: widget.namespace,
+          branch: widget.branch,
+          version: widget.version,
+        )
+        .listen(
+          (batch) {
+            if (!mounted || generation != _loadGeneration) {
+              return;
+            }
+
+            final rows = batch.toRows();
+            if (rows.isEmpty) {
+              return;
+            }
+
+            _putRows(controller: controller, rows: rows, columns: columns, rowOffset: rowOffset);
+
+            rowOffset += rows.length;
+            setState(() {
+              _loadedRowCount = rowOffset;
+            });
+          },
+          onError: (Object error, StackTrace stackTrace) {
+            if (!mounted || generation != _loadGeneration) {
+              return;
+            }
+            setState(() {
+              _error = error;
+              _isLoadingRows = false;
+            });
+          },
+          onDone: () {
+            if (!mounted || generation != _loadGeneration) {
+              return;
+            }
+            setState(() {
+              _isLoadingRows = false;
+            });
+          },
+          cancelOnError: false,
+        );
+  }
+
+  Future<void> _reloadSql(int generation) async {
+    final query = _normalizedSqlQuery;
+    if (query == null) {
+      return;
+    }
+
+    final execution = await widget.room.datasets.executeSql(
+      query: query,
+      tables: widget.sqlTables,
+      namespace: widget.namespace,
+      branch: widget.branch,
+    );
+
+    if (execution is DatasetSqlStatement) {
+      if (!mounted || generation != _loadGeneration) {
+        return;
+      }
+      setState(() {
+        _statementRowsAffected = execution.rowsAffected;
+        _rowCount = 0;
+        _loadedRowCount = 0;
+        _isLoadingMetadata = false;
+        _isLoadingRows = false;
+      });
+      return;
+    }
+
+    final opened = execution as DatasetSqlQuery;
+    if (!mounted || generation != _loadGeneration) {
+      await widget.room.datasets.cancelSqlQuery(queryId: opened.queryId);
+      return;
+    }
+    _activeSqlQueryId = opened.queryId;
+    final schema = opened.schema;
+    final columns = _selectableColumns(schema);
+    final rows = <Map<String, Object?>>[];
+    final skippedBinaryCount = _skippedBinaryColumnCount(schema);
+
+    if (mounted && generation == _loadGeneration) {
+      setState(() {
+        _columns = columns;
+        _skippedBinaryCount = skippedBinaryCount;
+        _isLoadingMetadata = false;
+        _isLoadingRows = true;
+      });
+    }
+
+    try {
+      await for (final batch in widget.room.datasets.readSqlQuery(queryId: opened.queryId)) {
+        if (!mounted || generation != _loadGeneration) {
+          await widget.room.datasets.cancelSqlQuery(queryId: opened.queryId);
+          return;
+        }
+        rows.addAll(batch.toRows());
+        setState(() {
+          _loadedRowCount = rows.length;
+        });
+      }
+    } finally {
+      if (_activeSqlQueryId == opened.queryId) {
+        _activeSqlQueryId = null;
+      }
+      await widget.room.datasets.closeSqlQuery(queryId: opened.queryId);
+    }
+
+    if (!mounted || generation != _loadGeneration) {
+      return;
+    }
+
+    final controller = columns.isNotEmpty && rows.isNotEmpty
+        ? _SharedSwayzeController(
+            id: 'room-sql:${widget.namespace?.join("/") ?? ""}:${widget.tableName}:${widget.reloadToken}',
+            columns: columns,
+            rowCount: rows.length,
+          )
+        : null;
+    if (controller != null) {
+      _putRows(controller: controller, rows: rows, columns: columns, rowOffset: 0);
+    }
+
+    setState(() {
+      _controller = controller;
+      _columns = columns;
+      _skippedBinaryCount = skippedBinaryCount;
+      _rowCount = rows.length;
+      _loadedRowCount = rows.length;
+      _isLoadingRows = false;
+    });
+  }
+
+  void _putRows({
+    required _SharedSwayzeController controller,
+    required List<Map<String, Object?>> rows,
+    required List<String> columns,
+    required int rowOffset,
+  }) {
+    controller.cellsController.updateState((modifier) {
+      for (var rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+        final absoluteRow = rowOffset + rowIndex;
+        final row = rows[rowIndex];
+        for (var columnIndex = 0; columnIndex < columns.length; columnIndex++) {
+          final columnName = columns[columnIndex];
+          modifier.putCell(
+            _SharedSwayzeCellData(id: '$absoluteRow:$columnIndex', position: IntVector2(columnIndex, absoluteRow), value: row[columnName]),
+          );
+        }
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    _scheduleStatusEmit();
     final theme = ShadTheme.of(context);
     final borderColor = theme.cardTheme.border?.bottom?.color ?? theme.colorScheme.border;
     final rowCount = _rowCount;
@@ -265,30 +521,37 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
       return const Center(child: CircularProgressIndicator());
     }
 
+    final rowsAffected = _statementRowsAffected;
+    if (rowsAffected != null) {
+      return Center(
+        child: Text(
+          rowsAffected < 0 ? 'Statement executed.' : 'Statement executed. Rows affected: $rowsAffected',
+          style: theme.textTheme.muted,
+          textAlign: TextAlign.center,
+        ),
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Container(
-          padding: const EdgeInsets.all(15),
-          decoration: BoxDecoration(
-            border: Border(bottom: BorderSide(color: borderColor)),
+        if (widget.showStatusBar)
+          Container(
+            padding: const EdgeInsets.all(15),
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: borderColor)),
+            ),
+            child: Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Text(_status.primaryText),
+                if (_status.secondaryText != null) Text(_status.secondaryText!, style: theme.textTheme.muted),
+                if (_isLoadingRows) const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+              ],
+            ),
           ),
-          child: Wrap(
-            spacing: 12,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              Text('Row Count: $rowCount'),
-              if (_isLoadingRows) Text('Loaded $_loadedRowCount/$rowCount', style: theme.textTheme.muted),
-              if (_isLoadingRows) const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
-              if (_skippedBinaryCount > 0)
-                Text(
-                  'Skipping $_skippedBinaryCount binary ${_skippedBinaryCount == 1 ? "column" : "columns"}',
-                  style: theme.textTheme.muted,
-                ),
-            ],
-          ),
-        ),
         if (_columns.isEmpty)
           Expanded(
             child: Center(
@@ -1002,6 +1265,27 @@ bool _isBinaryColumn(ArrowDataType type) {
   }
 
   return type is ArrowBinaryType || type is ArrowFixedSizeBinaryType;
+}
+
+bool _tableRefsEqual(List<TableRef>? a, List<TableRef>? b) {
+  if (a == null || b == null) {
+    return a == b;
+  }
+  if (a.length != b.length) {
+    return false;
+  }
+  for (var index = 0; index < a.length; index++) {
+    final left = a[index];
+    final right = b[index];
+    if (left.name != right.name ||
+        left.alias != right.alias ||
+        left.branch != right.branch ||
+        left.version != right.version ||
+        !listEquals(left.namespace, right.namespace)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 class _SharedSwayzeController extends SwayzeController {
