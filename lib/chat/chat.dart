@@ -3941,7 +3941,7 @@ class _ChatThreadState extends State<ChatThread> {
         final normalizedAgentName = widget.agentName?.trim();
         final hasConfiguredAgent = normalizedAgentName != null && normalizedAgentName.isNotEmpty;
         final mcpToolkitConfig = await _buildMcpTurnToolkitConfig(state: state);
-        final turnToolkits = <String, AgentTurnToolkitConfig>{if (mcpToolkitConfig != null) "mcp": mcpToolkitConfig};
+        final turnToolkits = <String, AgentTurnToolkitConfig>{"mcp": ?mcpToolkitConfig};
         await controller.send(
           thread: document,
           path: widget.path,
@@ -8458,7 +8458,7 @@ class _EventLineState extends State<EventLine> {
           ),
         ),
         if (normalizedCode.isNotEmpty) body,
-        if (logsBody != null) logsBody,
+        ?logsBody,
       ],
     );
 

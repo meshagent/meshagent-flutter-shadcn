@@ -197,7 +197,7 @@ class _VoiceAgentCaller extends State<VoiceAgentCaller> {
                   },
                 ),
               ),
-              if (controls != null) controls,
+              ?controls,
             ],
           );
 

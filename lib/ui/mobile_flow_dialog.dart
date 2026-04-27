@@ -487,7 +487,7 @@ class _ShadMobileFlowDialogFrame extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final headerChildren = <Widget>[if (title != null) title!, if (description != null) description!];
+    final headerChildren = <Widget>[?title, ?description];
     final headerSection = headerChildren.isEmpty
         ? null
         : Column(
