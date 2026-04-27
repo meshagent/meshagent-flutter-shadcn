@@ -25,5 +25,10 @@ Future<void> shareThreadAttachment({required BuildContext context, required Room
   final file = File(p.join(tempDirectory.path, fileName));
   await file.writeAsBytes(response.bodyBytes, flush: true);
 
-  await Share.shareXFiles([XFile(file.path, mimeType: lookupMimeType(fileName))], sharePositionOrigin: sharePositionOrigin);
+  await SharePlus.instance.share(
+    ShareParams(
+      files: [XFile(file.path, mimeType: lookupMimeType(fileName))],
+      sharePositionOrigin: sharePositionOrigin,
+    ),
+  );
 }

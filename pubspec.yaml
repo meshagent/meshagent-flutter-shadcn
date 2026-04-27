@@ -42,14 +42,14 @@ dependencies:
   lucide_icons_flutter: ^3.1.1
   google_fonts: ^6.2.1
   image_picker: ^1.0.7
-  interactive_viewer_2: ^0.0.10
-  just_audio: ^0.9.43
+  interactive_viewer_2: ^0.1.0
+  just_audio: ^0.10.5
   url_launcher: ^6.3.1
   universal_image: ^1.0.8
   flutter_svg: ^2.0.17
   siri_wave: ^2.2.0
   shared_preferences: ^2.3.3
-  file_picker: ^8.1.5
+  file_picker: ^11.0.2
   uuid: ^4.5.1
   http: ^1.6.0
   synchronized: ^3.3.0+3
@@ -64,7 +64,7 @@ dependencies:
   webrtc_interface: ^1.3.0
   flutter_webrtc: ^1.2.0
   built_collection: ^5.1.1
-  cached_value: ^0.2.0
+  cached_value: ^1.0.0
   flutter_sticky_header: ^0.8.0
   memoize: ^3.0.0
   meta: ^1.17.0
@@ -75,7 +75,7 @@ dependencies:
   collection: ^1.19.1
   mime: ^2.0.0
   path_provider: ^2.1.5
-  share_plus: ^10.1.4
+  share_plus: ^12.0.2
   wakelock_plus: ^1.4.0
   markdown: ^7.3.0
   flutter_timezone: ^5.0.1

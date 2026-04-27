@@ -2017,7 +2017,7 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
   }
 
   Future<void> _onSelectAttachment() async {
-    final picked = await FilePicker.platform.pickFiles(dialogTitle: "Select files", allowMultiple: true, withReadStream: true);
+    final picked = await FilePicker.pickFiles(dialogTitle: "Select files", allowMultiple: true, withReadStream: true);
 
     if (picked == null) {
       return;
@@ -4063,14 +4063,16 @@ class _ChatThreadState extends State<ChatThread> {
                   listenable: controller,
                   builder: (context, _) {
                     final pendingMessages = _combinedPendingMessages(state);
-                    final queuedPendingMessages = pendingMessages.where((message) => !message.awaitingAcceptance).toList(growable: false);
+                    final queuedSteerPendingMessages = pendingMessages
+                        .where((message) => message.messageType == _agentTurnSteerType && !message.awaitingAcceptance)
+                        .toList(growable: false);
                     final canInterruptActiveTurn = _canInterruptActiveTurn(state: state, pendingMessages: pendingMessages);
                     return ChatThreadInputFrame(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          if (queuedPendingMessages.isNotEmpty)
+                          if (queuedSteerPendingMessages.isNotEmpty)
                             Padding(
                               padding: const EdgeInsets.only(bottom: 10),
                               child: Row(
@@ -4089,7 +4091,7 @@ class _ChatThreadState extends State<ChatThread> {
                                           style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
                                         ),
                                         const SizedBox(height: 4),
-                                        for (final pending in queuedPendingMessages)
+                                        for (final pending in queuedSteerPendingMessages)
                                           Padding(
                                             padding: const EdgeInsets.only(bottom: 4),
                                             child: Text(
@@ -5374,6 +5376,8 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     final mine = !isAgentMessage && message.getAttribute("author_name") == localParticipantName;
     final useDefaultHeaderBuilder = messageHeaderBuilder == null;
     final shouldShowHeader = !useDefaultHeaderBuilder || widget.shouldShowAuthorNames;
+    final headerLeftInset = mine ? _chatBubbleHorizontalInset + _chatBubbleActionRailWidth : _chatBubbleHorizontalInset;
+    final headerRightInset = mine || isAgentMessage ? _chatBubbleHorizontalInset : _chatBubbleHorizontalInset + _chatBubbleActionRailWidth;
 
     final id = message.getAttribute("id");
     final text = message.getAttribute("text");
@@ -5421,11 +5425,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
         children: [
           if (shouldShowHeader)
             Container(
-              margin: .only(
-                left: mine ? _chatBubbleHorizontalInset + _chatBubbleActionRailWidth : _chatBubbleHorizontalInset,
-                right: mine ? _chatBubbleHorizontalInset : _chatBubbleHorizontalInset + _chatBubbleActionRailWidth,
-                bottom: 6,
-              ),
+              margin: .only(left: headerLeftInset, right: headerRightInset, bottom: 6),
               child: Align(
                 alignment: mine ? .centerRight : .centerLeft,
                 child:
