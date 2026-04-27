@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart';
@@ -16,6 +17,17 @@ const int codePreviewLargeFileThresholdBytes = 1024 * 1024;
 
 bool isCodeFile(String filename) {
   return resolveLanguageIdForFilename(filename) != null;
+}
+
+bool _usesSystemAdaptiveTextSelectionToolbar() {
+  if (kIsWeb) {
+    return false;
+  }
+
+  return switch (defaultTargetPlatform) {
+    TargetPlatform.iOS || TargetPlatform.android => true,
+    TargetPlatform.fuchsia || TargetPlatform.linux || TargetPlatform.macOS || TargetPlatform.windows => false,
+  };
 }
 
 class CodePreviewController extends ChangeNotifier {
@@ -307,6 +319,24 @@ class _CodePreview extends State<CodePreview> {
 
   CodeLineEditingController? controller;
 
+  SelectionToolbarController? _selectionToolbarController() {
+    if (!_usesSystemAdaptiveTextSelectionToolbar()) {
+      return null;
+    }
+
+    return MobileSelectionToolbarController(
+      builder: ({required context, required anchors, required controller, required onDismiss, required onRefresh}) {
+        return _CodePreviewMobileSelectionToolbar(
+          anchors: anchors,
+          controller: controller,
+          readOnly: widget.readOnly,
+          onDismiss: onDismiss,
+          onRefresh: onRefresh,
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final mode = resolveModeForFilename(widget.filename) ?? langPlaintext;
@@ -396,6 +426,7 @@ class _CodePreview extends State<CodePreview> {
                       ),
                       focusNode: focusNode,
                       controller: controller,
+                      toolbarController: _selectionToolbarController(),
                     ),
                   ),
                 ),
@@ -494,4 +525,118 @@ String _formatBytes(int bytes) {
   }
 
   return "${value.toStringAsFixed(value >= 10 ? 0 : 1)} ${units[unitIndex]}";
+}
+
+class _CodePreviewMobileSelectionToolbar extends StatefulWidget {
+  const _CodePreviewMobileSelectionToolbar({
+    required this.anchors,
+    required this.controller,
+    required this.readOnly,
+    required this.onDismiss,
+    required this.onRefresh,
+  });
+
+  final TextSelectionToolbarAnchors anchors;
+  final CodeLineEditingController controller;
+  final bool readOnly;
+  final VoidCallback onDismiss;
+  final VoidCallback onRefresh;
+
+  @override
+  State<_CodePreviewMobileSelectionToolbar> createState() => _CodePreviewMobileSelectionToolbarState();
+}
+
+class _CodePreviewMobileSelectionToolbarState extends State<_CodePreviewMobileSelectionToolbar> {
+  bool _clipboardChecked = false;
+  bool _hasClipboardText = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshClipboard();
+  }
+
+  @override
+  void didUpdateWidget(covariant _CodePreviewMobileSelectionToolbar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller || oldWidget.readOnly != widget.readOnly) {
+      _refreshClipboard();
+    }
+  }
+
+  Future<void> _refreshClipboard() async {
+    if (widget.readOnly) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _clipboardChecked = true;
+        _hasClipboardText = false;
+      });
+      return;
+    }
+
+    final clipboardData = await Clipboard.getData(Clipboard.kTextPlain);
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _clipboardChecked = true;
+      _hasClipboardText = (clipboardData?.text?.trim().isNotEmpty ?? false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final selection = widget.controller.selection;
+    final hasSelection = !selection.isCollapsed;
+    final hasContent = widget.controller.text.isNotEmpty;
+
+    if (!_clipboardChecked) {
+      return const SizedBox.shrink();
+    }
+
+    final buttonItems = <ContextMenuButtonItem>[
+      if (!widget.readOnly && hasSelection)
+        ContextMenuButtonItem(
+          type: ContextMenuButtonType.cut,
+          onPressed: () {
+            widget.controller.cut();
+            widget.onDismiss();
+          },
+        ),
+      if (hasSelection)
+        ContextMenuButtonItem(
+          type: ContextMenuButtonType.copy,
+          onPressed: () {
+            unawaited(widget.controller.copy());
+            widget.onDismiss();
+          },
+        ),
+      if (!widget.readOnly && _hasClipboardText)
+        ContextMenuButtonItem(
+          type: ContextMenuButtonType.paste,
+          onPressed: () {
+            widget.controller.paste();
+            widget.onDismiss();
+          },
+        ),
+      if (hasContent)
+        ContextMenuButtonItem(
+          type: ContextMenuButtonType.selectAll,
+          onPressed: () {
+            widget.controller.selectAll();
+            widget.onRefresh();
+          },
+        ),
+    ];
+
+    if (buttonItems.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return AdaptiveTextSelectionToolbar.buttonItems(anchors: widget.anchors, buttonItems: buttonItems);
+  }
 }

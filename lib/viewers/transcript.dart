@@ -38,6 +38,8 @@ class _Transcript extends State<TranscriptViewer> {
         final transcriptMeta = _transcriptMeta(segments);
 
         return SelectionArea(
+          contextMenuBuilder: (context, selectableRegionState) =>
+              AdaptiveTextSelectionToolbar.selectableRegion(selectableRegionState: selectableRegionState),
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [

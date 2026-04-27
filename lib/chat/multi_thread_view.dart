@@ -23,6 +23,8 @@ class MultiThreadView extends StatefulWidget {
     this.newThreadResetVersion = 0,
     this.centerComposer = true,
     this.emptyState,
+    this.inputContextMenuBuilder,
+    this.inputOnPressedOutside,
   });
 
   final RoomClient room;
@@ -38,6 +40,8 @@ class MultiThreadView extends StatefulWidget {
   final int newThreadResetVersion;
   final bool centerComposer;
   final Widget? emptyState;
+  final EditableTextContextMenuBuilder? inputContextMenuBuilder;
+  final TapRegionCallback? inputOnPressedOutside;
 
   @override
   State<MultiThreadView> createState() => _MultiThreadViewState();
@@ -108,6 +112,8 @@ class _MultiThreadViewState extends State<MultiThreadView> {
       onThreadResolved: widget.onSelectedThreadResolved,
       centerComposer: widget.centerComposer,
       emptyState: widget.emptyState,
+      inputContextMenuBuilder: widget.inputContextMenuBuilder,
+      inputOnPressedOutside: widget.inputOnPressedOutside,
       builder: (context, threadPath) => widget.builder(context, threadPath, _controller, _composerKey),
     );
   }

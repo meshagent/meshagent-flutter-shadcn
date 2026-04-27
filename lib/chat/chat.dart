@@ -20,6 +20,7 @@ import 'package:meshagent_flutter_shadcn/storage/file_browser.dart';
 import 'package:meshagent_flutter_shadcn/ui/coordinated_context_menu.dart';
 import 'package:meshagent_flutter_shadcn/ui/ui.dart';
 import 'package:meshagent_flutter_shadcn/src/web_context_menu_manager/enable_web_context_menu.dart';
+import 'package:meshagent_flutter_shadcn/chat/thread_attachment_share.dart';
 import 'package:re_highlight/styles/monokai-sublime.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:super_clipboard/super_clipboard.dart';
@@ -41,6 +42,14 @@ const List<String> _emojiFontFamilyFallback = <String>['Apple Color Emoji', 'Seg
 const double _chatBubbleContentHorizontalPadding = 16;
 const double _chatBubbleContentTopPadding = 4;
 const double _chatBubbleContentBottomPadding = 2;
+const double _mobileReactionFlowDialogMaxWidth = 420;
+const double _mobileReactionFlowDialogViewportTopGap = 20;
+const double _mobileReactionFlowDialogMaxHeightFactor = 0.72;
+const double _mobileReactionFlowDialogCornerRadius = 28;
+const double _mobileReactionFlowDialogTopPadding = 30;
+const double _mobileReactionFlowDialogBottomPadding = 28;
+const double _mobileStorageSaveFlowDialogMaxWidth = 420;
+const double _mobileStorageSaveFlowDialogViewportTopGap = 20;
 const EdgeInsets _chatBubbleContentPadding = EdgeInsets.only(
   left: _chatBubbleContentHorizontalPadding,
   right: _chatBubbleContentHorizontalPadding,
@@ -67,6 +76,77 @@ const String _agentTurnSteerAcceptedType = "meshagent.agent.turn.steer.accepted"
 const String _agentTurnSteerRejectedType = "meshagent.agent.turn.steer.rejected";
 const String _agentTurnEndedType = "meshagent.agent.turn.ended";
 const String _agentThreadClearedType = "meshagent.agent.thread.cleared";
+const double _mobileScreenWidthMax = 600;
+const double _mobileComposerPillCornerRadius = 999;
+const double _mobileComposerCornerRadius = 18;
+
+bool _usesMobileContextLayout(BuildContext context) {
+  return MediaQuery.sizeOf(context).width < _mobileScreenWidthMax;
+}
+
+bool _usesNativeMobileReactionFlowDialog(BuildContext context) {
+  if (kIsWeb || !_usesMobileContextLayout(context)) {
+    return false;
+  }
+
+  return switch (defaultTargetPlatform) {
+    TargetPlatform.iOS || TargetPlatform.android => true,
+    TargetPlatform.fuchsia || TargetPlatform.linux || TargetPlatform.macOS || TargetPlatform.windows => false,
+  };
+}
+
+String _defaultSuggestedFileNameFromPath(String path) {
+  final trimmed = path.trim();
+  if (trimmed.isEmpty) {
+    return "file";
+  }
+
+  final slash = trimmed.lastIndexOf("/");
+  if (slash < 0 || slash == trimmed.length - 1) {
+    return trimmed.isEmpty ? "file" : trimmed;
+  }
+
+  return trimmed.substring(slash + 1);
+}
+
+String _applySuggestedFileExtension(String rawPath, {required String suggestedFileName}) {
+  final trimmed = rawPath.trim();
+  if (trimmed.isEmpty) {
+    return suggestedFileName;
+  }
+
+  final lastSlash = trimmed.lastIndexOf("/");
+  final fileName = lastSlash >= 0 ? trimmed.substring(lastSlash + 1) : trimmed;
+  if (fileName.contains(".")) {
+    return trimmed;
+  }
+
+  final suggestedDot = suggestedFileName.lastIndexOf(".");
+  if (suggestedDot <= 0 || suggestedDot == suggestedFileName.length - 1) {
+    return trimmed;
+  }
+
+  final extension = suggestedFileName.substring(suggestedDot);
+  return "$trimmed$extension";
+}
+
+class ThreadStorageSaveSurfaceRequest {
+  const ThreadStorageSaveSurfaceRequest({
+    required this.room,
+    required this.title,
+    required this.suggestedFileName,
+    required this.fileNameLabel,
+    required this.loadContent,
+  });
+
+  final RoomClient room;
+  final String title;
+  final String suggestedFileName;
+  final String fileNameLabel;
+  final Future<FileContent> Function() loadContent;
+}
+
+typedef ThreadStorageSaveSurfacePresenter = Future<void> Function(BuildContext context, ThreadStorageSaveSurfaceRequest request);
 
 String _normalizeEmojiPresentationKey(String value) {
   return value.replaceAll('\u{FE0F}', '').replaceAll('\u{FE0E}', '').replaceAll('\u{200D}', '').trim();
@@ -93,6 +173,140 @@ TextStyle _emojiTextStyle({double size = 14}) {
     height: 1,
     fontFamily: _primaryEmojiFontFamily(),
     fontFamilyFallback: _emojiFontFamilyFallback,
+  );
+}
+
+List<Widget> _buildReactionOptionButtons({
+  required BuildContext context,
+  required List<String> reactionOptions,
+  required String? selectedReaction,
+  required ValueChanged<String> onSelected,
+  required double buttonSize,
+  required double emojiSize,
+}) {
+  final theme = ShadTheme.of(context);
+  return <Widget>[
+    for (final reaction in reactionOptions)
+      Builder(
+        builder: (context) {
+          final selected =
+              selectedReaction != null && _normalizeEmojiPresentationKey(selectedReaction) == _normalizeEmojiPresentationKey(reaction);
+          return ShadButton.ghost(
+            width: buttonSize,
+            height: buttonSize,
+            padding: EdgeInsets.zero,
+            backgroundColor: selected ? theme.colorScheme.foreground.withValues(alpha: 0.16) : null,
+            hoverBackgroundColor: selected
+                ? theme.colorScheme.foreground.withValues(alpha: 0.24)
+                : theme.colorScheme.muted.withValues(alpha: 0.55),
+            onPressed: () => onSelected(reaction),
+            child: Text(reaction, style: _emojiTextStyle(size: emojiSize)),
+          );
+        },
+      ),
+  ];
+}
+
+Future<void> _showReactionPickerSurface(
+  BuildContext context, {
+  required List<String> reactionOptions,
+  required String? selectedReaction,
+  required ValueChanged<String> onSelected,
+}) async {
+  if (_usesNativeMobileReactionFlowDialog(context)) {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      useSafeArea: false,
+      builder: (dialogContext) =>
+          _ReactionPickerFlowDialog(reactionOptions: reactionOptions, selectedReaction: selectedReaction, onSelected: onSelected),
+    );
+    return;
+  }
+
+  await showShadDialog<void>(
+    context: context,
+    builder: (dialogContext) =>
+        _ReactionPickerDesktopDialog(reactionOptions: reactionOptions, selectedReaction: selectedReaction, onSelected: onSelected),
+  );
+}
+
+Future<bool> _showStorageOverwriteConfirmation(BuildContext context, {required String title, required String message}) async {
+  final overwrite = await showShadDialog<bool>(
+    context: context,
+    builder: (dialogContext) => ShadDialog(
+      title: Text(title),
+      description: Text(message),
+      actions: [
+        ShadButton.secondary(
+          onPressed: () {
+            Navigator.of(dialogContext).pop(false);
+          },
+          child: const Text("Cancel"),
+        ),
+        ShadButton(
+          onPressed: () {
+            Navigator.of(dialogContext).pop(true);
+          },
+          child: const Text("Overwrite"),
+        ),
+      ],
+    ),
+  );
+
+  return overwrite == true;
+}
+
+Future<void> _showThreadStorageSaveSurface(
+  BuildContext context, {
+  required RoomClient room,
+  required String title,
+  required String suggestedFileName,
+  required String fileNameLabel,
+  required Future<FileContent> Function() loadContent,
+  ThreadStorageSaveSurfacePresenter? mobilePresenter,
+}) async {
+  if (mobilePresenter != null) {
+    await mobilePresenter(
+      context,
+      ThreadStorageSaveSurfaceRequest(
+        room: room,
+        title: title,
+        suggestedFileName: suggestedFileName,
+        fileNameLabel: fileNameLabel,
+        loadContent: loadContent,
+      ),
+    );
+    return;
+  }
+
+  if (_usesNativeMobileReactionFlowDialog(context)) {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      useSafeArea: false,
+      builder: (dialogContext) => _ThreadStorageSaveFlowDialog(
+        room: room,
+        title: title,
+        suggestedFileName: suggestedFileName,
+        fileNameLabel: fileNameLabel,
+        loadContent: loadContent,
+      ),
+    );
+    return;
+  }
+
+  await showShadDialog<void>(
+    context: context,
+    builder: (dialogContext) => _ThreadStorageSaveDesktopDialog(
+      room: room,
+      title: title,
+      suggestedFileName: suggestedFileName,
+      fileNameLabel: fileNameLabel,
+      loadContent: loadContent,
+    ),
   );
 }
 
@@ -1561,8 +1775,11 @@ class ChatThreadInputFrame extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final keyboardOpen = _usesMobileContextLayout(context) && MediaQuery.viewInsetsOf(context).bottom > 0;
+    final bottomPadding = keyboardOpen ? 4.0 : 8.0;
+
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+      padding: EdgeInsets.fromLTRB(15, 8, 15, bottomPadding),
       child: Center(
         child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 912), child: child),
       ),
@@ -1570,7 +1787,7 @@ class ChatThreadInputFrame extends StatelessWidget {
   }
 }
 
-class ChatThreadViewportBody extends StatelessWidget {
+class ChatThreadViewportBody extends StatefulWidget {
   const ChatThreadViewportBody({
     super.key,
     required this.children,
@@ -1579,6 +1796,8 @@ class ChatThreadViewportBody extends StatelessWidget {
     this.centerContent,
     this.bottomSpacer = 0,
     this.overlays = const [],
+    this.tapRegionGroupId,
+    this.mobileUnderHeaderContentPadding,
   });
 
   final List<Widget> children;
@@ -1587,42 +1806,127 @@ class ChatThreadViewportBody extends StatelessWidget {
   final Widget? centerContent;
   final double bottomSpacer;
   final List<Widget> overlays;
+  final Object? tapRegionGroupId;
+  final double? mobileUnderHeaderContentPadding;
+
+  @override
+  State<ChatThreadViewportBody> createState() => _ChatThreadViewportBodyState();
+}
+
+class _ChatThreadViewportBodyState extends State<ChatThreadViewportBody> {
+  double? _lastKeyboardInset;
+  double _pendingKeyboardInsetDelta = 0;
+  bool _keyboardAdjustmentScheduled = false;
+
+  void _scheduleKeyboardOffsetAdjustment(double delta) {
+    if (widget.scrollController == null || delta.abs() < 0.5) {
+      return;
+    }
+
+    _pendingKeyboardInsetDelta += delta;
+    if (_keyboardAdjustmentScheduled) {
+      return;
+    }
+
+    _keyboardAdjustmentScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _keyboardAdjustmentScheduled = false;
+      if (!mounted) {
+        _pendingKeyboardInsetDelta = 0;
+        return;
+      }
+
+      final scrollController = widget.scrollController;
+      if (scrollController == null || !scrollController.hasClients) {
+        _pendingKeyboardInsetDelta = 0;
+        return;
+      }
+
+      final delta = _pendingKeyboardInsetDelta;
+      _pendingKeyboardInsetDelta = 0;
+      if (delta.abs() < 0.5) {
+        return;
+      }
+
+      final position = scrollController.position;
+      if (position.pixels <= position.minScrollExtent + 1) {
+        return;
+      }
+
+      final nextOffset = (position.pixels + delta).clamp(position.minScrollExtent, position.maxScrollExtent).toDouble();
+      if ((nextOffset - position.pixels).abs() < 0.5) {
+        return;
+      }
+
+      scrollController.jumpTo(nextOffset);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
+    final lastKeyboardInset = _lastKeyboardInset;
+    _lastKeyboardInset = keyboardInset;
+    if (_usesMobileContextLayout(context) && lastKeyboardInset != null && (keyboardInset - lastKeyboardInset).abs() >= 0.5) {
+      _scheduleKeyboardOffsetAdjustment(keyboardInset - lastKeyboardInset);
+    }
+
+    final keyboardDismissBehavior = _usesMobileContextLayout(context)
+        ? ScrollViewKeyboardDismissBehavior.manual
+        : ScrollViewKeyboardDismissBehavior.onDrag;
+    final underHeaderContentPadding = _usesMobileContextLayout(context) ? (widget.mobileUnderHeaderContentPadding ?? 40.0) : 0.0;
+    final dismissKeyboardOnTap = _usesMobileContextLayout(context) && keyboardInset > 0
+        ? () => FocusManager.instance.primaryFocus?.unfocus()
+        : null;
+
     return Center(
       child: Stack(
         children: [
-          if (bottomAlign && centerContent != null && children.isEmpty)
+          if (widget.bottomAlign && widget.centerContent != null && widget.children.isEmpty)
             Positioned.fill(
-              child: IgnorePointer(child: Center(child: centerContent!)),
+              child: IgnorePointer(child: Center(child: widget.centerContent!)),
             ),
           Positioned.fill(
             child: Column(
-              mainAxisAlignment: bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
+              mainAxisAlignment: widget.bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
               children: [
                 Expanded(
-                  child: LayoutBuilder(
-                    builder: (context, constraints) => ListView(
-                      controller: scrollController,
-                      reverse: true,
-                      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-                      padding: EdgeInsets.only(
-                        top: 0,
-                        bottom: 16,
-                        left: chatThreadFeedHorizontalPadding(constraints.maxWidth),
-                        right: chatThreadFeedHorizontalPadding(constraints.maxWidth),
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Positioned.fill(
+                        top: -underHeaderContentPadding,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.translucent,
+                          onTap: dismissKeyboardOnTap,
+                          child: TextFieldTapRegion(
+                            groupId: widget.tapRegionGroupId,
+                            child: LayoutBuilder(
+                              builder: (context, constraints) => ListView(
+                                controller: widget.scrollController,
+                                reverse: true,
+                                keyboardDismissBehavior: keyboardDismissBehavior,
+                                padding: EdgeInsets.only(
+                                  top: underHeaderContentPadding,
+                                  bottom: 16,
+                                  left: chatThreadFeedHorizontalPadding(constraints.maxWidth),
+                                  right: chatThreadFeedHorizontalPadding(constraints.maxWidth),
+                                ),
+                                children: widget.children,
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
-                      children: children,
-                    ),
+                    ],
                   ),
                 ),
-                if (!bottomAlign && centerContent != null) centerContent!,
-                if (bottomSpacer > 0) SizedBox(height: bottomSpacer),
+                if (!widget.bottomAlign && widget.centerContent != null) widget.centerContent!,
+                if (widget.bottomSpacer > 0) SizedBox(height: widget.bottomSpacer),
               ],
             ),
           ),
-          ...overlays,
+          ...widget.overlays,
         ],
       ),
     );
@@ -2328,6 +2632,9 @@ class ChatThreadInput extends StatefulWidget {
     this.onInterrupt,
     this.onCancelSend,
     this.sendPendingText,
+    this.contextMenuBuilder,
+    this.onPressedOutside,
+    this.tapRegionGroupId,
   });
 
   final Widget? placeholder;
@@ -2351,6 +2658,9 @@ class ChatThreadInput extends StatefulWidget {
   final Widget? trailing;
   final Widget? header;
   final Widget? footer;
+  final EditableTextContextMenuBuilder? contextMenuBuilder;
+  final TapRegionCallback? onPressedOutside;
+  final Object? tapRegionGroupId;
   @override
   State createState() => _ChatThreadInput();
 }
@@ -2359,9 +2669,27 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   bool showSendButton = false;
   bool allAttachmentsUploaded = true;
   bool sending = false;
+  int composerLineCount = 1;
 
   String text = "";
   List<FileAttachment> attachments = [];
+
+  void _syncDraftStateFromController({bool triggerExternalOnChanged = false}) {
+    final nextText = widget.controller.text;
+    final nextAttachments = widget.controller.attachmentUploads;
+    final nextAllAttachmentsUploaded =
+        nextAttachments.isEmpty || nextAttachments.every((upload) => upload.status == UploadStatus.completed);
+    final nextShowSendButton = nextText.isNotEmpty || nextAttachments.isNotEmpty;
+
+    text = nextText;
+    attachments = nextAttachments;
+    allAttachmentsUploaded = nextAllAttachmentsUploaded;
+    showSendButton = nextShowSendButton;
+
+    if (triggerExternalOnChanged) {
+      widget.onChanged?.call(text, attachments);
+    }
+  }
 
   void _showSendDisabledToast() {
     if (!mounted) {
@@ -2475,7 +2803,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   );
 
   Widget _wrapAccessoryTapRegion(Widget child) {
-    return TextFieldTapRegion(child: child);
+    return TextFieldTapRegion(groupId: widget.tapRegionGroupId, child: child);
   }
 
   void _onTextChanged() {
@@ -2522,6 +2850,16 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     }
   }
 
+  void _onComposerLineCountChanged(int value) {
+    if (composerLineCount == value) {
+      return;
+    }
+
+    setState(() {
+      composerLineCount = value;
+    });
+  }
+
   void _scheduleAutoFocus() {
     if (!widget.autoFocus) {
       return;
@@ -2555,6 +2893,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   void initState() {
     super.initState();
 
+    _syncDraftStateFromController();
     widget.controller.textFieldController.addListener(_onTextChanged);
     widget.controller.addListener(_onChanged);
     ClipboardEvents.instance?.registerPasteEventListener(onPasteEvent);
@@ -2564,6 +2903,13 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   @override
   void didUpdateWidget(covariant ChatThreadInput oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_onChanged);
+      oldWidget.controller.textFieldController.removeListener(_onTextChanged);
+      _syncDraftStateFromController();
+      widget.controller.textFieldController.addListener(_onTextChanged);
+      widget.controller.addListener(_onChanged);
+    }
     if ((!oldWidget.autoFocus && widget.autoFocus) || oldWidget.focusTrigger != widget.focusTrigger) {
       _scheduleAutoFocus();
     }
@@ -2742,9 +3088,11 @@ class _ChatThreadInput extends State<ChatThreadInput> {
         if (widget.header != null) widget.header!,
         EnableWebContextMenu(
           child: ShadInput(
-            contextMenuBuilder: (context, editableTextState) =>
-                AdaptiveTextSelectionToolbar.editableText(editableTextState: editableTextState),
-            onPressedOutside: (_) {},
+            groupId: widget.tapRegionGroupId,
+            contextMenuBuilder:
+                widget.contextMenuBuilder ??
+                (context, editableTextState) => AdaptiveTextSelectionToolbar.editableText(editableTextState: editableTextState),
+            onPressedOutside: widget.onPressedOutside,
             top: ListenableBuilder(
               listenable: widget.controller,
               builder: (context, _) {
@@ -2794,9 +3142,13 @@ class _ChatThreadInput extends State<ChatThreadInput> {
             leading: widget.leading == null ? SizedBox(width: 3) : _wrapAccessoryTapRegion(wrapReadOnlyControls(widget.leading!)),
             trailing: widget.footer == null ? trailer : null,
             padding: EdgeInsets.only(left: 5, right: 5, top: widget.footer == null ? 5 : 10, bottom: widget.footer == null ? 5 : 0),
+            onLineCountChange: _onComposerLineCountChanged,
             decoration: (() {
               final theme = ShadTheme.of(context);
-              final composerRadius = theme.radius.resolve(Directionality.of(context));
+              final usesCompactMobileComposerShape = _usesMobileContextLayout(context) && attachments.isEmpty && composerLineCount <= 1;
+              final composerRadius = _usesMobileContextLayout(context)
+                  ? BorderRadius.circular(usesCompactMobileComposerShape ? _mobileComposerPillCornerRadius : _mobileComposerCornerRadius)
+                  : theme.radius.resolve(Directionality.of(context));
               final composerBorder = ShadBorder.all(radius: composerRadius, color: theme.colorScheme.border, width: 2);
               final composerFocusedBorder = ShadBorder.all(radius: composerRadius, color: theme.colorScheme.foreground, width: 2);
               return ShadDecoration(
@@ -2868,6 +3220,10 @@ class ChatThread extends StatefulWidget {
     this.onVisibleMessagesEmpty,
     this.initialShowCompletedToolCalls = false,
     this.shouldShowAuthorNames = true,
+    this.inputContextMenuBuilder,
+    this.inputOnPressedOutside,
+    this.mobileStorageSaveSurfacePresenter,
+    this.mobileUnderHeaderContentPadding,
   });
 
   final String? agentName;
@@ -2897,6 +3253,10 @@ class ChatThread extends StatefulWidget {
   final Widget Function(BuildContext context, Widget chatBox)? chatInputBoxBuilder;
   final FutureOr<void> Function(String path)? openFile;
   final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
+  final EditableTextContextMenuBuilder? inputContextMenuBuilder;
+  final TapRegionCallback? inputOnPressedOutside;
+  final ThreadStorageSaveSurfacePresenter? mobileStorageSaveSurfacePresenter;
+  final double? mobileUnderHeaderContentPadding;
 
   @override
   State createState() => _ChatThreadState();
@@ -2912,6 +3272,7 @@ class ChatBubble extends StatefulWidget {
     this.reactionActionBuilder,
     this.showReactionAction = false,
     this.onReactFromMenu,
+    this.mobileStorageSaveSurfacePresenter,
     this.fullWidth = false,
   });
 
@@ -2922,6 +3283,7 @@ class ChatBubble extends StatefulWidget {
   final Widget Function(ShadContextMenuController controller)? reactionActionBuilder;
   final bool showReactionAction;
   final VoidCallback? onReactFromMenu;
+  final ThreadStorageSaveSurfacePresenter? mobileStorageSaveSurfacePresenter;
   final bool fullWidth;
 
   @override
@@ -3036,118 +3398,20 @@ class _ChatBubble extends State<ChatBubble> {
       ]);
     }
 
-    await clipboard.write([DataWriterItem(suggestedName: "meshwidget.widget")..add(EncodedData(reps))]);
+    await clipboard.write([DataWriterItem()..add(EncodedData(reps))]);
   }
 
   Future<void> _onSave(RoomClient room) async {
-    final fileNameController = TextEditingController();
-    String path = "";
-
-    showShadDialog<void>(
-      context: context,
-      builder: (context) {
-        final theme = ShadTheme.of(context);
-        final tt = theme.textTheme;
-
-        return ShadDialog(
-          title: Text("Save comment file as ..."),
-          crossAxisAlignment: CrossAxisAlignment.start,
-          constraints: BoxConstraints(maxWidth: 700, maxHeight: 544),
-          scrollable: false,
-          actions: [
-            ShadButton.secondary(
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-              child: Text("Cancel"),
-            ),
-            ShadButton(
-              onPressed: () async {
-                final room = widget.room;
-                if (room == null) {
-                  return;
-                }
-
-                final f = fileNameController.text.trim();
-                String fileName = f.isEmpty ? "chat-comment.md" : f;
-
-                if (!fileName.endsWith(".md")) {
-                  fileName = "$fileName.md";
-                }
-
-                final fullPath = path.isEmpty ? fileName : "$path/$fileName";
-
-                // Check if file exists
-                final exists = await room.storage.exists(fullPath);
-
-                if (exists && context.mounted) {
-                  // Show overwrite confirmation
-                  final overwrite = await showShadDialog<bool>(
-                    context: context,
-                    builder: (context) => ShadDialog(
-                      title: Text("File already exists"),
-                      description: Text(
-                        "A file with the name '$fileName' already exists in the selected folder. Do you want to overwrite it?",
-                      ),
-                      actions: [
-                        ShadButton.secondary(
-                          onPressed: () {
-                            Navigator.of(context).pop(false);
-                          },
-                          child: Text("Cancel"),
-                        ),
-                        ShadButton(
-                          onPressed: () {
-                            Navigator.of(context).pop(true);
-                          },
-                          child: Text("Overwrite"),
-                        ),
-                      ],
-                    ),
-                  );
-
-                  if (overwrite != true) {
-                    return;
-                  }
-                }
-
-                final bytes = Uint8List.fromList(utf8.encode(widget.text));
-                await room.storage.uploadStream(fullPath, Stream.value(bytes), overwrite: true, size: bytes.length);
-
-                if (context.mounted) {
-                  Navigator.of(context).pop();
-                }
-              },
-              child: Text("Save"),
-            ),
-          ],
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: FileBrowser(
-                  onSelectionChanged: (selection) {
-                    path = selection.join("/");
-                  },
-                  room: room,
-                  multiple: false,
-                  selectionMode: FileBrowserSelectionMode.folders,
-                  rootLabel: "Files",
-                ),
-              ),
-              Padding(
-                padding: .only(top: 12.0),
-                child: ShadInputFormField(
-                  label: Text('Enter File Name', style: tt.small.copyWith(fontWeight: FontWeight.bold)),
-                  placeholder: const Text('chat-comment.md'),
-                  keyboardType: TextInputType.emailAddress,
-                  controller: fileNameController,
-                ),
-              ),
-            ],
-          ),
-        );
+    await _showThreadStorageSaveSurface(
+      context,
+      room: room,
+      title: "Save comment file as ...",
+      suggestedFileName: "chat-comment.md",
+      fileNameLabel: "Enter File Name",
+      mobilePresenter: widget.mobileStorageSaveSurfacePresenter,
+      loadContent: () async {
+        final bytes = Uint8List.fromList(utf8.encode(widget.text));
+        return FileContent(data: bytes, name: "chat-comment.md", mimeType: "text/markdown");
       },
     );
   }
@@ -3335,6 +3599,7 @@ class ChatMessage {
 class _ChatThreadState extends State<ChatThread> {
   late final ChatThreadController controller;
   late Key _composerInputKey;
+  late final Object _composerTapRegionGroupId = Object();
   bool _didNotifyVisibleMessagesEmpty = false;
   late bool _showCompletedToolCalls;
   MeshDocument? _managedDocument;
@@ -3699,6 +3964,9 @@ class _ChatThreadState extends State<ChatThread> {
       },
       controller: controller,
       attachmentBuilder: widget.attachmentBuilder,
+      contextMenuBuilder: widget.inputContextMenuBuilder,
+      onPressedOutside: widget.inputOnPressedOutside,
+      tapRegionGroupId: _composerTapRegionGroupId,
     );
   }
 
@@ -3718,6 +3986,7 @@ class _ChatThreadState extends State<ChatThread> {
       onSend: (value, attachments) async {},
       controller: controller,
       attachmentBuilder: widget.attachmentBuilder,
+      tapRegionGroupId: _composerTapRegionGroupId,
     );
   }
 
@@ -3754,6 +4023,7 @@ class _ChatThreadState extends State<ChatThread> {
                   room: widget.room,
                   path: widget.path,
                   scrollController: controller.threadScrollController,
+                  composerTapRegionGroupId: _composerTapRegionGroupId,
                   agentName: widget.agentName,
                   shouldShowAuthorNames: widget.shouldShowAuthorNames,
                   showCompletedToolCalls: _showCompletedToolCalls,
@@ -3786,6 +4056,8 @@ class _ChatThreadState extends State<ChatThread> {
                   emptyStateTitle: widget.emptyStateTitle,
                   emptyStateDescription: widget.emptyStateDescription,
                   emptyState: widget.emptyState,
+                  mobileStorageSaveSurfacePresenter: widget.mobileStorageSaveSurfacePresenter,
+                  mobileUnderHeaderContentPadding: widget.mobileUnderHeaderContentPadding,
                 ),
                 ListenableBuilder(
                   listenable: controller,
@@ -3906,6 +4178,7 @@ class ChatThreadMessages extends StatefulWidget {
     required this.room,
     required this.path,
     required this.scrollController,
+    this.composerTapRegionGroupId,
     required this.messages,
     required this.online,
     required this.showCompletedToolCalls,
@@ -3928,6 +4201,8 @@ class ChatThreadMessages extends StatefulWidget {
     this.emptyStateDescription,
     this.emptyState,
     this.onShowCompletedToolCallsChanged,
+    this.mobileStorageSaveSurfacePresenter,
+    this.mobileUnderHeaderContentPadding,
   });
 
   final Map<String, MessageBuilder>? messageBuilders;
@@ -3935,6 +4210,7 @@ class ChatThreadMessages extends StatefulWidget {
   final RoomClient room;
   final String path;
   final ScrollController scrollController;
+  final Object? composerTapRegionGroupId;
   final String? agentName;
   final bool shouldShowAuthorNames;
   final bool showCompletedToolCalls;
@@ -3952,6 +4228,8 @@ class ChatThreadMessages extends StatefulWidget {
   final String? emptyStateDescription;
   final Widget? emptyState;
   final ValueChanged<bool>? onShowCompletedToolCallsChanged;
+  final ThreadStorageSaveSurfacePresenter? mobileStorageSaveSurfacePresenter;
+  final double? mobileUnderHeaderContentPadding;
 
   final Widget Function(BuildContext, MeshDocument, MeshElement)? messageHeaderBuilder;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
@@ -4061,6 +4339,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   Widget Function(BuildContext, MeshDocument, MeshElement)? get messageHeaderBuilder => widget.messageHeaderBuilder;
   Widget Function(BuildContext context, String path)? get fileInThreadBuilder => widget.fileInThreadBuilder;
   FutureOr<void> Function(String path)? get openFile => widget.openFile;
+  ThreadStorageSaveSurfacePresenter? get mobileStorageSaveSurfacePresenter => widget.mobileStorageSaveSurfacePresenter;
 
   final OverlayPortalController _imageViewerController = OverlayPortalController();
   List<_ThreadFeedImage> _overlayImages = const <_ThreadFeedImage>[];
@@ -4070,6 +4349,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   final LinkedHashMap<String, int> _imageCacheSizes = LinkedHashMap<String, int>();
   final Map<String, Future<_ThreadImageRecord?>> _imageInFlight = <String, Future<_ThreadImageRecord?>>{};
   int _imageCacheBytes = 0;
+  bool _attachmentShareInFlight = false;
 
   String? _localParticipantName() {
     final name = room.localParticipant?.getAttribute("name");
@@ -4242,49 +4522,11 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     required String? selectedReaction,
     required ValueChanged<String> onSelected,
   }) async {
-    await showShadDialog<void>(
-      context: context,
-      builder: (context) {
-        final theme = ShadTheme.of(context);
-        return ShadDialog(
-          title: const Text("React"),
-          constraints: const BoxConstraints(maxWidth: 320),
-          actions: [ShadButton.ghost(onPressed: () => Navigator.of(context).pop(), child: const Text("Close"))],
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 360),
-            child: SingleChildScrollView(
-              child: Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  for (final reaction in _defaultReactionOptions)
-                    Builder(
-                      builder: (context) {
-                        final selected =
-                            selectedReaction != null &&
-                            _normalizeEmojiPresentationKey(selectedReaction) == _normalizeEmojiPresentationKey(reaction);
-                        return ShadButton.ghost(
-                          width: 34,
-                          height: 34,
-                          padding: EdgeInsets.zero,
-                          backgroundColor: selected ? theme.colorScheme.foreground.withValues(alpha: 0.16) : null,
-                          hoverBackgroundColor: selected
-                              ? theme.colorScheme.foreground.withValues(alpha: 0.24)
-                              : theme.colorScheme.muted.withValues(alpha: 0.55),
-                          onPressed: () {
-                            onSelected(reaction);
-                            Navigator.of(context).pop();
-                          },
-                          child: Text(reaction, style: _emojiTextStyle(size: 18)),
-                        );
-                      },
-                    ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
+    await _showReactionPickerSurface(
+      context,
+      reactionOptions: _defaultReactionOptions,
+      selectedReaction: selectedReaction,
+      onSelected: onSelected,
     );
   }
 
@@ -4421,11 +4663,20 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                   final users = entry.value;
                   final tooltipText = _reactionUsersTooltipText(groupedDisplayNames[entry.key]?.values ?? const <String>[]);
                   final isMine = mineValues.contains(entry.key);
+                  final isMobileReactionChip = _usesMobileContextLayout(context);
+                  final reactionEmojiSize = isMobileReactionChip ? 16.0 : 14.0;
+                  final reactionEmojiYOffset = isMobileReactionChip ? 2.0 : 0.0;
+                  final reactionCountYOffset = isMobileReactionChip ? 1.0 : 0.0;
+                  final reactionCountStyle = theme.textTheme.small.copyWith(
+                    fontWeight: isMine ? FontWeight.w700 : FontWeight.w500,
+                    fontSize: isMobileReactionChip ? ((theme.textTheme.small.fontSize ?? 14) - 1) : null,
+                    height: 1,
+                  );
                   Widget reactionChip({required VoidCallback? onPressed}) {
                     return Tooltip(
                       message: tooltipText,
                       child: ShadButton.ghost(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: EdgeInsets.symmetric(horizontal: isMobileReactionChip ? 9 : 8, vertical: isMobileReactionChip ? 5 : 4),
                         backgroundColor: isMine ? theme.colorScheme.accent.withValues(alpha: 0.2) : theme.colorScheme.muted,
                         hoverBackgroundColor: isMine
                             ? theme.colorScheme.accent.withValues(alpha: 0.25)
@@ -4433,12 +4684,16 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                         onPressed: onPressed,
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
-                            Text(entry.key, style: _emojiTextStyle(size: 14)),
-                            const SizedBox(width: 4),
-                            Text(
-                              "${users.length}",
-                              style: theme.textTheme.small.copyWith(fontWeight: isMine ? FontWeight.w700 : FontWeight.w500),
+                            Transform.translate(
+                              offset: Offset(0, reactionEmojiYOffset),
+                              child: Text(entry.key, style: _emojiTextStyle(size: reactionEmojiSize)),
+                            ),
+                            SizedBox(width: isMobileReactionChip ? 5 : 4),
+                            Transform.translate(
+                              offset: Offset(0, reactionCountYOffset),
+                              child: Text("${users.length}", style: reactionCountStyle),
                             ),
                           ],
                         ),
@@ -4706,6 +4961,43 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     await launchUrl(Uri.parse(url));
   }
 
+  Future<void> _saveStoragePath(String path) async {
+    await _showThreadStorageSaveSurface(
+      context,
+      room: room,
+      title: "Save file as ...",
+      suggestedFileName: _defaultSuggestedFileNameFromPath(path),
+      fileNameLabel: "File name or path",
+      mobilePresenter: mobileStorageSaveSurfacePresenter,
+      loadContent: () => room.storage.download(path),
+    );
+  }
+
+  Future<void> _confirmDeleteMessage(MeshElement message) async {
+    await showShadDialog<void>(
+      context: context,
+      builder: (context) => ShadDialog(
+        title: const Text("Delete Message"),
+        description: const Text("Are you sure you want to delete this message? This action cannot be undone."),
+        actions: [
+          ShadButton.secondary(
+            onPressed: () {
+              Navigator.of(context).pop();
+            },
+            child: const Text("Cancel"),
+          ),
+          ShadButton(
+            onPressed: () {
+              message.delete();
+              Navigator.of(context).pop();
+            },
+            child: const Text("Delete"),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _openPath(String path) async {
     if (widget.openFile != null) {
       await widget.openFile!(path);
@@ -4718,14 +5010,16 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
         return ShadDialog(
           crossAxisAlignment: CrossAxisAlignment.start,
           title: Text("File: $path"),
-          actions: [
-            ShadButton(
-              onPressed: () async {
-                await _downloadPath(path);
-              },
-              child: Text("Download"),
-            ),
-          ],
+          actions: _usesMobileContextLayout(context)
+              ? const <Widget>[]
+              : [
+                  ShadButton(
+                    onPressed: () async {
+                      await _downloadPath(path);
+                    },
+                    child: Text("Download"),
+                  ),
+                ],
           child: FilePreview(room: room, path: path, fit: BoxFit.contain),
         );
       },
@@ -4746,45 +5040,91 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     );
   }
 
-  Widget _buildFileImageInThread(BuildContext context, String path, _ThreadImageRecord? imageRecord, bool loading) {
-    final items = _buildAttachmentOptions(imageRecord: imageRecord, path: path);
-
-    return CoordinatedShadContextMenuRegion(
-      items: items,
-      child: _wrapTapTarget(
-        SizedBox(
-          width: 312.5,
-          height: 312.5,
-          child: _wrapWithCorners(
-            ColoredBox(
-              color: ShadTheme.of(context).colorScheme.background,
-              child: imageRecord == null
-                  ? Center(
-                      child: loading
-                          ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
-                          : Icon(LucideIcons.imageOff, size: 20, color: ShadTheme.of(context).colorScheme.mutedForeground),
-                    )
-                  : _ImageMime.isSvg(imageRecord.mimeType)
-                  ? SvgPicture.memory(imageRecord.data, fit: BoxFit.cover)
-                  : UniversalImage(imageRecord.data, fit: BoxFit.cover),
-            ),
+  Widget _buildFileImageInThread(
+    BuildContext context,
+    String path,
+    _ThreadImageRecord? imageRecord,
+    bool loading, {
+    required List<ShadContextMenuItem> items,
+  }) {
+    final child = _wrapTapTarget(
+      SizedBox(
+        width: 312.5,
+        height: 312.5,
+        child: _wrapWithCorners(
+          ColoredBox(
+            color: ShadTheme.of(context).colorScheme.background,
+            child: imageRecord == null
+                ? Center(
+                    child: loading
+                        ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                        : Icon(LucideIcons.imageOff, size: 20, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                  )
+                : _ImageMime.isSvg(imageRecord.mimeType)
+                ? SvgPicture.memory(imageRecord.data, fit: BoxFit.cover)
+                : UniversalImage(imageRecord.data, fit: BoxFit.cover),
           ),
         ),
-        path,
       ),
+      path,
     );
+
+    if (_usesMobileContextLayout(context)) {
+      return CoordinatedShadContextMenuRegion(items: items, tapEnabled: false, child: child);
+    }
+
+    return CoordinatedShadContextMenuRegion(items: items, child: child);
   }
 
-  Widget _buildFileInThread(BuildContext context, String path) {
-    final items = _buildAttachmentOptions(path: path);
-
-    return CoordinatedShadContextMenuRegion(
-      items: items,
-      child: _wrapTapTarget(
-        fileInThreadBuilder != null ? fileInThreadBuilder!(context, path) : ChatThreadPreview(room: room, path: path),
-        path,
-      ),
+  Widget _buildFileInThread(BuildContext context, String path, {required List<ShadContextMenuItem> items}) {
+    final child = _wrapTapTarget(
+      fileInThreadBuilder != null ? fileInThreadBuilder!(context, path) : ChatThreadPreview(room: room, path: path),
+      path,
     );
+
+    if (_usesMobileContextLayout(context)) {
+      return CoordinatedShadContextMenuRegion(items: items, tapEnabled: false, child: child);
+    }
+
+    return CoordinatedShadContextMenuRegion(items: items, child: child);
+  }
+
+  List<ShadContextMenuItem> _buildMobileAttachmentOptions({
+    required MeshElement message,
+    required String? attachmentRef,
+    _ThreadImageRecord? imageRecord,
+    String? path,
+  }) {
+    final canReact = attachmentRef != null && _localParticipantName() != null;
+    final selectedReaction = canReact
+        ? _selectedReactionForTarget(message: message, target: _reactionTargetAttachment, attachmentRef: attachmentRef)
+        : null;
+
+    return [
+      if (imageRecord != null) ShadContextMenuItem(height: 40, onPressed: () => _copyImageRecord(imageRecord), child: const Text("Copy")),
+      if (canReact)
+        ShadContextMenuItem(
+          height: 40,
+          onPressed: () {
+            _showReactionPickerDialog(
+              context,
+              selectedReaction: selectedReaction,
+              onSelected: (reaction) {
+                _toggleReaction(
+                  message: message,
+                  reaction: reaction,
+                  target: _reactionTargetAttachment,
+                  attachmentRef: attachmentRef,
+                  removeIfSame: true,
+                );
+              },
+            );
+          },
+          child: const Text("React"),
+        ),
+      if (path != null) ShadContextMenuItem(height: 40, onPressed: () => _saveStoragePath(path), child: const Text("Save as...")),
+      ShadContextMenuItem(height: 40, onPressed: () => _confirmDeleteMessage(message), child: const Text("Delete")),
+    ];
   }
 
   Widget _buildImageInThread(BuildContext context, MeshElement attachment, {required List<_ThreadFeedImage> feedImages}) {
@@ -4878,11 +5218,19 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
         builder: (context, snapshot) {
           final imageRecord = snapshot.data;
           final loading = snapshot.connectionState != ConnectionState.done;
+          final items = _usesMobileContextLayout(context)
+              ? _buildMobileAttachmentOptions(
+                  message: message,
+                  attachmentRef: normalizedAttachmentRef,
+                  imageRecord: imageRecord,
+                  path: normalizedPath,
+                )
+              : _buildAttachmentOptions(imageRecord: imageRecord, path: normalizedPath);
 
           return Column(
             crossAxisAlignment: mine ? .end : .start,
             children: [
-              _buildFileImageInThread(context, normalizedPath, imageRecord, loading),
+              _buildFileImageInThread(context, normalizedPath, imageRecord, loading, items: items),
               if (normalizedAttachmentRef != null)
                 _buildReactionRow(
                   context,
@@ -4901,7 +5249,13 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     return Column(
       crossAxisAlignment: mine ? .end : .start,
       children: [
-        _buildFileInThread(context, normalizedPath),
+        _buildFileInThread(
+          context,
+          normalizedPath,
+          items: _usesMobileContextLayout(context)
+              ? _buildMobileAttachmentOptions(message: message, attachmentRef: normalizedAttachmentRef, path: normalizedPath)
+              : _buildAttachmentOptions(path: normalizedPath),
+        ),
         if (normalizedAttachmentRef != null)
           _buildReactionRow(
             context,
@@ -4916,6 +5270,8 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   }
 
   List<ShadContextMenuItem> _buildAttachmentOptions({_ThreadImageRecord? imageRecord, String? path}) {
+    final isMobile = _usesMobileContextLayout(context);
+
     return [
       if (path != null)
         ShadContextMenuItem(
@@ -4935,7 +5291,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
           leading: const Icon(LucideIcons.copy, size: 14),
           child: const Text("Copy"),
         ),
-      if (path != null)
+      if (path != null && !isMobile)
         ShadContextMenuItem(
           height: 40,
           onPressed: () async {
@@ -4948,6 +5304,54 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   }
 
   List<Widget> _buildAttachmentActions({_ThreadImageRecord? imageRecord, String? path}) {
+    if (_usesMobileContextLayout(context) && path != null && supportsNativeThreadAttachmentShare) {
+      final theme = ShadTheme.of(context);
+
+      return [
+        Semantics(
+          label: "Share attachment",
+          button: true,
+          child: ShadIconButton.ghost(
+            width: 40,
+            height: 40,
+            padding: EdgeInsets.zero,
+            icon: _attachmentShareInFlight
+                ? SizedBox(
+                    width: 19,
+                    height: 19,
+                    child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation(theme.colorScheme.mutedForeground)),
+                  )
+                : Icon(LucideIcons.share, size: 19, color: theme.colorScheme.mutedForeground),
+            onPressed: _attachmentShareInFlight
+                ? null
+                : () async {
+                    setState(() {
+                      _attachmentShareInFlight = true;
+                    });
+
+                    try {
+                      await shareThreadAttachment(context: context, room: room, path: path);
+                    } catch (error) {
+                      if (!mounted) {
+                        return;
+                      }
+
+                      ShadToaster.of(
+                        context,
+                      ).show(ShadToast.destructive(title: const Text("Unable to share attachment"), description: Text("$error")));
+                    } finally {
+                      if (mounted) {
+                        setState(() {
+                          _attachmentShareInFlight = false;
+                        });
+                      }
+                    }
+                  },
+          ),
+        ),
+      ];
+    }
+
     final items = _buildAttachmentOptions(imageRecord: imageRecord, path: path);
     return [_AttachmentOptionsButton(items: items)];
   }
@@ -5039,6 +5443,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                 fullWidth: isAgentMessage,
                 text: messageText,
                 onDelete: message.delete,
+                mobileStorageSaveSurfacePresenter: mobileStorageSaveSurfacePresenter,
                 reactionActionBuilder: localParticipantReactionName == null
                     ? null
                     : (controller) => _ReactionPickerButton(
@@ -5102,6 +5507,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     }
     final threadView = ChatThreadViewportBody(
       scrollController: widget.scrollController,
+      tapRegionGroupId: widget.composerTapRegionGroupId,
       bottomAlign: bottomAlign,
       centerContent: null,
       bottomSpacer: showTyping ? 20 : 0,
@@ -5150,22 +5556,25 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
             ),
           ),
       ],
+      mobileUnderHeaderContentPadding: widget.mobileUnderHeaderContentPadding,
       children: messageWidgets,
     );
-    final threadViewWithContextMenu = CoordinatedShadContextMenuRegion(
-      constraints: const BoxConstraints(minWidth: 180),
-      tapEnabled: false,
-      items: [
-        ShadContextMenuItem(
-          onPressed: widget.onShowCompletedToolCallsChanged == null
-              ? null
-              : () => widget.onShowCompletedToolCallsChanged!(!widget.showCompletedToolCalls),
-          leading: Icon(widget.showCompletedToolCalls ? LucideIcons.squareCheckBig : LucideIcons.square),
-          child: const Text("Show tool calls"),
-        ),
-      ],
-      child: threadView,
-    );
+    final threadViewWithContextMenu = _usesMobileContextLayout(context)
+        ? threadView
+        : CoordinatedShadContextMenuRegion(
+            constraints: const BoxConstraints(minWidth: 180),
+            tapEnabled: false,
+            items: [
+              ShadContextMenuItem(
+                onPressed: widget.onShowCompletedToolCallsChanged == null
+                    ? null
+                    : () => widget.onShowCompletedToolCallsChanged!(!widget.showCompletedToolCalls),
+                leading: Icon(widget.showCompletedToolCalls ? LucideIcons.squareCheckBig : LucideIcons.square),
+                child: const Text("Show tool calls"),
+              ),
+            ],
+            child: threadView,
+          );
 
     return Expanded(
       child: OverlayPortal(
@@ -5217,7 +5626,7 @@ class ChatThreadEmptyStateContent extends StatelessWidget {
       builder: (context, constraints) {
         final scale = titleScaleOverride ?? _titleScale(constraints.maxWidth);
         final titleStyle = theme.textTheme.h1;
-        final descriptionStyle = theme.textTheme.p;
+        final descriptionStyle = theme.textTheme.p.copyWith(height: 24 / 16);
         final titleFontSize = (titleStyle.fontSize ?? 64) * scale;
         final showDescription =
             description != null &&
@@ -5264,6 +5673,7 @@ class _ReactionPickerButton extends StatefulWidget {
 
 class _ReactionPickerButtonState extends State<_ReactionPickerButton> {
   late final ShadContextMenuController _internalController = ShadContextMenuController();
+  bool _didDispose = false;
 
   ShadContextMenuController get _controller => widget.controller ?? _internalController;
 
@@ -5272,8 +5682,34 @@ class _ReactionPickerButtonState extends State<_ReactionPickerButton> {
     _controller.hide();
   }
 
+  Future<void> _handleTriggerPressed() async {
+    if (_usesNativeMobileReactionFlowDialog(context)) {
+      if (_controller.isOpen || _didDispose) {
+        return;
+      }
+
+      _controller.show();
+      try {
+        await _showReactionPickerSurface(
+          context,
+          reactionOptions: widget.reactionOptions,
+          selectedReaction: widget.selectedReaction,
+          onSelected: widget.onSelected,
+        );
+      } finally {
+        if (!_didDispose) {
+          _controller.hide();
+        }
+      }
+      return;
+    }
+
+    _controller.toggle();
+  }
+
   @override
   void dispose() {
+    _didDispose = true;
     if (widget.controller == null) {
       _internalController.dispose();
     }
@@ -5282,18 +5718,34 @@ class _ReactionPickerButtonState extends State<_ReactionPickerButton> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = ShadTheme.of(context);
+    final usesNativeMobileFlowDialog = _usesNativeMobileReactionFlowDialog(context);
+    final isMobile = _usesMobileContextLayout(context);
+    final triggerSize = isMobile ? 40.0 : 30.0;
+    final iconSize = isMobile ? 19.0 : 14.0;
     final trigger =
-        widget.triggerBuilder?.call(_controller.toggle) ??
-        Tooltip(
-          message: "Add reaction",
-          child: ShadIconButton.ghost(
-            width: 30,
-            height: 30,
-            icon: const Icon(LucideIcons.smilePlus, size: 14),
-            onPressed: _controller.toggle,
-          ),
-        );
+        widget.triggerBuilder?.call(_handleTriggerPressed) ??
+        (usesNativeMobileFlowDialog
+            ? ShadIconButton.ghost(
+                width: triggerSize,
+                height: triggerSize,
+                padding: EdgeInsets.zero,
+                icon: Icon(LucideIcons.smilePlus, size: iconSize),
+                onPressed: _handleTriggerPressed,
+              )
+            : Tooltip(
+                message: "Add reaction",
+                child: ShadIconButton.ghost(
+                  width: triggerSize,
+                  height: triggerSize,
+                  padding: EdgeInsets.zero,
+                  icon: Icon(LucideIcons.smilePlus, size: iconSize),
+                  onPressed: _handleTriggerPressed,
+                ),
+              ));
+
+    if (usesNativeMobileFlowDialog) {
+      return trigger;
+    }
 
     return CoordinatedShadContextMenu(
       controller: _controller,
@@ -5310,27 +5762,14 @@ class _ReactionPickerButtonState extends State<_ReactionPickerButton> {
               child: Wrap(
                 spacing: 4,
                 runSpacing: 4,
-                children: [
-                  for (final reaction in widget.reactionOptions)
-                    Builder(
-                      builder: (context) {
-                        final selected =
-                            widget.selectedReaction != null &&
-                            _normalizeEmojiPresentationKey(widget.selectedReaction!) == _normalizeEmojiPresentationKey(reaction);
-                        return ShadButton.ghost(
-                          width: 32,
-                          height: 32,
-                          padding: EdgeInsets.zero,
-                          backgroundColor: selected ? theme.colorScheme.foreground.withValues(alpha: 0.16) : null,
-                          hoverBackgroundColor: selected
-                              ? theme.colorScheme.foreground.withValues(alpha: 0.24)
-                              : theme.colorScheme.muted.withValues(alpha: 0.55),
-                          onPressed: () => _onSelectReaction(reaction),
-                          child: Text(reaction, style: _emojiTextStyle(size: 18)),
-                        );
-                      },
-                    ),
-                ],
+                children: _buildReactionOptionButtons(
+                  context: context,
+                  reactionOptions: widget.reactionOptions,
+                  selectedReaction: widget.selectedReaction,
+                  onSelected: _onSelectReaction,
+                  buttonSize: 32,
+                  emojiSize: 18,
+                ),
               ),
             ),
           ),
@@ -5338,6 +5777,393 @@ class _ReactionPickerButtonState extends State<_ReactionPickerButton> {
       ],
       child: trigger,
     );
+  }
+}
+
+class _ReactionPickerDesktopDialog extends StatelessWidget {
+  const _ReactionPickerDesktopDialog({required this.reactionOptions, required this.selectedReaction, required this.onSelected});
+
+  final List<String> reactionOptions;
+  final String? selectedReaction;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return ShadDialog(
+      title: const Text("React"),
+      constraints: const BoxConstraints(maxWidth: 320),
+      actions: [ShadButton.ghost(onPressed: () => Navigator.of(context).pop(), child: const Text("Close"))],
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 360),
+        child: SingleChildScrollView(
+          child: Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: _buildReactionOptionButtons(
+              context: context,
+              reactionOptions: reactionOptions,
+              selectedReaction: selectedReaction,
+              onSelected: (reaction) {
+                onSelected(reaction);
+                Navigator.of(context).pop();
+              },
+              buttonSize: 34,
+              emojiSize: 18,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ReactionPickerFlowDialog extends StatelessWidget {
+  const _ReactionPickerFlowDialog({required this.reactionOptions, required this.selectedReaction, required this.onSelected});
+
+  final List<String> reactionOptions;
+  final String? selectedReaction;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final mediaQuery = MediaQuery.of(context);
+    final maxHeight = math
+        .max(
+          280.0,
+          math.min(
+            mediaQuery.size.height - mediaQuery.padding.top - _mobileReactionFlowDialogViewportTopGap,
+            mediaQuery.size.height * _mobileReactionFlowDialogMaxHeightFactor,
+          ),
+        )
+        .toDouble();
+
+    return Padding(
+      padding: EdgeInsets.only(top: mediaQuery.padding.top + _mobileReactionFlowDialogViewportTopGap),
+      child: Align(
+        alignment: Alignment.bottomCenter,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: _mobileReactionFlowDialogMaxWidth, maxHeight: maxHeight),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: theme.colorScheme.card,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(_mobileReactionFlowDialogCornerRadius)),
+              border: Border.all(color: theme.colorScheme.border),
+            ),
+            child: SafeArea(
+              top: false,
+              child: Padding(
+                padding: EdgeInsets.only(
+                  left: 24,
+                  right: 24,
+                  top: _mobileReactionFlowDialogTopPadding,
+                  bottom: mediaQuery.padding.bottom + _mobileReactionFlowDialogBottomPadding,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        const SizedBox(width: 40),
+                        Expanded(
+                          child: Text(
+                            "React",
+                            textAlign: TextAlign.center,
+                            style: theme.textTheme.large.copyWith(color: theme.colorScheme.foreground),
+                          ),
+                        ),
+                        ShadIconButton.ghost(
+                          width: 40,
+                          height: 40,
+                          padding: EdgeInsets.zero,
+                          icon: Icon(LucideIcons.x, size: 20, color: theme.colorScheme.foreground),
+                          onPressed: () => Navigator.of(context).pop(),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Flexible(
+                      fit: FlexFit.loose,
+                      child: SingleChildScrollView(
+                        child: Align(
+                          alignment: Alignment.topCenter,
+                          child: Wrap(
+                            spacing: 12,
+                            runSpacing: 12,
+                            alignment: WrapAlignment.center,
+                            children: _buildReactionOptionButtons(
+                              context: context,
+                              reactionOptions: reactionOptions,
+                              selectedReaction: selectedReaction,
+                              onSelected: (reaction) {
+                                onSelected(reaction);
+                                Navigator.of(context).pop();
+                              },
+                              buttonSize: 48,
+                              emojiSize: 24,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ThreadStorageSaveDesktopDialog extends StatelessWidget {
+  const _ThreadStorageSaveDesktopDialog({
+    required this.room,
+    required this.title,
+    required this.suggestedFileName,
+    required this.fileNameLabel,
+    required this.loadContent,
+  });
+
+  final RoomClient room;
+  final String title;
+  final String suggestedFileName;
+  final String fileNameLabel;
+  final Future<FileContent> Function() loadContent;
+
+  @override
+  Widget build(BuildContext context) {
+    return _ThreadStorageSaveSurfaceScaffold(
+      room: room,
+      title: title,
+      suggestedFileName: suggestedFileName,
+      fileNameLabel: fileNameLabel,
+      loadContent: loadContent,
+      useMobileFlowPresentation: false,
+    );
+  }
+}
+
+class _ThreadStorageSaveFlowDialog extends StatelessWidget {
+  const _ThreadStorageSaveFlowDialog({
+    required this.room,
+    required this.title,
+    required this.suggestedFileName,
+    required this.fileNameLabel,
+    required this.loadContent,
+  });
+
+  final RoomClient room;
+  final String title;
+  final String suggestedFileName;
+  final String fileNameLabel;
+  final Future<FileContent> Function() loadContent;
+
+  @override
+  Widget build(BuildContext context) {
+    return _ThreadStorageSaveSurfaceScaffold(
+      room: room,
+      title: title,
+      suggestedFileName: suggestedFileName,
+      fileNameLabel: fileNameLabel,
+      loadContent: loadContent,
+      useMobileFlowPresentation: true,
+    );
+  }
+}
+
+class _ThreadStorageSaveSurfaceScaffold extends StatefulWidget {
+  const _ThreadStorageSaveSurfaceScaffold({
+    required this.room,
+    required this.title,
+    required this.suggestedFileName,
+    required this.fileNameLabel,
+    required this.loadContent,
+    required this.useMobileFlowPresentation,
+  });
+
+  final RoomClient room;
+  final String title;
+  final String suggestedFileName;
+  final String fileNameLabel;
+  final Future<FileContent> Function() loadContent;
+  final bool useMobileFlowPresentation;
+
+  @override
+  State<_ThreadStorageSaveSurfaceScaffold> createState() => _ThreadStorageSaveSurfaceScaffoldState();
+}
+
+class _ThreadStorageSaveSurfaceScaffoldState extends State<_ThreadStorageSaveSurfaceScaffold> {
+  late final TextEditingController _fileNameController = TextEditingController();
+  String _selectedFolder = "";
+  bool _saving = false;
+
+  String _resolvedFullPath() {
+    final rawValue = _fileNameController.text.trim();
+    var fullPath = rawValue.isEmpty ? widget.suggestedFileName : rawValue;
+
+    if (!fullPath.contains("/")) {
+      fullPath = _selectedFolder.isEmpty ? fullPath : "$_selectedFolder/$fullPath";
+    }
+
+    return _applySuggestedFileExtension(fullPath, suggestedFileName: widget.suggestedFileName);
+  }
+
+  Future<void> _onSavePressed() async {
+    if (_saving) {
+      return;
+    }
+
+    final fullPath = _resolvedFullPath();
+    final exists = await widget.room.storage.exists(fullPath);
+    if (exists && mounted) {
+      final overwrite = await _showStorageOverwriteConfirmation(
+        context,
+        title: "File already exists",
+        message: "A file at '$fullPath' already exists in room storage. Do you want to overwrite it?",
+      );
+
+      if (!overwrite || !mounted) {
+        return;
+      }
+    }
+
+    setState(() {
+      _saving = true;
+    });
+
+    try {
+      final content = await widget.loadContent();
+      await widget.room.storage.uploadStream(
+        fullPath,
+        Stream.value(content.data),
+        overwrite: true,
+        size: content.data.length,
+        name: _defaultSuggestedFileNameFromPath(fullPath),
+        mimeType: content.mimeType,
+      );
+
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+        });
+      }
+    }
+  }
+
+  Widget _buildSurfaceBody(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final tt = theme.textTheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: ColoredBox(
+              color: theme.colorScheme.background,
+              child: FileBrowser(
+                onSelectionChanged: (selection) {
+                  setState(() {
+                    _selectedFolder = selection.join("/");
+                  });
+                },
+                room: widget.room,
+                multiple: false,
+                selectionMode: FileBrowserSelectionMode.folders,
+                rootLabel: "Folders",
+              ),
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: ShadInputFormField(
+            label: Text(widget.fileNameLabel, style: tt.small.copyWith(fontWeight: FontWeight.bold)),
+            placeholder: Text(widget.suggestedFileName),
+            keyboardType: TextInputType.emailAddress,
+            controller: _fileNameController,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMobileSurface(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final mediaQuery = MediaQuery.of(context);
+    final maxHeight = math.max(360.0, mediaQuery.size.height - mediaQuery.padding.top - _mobileStorageSaveFlowDialogViewportTopGap);
+    return ShadMobileFlowDialogSurface(
+      constraints: BoxConstraints(maxWidth: _mobileStorageSaveFlowDialogMaxWidth, minHeight: maxHeight, maxHeight: maxHeight),
+      backgroundColor: theme.colorScheme.card,
+      radius: const BorderRadius.vertical(top: Radius.circular(28)),
+      border: Border.all(color: theme.colorScheme.border),
+      shadows: null,
+      padding: shadMobileFlowDialogCompactPadding.copyWith(bottom: mediaQuery.padding.bottom + shadMobileFlowDialogCompactPadding.bottom),
+      title: ShadMobileFlowDialogCenteredTitleBar(
+        title: Text(
+          widget.title,
+          textAlign: TextAlign.center,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.large.copyWith(color: theme.colorScheme.foreground),
+        ),
+        onClose: _saving ? null : () => Navigator.of(context).pop(),
+      ),
+      description: null,
+      body: _buildSurfaceBody(context),
+      actions: [
+        ShadButton.secondary(onPressed: _saving ? null : () => Navigator.of(context).pop(), child: const Text("Cancel")),
+        ShadButton(
+          onPressed: _saving ? null : _onSavePressed,
+          child: _saving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Text("Save"),
+        ),
+      ],
+      gap: 16,
+      actionsGap: 12,
+      bodyBehavior: ShadMobileFlowDialogBodyBehavior.fill,
+      usesHorizontalActionRow: true,
+      keyboardInset: mediaQuery.viewInsets.bottom,
+      hideActionsWhenKeyboardVisible: false,
+    );
+  }
+
+  Widget _buildDesktopSurface(BuildContext context) {
+    return ShadDialog(
+      title: Text(widget.title),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      constraints: const BoxConstraints(maxWidth: 700, maxHeight: 544),
+      scrollable: false,
+      actions: [
+        ShadButton.secondary(onPressed: _saving ? null : () => Navigator.of(context).pop(), child: const Text("Cancel")),
+        ShadButton(
+          onPressed: _saving ? null : _onSavePressed,
+          child: _saving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Text("Save"),
+        ),
+      ],
+      child: _buildSurfaceBody(context),
+    );
+  }
+
+  @override
+  void dispose() {
+    _fileNameController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.useMobileFlowPresentation) {
+      return _buildMobileSurface(context);
+    }
+
+    return _buildDesktopSurface(context);
   }
 }
 
@@ -5693,6 +6519,10 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
   }
 
   Widget _wrapContextMenu({required _ThreadImageRecord image, required Widget child}) {
+    if (_usesMobileContextLayout(context)) {
+      return child;
+    }
+
     return CoordinatedShadContextMenuRegion(
       items: [
         ShadContextMenuItem(height: 40, onPressed: () => _onSaveImage(image), child: const Text("Save As...")),
@@ -7509,8 +8339,13 @@ class _EventLineState extends State<EventLine> {
     final theme = ShadTheme.of(context);
     const previewBackground = Color(0xFF050505);
     const previewHeaderBackground = Color(0xFF111111);
-    final codeTextStyle = GoogleFonts.sourceCodePro(fontSize: 12, color: const Color(0xFFE5E7EB), height: 1.3);
-    final headerTextStyle = GoogleFonts.sourceCodePro(fontSize: 11, color: theme.colorScheme.mutedForeground);
+    final usesMobileTypography = chatBubbleMarkdownUsesMobileTypography(context);
+    final codeTextStyle = GoogleFonts.sourceCodePro(
+      fontSize: usesMobileTypography ? chatBubbleMarkdownMobileBaseFontSize : 12,
+      color: const Color(0xFFE5E7EB),
+      height: usesMobileTypography ? chatBubbleMarkdownMobileCodeLineHeight : 1.3,
+    );
+    final headerTextStyle = GoogleFonts.sourceCodePro(fontSize: usesMobileTypography ? 13 : 11, color: theme.colorScheme.mutedForeground);
     final resolvedLanguageId = resolveLanguageIdForFilename(languageOrFilename) ?? fallbackLanguageId;
     final body = resolvedLanguageId == "diff"
         ? SingleChildScrollView(

@@ -26,6 +26,8 @@ class NewChatThread extends StatefulWidget {
     this.onThreadResolved,
     this.centerComposer = true,
     this.emptyState,
+    this.inputContextMenuBuilder,
+    this.inputOnPressedOutside,
   });
 
   final RoomClient room;
@@ -41,6 +43,8 @@ class NewChatThread extends StatefulWidget {
   final void Function(String? path, String? displayName)? onThreadResolved;
   final bool centerComposer;
   final Widget? emptyState;
+  final EditableTextContextMenuBuilder? inputContextMenuBuilder;
+  final TapRegionCallback? inputOnPressedOutside;
 
   @override
   State<NewChatThread> createState() => _NewChatThreadState();
@@ -78,10 +82,10 @@ class _NewChatThreadState extends State<NewChatThread> {
   String _chatPlaceholderText() {
     final normalizedAgentName = widget.agentName.trim();
     if (normalizedAgentName.isEmpty) {
-      return "Type a message";
+      return "Message...";
     }
 
-    return "Type a message or @$normalizedAgentName";
+    return "Message $normalizedAgentName...";
   }
 
   void _notifyThreadPathChanged(String? path) {
@@ -460,6 +464,8 @@ class _NewChatThreadState extends State<NewChatThread> {
           await _startNewThread();
         }
       },
+      contextMenuBuilder: widget.inputContextMenuBuilder,
+      onPressedOutside: widget.inputOnPressedOutside,
     );
 
     final content = !widget.centerComposer

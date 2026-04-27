@@ -8,6 +8,28 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 
 typedef AsyncSearch = Future<List<String>> Function(String query);
 
+bool _usesSystemAdaptiveTextSelectionToolbar() {
+  if (kIsWeb) {
+    return false;
+  }
+
+  return switch (defaultTargetPlatform) {
+    TargetPlatform.iOS || TargetPlatform.android => true,
+    TargetPlatform.fuchsia || TargetPlatform.linux || TargetPlatform.macOS || TargetPlatform.windows => false,
+  };
+}
+
+Widget _adaptiveEditableTextContextMenuBuilder(BuildContext context, EditableTextState editableTextState) {
+  return TextFieldTapRegion(
+    groupId: editableTextState.widget.groupId,
+    child: AdaptiveTextSelectionToolbar.editableText(editableTextState: editableTextState),
+  );
+}
+
+TapRegionCallback _adaptiveInputOnTapOutside() {
+  return (_) => FocusManager.instance.primaryFocus?.unfocus();
+}
+
 class MultiSelectController extends ValueNotifier<List<String>> {
   MultiSelectController({List<String> initialValue = const []}) : super(initialValue);
 
@@ -90,6 +112,7 @@ class _MultiSelectAutocompleteState extends State<MultiSelectAutocomplete> {
 
   Timer? debounceTimer;
   TextSelection? lastSelection;
+  bool _isOffstageMeasurement = false;
   int seq = 0;
 
   static const Map<ShortcutActivator, Intent> appleShortcuts = {
@@ -220,6 +243,13 @@ class _MultiSelectAutocompleteState extends State<MultiSelectAutocomplete> {
   }
 
   void onTextChanged() {
+    if (_isOffstageMeasurement) {
+      if (popoverController.isOpen) {
+        popoverController.hide();
+      }
+      return;
+    }
+
     lastSelection = textController.selection;
     debounceTimer?.cancel();
 
@@ -236,6 +266,13 @@ class _MultiSelectAutocompleteState extends State<MultiSelectAutocomplete> {
   }
 
   Future<void> invokeSearch(String query) async {
+    if (_isOffstageMeasurement) {
+      if (popoverController.isOpen) {
+        popoverController.hide();
+      }
+      return;
+    }
+
     final mySeq = ++seq;
     final results = await widget.search(query);
 
@@ -314,10 +351,27 @@ class _MultiSelectAutocompleteState extends State<MultiSelectAutocomplete> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+
+    final nearestOffstage = context.findAncestorWidgetOfExactType<Offstage>();
+    final nextIsOffstageMeasurement = nearestOffstage?.offstage ?? false;
+    if (_isOffstageMeasurement == nextIsOffstageMeasurement) {
+      return;
+    }
+
+    _isOffstageMeasurement = nextIsOffstageMeasurement;
+    if (_isOffstageMeasurement && popoverController.isOpen) {
+      popoverController.hide();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final cs = theme.colorScheme;
     final hoveredBackgroundColor = theme.optionTheme.hoveredBackgroundColor;
+    final usesSystemAdaptiveToolbar = _usesSystemAdaptiveTextSelectionToolbar();
 
     final effectiveTextStyle = theme.textTheme.muted
         .copyWith(color: theme.colorScheme.foreground)
@@ -450,13 +504,17 @@ class _MultiSelectAutocompleteState extends State<MultiSelectAutocomplete> {
                                             actions: actions,
                                             child: EditableText(
                                               key: editableTextKey,
-                                              autofocus: widget.autofocus ?? false,
+                                              autofocus: _isOffstageMeasurement ? false : (widget.autofocus ?? false),
                                               backgroundCursorColor: const Color(0xFF9E9E9E),
                                               cursorColor: cursorColor,
                                               style: effectiveTextStyle,
                                               controller: textController,
                                               focusNode: focusNode,
                                               groupId: tapRegionGroupId,
+                                              contextMenuBuilder: usesSystemAdaptiveToolbar
+                                                  ? _adaptiveEditableTextContextMenuBuilder
+                                                  : null,
+                                              onTapOutside: usesSystemAdaptiveToolbar ? _adaptiveInputOnTapOutside() : null,
                                               selectionColor: focusNode.hasFocus ? theme.colorScheme.selection : null,
                                             ),
                                           ),
