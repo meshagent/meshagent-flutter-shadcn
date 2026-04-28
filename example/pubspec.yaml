@@ -39,7 +39,9 @@ dependencies:
   file_picker: ^11.0.2
   meshagent: ^0.39.2
   meshagent_flutter: ^0.39.2
-  shadcn_ui: ^0.52.1
+  shadcn_ui:
+    git:
+      url: https://github.com/brandon-bethke-timu/flutter-shadcn-ui
   meshagent_flutter_shadcn:
     path: ..
 
@@ -53,11 +55,6 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
-
-dependency_overrides:
-  shadcn_ui:
-    git:
-      url: https://github.com/brandon-bethke-timu/flutter-shadcn-ui
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -100,5 +97,3 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
-
-
