@@ -54,6 +54,11 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
 
+dependency_overrides:
+  shadcn_ui:
+    git:
+      url: https://github.com/brandon-bethke-timu/flutter-shadcn-ui
+
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
@@ -95,6 +100,5 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
-
 
 
