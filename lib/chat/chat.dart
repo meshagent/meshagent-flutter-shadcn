@@ -328,23 +328,20 @@ List<String> _parseEventDetailLines(String raw) {
   return value.split(RegExp(r"\r?\n")).map((line) => line.trim()).where((line) => line.isNotEmpty).toList();
 }
 
-bool _isCompletedToolCallEvent(MeshElement message) {
-  if (message.tagName != "event") {
-    return false;
-  }
+const Set<String> _toolCallItemTypes = {"tool_call", "function_call", "mcp_call", "shell_call", "local_shell_call"};
 
+bool _isToolOrShellCallEvent(MeshElement message) {
   final kind = ((message.getAttribute("kind") as String?) ?? "").trim().toLowerCase();
-  if (kind != "tool") {
-    return false;
+  if (message.tagName == "exec" || kind == "exec") {
+    return true;
   }
 
-  final state = ((message.getAttribute("state") as String?) ?? "info").toLowerCase();
-  if (state != "completed") {
+  if (message.tagName != "event" || kind != "tool") {
     return false;
   }
 
   final itemType = ((message.getAttribute("item_type") as String?) ?? "").trim().toLowerCase();
-  if (itemType == "tool_call") {
+  if (_toolCallItemTypes.contains(itemType)) {
     return true;
   }
 
@@ -354,13 +351,16 @@ bool _isCompletedToolCallEvent(MeshElement message) {
   final detailLines = _parseEventDetailLines(((message.getAttribute("details") as String?) ?? "").trim());
   final resolvedHeadlineForFiltering = (headlineAttr.isNotEmpty ? headlineAttr : summary).trim().toLowerCase();
 
-  return resolvedHeadlineForFiltering == "called tool" &&
+  return (resolvedHeadlineForFiltering == "called tool" ||
+          resolvedHeadlineForFiltering.startsWith("called tool:") ||
+          resolvedHeadlineForFiltering == "calling tool" ||
+          resolvedHeadlineForFiltering.startsWith("calling tool:")) &&
       detailLines.isNotEmpty &&
       detailLines.every((line) => line.trimLeft().toLowerCase().startsWith("tool:"));
 }
 
-bool _shouldHideCompletedToolCallEvent(MeshElement message, {required bool showCompletedToolCalls}) {
-  return !showCompletedToolCalls && _isCompletedToolCallEvent(message);
+bool _shouldHideToolOrShellCallEvent(MeshElement message, {required bool showCompletedToolCalls}) {
+  return !showCompletedToolCalls && _isToolOrShellCallEvent(message);
 }
 
 const Set<String> _supportedThreadEventKinds = {
@@ -413,7 +413,7 @@ bool _shouldRenderThreadMessageElement(MeshElement message, {required bool showC
   if (!_supportedThreadEventKinds.contains(kind)) {
     return false;
   }
-  return !_shouldHideCompletedToolCallEvent(message, showCompletedToolCalls: showCompletedToolCalls);
+  return !_shouldHideToolOrShellCallEvent(message, showCompletedToolCalls: showCompletedToolCalls);
 }
 
 class _ImageMime {
@@ -8583,7 +8583,7 @@ class _EventLineState extends State<EventLine> {
     final headlineAttr = ((widget.message.getAttribute("headline") as String?) ?? "").trim();
     final detailsAttr = ((widget.message.getAttribute("details") as String?) ?? "").trim();
     final detailLines = _detailLines(detailsAttr);
-    if (_shouldHideCompletedToolCallEvent(widget.message, showCompletedToolCalls: widget.showCompletedToolCalls)) {
+    if (_shouldHideToolOrShellCallEvent(widget.message, showCompletedToolCalls: widget.showCompletedToolCalls)) {
       return const SizedBox.shrink();
     }
     final approvalId =
