@@ -57,6 +57,6 @@ class _ParquetViewer extends State<ParquetViewer> {
   var dbName = "temp";
   @override
   Widget build(BuildContext context) {
-    return Center(child: Text("Use duckdb tools to load this parquet file into a database."));
+    return Center(child: Text("Use duckdb tools to load this parquet file into a dataset."));
   }
 }

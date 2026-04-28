@@ -9,11 +9,12 @@ import "package:meshagent/room_server_client.dart";
 
 import "image.dart";
 import "pdf.dart";
+import "tsv.dart";
 import "video.dart";
 import "markdown.dart";
 import "../chat/chat.dart";
 
-enum FileKind { image, video, audio, pdf, code, parquet, office, markdown, thread, lance, custom, unknown }
+enum FileKind { image, video, audio, pdf, code, parquet, office, markdown, thread, lance, tsv, custom, unknown }
 
 final imageExtensions = <String>{"png", "jpg", "jpeg", "jfif", "heic", "heif", "webp", "tif", "tiff", "gif", "svg", "bmp"};
 final pdfExtensions = <String>{"pdf"};
@@ -24,6 +25,12 @@ final videoExtensions = <String>{"mp4", "mkv", "mov"};
 final audioExtensions = <String>{"mp3", "ogg", "wav"};
 final officeExtensions = <String>{"docx", "pptx", "xlsx"};
 final parquetExtensions = <String>{"parquet"};
+final tsvExtensions = <String>{"tsv"};
+const double _mobilePreviewScreenWidthMax = 600;
+
+bool _usesMobilePreviewLayout(BuildContext context) {
+  return MediaQuery.sizeOf(context).width < _mobilePreviewScreenWidthMax;
+}
 
 final Map<String, Widget Function({Key? key, required RoomClient room, required String filename, required Uri url})> customViewers = {};
 
@@ -38,6 +45,7 @@ FileKind classifyFile(String path) {
   if (markdownExtensions.contains(ext)) return FileKind.markdown;
   if (threadExtensions.contains(ext)) return FileKind.thread;
   if (lanceExtensions.contains(ext)) return FileKind.lance;
+  if (tsvExtensions.contains(ext)) return FileKind.tsv;
   if (customViewers.containsKey(ext)) return FileKind.custom;
   if (imageExtensions.contains(ext)) return FileKind.image;
   if (videoExtensions.contains(ext)) return FileKind.video;
@@ -56,7 +64,7 @@ FileKind classifyFile(String path) {
 
 bool filePreviewLoadsFromRoomStorage(String path) {
   return switch (classifyFile(path)) {
-    FileKind.markdown || FileKind.pdf || FileKind.code => true,
+    FileKind.markdown || FileKind.pdf || FileKind.code || FileKind.tsv => true,
     _ => false,
   };
 }
@@ -79,6 +87,8 @@ Widget filePreview({Key? key, required RoomClient room, required String filename
       return AudioPreview(url: url, key: key);
     case FileKind.pdf:
       return PdfPreview(room: room, path: filename, key: key);
+    case FileKind.tsv:
+      return TsvPreview(filename: filename, room: room, key: key);
     case FileKind.code:
       return CodePreview(room: room, filename: filename, url: url, key: key);
     case FileKind.custom:
@@ -111,6 +121,7 @@ class _FilePreviewState extends State<FilePreview> {
       FileKind.markdown => MarkdownPreview(filename: widget.path, room: widget.room),
       FileKind.pdf => PdfPreview(room: widget.room, path: widget.path),
       FileKind.code => CodePreview(room: widget.room, filename: widget.path),
+      FileKind.tsv => TsvPreview(filename: widget.path, room: widget.room),
       _ => null,
     };
   }
@@ -131,6 +142,11 @@ class _FilePreviewState extends State<FilePreview> {
       future: urlLookup,
       builder: (context, snapshot) {
         if (snapshot.hasData) {
+          final preview = filePreview(room: widget.room, filename: widget.path, url: Uri.parse(snapshot.data!), fit: widget.fit);
+          if (_usesMobilePreviewLayout(context)) {
+            return preview;
+          }
+
           return CoordinatedShadContextMenuRegion(
             items: [
               ShadContextMenuItem(
@@ -141,7 +157,7 @@ class _FilePreviewState extends State<FilePreview> {
                 child: Text("Download"),
               ),
             ],
-            child: filePreview(room: widget.room, filename: widget.path, url: Uri.parse(snapshot.data!), fit: widget.fit),
+            child: preview,
           );
         } else if (snapshot.hasError) {
           return Center(

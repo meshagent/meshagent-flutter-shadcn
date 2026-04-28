@@ -46,12 +46,16 @@ class TableScaffold extends StatefulWidget {
   /// See [SliverSwayzeTable.wrapHeader]
   final WrapHeaderBuilder? wrapHeader;
 
+  /// Whether to render row-number headers on the leading edge.
+  final bool showRowHeaders;
+
   const TableScaffold({
     Key? key,
     required this.horizontalDisplacement,
     required this.verticalDisplacement,
     this.wrapTableBody,
     this.wrapHeader,
+    this.showRowHeaders = true,
   }) : super(key: key);
 
   @override
@@ -66,7 +70,7 @@ class _TableScaffoldState extends State<TableScaffold> {
 
   // The state for sizes of headers
   final double columnHeaderHeight = config.kColumnHeaderHeight;
-  late double rowHeaderWidth = config.headerWidthForRange(verticalRangeNotifier.value);
+  late double rowHeaderWidth = _resolveRowHeaderWidth();
 
   @override
   void initState() {
@@ -76,18 +80,38 @@ class _TableScaffoldState extends State<TableScaffold> {
     didChangeVerticalRange();
   }
 
+  @override
+  void didUpdateWidget(covariant TableScaffold oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.showRowHeaders != widget.showRowHeaders) {
+      didChangeVerticalRange();
+    }
+  }
+
   /// The scaffold adapts to changes in the width of the row headers for large
   /// numbers.
   /// For this is subscribe to changes in the vertical visible range and save
   /// the width into the state.
   void didChangeVerticalRange() {
-    final newRowHeaderWidth = config.headerWidthForRange(verticalRangeNotifier.value);
+    final newRowHeaderWidth = _resolveRowHeaderWidth();
     if (newRowHeaderWidth == rowHeaderWidth) {
       return;
     }
     setState(() {
       rowHeaderWidth = newRowHeaderWidth;
     });
+  }
+
+  double _resolveRowHeaderWidth() {
+    if (widget.showRowHeaders) {
+      return config.headerWidthForRange(verticalRangeNotifier.value);
+    }
+
+    final style = InternalScope.of(context).style;
+    if (!style.showLeadingOuterBorders || style.cellSeparatorColor.a == 0.0) {
+      return 0.0;
+    }
+    return style.cellSeparatorStrokeWidth;
   }
 
   @override
@@ -98,18 +122,19 @@ class _TableScaffoldState extends State<TableScaffold> {
 
   @override
   Widget build(BuildContext context) {
-    return CustomMultiChildLayout(
+    final table = CustomMultiChildLayout(
       delegate: _TableScaffoldDelegate(rowHeaderWidth, columnHeaderHeight),
       children: [
-        LayoutId(id: _TableScaffoldSlot.headerCorner, child: const _HeaderCorner()),
+        if (widget.showRowHeaders) LayoutId(id: _TableScaffoldSlot.headerCorner, child: const _HeaderCorner()),
         LayoutId(
           id: _TableScaffoldSlot.columnHeaders,
           child: Header(axis: Axis.horizontal, displacement: widget.horizontalDisplacement, wrapHeader: widget.wrapHeader),
         ),
-        LayoutId(
-          id: _TableScaffoldSlot.rowsHeaders,
-          child: Header(axis: Axis.vertical, displacement: widget.verticalDisplacement, wrapHeader: widget.wrapHeader),
-        ),
+        if (widget.showRowHeaders)
+          LayoutId(
+            id: _TableScaffoldSlot.rowsHeaders,
+            child: Header(axis: Axis.vertical, displacement: widget.verticalDisplacement, wrapHeader: widget.wrapHeader),
+          ),
         LayoutId(
           id: _TableScaffoldSlot.tableBody,
           child: TableBody(
@@ -117,6 +142,24 @@ class _TableScaffoldState extends State<TableScaffold> {
             verticalDisplacement: widget.verticalDisplacement,
             wrapTableBody: widget.wrapTableBody,
           ),
+        ),
+      ],
+    );
+
+    final style = InternalScope.of(context).style;
+    if (widget.showRowHeaders || !style.showLeadingOuterBorders) {
+      return table;
+    }
+
+    return Stack(
+      children: [
+        table,
+        Positioned(
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: style.cellSeparatorStrokeWidth,
+          child: IgnorePointer(child: ColoredBox(color: style.cellSeparatorColor)),
         ),
       ],
     );
@@ -165,7 +208,7 @@ class _TableScaffoldDelegate extends MultiChildLayoutDelegate {
 
   @override
   bool shouldRelayout(_TableScaffoldDelegate oldDelegate) {
-    return oldDelegate.headerWidth != headerWidth;
+    return oldDelegate.headerWidth != headerWidth || oldDelegate.headerHeight != headerHeight;
   }
 }
 

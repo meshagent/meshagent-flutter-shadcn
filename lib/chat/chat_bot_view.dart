@@ -41,6 +41,10 @@ class ChatBotView extends StatefulWidget {
     this.emptyStateTitle,
     this.emptyStateDescription,
     this.emptyState,
+    this.inputContextMenuBuilder,
+    this.inputOnPressedOutside,
+    this.mobileStorageSaveSurfacePresenter,
+    this.mobileUnderHeaderContentPadding,
     this.centerComposer = false,
     this.hideChatInput = false,
     this.showThreadList = true,
@@ -79,6 +83,10 @@ class ChatBotView extends StatefulWidget {
   final String? emptyStateTitle;
   final String? emptyStateDescription;
   final Widget? emptyState;
+  final EditableTextContextMenuBuilder? inputContextMenuBuilder;
+  final TapRegionCallback? inputOnPressedOutside;
+  final ThreadStorageSaveSurfacePresenter? mobileStorageSaveSurfacePresenter;
+  final double? mobileUnderHeaderContentPadding;
   final bool centerComposer;
   final bool hideChatInput;
   final bool showThreadList;
@@ -181,6 +189,10 @@ class _ChatBotViewState extends State<ChatBotView> {
       emptyStateTitle: widget.emptyStateTitle,
       emptyStateDescription: widget.emptyStateDescription,
       emptyState: widget.emptyState,
+      inputContextMenuBuilder: widget.inputContextMenuBuilder,
+      inputOnPressedOutside: widget.inputOnPressedOutside,
+      mobileStorageSaveSurfacePresenter: widget.mobileStorageSaveSurfacePresenter,
+      mobileUnderHeaderContentPadding: widget.mobileUnderHeaderContentPadding,
       agentName: widget.agentName,
       initialShowCompletedToolCalls: widget.initialShowCompletedToolCalls,
       shouldShowAuthorNames: widget.shouldShowAuthorNames,
@@ -205,6 +217,8 @@ class _ChatBotViewState extends State<ChatBotView> {
       newThreadResetVersion: widget.newThreadResetVersion,
       centerComposer: widget.centerComposer,
       emptyState: widget.emptyState,
+      inputContextMenuBuilder: widget.inputContextMenuBuilder,
+      inputOnPressedOutside: widget.inputOnPressedOutside,
       toolsBuilder: widget.toolsBuilder,
       builder: (context, path, controller, composerKey) => _buildThread(path, controller, composerKey: composerKey),
     );

@@ -38,6 +38,8 @@ class _Transcript extends State<TranscriptViewer> {
         final transcriptMeta = _transcriptMeta(segments);
 
         return SelectionArea(
+          contextMenuBuilder: (context, selectableRegionState) =>
+              AdaptiveTextSelectionToolbar.selectableRegion(selectableRegionState: selectableRegionState),
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
@@ -225,8 +227,8 @@ class _TranscriptHeader extends StatelessWidget {
     final headerMetaSize = theme.textTheme.p.fontSize ?? 16;
     final detailParts = <String>[
       "Transcript",
-      if (_formatTranscriptHeaderTime(context, meta.startTime) case final startTime?) startTime,
-      if (_formatTranscriptDuration(meta.duration) case final duration?) duration,
+      ?_formatTranscriptHeaderTime(context, meta.startTime),
+      ?_formatTranscriptDuration(meta.duration),
     ];
 
     return Column(

@@ -9,6 +9,8 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 class ShadTopLevelContextMenuCoordinator {
   static final Set<ShadContextMenuController> _controllers = <ShadContextMenuController>{};
   static bool _synchronizing = false;
+  static Offset? _suppressedSecondaryTapPosition;
+  static DateTime? _suppressedSecondaryTapAt;
 
   static void register(ShadContextMenuController controller) {
     _controllers.add(controller);
@@ -33,6 +35,43 @@ class ShadTopLevelContextMenuCoordinator {
     } finally {
       _synchronizing = false;
     }
+  }
+
+  static void suppressSecondaryTapAt(Offset globalPosition) {
+    _suppressedSecondaryTapPosition = globalPosition;
+    _suppressedSecondaryTapAt = DateTime.now();
+  }
+
+  static bool shouldSuppressSecondaryTapAt(Offset globalPosition) {
+    final suppressedPosition = _suppressedSecondaryTapPosition;
+    final suppressedAt = _suppressedSecondaryTapAt;
+    if (suppressedPosition == null || suppressedAt == null) {
+      return false;
+    }
+
+    final isCurrentTap = DateTime.now().difference(suppressedAt) < const Duration(milliseconds: 750);
+    return isCurrentTap && (suppressedPosition - globalPosition).distance <= 2;
+  }
+}
+
+class CoordinatedSecondaryTapBarrier extends StatelessWidget {
+  const CoordinatedSecondaryTapBarrier({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (event) {
+        final isMouse = event.kind == PointerDeviceKind.mouse;
+        final isSecondaryMouseButton = event.buttons == kSecondaryMouseButton;
+        if (isMouse && isSecondaryMouseButton) {
+          ShadTopLevelContextMenuCoordinator.suppressSecondaryTapAt(event.position);
+        }
+      },
+      child: child,
+    );
   }
 }
 
@@ -708,6 +747,9 @@ class _CoordinatedShadContextMenuRegionState extends State<CoordinatedShadContex
           }
         },
         onSecondaryTapDown: (details) async {
+          if (ShadTopLevelContextMenuCoordinator.shouldSuppressSecondaryTapAt(details.globalPosition)) {
+            return;
+          }
           if (kIsWeb && !isContextMenuAlreadyDisabled) {
             await BrowserContextMenu.disableContextMenu();
           }
@@ -716,6 +758,12 @@ class _CoordinatedShadContextMenuRegionState extends State<CoordinatedShadContex
           }
         },
         onSecondaryTapUp: (details) async {
+          if (ShadTopLevelContextMenuCoordinator.shouldSuppressSecondaryTapAt(details.globalPosition)) {
+            if (kIsWeb && !isContextMenuAlreadyDisabled) {
+              await BrowserContextMenu.enableContextMenu();
+            }
+            return;
+          }
           if (isWindows) {
             _showAtOffset(details.globalPosition);
             await Future<void>.delayed(Duration.zero);

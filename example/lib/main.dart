@@ -128,7 +128,7 @@ class _MeshagentRoomViewState extends State<MeshagentRoomView> {
   }
 
   Future<void> _uploadFile() async {
-    final picked = await FilePicker.platform.pickFiles(withData: true);
+    final picked = await FilePicker.pickFiles(withData: true);
     if (picked == null || picked.files.isEmpty) {
       return;
     }

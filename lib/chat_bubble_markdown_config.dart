@@ -19,7 +19,20 @@ Color chatBubbleMarkdownColor(BuildContext context) {
   return theme.textTheme.p.color ?? DefaultTextStyle.of(context).style.color ?? theme.colorScheme.foreground;
 }
 
-double chatBubbleMarkdownBaseFontSize(BuildContext context) {
+const double chatBubbleMarkdownMobileBaseFontSize = 16;
+const double chatBubbleMarkdownThreadLineHeight = 1.45;
+const double chatBubbleMarkdownMobileCodeLineHeight = 1.4;
+
+bool chatBubbleMarkdownUsesMobileTypography(BuildContext context) {
+  final size = MediaQuery.sizeOf(context);
+  return size.width < 600 || (size.width > size.height && size.shortestSide < 600);
+}
+
+double chatBubbleMarkdownBaseFontSize(BuildContext context, {bool threadTypography = false}) {
+  if (threadTypography && chatBubbleMarkdownUsesMobileTypography(context)) {
+    return chatBubbleMarkdownMobileBaseFontSize;
+  }
+
   final defaultFontSize = DefaultTextStyle.of(context).style.fontSize ?? 14;
   return MediaQuery.of(context).textScaler.scale(defaultFontSize);
 }
@@ -81,8 +94,9 @@ Widget _buildHighlightedCodeBlock({
     lines.removeLast();
   }
   final normalizedCode = lines.join("\n");
+  final usesMobileTypography = chatBubbleMarkdownUsesMobileTypography(context);
   final resolvedBackgroundColor = backgroundColor ?? theme.cardTheme.backgroundColor;
-  final headerTextStyle = GoogleFonts.sourceCodePro(fontSize: 11, color: theme.colorScheme.mutedForeground);
+  final headerTextStyle = GoogleFonts.sourceCodePro(fontSize: usesMobileTypography ? 13 : 11, color: theme.colorScheme.mutedForeground);
   final body = languageId == "diff"
       ? SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -173,12 +187,23 @@ MarkdownConfig buildChatBubbleMarkdownConfig(
 }) {
   final theme = ShadTheme.of(context);
   final mdColor = color ?? chatBubbleMarkdownColor(context);
-  final resolvedBaseFontSize = baseFontSize ?? chatBubbleMarkdownBaseFontSize(context);
+  final usesMobileThreadTypography = threadTypography && chatBubbleMarkdownUsesMobileTypography(context);
+  final resolvedBaseFontSize = baseFontSize ?? chatBubbleMarkdownBaseFontSize(context, threadTypography: threadTypography);
   final codeTextStyle = GoogleFonts.sourceCodePro(
-    fontSize: threadTypography ? (resolvedBaseFontSize * 0.95).clamp(12.0, 16.0).toDouble() : resolvedBaseFontSize,
+    fontSize: usesMobileThreadTypography
+        ? resolvedBaseFontSize
+        : threadTypography
+        ? (resolvedBaseFontSize * 0.95).clamp(12.0, 16.0).toDouble()
+        : resolvedBaseFontSize,
     color: mdColor,
+    height: usesMobileThreadTypography ? chatBubbleMarkdownMobileCodeLineHeight : null,
   );
-  final paragraphStyle = TextStyle(fontSize: resolvedBaseFontSize, color: mdColor, inherit: false, height: threadTypography ? 1.45 : null);
+  final paragraphStyle = TextStyle(
+    fontSize: resolvedBaseFontSize,
+    color: mdColor,
+    inherit: false,
+    height: threadTypography ? chatBubbleMarkdownThreadLineHeight : null,
+  );
 
   final headingBase = TextStyle(
     color: mdColor,
@@ -209,7 +234,11 @@ MarkdownConfig buildChatBubbleMarkdownConfig(
     color: mdColor,
     inherit: false,
     fontFamily: 'SourceCodePro',
-    height: threadTypography ? 1.45 : null,
+    height: usesMobileThreadTypography
+        ? chatBubbleMarkdownMobileCodeLineHeight
+        : threadTypography
+        ? chatBubbleMarkdownThreadLineHeight
+        : null,
   );
 
   return MarkdownConfig(

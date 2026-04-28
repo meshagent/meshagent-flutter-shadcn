@@ -1,3 +1,19 @@
+## [0.39.2]
+- Updated Dart/Flutter SDK package versions and internal dependency constraints to `0.39.1` (from `0.39.0`) across the `meshagent` Flutter-related packages (e.g. `meshagent_flutter`, `meshagent_flutter_auth`, `meshagent_flutter_shadcn`, `meshagent_super_editor`, `meshagent_flutter_dev`, and related SDK packages).
+
+## [0.39.1]
+- Added paged response model types (e.g., `MailboxesPage`, `RoutesPage`, `FeedsPage`, `ScheduledTasksPage`, plus related paging models for users/rooms/grants/OAuth clients).
+- Added `Meshagent` Dart client methods for paged listing (e.g., `listMailboxesPage`, `listRoutesPage`, `listFeedsPage`, `listRoomsPage`, `listRoomGrantsByUserPage`, `listUniqueUsersWithGrantsPage`, `listOAuthClientsPage`, `listScheduledTasksPage`) with `count`/`offset`/`filter` support and `total`.
+- Updated existing Dart list methods to route through paging and accept `count`/`offset`/`filter` options, with default page-size behavior updated (default page size changed from the prior smaller default behavior).
+
+## [0.39.0]
+- Added expanded dataset index management support to the Dart datasets client, including index configuration/remapping and richer index metadata.
+- Added dataset SQL cancellation support to Dart datasets client operations, including typed cancel status/results.
+- Applied “database” -> “datasets” terminology and API/tooling updates across Dart clients (breaking for prior database-named usage).
+- Updated Dart clients to support improved usage/cost reporting plumbing (usage export/annotations) and enhanced LLM proxy “pipes” plus custom LLM usage tracking.
+- Added/updated the Dart Arrow package for Arrow body compression with VM/web support and interop coverage.
+- Updated Dart SDK pricing-related surfaces to include gpt-5.5 model release pricing.
+
 ## [0.38.4]
 - Added `delete({projectId, path})` to the Dart `Meshagent` client for project storage deletion (`/projects/:project_id/storage/delete`), throwing `NotFoundException` on 404.
 

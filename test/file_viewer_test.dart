@@ -45,14 +45,14 @@ void main() {
   });
 
   test('classifyFile detects lance files explicitly', () {
-    expect(classifyFile('.database/.1234.table'), FileKind.lance);
+    expect(classifyFile('.datasets/.1234.table'), FileKind.lance);
   });
 
   test('fileViewer returns the lance viewer for lance files', () {
     final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     addTearDown(room.dispose);
 
-    final viewer = fileViewer(room, '.database/.1234.table');
+    final viewer = fileViewer(room, '.datasets/.1234.table');
     expect(viewer, isA<LanceViewer>());
   });
 }

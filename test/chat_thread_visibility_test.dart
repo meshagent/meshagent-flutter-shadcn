@@ -156,6 +156,7 @@ Widget _buildThreadHarness({
   required ChatThreadController controller,
   required MeshDocument document,
   bool shouldShowAuthorNames = true,
+  bool showCompletedToolCalls = false,
 }) {
   return ShadApp(
     home: Scaffold(
@@ -167,7 +168,7 @@ Widget _buildThreadHarness({
             scrollController: controller.threadScrollController,
             messages: _messagesElement(document).getChildren().whereType<MeshElement>().toList(),
             online: const [],
-            showCompletedToolCalls: false,
+            showCompletedToolCalls: showCompletedToolCalls,
             shouldShowAuthorNames: shouldShowAuthorNames,
             startChatCentered: true,
             emptyStateTitle: "No visible messages",
@@ -303,6 +304,73 @@ void main() {
     await tester.pump();
 
     expect(find.text("assistant"), findsNothing);
+  });
+
+  testWidgets('hides in-progress tool call events when tool calls are disabled', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
+    final document = _createThreadDocument();
+    addTearDown(room.dispose);
+    addTearDown(controller.dispose);
+    addTearDown(document.dispose);
+
+    _insertElement(
+      document: document,
+      targetId: _messagesElement(document).id,
+      tagName: "event",
+      elementId: "tool-call-running",
+      attributes: {
+        "kind": "tool",
+        "state": "in_progress",
+        "item_type": "function_call",
+        "method": "tool.started",
+        "summary": "Calling Tool: weather",
+        "headline": "Calling Tool: weather",
+        "details": "Tool: weather",
+      },
+    );
+
+    await tester.pumpWidget(_buildThreadHarness(room: room, controller: controller, document: document));
+    await tester.pump();
+
+    expect(find.text("Calling Tool: weather"), findsNothing);
+    expect(find.text("Tool: weather"), findsNothing);
+
+    await tester.pumpWidget(_buildThreadHarness(room: room, controller: controller, document: document, showCompletedToolCalls: true));
+    await tester.pump();
+
+    expect(find.text("Calling Tool: weather"), findsOneWidget);
+  });
+
+  testWidgets('hides shell call events when tool calls are disabled', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
+    final document = _createThreadDocument();
+    addTearDown(room.dispose);
+    addTearDown(controller.dispose);
+    addTearDown(document.dispose);
+
+    _insertElement(
+      document: document,
+      targetId: _messagesElement(document).id,
+      tagName: "event",
+      elementId: "shell-call-running",
+      attributes: {
+        "kind": "exec",
+        "state": "in_progress",
+        "item_type": "shell_call",
+        "method": "response.shell_call",
+        "summary": "Running Command",
+        "headline": "Running Command",
+        "details": "Shell: pwd",
+      },
+    );
+
+    await tester.pumpWidget(_buildThreadHarness(room: room, controller: controller, document: document));
+    await tester.pump();
+
+    expect(find.text("Running Command"), findsNothing);
+    expect(find.text("Shell: pwd"), findsNothing);
   });
 
   testWidgets('renders tool footers below the thread composer', (tester) async {
