@@ -8,8 +8,8 @@ import 'package:http/http.dart';
 import 'package:meshagent/room_server_client.dart';
 import 'package:meshagent_flutter_shadcn/code_language_resolver.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
-import 'package:re_editor/re_editor.dart';
 import 'package:flutter_highlight/themes/monokai-sublime.dart';
+import 'package:meshagent_flutter_shadcn/code_editor.dart';
 import 'package:re_highlight/languages/plaintext.dart';
 import 'package:url_launcher/url_launcher.dart';
 
