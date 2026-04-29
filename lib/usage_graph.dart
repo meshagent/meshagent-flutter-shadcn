@@ -11,12 +11,20 @@ class UsageGraphPoint {
 }
 
 class UsageGraph extends StatefulWidget {
-  const UsageGraph({super.key, required this.points, required this.title, required this.formatValue, this.summaryValue});
+  const UsageGraph({
+    super.key,
+    required this.points,
+    required this.title,
+    required this.formatValue,
+    this.summaryValue,
+    this.highlightedPoints = const [],
+  });
 
   final List<UsageGraphPoint> points;
   final String title;
   final String Function(double value) formatValue;
   final double? summaryValue;
+  final List<UsageGraphPoint> highlightedPoints;
 
   @override
   State<UsageGraph> createState() => _UsageGraphState();
@@ -69,6 +77,7 @@ class _UsageGraphState extends State<UsageGraph> {
             child: CustomPaint(
               painter: _UsageGraphPainter(
                 points: widget.points,
+                highlightedPoints: widget.highlightedPoints,
                 title: widget.title,
                 totalLabel: totalLabel,
                 averageValue: averageValue,
@@ -261,6 +270,7 @@ class _UsageGraphGeometry {
 class _UsageGraphPainter extends CustomPainter {
   const _UsageGraphPainter({
     required this.points,
+    required this.highlightedPoints,
     required this.title,
     required this.totalLabel,
     required this.averageValue,
@@ -273,6 +283,7 @@ class _UsageGraphPainter extends CustomPainter {
   });
 
   final List<UsageGraphPoint> points;
+  final List<UsageGraphPoint> highlightedPoints;
   final String title;
   final String totalLabel;
   final double? averageValue;
@@ -302,6 +313,7 @@ class _UsageGraphPainter extends CustomPainter {
       ..strokeWidth = 1;
     canvas.drawLine(Offset(chartRect.left, chartRect.bottom), Offset(chartRect.right, chartRect.bottom), baselinePaint);
 
+    final highlightedValuesByDay = _valuesByDay(highlightedPoints);
     for (var i = 0; i < points.length; i++) {
       final rect = _UsageGraphGeometry.barRect(points, i, layout);
       final isPartial = _isSameLocalDayAsToday(points[i].periodStart);
@@ -312,6 +324,13 @@ class _UsageGraphPainter extends CustomPainter {
           : _UsageGraphGeometry.barColor(theme);
       final barPaint = Paint()..color = color;
       canvas.drawRect(rect, barPaint);
+      _paintHighlightedBarSegment(
+        canvas,
+        rect: rect,
+        totalValue: points[i].value,
+        highlightedValue: highlightedValuesByDay[_dayKey(points[i].periodStart)] ?? 0.0,
+        barColor: color,
+      );
     }
 
     _paintAverageReference(canvas, chartRect);
@@ -375,6 +394,33 @@ class _UsageGraphPainter extends CustomPainter {
     final labelPainter = _textPainter(label, labelStyle, TextAlign.right)..layout();
     final labelY = (y - labelPainter.height - 4).clamp(chartRect.top, chartRect.bottom - labelPainter.height).toDouble();
     labelPainter.paint(canvas, Offset(chartRect.right - labelPainter.width, labelY));
+  }
+
+  void _paintHighlightedBarSegment(
+    Canvas canvas, {
+    required Rect rect,
+    required double totalValue,
+    required double highlightedValue,
+    required Color barColor,
+  }) {
+    if (rect.height <= 0.0 || totalValue <= 0.0 || highlightedValue <= 0.0) {
+      return;
+    }
+
+    final normalized = (highlightedValue / totalValue).clamp(0.0, 1.0);
+    final segmentHeight = rect.height * normalized;
+    final segmentRect = Rect.fromLTRB(rect.left, rect.bottom - segmentHeight, rect.right, rect.bottom);
+    final segmentColor = Color.lerp(barColor, theme.colorScheme.foreground, 0.48)!;
+    canvas.drawRect(segmentRect, Paint()..color = segmentColor);
+  }
+
+  Map<DateTime, double> _valuesByDay(List<UsageGraphPoint> points) {
+    final valuesByDay = <DateTime, double>{};
+    for (final point in points) {
+      final key = _dayKey(point.periodStart);
+      valuesByDay[key] = (valuesByDay[key] ?? 0.0) + point.value;
+    }
+    return valuesByDay;
   }
 
   void _paintDashedLine(Canvas canvas, Offset start, Offset end, Paint paint) {
@@ -462,6 +508,7 @@ class _UsageGraphPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _UsageGraphPainter oldDelegate) {
     return oldDelegate.points != points ||
+        oldDelegate.highlightedPoints != highlightedPoints ||
         oldDelegate.title != title ||
         oldDelegate.totalLabel != totalLabel ||
         oldDelegate.averageValue != averageValue ||
@@ -472,6 +519,11 @@ class _UsageGraphPainter extends CustomPainter {
         oldDelegate.layout != layout ||
         oldDelegate.theme != theme;
   }
+}
+
+DateTime _dayKey(DateTime date) {
+  final localDate = date.toLocal();
+  return DateTime(localDate.year, localDate.month, localDate.day);
 }
 
 bool _isSameLocalDayAsToday(DateTime date) {
