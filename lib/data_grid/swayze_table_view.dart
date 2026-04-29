@@ -1721,6 +1721,12 @@ Future<void> _copyControllerSelectionToClipboard(_SharedSwayzeController control
   }
 
   final cellMatrix = controller.cellsController.cellMatrixReadOnly;
+  if (rowLimit == rowRange.start + 1 && columnRange.end == columnRange.start + 1) {
+    final cell = cellMatrix[IntVector2(columnRange.start, rowRange.start)];
+    await Clipboard.setData(ClipboardData(text: _rawClipboardFieldText(cell)));
+    return;
+  }
+
   final lines = <String>[];
   for (var row = rowRange.start; row < rowLimit; row++) {
     final fields = <String>[];
@@ -1757,16 +1763,20 @@ String _stringifyTableValue(Object? value, {required bool pretty}) {
 }
 
 String _clipboardFieldText(_SharedSwayzeCellData? cell) {
-  if (cell == null) {
-    return '';
-  }
-
-  final text = _stringifyTableValue(cell.value, pretty: false);
+  final text = _rawClipboardFieldText(cell);
   if (text.contains('\t') || text.contains('\n') || text.contains('"')) {
     return '"${text.replaceAll('"', '""')}"';
   }
 
   return text;
+}
+
+String _rawClipboardFieldText(_SharedSwayzeCellData? cell) {
+  if (cell == null) {
+    return '';
+  }
+
+  return _stringifyTableValue(cell.value, pretty: false);
 }
 
 bool _rowsEqual(List<List<String>> a, List<List<String>> b) {

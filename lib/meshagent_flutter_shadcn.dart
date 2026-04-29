@@ -12,6 +12,7 @@ export "markdown_viewer.dart";
 export "theme/colors.dart";
 export "voice/voice.dart";
 export "toolkits/ui.dart";
+export "usage_graph.dart";
 export "chat/outbound_delivery_status.dart";
 export "secrets/keychain_dialog.dart";
 export "web_context_menu_manager.dart";
