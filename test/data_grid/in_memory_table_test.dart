@@ -455,7 +455,7 @@ void main() {
     expect(tester.getSize(tablePadding).height, closeTo(kColumnHeaderHeight + maxRowExtent + 1 + 8, 0.1));
   });
 
-  testWidgets('copy context menu item closes after copy', (tester) async {
+  testWidgets('copy context menu item copies a single cell without TSV quotes', (tester) async {
     final platform = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     final clipboardCalls = <MethodCall>[];
     platform.setMockMethodCallHandler(SystemChannels.platform, (methodCall) async {
@@ -474,7 +474,7 @@ void main() {
             child: InMemoryTable(
               columns: const ['Name'],
               rows: const [
-                ['Alpha'],
+                ['# Alpha\n\n"quoted" text'],
               ],
             ),
           ),
@@ -497,6 +497,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(clipboardCalls, hasLength(1));
+    expect(clipboardCalls.single.arguments, equals({'text': '# Alpha\n\n"quoted" text'}));
     expect(find.text('Copy'), findsNothing);
   });
 
