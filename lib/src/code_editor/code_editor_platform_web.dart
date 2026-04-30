@@ -91,11 +91,26 @@ Widget buildCodeEditor({
         : null,
   );
 
+  final scopedEditor = LayoutBuilder(
+    builder: (context, constraints) {
+      final mediaQuery = MediaQuery.of(context);
+      final resolvedPadding = padding?.resolve(Directionality.of(context)) ?? EdgeInsets.zero;
+      final rawWidth = constraints.hasBoundedWidth ? constraints.maxWidth : mediaQuery.size.width;
+      final rawHeight = constraints.hasBoundedHeight ? constraints.maxHeight : mediaQuery.size.height;
+      final width = (rawWidth - resolvedPadding.right).clamp(0.0, double.infinity);
+      final height = (rawHeight - resolvedPadding.bottom).clamp(0.0, double.infinity);
+      return MediaQuery(
+        data: mediaQuery.copyWith(size: Size(width, height)),
+        child: editor,
+      );
+    },
+  );
+
   if (style?.backgroundColor == null) {
-    return editor;
+    return scopedEditor;
   }
 
-  return ColoredBox(color: style!.backgroundColor!, child: editor);
+  return ColoredBox(color: style!.backgroundColor!, child: scopedEditor);
 }
 
 Color _selectionColor(Color cursorColor) {
