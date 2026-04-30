@@ -3,7 +3,34 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:meshagent_flutter_shadcn/chat/chat.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
+Color? _bubbleBackgroundColor(WidgetTester tester) {
+  for (final container in tester.widgetList<Container>(find.byType(Container))) {
+    final decoration = container.decoration;
+    if (decoration is BoxDecoration && decoration.borderRadius != null) {
+      return decoration.color;
+    }
+  }
+  return null;
+}
+
 void main() {
+  testWidgets('uses the accent background for non-assistant bubbles in dark mode', (tester) async {
+    final darkTheme = ShadThemeData(colorScheme: const ShadSlateColorScheme.dark(), brightness: Brightness.dark);
+
+    await tester.pumpWidget(
+      ShadApp(
+        themeMode: ThemeMode.dark,
+        darkTheme: darkTheme,
+        home: const Scaffold(body: ChatBubble(mine: false, accented: true, text: 'Hello')),
+      ),
+    );
+
+    expect(_bubbleBackgroundColor(tester), darkTheme.colorScheme.accent);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 600));
+  });
+
   testWidgets('keeps the reaction action visible while the reaction menu is open', (tester) async {
     const reactionKey = Key('reaction-action');
     ShadContextMenuController? reactionController;

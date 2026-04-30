@@ -94,9 +94,6 @@ class _MultiThreadViewState extends State<MultiThreadView> {
   @override
   Widget build(BuildContext context) {
     final selectedThreadPath = _normalizeSelectedThreadPath(widget.selectedThreadPath);
-    if (selectedThreadPath != null) {
-      return widget.builder(context, selectedThreadPath, _controller, _composerKey);
-    }
 
     return NewChatThread(
       key: ValueKey("new-thread-${widget.agentName}-${widget.newThreadResetVersion}"),
