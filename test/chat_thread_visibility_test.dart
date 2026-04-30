@@ -656,7 +656,7 @@ void main() {
     expect(find.text("optimistic hello"), findsOneWidget);
   });
 
-  testWidgets('does not optimistically render pending turn starts while the agent is processing', (tester) async {
+  testWidgets('keeps optimistic pending turn starts visible while the agent is processing', (tester) async {
     final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     final controller = ChatThreadController(room: room);
     final document = _createThreadDocument();
@@ -685,8 +685,83 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.byType(ChatBubble), findsNothing);
-    expect(find.text("optimistic hello"), findsNothing);
+    expect(find.byType(ChatBubble), findsOneWidget);
+    expect(find.text("optimistic hello"), findsOneWidget);
+  });
+
+  testWidgets('keeps optimistic pending turn starts until matching server messages are renderable', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
+    final document = _createThreadDocument();
+    addTearDown(room.dispose);
+    addTearDown(controller.dispose);
+    addTearDown(document.dispose);
+
+    _insertElement(
+      document: document,
+      targetId: _messagesElement(document).id,
+      tagName: "message",
+      elementId: "message-pending-incomplete",
+      attributes: {"id": "pending-1", "text": "optimistic hello", "author_name": "user"},
+    );
+
+    await tester.pumpWidget(
+      _buildThreadHarness(
+        room: room,
+        controller: controller,
+        document: document,
+        showTyping: true,
+        threadStatus: "Working",
+        threadStatusMode: "busy",
+        pendingMessages: const [
+          PendingAgentMessage(
+            messageId: "pending-1",
+            messageType: "meshagent.agent.turn.start",
+            threadPath: "/threads/test",
+            text: "optimistic hello",
+            attachments: [],
+          ),
+        ],
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(ChatBubble), findsOneWidget);
+    expect(find.text("optimistic hello"), findsOneWidget);
+  });
+
+  testWidgets('animates the processing status spacer when status appears', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
+    final document = _createThreadDocument();
+    addTearDown(room.dispose);
+    addTearDown(controller.dispose);
+    addTearDown(document.dispose);
+
+    const spacerKey = ValueKey("chat-thread-status-bottom-spacer");
+
+    await tester.pumpWidget(
+      _buildThreadHarness(
+        room: room,
+        controller: controller,
+        document: document,
+        showTyping: true,
+        threadStatus: "Working",
+        threadStatusMode: "busy",
+      ),
+    );
+
+    expect(tester.getSize(find.byKey(spacerKey)).height, 0);
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+
+    final midAnimationHeight = tester.getSize(find.byKey(spacerKey)).height;
+    expect(midAnimationHeight, greaterThan(0));
+    expect(midAnimationHeight, lessThan(20));
+
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(tester.getSize(find.byKey(spacerKey)).height, 20);
   });
 
   testWidgets('keeps the processing status row visible briefly after status clears', (tester) async {

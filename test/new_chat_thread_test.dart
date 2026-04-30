@@ -154,6 +154,54 @@ void main() {
     expect(footerWidthWithSend, footerWidthWithoutSend);
   });
 
+  testWidgets('composer box does not resize when focus changes', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
+    final composerKey = GlobalKey();
+    addTearDown(room.dispose);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      ShadApp(
+        themeMode: ThemeMode.dark,
+        darkTheme: ShadThemeData(
+          brightness: Brightness.dark,
+          inputTheme: ShadInputTheme(
+            decoration: ShadDecoration(border: ShadBorder.all(width: 1, padding: const EdgeInsets.all(1))),
+          ),
+        ),
+        home: Scaffold(
+          body: SizedBox(
+            width: 640,
+            child: ChatThreadInput(key: composerKey, room: room, controller: controller, onSend: (text, attachments) async {}),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final inputFinder = find.byType(ShadInput);
+    final decoration = tester.widget<ShadInput>(inputFinder).decoration!;
+    expect(decoration.focusedBorder?.top?.color, isNot(decoration.border?.top?.color));
+    expect(decoration.focusedBorder?.top?.width, decoration.border?.top?.width);
+    expect(decoration.focusedBorder?.radius, decoration.border?.radius);
+    expect(decoration.focusedBorder?.padding, decoration.border?.padding);
+
+    final composerFinder = find.byKey(composerKey);
+    final unfocusedComposerHeight = tester.getSize(composerFinder).height;
+    final unfocusedSize = tester.getSize(inputFinder);
+    final unfocusedTopLeft = tester.getTopLeft(inputFinder);
+
+    await tester.tap(find.byType(EditableText));
+    await tester.pump();
+
+    expect(tester.widget<EditableText>(find.byType(EditableText)).focusNode.hasFocus, isTrue);
+    expect(tester.getSize(composerFinder).height, unfocusedComposerHeight);
+    expect(tester.getSize(inputFinder).height, unfocusedSize.height);
+    expect(tester.getSize(inputFinder), unfocusedSize);
+    expect(tester.getTopLeft(inputFinder), unfocusedTopLeft);
+  });
+
   testWidgets('mcp footer keeps row content visible while connectors load', (tester) async {
     final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     final controller = ChatThreadController(room: room);

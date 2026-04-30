@@ -1900,6 +1900,7 @@ class ChatThreadViewportBody extends StatefulWidget {
     this.bottomAlign = true,
     this.centerContent,
     this.bottomSpacer = 0,
+    this.bottomSpacerKey,
     this.bottomSpacerAnimationDuration = Duration.zero,
     this.overlays = const [],
     this.tapRegionGroupId,
@@ -1911,6 +1912,7 @@ class ChatThreadViewportBody extends StatefulWidget {
   final bool bottomAlign;
   final Widget? centerContent;
   final double bottomSpacer;
+  final Key? bottomSpacerKey;
   final Duration bottomSpacerAnimationDuration;
   final List<Widget> overlays;
   final Object? tapRegionGroupId;
@@ -2029,7 +2031,12 @@ class _ChatThreadViewportBodyState extends State<ChatThreadViewportBody> {
                   ),
                 ),
                 if (!widget.bottomAlign && widget.centerContent != null) widget.centerContent!,
-                AnimatedContainer(duration: widget.bottomSpacerAnimationDuration, curve: Curves.easeOutCubic, height: widget.bottomSpacer),
+                AnimatedContainer(
+                  key: widget.bottomSpacerKey,
+                  duration: widget.bottomSpacerAnimationDuration,
+                  curve: Curves.easeOutCubic,
+                  height: widget.bottomSpacer,
+                ),
               ],
             ),
           ),
@@ -3256,14 +3263,25 @@ class _ChatThreadInput extends State<ChatThreadInput> {
               final composerRadius = _usesMobileContextLayout(context)
                   ? BorderRadius.circular(usesCompactMobileComposerShape ? _mobileComposerPillCornerRadius : _mobileComposerCornerRadius)
                   : theme.radius.resolve(Directionality.of(context));
-              final composerBorder = ShadBorder.all(radius: composerRadius, color: theme.colorScheme.border, width: 2);
-              final composerFocusedBorder = ShadBorder.all(radius: composerRadius, color: theme.colorScheme.foreground, width: 2);
+              final composerBorder = ShadBorder.all(
+                radius: composerRadius,
+                color: theme.colorScheme.border,
+                width: 2,
+                padding: EdgeInsets.zero,
+              );
+              final focusedComposerBorder = ShadBorder.all(
+                radius: composerRadius,
+                color: theme.colorScheme.ring,
+                width: 2,
+                padding: EdgeInsets.zero,
+              );
               return ShadDecoration(
                 color: theme.colorScheme.card,
                 border: composerBorder,
-                focusedBorder: composerFocusedBorder,
+                focusedBorder: focusedComposerBorder,
                 secondaryBorder: ShadBorder.none,
                 secondaryFocusedBorder: ShadBorder.none,
+                disableSecondaryBorder: true,
               );
             })(),
             maxLines: 8,
@@ -4502,6 +4520,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   static const double _statusBottomSpacer = 20;
   static const Duration _statusCollapseDelay = Duration(milliseconds: 500);
   static const Duration _statusSpacerAnimationDuration = Duration(milliseconds: 160);
+  static const Key _statusBottomSpacerKey = ValueKey("chat-thread-status-bottom-spacer");
   static const int _maxImageCacheBytes = 64 * 1024 * 1024;
 
   static const List<String> _defaultReactionOptions = <String>[
@@ -4617,8 +4636,18 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   @override
   void initState() {
     super.initState();
-    _statusSlotVisible = showTyping;
+    _statusSlotVisible = false;
     _rememberThreadStatus();
+    if (showTyping) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !showTyping || _statusSlotVisible) {
+          return;
+        }
+        setState(() {
+          _statusSlotVisible = true;
+        });
+      });
+    }
   }
 
   @override
@@ -5689,7 +5718,6 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   }
 
   List<PendingAgentMessage> _optimisticPendingMessages(List<MeshElement> visibleMessages) {
-    final canRenderTurnStart = !showTyping && !showListening && threadStatusMode == null;
     return widget.pendingMessages
         .where((message) {
           if (visibleMessages.any((visibleMessage) => _threadMessageMatchesPendingAgentMessage(visibleMessage, message))) {
@@ -5697,7 +5725,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
           }
 
           if (message.messageType == _agentTurnStartType) {
-            return canRenderTurnStart;
+            return true;
           }
 
           return false;
@@ -5872,6 +5900,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
       bottomAlign: bottomAlign,
       centerContent: null,
       bottomSpacer: _statusSlotVisible ? _statusBottomSpacer : 0,
+      bottomSpacerKey: _statusBottomSpacerKey,
       bottomSpacerAnimationDuration: _statusSpacerAnimationDuration,
       overlays: [
         Positioned(
