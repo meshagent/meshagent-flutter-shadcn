@@ -1098,6 +1098,7 @@ class _SharedSwayzeGridState extends State<_SharedSwayzeGrid> {
           physics: widget.autoSizeVertically ? const NeverScrollableScrollPhysics() : null,
           slivers: [
             SliverSwayzeTable<_SharedSwayzeCellData>(
+              key: ObjectKey(widget.controller),
               controller: widget.controller,
               focusNode: _focusNode,
               verticalScrollController: _verticalScrollController,

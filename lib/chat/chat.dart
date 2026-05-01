@@ -335,12 +335,12 @@ bool _isToolOrShellCallEvent(MeshElement message) {
     return true;
   }
 
-  if (message.tagName != "event" || kind != "tool") {
+  if (message.tagName != "event") {
     return false;
   }
 
   final itemType = ((message.getAttribute("item_type") as String?) ?? "").trim().toLowerCase();
-  if (_toolCallItemTypes.contains(itemType)) {
+  if (kind == "tool" || _toolCallItemTypes.contains(itemType)) {
     return true;
   }
 
@@ -475,6 +475,10 @@ bool _threadMessageMatchesPendingAgentMessage(MeshElement message, PendingAgentM
 }
 
 bool _shouldRenderThreadMessageElement(MeshElement message, {required bool showCompletedToolCalls}) {
+  if (_shouldHideToolOrShellCallEvent(message, showCompletedToolCalls: showCompletedToolCalls)) {
+    return false;
+  }
+
   if (message.tagName == "reasoning") {
     final summary = (message.getAttribute("summary") ?? "").toString().trim();
     return summary.isNotEmpty;
@@ -492,7 +496,7 @@ bool _shouldRenderThreadMessageElement(MeshElement message, {required bool showC
   if (!_supportedThreadEventKinds.contains(kind)) {
     return false;
   }
-  return !_shouldHideToolOrShellCallEvent(message, showCompletedToolCalls: showCompletedToolCalls);
+  return true;
 }
 
 class _ImageMime {
@@ -1902,6 +1906,7 @@ class ChatThreadViewportBody extends StatefulWidget {
     this.bottomSpacer = 0,
     this.bottomSpacerKey,
     this.bottomSpacerAnimationDuration = Duration.zero,
+    this.bottomSpacerAnimationCurve = Curves.easeOutCubic,
     this.overlays = const [],
     this.tapRegionGroupId,
     this.mobileUnderHeaderContentPadding,
@@ -1914,6 +1919,7 @@ class ChatThreadViewportBody extends StatefulWidget {
   final double bottomSpacer;
   final Key? bottomSpacerKey;
   final Duration bottomSpacerAnimationDuration;
+  final Curve bottomSpacerAnimationCurve;
   final List<Widget> overlays;
   final Object? tapRegionGroupId;
   final double? mobileUnderHeaderContentPadding;
@@ -2034,7 +2040,7 @@ class _ChatThreadViewportBodyState extends State<ChatThreadViewportBody> {
                 AnimatedContainer(
                   key: widget.bottomSpacerKey,
                   duration: widget.bottomSpacerAnimationDuration,
-                  curve: Curves.easeOutCubic,
+                  curve: widget.bottomSpacerAnimationCurve,
                   height: widget.bottomSpacer,
                 ),
               ],
@@ -4519,7 +4525,8 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   static const double _chatMessageStackSpacing = 38;
   static const double _statusBottomSpacer = 20;
   static const Duration _statusCollapseDelay = Duration(milliseconds: 500);
-  static const Duration _statusSpacerAnimationDuration = Duration(milliseconds: 160);
+  static const Duration _statusAnimationDuration = Duration(seconds: 1);
+  static const Curve _statusAnimationCurve = Curves.easeInOutCubicEmphasized;
   static const Key _statusBottomSpacerKey = ValueKey("chat-thread-status-bottom-spacer");
   static const int _maxImageCacheBytes = 64 * 1024 * 1024;
 
@@ -5901,7 +5908,8 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
       centerContent: null,
       bottomSpacer: _statusSlotVisible ? _statusBottomSpacer : 0,
       bottomSpacerKey: _statusBottomSpacerKey,
-      bottomSpacerAnimationDuration: _statusSpacerAnimationDuration,
+      bottomSpacerAnimationDuration: _statusAnimationDuration,
+      bottomSpacerAnimationCurve: _statusAnimationCurve,
       overlays: [
         Positioned(
           left: 0,
@@ -5915,8 +5923,8 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                 padding: EdgeInsets.symmetric(horizontal: chatThreadStatusHorizontalPadding(constraints.maxWidth)),
                 child: AnimatedSize(
                   alignment: Alignment.bottomCenter,
-                  duration: _statusSpacerAnimationDuration,
-                  curve: Curves.easeOutCubic,
+                  duration: _statusAnimationDuration,
+                  curve: _statusAnimationCurve,
                   child: _statusSlotVisible
                       ? ChatThreadProcessingStatusRow(
                           text: displayStatus,

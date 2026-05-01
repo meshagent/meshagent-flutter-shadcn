@@ -59,7 +59,7 @@ final MeshSchema _threadSchema = MeshSchema(
       tagName: "messages",
       description: "",
       properties: [
-        ChildProperty(name: "children", description: "", childTagNames: ["message", "reasoning", "event"]),
+        ChildProperty(name: "children", description: "", childTagNames: ["message", "reasoning", "event", "exec"]),
       ],
     ),
     ElementType(
@@ -110,6 +110,15 @@ final MeshSchema _threadSchema = MeshSchema(
         ValueProperty(name: "summary", description: "", type: SimpleValue.string),
         ValueProperty(name: "headline", description: "", type: SimpleValue.string),
         ValueProperty(name: "details", description: "", type: SimpleValue.string),
+      ],
+    ),
+    ElementType(
+      tagName: "exec",
+      description: "",
+      properties: [
+        ValueProperty(name: "command", description: "", type: SimpleValue.string),
+        ValueProperty(name: "stdout", description: "", type: SimpleValue.string),
+        ValueProperty(name: "stderr", description: "", type: SimpleValue.string),
       ],
     ),
   ],
@@ -385,6 +394,41 @@ void main() {
     expect(find.text("Calling Tool: weather"), findsOneWidget);
   });
 
+  testWidgets('hides preparing tool events without item type when tool calls are disabled', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
+    final document = _createThreadDocument();
+    addTearDown(room.dispose);
+    addTearDown(controller.dispose);
+    addTearDown(document.dispose);
+
+    _insertElement(
+      document: document,
+      targetId: _messagesElement(document).id,
+      tagName: "event",
+      elementId: "tool-call-preparing",
+      attributes: {
+        "kind": "tool",
+        "state": "queued",
+        "method": "response.output_item.added",
+        "summary": "Preparing Tool Call",
+        "headline": "Preparing Tool Call",
+        "details": "Preparing search",
+      },
+    );
+
+    await tester.pumpWidget(_buildThreadHarness(room: room, controller: controller, document: document));
+    await tester.pump();
+
+    expect(find.text("Preparing Tool Call"), findsNothing);
+    expect(find.text("Preparing search"), findsNothing);
+
+    await tester.pumpWidget(_buildThreadHarness(room: room, controller: controller, document: document, showCompletedToolCalls: true));
+    await tester.pump();
+
+    expect(find.text("Preparing Tool Call"), findsOneWidget);
+  });
+
   testWidgets('hides shell call events when tool calls are disabled', (tester) async {
     final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     final controller = ChatThreadController(room: room);
@@ -414,6 +458,29 @@ void main() {
 
     expect(find.text("Running Command"), findsNothing);
     expect(find.text("Shell: pwd"), findsNothing);
+  });
+
+  testWidgets('hides exec elements when tool calls are disabled', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
+    final document = _createThreadDocument();
+    addTearDown(room.dispose);
+    addTearDown(controller.dispose);
+    addTearDown(document.dispose);
+
+    _insertElement(
+      document: document,
+      targetId: _messagesElement(document).id,
+      tagName: "exec",
+      elementId: "exec-running",
+      attributes: {"command": "echo hidden", "stdout": "hidden output"},
+    );
+
+    await tester.pumpWidget(_buildThreadHarness(room: room, controller: controller, document: document));
+    await tester.pump();
+
+    expect(find.textContaining("echo hidden"), findsNothing);
+    expect(find.textContaining("hidden output"), findsNothing);
   });
 
   testWidgets('optimistically renders pending turn start messages in the feed', (tester) async {
@@ -760,7 +827,7 @@ void main() {
     expect(midAnimationHeight, greaterThan(0));
     expect(midAnimationHeight, lessThan(20));
 
-    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump(const Duration(milliseconds: 1100));
     expect(tester.getSize(find.byKey(spacerKey)).height, 20);
   });
 
