@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_flutter_shadcn/chat/chat.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:uuid/uuid.dart';
 
 typedef NewChatThreadBuilder = Widget Function(BuildContext context, String threadPath);
 typedef NewChatThreadToolsBuilder = Widget Function(BuildContext context, ChatThreadController controller, ChatThreadSnapshot state);
@@ -60,6 +61,7 @@ class _NewChatThreadState extends State<NewChatThread> {
   bool _waitingForAgent = false;
   String? _newThreadError;
   String? _threadPath;
+  PendingAgentMessage? _pendingFirstMessage;
   int _newThreadOperationId = 0;
   Completer<RemoteParticipant>? _waitForAgentCompleter;
   Completer<void>? _waitForAgentReadyCompleter;
@@ -129,6 +131,7 @@ class _NewChatThreadState extends State<NewChatThread> {
       _composerInputKey = widget.composerKey ?? GlobalObjectKey(_controller);
       _threadPath = null;
       _newThreadError = null;
+      _pendingFirstMessage = null;
       _creatingNewThread = false;
       _waitingForAgent = false;
       _cancelWaitingForAgent();
@@ -140,6 +143,7 @@ class _NewChatThreadState extends State<NewChatThread> {
       _composerInputKey = widget.composerKey ?? GlobalObjectKey(_controller);
       _threadPath = null;
       _newThreadError = null;
+      _pendingFirstMessage = null;
       _creatingNewThread = false;
       _waitingForAgent = false;
       _cancelWaitingForAgent();
@@ -258,6 +262,8 @@ class _NewChatThreadState extends State<NewChatThread> {
     final prompt = _controller.text.trim();
     final attachments = _controller.attachmentUploads;
     final attachmentPaths = [for (final attachment in attachments) attachment.path];
+    final pendingMessageId = const Uuid().v4();
+    final pendingCreatedAt = DateTime.now();
     final hasPendingUploads = attachments.any((attachment) => attachment.status != UploadStatus.completed);
     if (_creatingNewThread || _waitingForAgent || hasPendingUploads) {
       return;
@@ -268,11 +274,26 @@ class _NewChatThreadState extends State<NewChatThread> {
 
     final operationId = ++_newThreadOperationId;
     final waitingForAgent = _agent == null;
+    final senderName = widget.room.localParticipant?.getAttribute("name");
+    final pendingFirstMessage = PendingAgentMessage(
+      messageId: pendingMessageId,
+      messageType: "meshagent.agent.turn.start",
+      threadPath: "",
+      text: prompt,
+      attachments: attachmentPaths,
+      senderName: senderName is String && senderName.trim().isNotEmpty ? senderName.trim() : null,
+      createdAt: pendingCreatedAt,
+      matchByContentOnly: true,
+      awaitingAcceptance: true,
+      awaitingOnline: waitingForAgent,
+    );
     setState(() {
       _creatingNewThread = !waitingForAgent;
       _waitingForAgent = waitingForAgent;
       _newThreadError = null;
+      _pendingFirstMessage = pendingFirstMessage;
     });
+    _controller.scrollThreadToBottom(animated: false);
 
     try {
       final agent = _agent ?? await _waitForAgentOnline();
@@ -327,12 +348,27 @@ class _NewChatThreadState extends State<NewChatThread> {
         return;
       }
 
+      _controller.markPendingAgentMessage(
+        PendingAgentMessage(
+          messageId: pendingFirstMessage.messageId,
+          messageType: pendingFirstMessage.messageType,
+          threadPath: path,
+          text: pendingFirstMessage.text,
+          attachments: pendingFirstMessage.attachments,
+          senderName: pendingFirstMessage.senderName,
+          createdAt: pendingFirstMessage.createdAt,
+          matchByContentOnly: pendingFirstMessage.matchByContentOnly,
+          awaitingAcceptance: pendingFirstMessage.awaitingAcceptance,
+        ),
+      );
+
       final defersToParent = widget.onThreadPathChanged != null || widget.onThreadResolved != null;
       setState(() {
         _threadPath = defersToParent ? null : path;
         _newThreadError = null;
         _creatingNewThread = false;
         _waitingForAgent = false;
+        _pendingFirstMessage = defersToParent ? pendingFirstMessage : null;
       });
       _notifyThreadResolved(path, threadName);
       _notifyThreadPathChanged(path);
@@ -345,6 +381,7 @@ class _NewChatThreadState extends State<NewChatThread> {
         _creatingNewThread = false;
         _waitingForAgent = false;
         _newThreadError = null;
+        _pendingFirstMessage = null;
       });
     } catch (e) {
       if (!mounted || operationId != _newThreadOperationId) {
@@ -354,6 +391,7 @@ class _NewChatThreadState extends State<NewChatThread> {
         _creatingNewThread = false;
         _waitingForAgent = false;
         _newThreadError = "$e";
+        _pendingFirstMessage = null;
       });
     }
   }
@@ -370,6 +408,7 @@ class _NewChatThreadState extends State<NewChatThread> {
       _creatingNewThread = false;
       _waitingForAgent = false;
       _newThreadError = null;
+      _pendingFirstMessage = null;
     });
   }
 
@@ -385,10 +424,12 @@ class _NewChatThreadState extends State<NewChatThread> {
       _threadPath = null;
       _newThreadError = null;
       _waitingForAgent = false;
+      _pendingFirstMessage = null;
     });
     _notifyThreadResolved(null, null);
     _notifyThreadPathChanged(null);
     _controller.clear();
+    _controller.resetThreadScrollPosition();
   }
 
   ChatThreadSnapshot _buildSnapshot() {
@@ -436,6 +477,23 @@ class _NewChatThreadState extends State<NewChatThread> {
     );
   }
 
+  Widget _buildNewThreadFeedArea(BuildContext context) {
+    final pendingMessage = _pendingFirstMessage;
+    if (pendingMessage == null) {
+      return Expanded(child: Center(child: widget.emptyState ?? const SizedBox.shrink()));
+    }
+
+    return ChatThreadMessages(
+      room: widget.room,
+      path: pendingMessage.threadPath,
+      scrollController: _controller.threadScrollController,
+      messages: const [],
+      online: _agent == null ? const [] : [_agent!],
+      showCompletedToolCalls: false,
+      pendingMessages: [pendingMessage],
+    );
+  }
+
   Widget _buildNewThreadComposer(BuildContext context) {
     final snapshot = _buildSnapshot();
     final toolsBuilder = widget.toolsBuilder;
@@ -471,7 +529,24 @@ class _NewChatThreadState extends State<NewChatThread> {
     final content = !widget.centerComposer
         ? Column(
             children: [
-              Expanded(child: Center(child: widget.emptyState ?? const SizedBox.shrink())),
+              _buildNewThreadFeedArea(context),
+              if (_newThreadError != null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 15),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 912),
+                      child: ShadAlert.destructive(title: const Text("Unable to start thread"), description: Text(_newThreadError!)),
+                    ),
+                  ),
+                ),
+              ChatThreadInputFrame(child: input),
+            ],
+          )
+        : _pendingFirstMessage != null
+        ? Column(
+            children: [
+              _buildNewThreadFeedArea(context),
               if (_newThreadError != null)
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 15),

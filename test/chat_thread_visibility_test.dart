@@ -59,7 +59,7 @@ final MeshSchema _threadSchema = MeshSchema(
       tagName: "messages",
       description: "",
       properties: [
-        ChildProperty(name: "children", description: "", childTagNames: ["message", "reasoning", "event"]),
+        ChildProperty(name: "children", description: "", childTagNames: ["message", "reasoning", "event", "exec"]),
       ],
     ),
     ElementType(
@@ -80,6 +80,7 @@ final MeshSchema _threadSchema = MeshSchema(
       properties: [
         ValueProperty(name: "text", description: "", type: SimpleValue.string),
         ValueProperty(name: "author_name", description: "", type: SimpleValue.string),
+        ValueProperty(name: "role", description: "", type: SimpleValue.string),
         ChildProperty(name: "children", description: "", childTagNames: ["file", "image"]),
       ],
     ),
@@ -109,6 +110,15 @@ final MeshSchema _threadSchema = MeshSchema(
         ValueProperty(name: "summary", description: "", type: SimpleValue.string),
         ValueProperty(name: "headline", description: "", type: SimpleValue.string),
         ValueProperty(name: "details", description: "", type: SimpleValue.string),
+      ],
+    ),
+    ElementType(
+      tagName: "exec",
+      description: "",
+      properties: [
+        ValueProperty(name: "command", description: "", type: SimpleValue.string),
+        ValueProperty(name: "stdout", description: "", type: SimpleValue.string),
+        ValueProperty(name: "stderr", description: "", type: SimpleValue.string),
       ],
     ),
   ],
@@ -157,6 +167,11 @@ Widget _buildThreadHarness({
   required MeshDocument document,
   bool shouldShowAuthorNames = true,
   bool showCompletedToolCalls = false,
+  bool showTyping = false,
+  String? threadStatus,
+  DateTime? threadStatusStartedAt,
+  String? threadStatusMode,
+  List<PendingAgentMessage> pendingMessages = const [],
 }) {
   return ShadApp(
     home: Scaffold(
@@ -171,6 +186,11 @@ Widget _buildThreadHarness({
             showCompletedToolCalls: showCompletedToolCalls,
             shouldShowAuthorNames: shouldShowAuthorNames,
             startChatCentered: true,
+            showTyping: showTyping,
+            threadStatus: threadStatus,
+            threadStatusStartedAt: threadStatusStartedAt,
+            threadStatusMode: threadStatusMode,
+            pendingMessages: pendingMessages,
             emptyStateTitle: "No visible messages",
           ),
           ChatThreadInputFrame(
@@ -211,7 +231,7 @@ void main() {
       targetId: _messagesElement(document).id,
       tagName: "message",
       elementId: "message-empty",
-      attributes: {"text": "   ", "author_name": "assistant"},
+      attributes: {"text": "   ", "author_name": "assistant", "role": "agent"},
     );
 
     await tester.pumpWidget(_buildThreadHarness(room: room, controller: controller, document: document));
@@ -236,14 +256,14 @@ void main() {
       targetId: messages.id,
       tagName: "message",
       elementId: "message-empty",
-      attributes: {"text": "", "author_name": "assistant"},
+      attributes: {"text": "", "author_name": "assistant", "role": "agent"},
     );
     _insertElement(
       document: document,
       targetId: messages.id,
       tagName: "message",
       elementId: "message-visible",
-      attributes: {"text": "hello", "author_name": "assistant"},
+      attributes: {"text": "hello", "author_name": "assistant", "role": "agent"},
     );
 
     await tester.pumpWidget(_buildThreadHarness(room: room, controller: controller, document: document));
@@ -268,14 +288,14 @@ void main() {
       targetId: messages.id,
       tagName: "message",
       elementId: "message-one",
-      attributes: {"text": "hello", "author_name": "assistant"},
+      attributes: {"text": "hello", "author_name": "assistant", "role": "agent"},
     );
     _insertElement(
       document: document,
       targetId: messages.id,
       tagName: "message",
       elementId: "message-two",
-      attributes: {"text": "again", "author_name": "assistant"},
+      attributes: {"text": "again", "author_name": "assistant", "role": "agent"},
     );
 
     await tester.pumpWidget(_buildThreadHarness(room: room, controller: controller, document: document));
@@ -297,13 +317,45 @@ void main() {
       targetId: _messagesElement(document).id,
       tagName: "message",
       elementId: "message-one",
-      attributes: {"text": "hello", "author_name": "assistant"},
+      attributes: {"text": "hello", "author_name": "assistant", "role": "agent"},
     );
 
     await tester.pumpWidget(_buildThreadHarness(room: room, controller: controller, document: document, shouldShowAuthorNames: false));
     await tester.pump();
 
     expect(find.text("assistant"), findsNothing);
+  });
+
+  testWidgets('does not render standard messages until author name and role are present', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
+    final document = _createThreadDocument();
+    addTearDown(room.dispose);
+    addTearDown(controller.dispose);
+    addTearDown(document.dispose);
+
+    final messages = _messagesElement(document);
+    _insertElement(
+      document: document,
+      targetId: messages.id,
+      tagName: "message",
+      elementId: "message-no-role",
+      attributes: {"text": "missing role", "author_name": "assistant"},
+    );
+    _insertElement(
+      document: document,
+      targetId: messages.id,
+      tagName: "message",
+      elementId: "message-no-name",
+      attributes: {"text": "missing name", "role": "agent"},
+    );
+
+    await tester.pumpWidget(_buildThreadHarness(room: room, controller: controller, document: document));
+    await tester.pump();
+
+    expect(find.text("missing role"), findsNothing);
+    expect(find.text("missing name"), findsNothing);
+    expect(find.byType(ChatBubble), findsNothing);
   });
 
   testWidgets('hides in-progress tool call events when tool calls are disabled', (tester) async {
@@ -342,6 +394,41 @@ void main() {
     expect(find.text("Calling Tool: weather"), findsOneWidget);
   });
 
+  testWidgets('hides preparing tool events without item type when tool calls are disabled', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
+    final document = _createThreadDocument();
+    addTearDown(room.dispose);
+    addTearDown(controller.dispose);
+    addTearDown(document.dispose);
+
+    _insertElement(
+      document: document,
+      targetId: _messagesElement(document).id,
+      tagName: "event",
+      elementId: "tool-call-preparing",
+      attributes: {
+        "kind": "tool",
+        "state": "queued",
+        "method": "response.output_item.added",
+        "summary": "Preparing Tool Call",
+        "headline": "Preparing Tool Call",
+        "details": "Preparing search",
+      },
+    );
+
+    await tester.pumpWidget(_buildThreadHarness(room: room, controller: controller, document: document));
+    await tester.pump();
+
+    expect(find.text("Preparing Tool Call"), findsNothing);
+    expect(find.text("Preparing search"), findsNothing);
+
+    await tester.pumpWidget(_buildThreadHarness(room: room, controller: controller, document: document, showCompletedToolCalls: true));
+    await tester.pump();
+
+    expect(find.text("Preparing Tool Call"), findsOneWidget);
+  });
+
   testWidgets('hides shell call events when tool calls are disabled', (tester) async {
     final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     final controller = ChatThreadController(room: room);
@@ -371,6 +458,452 @@ void main() {
 
     expect(find.text("Running Command"), findsNothing);
     expect(find.text("Shell: pwd"), findsNothing);
+  });
+
+  testWidgets('hides exec elements when tool calls are disabled', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
+    final document = _createThreadDocument();
+    addTearDown(room.dispose);
+    addTearDown(controller.dispose);
+    addTearDown(document.dispose);
+
+    _insertElement(
+      document: document,
+      targetId: _messagesElement(document).id,
+      tagName: "exec",
+      elementId: "exec-running",
+      attributes: {"command": "echo hidden", "stdout": "hidden output"},
+    );
+
+    await tester.pumpWidget(_buildThreadHarness(room: room, controller: controller, document: document));
+    await tester.pump();
+
+    expect(find.textContaining("echo hidden"), findsNothing);
+    expect(find.textContaining("hidden output"), findsNothing);
+  });
+
+  testWidgets('optimistically renders pending turn start messages in the feed', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
+    final document = _createThreadDocument();
+    addTearDown(room.dispose);
+    addTearDown(controller.dispose);
+    addTearDown(document.dispose);
+
+    await tester.pumpWidget(
+      _buildThreadHarness(
+        room: room,
+        controller: controller,
+        document: document,
+        pendingMessages: const [
+          PendingAgentMessage(
+            messageId: "pending-1",
+            messageType: "meshagent.agent.turn.start",
+            threadPath: "/threads/test",
+            text: "optimistic hello",
+            attachments: [],
+          ),
+        ],
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(ChatBubble), findsOneWidget);
+    expect(find.text("optimistic hello"), findsOneWidget);
+  });
+
+  testWidgets('does not optimistically render pending steer messages in the feed', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
+    final document = _createThreadDocument();
+    addTearDown(room.dispose);
+    addTearDown(controller.dispose);
+    addTearDown(document.dispose);
+
+    await tester.pumpWidget(
+      _buildThreadHarness(
+        room: room,
+        controller: controller,
+        document: document,
+        showTyping: true,
+        threadStatus: "Writing",
+        threadStatusMode: "steerable",
+        pendingMessages: const [
+          PendingAgentMessage(
+            messageId: "pending-steer-1",
+            messageType: "meshagent.agent.turn.steer",
+            threadPath: "/threads/test",
+            text: "queued steer",
+            attachments: [],
+          ),
+        ],
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(ChatBubble), findsNothing);
+    expect(find.text("queued steer"), findsNothing);
+  });
+
+  test('keeps pending steer messages after acceptance and application events', () async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
+    final document = _createThreadDocument();
+    addTearDown(room.dispose);
+    addTearDown(controller.dispose);
+    addTearDown(document.dispose);
+
+    controller.notifyOnSend = false;
+    await controller.send(
+      thread: document,
+      path: "/threads/test",
+      message: const ChatMessage(id: "pending-steer-1", text: "translate to spanish"),
+      messageType: "steer",
+      storeLocally: false,
+      useAgentMessages: true,
+      turnId: "turn-1",
+    );
+
+    expect(controller.pendingAgentMessages.single.awaitingAcceptance, isTrue);
+
+    controller.handleAgentMessagePayload({
+      "type": "meshagent.agent.turn.steer.accepted",
+      "thread_id": "/threads/test",
+      "turn_id": "turn-1",
+      "source_message_id": "pending-steer-1",
+    });
+
+    expect(controller.pendingAgentMessages.single.awaitingAcceptance, isFalse);
+    expect(controller.pendingAgentMessages.single.text, "translate to spanish");
+
+    controller.handleAgentMessagePayload({
+      "type": "meshagent.agent.turn.steered",
+      "thread_id": "/threads/test",
+      "turn_id": "turn-1",
+      "source_message_id": "pending-steer-1",
+    });
+
+    expect(controller.pendingAgentMessages.single.text, "translate to spanish");
+  });
+
+  testWidgets('hides optimistic pending turn start messages once the real message is visible', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
+    final document = _createThreadDocument();
+    addTearDown(room.dispose);
+    addTearDown(controller.dispose);
+    addTearDown(document.dispose);
+
+    _insertElement(
+      document: document,
+      targetId: _messagesElement(document).id,
+      tagName: "message",
+      elementId: "message-visible",
+      attributes: {"id": "pending-1", "text": "optimistic hello", "author_name": "user", "role": "user"},
+    );
+
+    await tester.pumpWidget(
+      _buildThreadHarness(
+        room: room,
+        controller: controller,
+        document: document,
+        pendingMessages: const [
+          PendingAgentMessage(
+            messageId: "pending-1",
+            messageType: "meshagent.agent.turn.start",
+            threadPath: "/threads/test",
+            text: "optimistic hello",
+            attachments: [],
+          ),
+        ],
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(ChatBubble), findsOneWidget);
+    expect(find.text("optimistic hello"), findsOneWidget);
+  });
+
+  testWidgets('hides new thread first-message pending rows once matching content is visible', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
+    final document = _createThreadDocument();
+    addTearDown(room.dispose);
+    addTearDown(controller.dispose);
+    addTearDown(document.dispose);
+
+    await tester.pumpWidget(
+      _buildThreadHarness(
+        room: room,
+        controller: controller,
+        document: document,
+        pendingMessages: const [
+          PendingAgentMessage(
+            messageId: "pending-new-thread-1",
+            messageType: "meshagent.agent.turn.start",
+            threadPath: "/threads/test",
+            text: "first new thread message",
+            attachments: [],
+            matchByContentOnly: true,
+          ),
+        ],
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(ChatBubble), findsOneWidget);
+    expect(find.text("first new thread message"), findsOneWidget);
+
+    _insertElement(
+      document: document,
+      targetId: _messagesElement(document).id,
+      tagName: "message",
+      elementId: "message-visible",
+      attributes: {"text": "first new thread message", "author_name": "user", "role": "user"},
+    );
+
+    await tester.pumpWidget(
+      _buildThreadHarness(
+        room: room,
+        controller: controller,
+        document: document,
+        pendingMessages: const [
+          PendingAgentMessage(
+            messageId: "pending-new-thread-1",
+            messageType: "meshagent.agent.turn.start",
+            threadPath: "/threads/test",
+            text: "first new thread message",
+            attachments: [],
+            matchByContentOnly: true,
+          ),
+        ],
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(ChatBubble), findsOneWidget);
+    expect(find.text("first new thread message"), findsOneWidget);
+  });
+
+  testWidgets('keeps optimistic pending messages until the real message text matches', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
+    final document = _createThreadDocument();
+    addTearDown(room.dispose);
+    addTearDown(controller.dispose);
+    addTearDown(document.dispose);
+
+    _insertElement(
+      document: document,
+      targetId: _messagesElement(document).id,
+      tagName: "message",
+      elementId: "message-visible",
+      attributes: {"id": "pending-1", "text": "", "author_name": "user", "role": "user"},
+    );
+
+    await tester.pumpWidget(
+      _buildThreadHarness(
+        room: room,
+        controller: controller,
+        document: document,
+        pendingMessages: const [
+          PendingAgentMessage(
+            messageId: "pending-1",
+            messageType: "meshagent.agent.turn.start",
+            threadPath: "/threads/test",
+            text: "optimistic hello",
+            attachments: [],
+          ),
+        ],
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text("optimistic hello"), findsOneWidget);
+  });
+
+  testWidgets('keeps optimistic pending turn starts visible while the agent is processing', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
+    final document = _createThreadDocument();
+    addTearDown(room.dispose);
+    addTearDown(controller.dispose);
+    addTearDown(document.dispose);
+
+    await tester.pumpWidget(
+      _buildThreadHarness(
+        room: room,
+        controller: controller,
+        document: document,
+        showTyping: true,
+        threadStatus: "Working",
+        threadStatusMode: "busy",
+        pendingMessages: const [
+          PendingAgentMessage(
+            messageId: "pending-1",
+            messageType: "meshagent.agent.turn.start",
+            threadPath: "/threads/test",
+            text: "optimistic hello",
+            attachments: [],
+          ),
+        ],
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(ChatBubble), findsOneWidget);
+    expect(find.text("optimistic hello"), findsOneWidget);
+  });
+
+  testWidgets('keeps optimistic pending turn starts until matching server messages are renderable', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
+    final document = _createThreadDocument();
+    addTearDown(room.dispose);
+    addTearDown(controller.dispose);
+    addTearDown(document.dispose);
+
+    _insertElement(
+      document: document,
+      targetId: _messagesElement(document).id,
+      tagName: "message",
+      elementId: "message-pending-incomplete",
+      attributes: {"id": "pending-1", "text": "optimistic hello", "author_name": "user"},
+    );
+
+    await tester.pumpWidget(
+      _buildThreadHarness(
+        room: room,
+        controller: controller,
+        document: document,
+        showTyping: true,
+        threadStatus: "Working",
+        threadStatusMode: "busy",
+        pendingMessages: const [
+          PendingAgentMessage(
+            messageId: "pending-1",
+            messageType: "meshagent.agent.turn.start",
+            threadPath: "/threads/test",
+            text: "optimistic hello",
+            attachments: [],
+          ),
+        ],
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(ChatBubble), findsOneWidget);
+    expect(find.text("optimistic hello"), findsOneWidget);
+  });
+
+  testWidgets('animates the processing status spacer when status appears', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
+    final document = _createThreadDocument();
+    addTearDown(room.dispose);
+    addTearDown(controller.dispose);
+    addTearDown(document.dispose);
+
+    const spacerKey = ValueKey("chat-thread-status-bottom-spacer");
+
+    await tester.pumpWidget(
+      _buildThreadHarness(
+        room: room,
+        controller: controller,
+        document: document,
+        showTyping: true,
+        threadStatus: "Working",
+        threadStatusMode: "busy",
+      ),
+    );
+
+    expect(tester.getSize(find.byKey(spacerKey)).height, 0);
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+
+    final midAnimationHeight = tester.getSize(find.byKey(spacerKey)).height;
+    expect(midAnimationHeight, greaterThan(0));
+    expect(midAnimationHeight, lessThan(20));
+
+    await tester.pump(const Duration(milliseconds: 1100));
+    expect(tester.getSize(find.byKey(spacerKey)).height, 20);
+  });
+
+  testWidgets('keeps the processing status row visible briefly after status clears', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
+    final document = _createThreadDocument();
+    addTearDown(room.dispose);
+    addTearDown(controller.dispose);
+    addTearDown(document.dispose);
+
+    await tester.pumpWidget(
+      _buildThreadHarness(
+        room: room,
+        controller: controller,
+        document: document,
+        showTyping: true,
+        threadStatus: "Working",
+        threadStatusMode: "busy",
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(ChatThreadProcessingStatusRow), findsOneWidget);
+    expect(find.text("Working"), findsWidgets);
+
+    await tester.pumpWidget(_buildThreadHarness(room: room, controller: controller, document: document));
+    await tester.pump();
+
+    expect(find.byType(ChatThreadProcessingStatusRow), findsOneWidget);
+    expect(find.text("Working"), findsWidgets);
+
+    await tester.pump(const Duration(milliseconds: 499));
+    expect(find.byType(ChatThreadProcessingStatusRow), findsOneWidget);
+
+    await tester.pump(const Duration(milliseconds: 1));
+    expect(find.byType(ChatThreadProcessingStatusRow), findsNothing);
+  });
+
+  testWidgets('cancels delayed processing status collapse when status returns', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
+    final document = _createThreadDocument();
+    addTearDown(room.dispose);
+    addTearDown(controller.dispose);
+    addTearDown(document.dispose);
+
+    await tester.pumpWidget(
+      _buildThreadHarness(
+        room: room,
+        controller: controller,
+        document: document,
+        showTyping: true,
+        threadStatus: "Working",
+        threadStatusMode: "busy",
+      ),
+    );
+    await tester.pump();
+
+    await tester.pumpWidget(_buildThreadHarness(room: room, controller: controller, document: document));
+    await tester.pump(const Duration(milliseconds: 250));
+
+    await tester.pumpWidget(
+      _buildThreadHarness(
+        room: room,
+        controller: controller,
+        document: document,
+        showTyping: true,
+        threadStatus: "Still working",
+        threadStatusMode: "busy",
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.byType(ChatThreadProcessingStatusRow), findsOneWidget);
+    expect(find.text("Still working"), findsWidgets);
   });
 
   testWidgets('renders tool footers below the thread composer', (tester) async {

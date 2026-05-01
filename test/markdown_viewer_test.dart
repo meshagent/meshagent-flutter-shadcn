@@ -43,6 +43,43 @@ void main() {
     expect(find.text('1'), findsNothing);
   });
 
+  testWidgets('streaming markdown tables render after content update', (tester) async {
+    final previousVisibilityUpdateInterval = VisibilityDetectorController.instance.updateInterval;
+    addTearDown(() {
+      VisibilityDetectorController.instance.updateInterval = previousVisibilityUpdateInterval;
+    });
+    VisibilityDetectorController.instance.updateInterval = Duration.zero;
+
+    Widget buildViewer(String markdown) {
+      return ShadApp(
+        home: Scaffold(
+          body: MarkdownViewer(markdown: markdown, padding: EdgeInsets.zero),
+        ),
+      );
+    }
+
+    await tester.pumpWidget(
+      buildViewer('''
+| Name | Value |
+| --- | --- |
+'''),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.pumpWidget(
+      buildViewer('''
+| Name | Value |
+| --- | --- |
+| Alpha | Beta |
+'''),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(InMemoryTable), findsOneWidget);
+    expect(find.text('Alpha'), findsOneWidget);
+    expect(find.text('Beta'), findsOneWidget);
+  });
+
   testWidgets('markdown table context menu wins over parent context menu', (tester) async {
     final previousVisibilityUpdateInterval = VisibilityDetectorController.instance.updateInterval;
     addTearDown(() {

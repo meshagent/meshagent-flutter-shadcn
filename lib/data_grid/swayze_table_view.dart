@@ -38,6 +38,7 @@ class SwayzeTableView extends StatefulWidget {
     this.showLeadingOuterBorders = false,
     this.showRowHeaders = true,
     this.showStatusBar = true,
+    this.showGridTopBorder = false,
     this.cancelToken = 0,
     this.onStatusChanged,
   });
@@ -60,6 +61,7 @@ class SwayzeTableView extends StatefulWidget {
   final bool showLeadingOuterBorders;
   final bool showRowHeaders;
   final bool showStatusBar;
+  final bool showGridTopBorder;
   final int cancelToken;
   final ValueChanged<SwayzeTableStatus>? onStatusChanged;
 
@@ -74,6 +76,7 @@ class SwayzeTableStatus {
     required this.isLoadingRows,
     required this.rowCount,
     required this.loadedRowCount,
+    required this.loadedByteCount,
     required this.skippedBinaryCount,
     required this.statementRowsAffected,
   });
@@ -83,6 +86,7 @@ class SwayzeTableStatus {
   final bool isLoadingRows;
   final int? rowCount;
   final int loadedRowCount;
+  final int loadedByteCount;
   final int skippedBinaryCount;
   final int? statementRowsAffected;
 
@@ -95,14 +99,16 @@ class SwayzeTableStatus {
     }
     final count = rowCount;
     if (count == null) {
-      return 'Loading';
+      return loadedByteCount > 0 ? 'Loading · ${_formatBytes(loadedByteCount)}' : 'Loading';
     }
-    return isSql ? 'Rows: $count' : 'Row Count: $count';
+    final bytesLabel = loadedByteCount > 0 ? ' · ${_formatBytes(loadedByteCount)}' : '';
+    return isSql ? 'Rows: $count$bytesLabel' : 'Row Count: $count$bytesLabel';
   }
 
   String? get secondaryText {
     if (isLoadingRows) {
-      return isSql ? 'Loaded $loadedRowCount' : 'Loaded $loadedRowCount/$rowCount';
+      final bytesLabel = loadedByteCount > 0 ? ' · ${_formatBytes(loadedByteCount)}' : '';
+      return isSql ? 'Loaded $loadedRowCount$bytesLabel' : 'Loaded $loadedRowCount/$rowCount$bytesLabel';
     }
     if (skippedBinaryCount > 0) {
       return 'Skipping $skippedBinaryCount binary ${skippedBinaryCount == 1 ? "column" : "columns"}';
@@ -118,13 +124,36 @@ class SwayzeTableStatus {
         other.isLoadingRows == isLoadingRows &&
         other.rowCount == rowCount &&
         other.loadedRowCount == loadedRowCount &&
+        other.loadedByteCount == loadedByteCount &&
         other.skippedBinaryCount == skippedBinaryCount &&
         other.statementRowsAffected == statementRowsAffected;
   }
 
   @override
-  int get hashCode =>
-      Object.hash(isSql, isLoadingMetadata, isLoadingRows, rowCount, loadedRowCount, skippedBinaryCount, statementRowsAffected);
+  int get hashCode => Object.hash(
+    isSql,
+    isLoadingMetadata,
+    isLoadingRows,
+    rowCount,
+    loadedRowCount,
+    loadedByteCount,
+    skippedBinaryCount,
+    statementRowsAffected,
+  );
+}
+
+String _formatBytes(int bytes) {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  var value = bytes.toDouble();
+  var unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex++;
+  }
+  if (unitIndex == 0) {
+    return '$bytes ${units[unitIndex]}';
+  }
+  return '${value.toStringAsFixed(value >= 10 ? 1 : 2)} ${units[unitIndex]}';
 }
 
 class _SwayzeTableViewState extends State<SwayzeTableView> {
@@ -135,6 +164,7 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
   int _skippedBinaryCount = 0;
   int? _rowCount;
   int _loadedRowCount = 0;
+  int _loadedByteCount = 0;
   bool _isLoadingMetadata = true;
   bool _isLoadingRows = false;
   int _loadGeneration = 0;
@@ -203,6 +233,7 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
         _skippedBinaryCount = 0;
         _rowCount = null;
         _loadedRowCount = 0;
+        _loadedByteCount = 0;
         _isLoadingMetadata = true;
         _isLoadingRows = false;
         _statementRowsAffected = null;
@@ -234,6 +265,7 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
       isLoadingRows: _isLoadingRows,
       rowCount: _rowCount,
       loadedRowCount: _loadedRowCount,
+      loadedByteCount: _loadedByteCount,
       skippedBinaryCount: _skippedBinaryCount,
       statementRowsAffected: _statementRowsAffected,
     );
@@ -334,6 +366,7 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
       _skippedBinaryCount = _skippedBinaryColumnCount(schema);
       _rowCount = rowCount;
       _loadedRowCount = 0;
+      _loadedByteCount = 0;
       _isLoadingMetadata = false;
       _isLoadingRows = controller != null;
     });
@@ -368,6 +401,7 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
             rowOffset += rows.length;
             setState(() {
               _loadedRowCount = rowOffset;
+              _loadedByteCount += batch.ipcBytes.length;
             });
           },
           onError: (Object error, StackTrace stackTrace) {
@@ -412,6 +446,7 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
         _statementRowsAffected = execution.rowsAffected;
         _rowCount = 0;
         _loadedRowCount = 0;
+        _loadedByteCount = 0;
         _isLoadingMetadata = false;
         _isLoadingRows = false;
       });
@@ -447,6 +482,7 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
         rows.addAll(batch.toRows());
         setState(() {
           _loadedRowCount = rows.length;
+          _loadedByteCount += batch.ipcBytes.length;
         });
       }
     } finally {
@@ -572,18 +608,24 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
           const Expanded(child: Center(child: CircularProgressIndicator()))
         else
           Expanded(
-            child: _SharedSwayzeGrid(
-              controller: _controller!,
-              columns: _columns,
-              availableRowCount: _loadedRowCount,
-              autoSizeHorizontally: widget.autoSizeHorizontally,
-              autoSizeVertically: widget.autoSizeVertically,
-              autoSizeColumns: widget.autoSizeColumns,
-              autoSizeRows: widget.autoSizeRows,
-              maxAutoSizeColumnExtent: widget.maxAutoSizeColumnExtent,
-              maxAutoSizeRowExtent: widget.maxAutoSizeRowExtent,
-              showLeadingOuterBorders: widget.showLeadingOuterBorders,
-              showRowHeaders: widget.showRowHeaders,
+            child: DecoratedBox(
+              position: DecorationPosition.foreground,
+              decoration: BoxDecoration(
+                border: widget.showGridTopBorder ? Border(top: BorderSide(color: borderColor)) : null,
+              ),
+              child: _SharedSwayzeGrid(
+                controller: _controller!,
+                columns: _columns,
+                availableRowCount: _loadedRowCount,
+                autoSizeHorizontally: widget.autoSizeHorizontally,
+                autoSizeVertically: widget.autoSizeVertically,
+                autoSizeColumns: widget.autoSizeColumns,
+                autoSizeRows: widget.autoSizeRows,
+                maxAutoSizeColumnExtent: widget.maxAutoSizeColumnExtent,
+                maxAutoSizeRowExtent: widget.maxAutoSizeRowExtent,
+                showLeadingOuterBorders: widget.showLeadingOuterBorders,
+                showRowHeaders: widget.showRowHeaders,
+              ),
             ),
           ),
       ],
@@ -1098,6 +1140,7 @@ class _SharedSwayzeGridState extends State<_SharedSwayzeGrid> {
           physics: widget.autoSizeVertically ? const NeverScrollableScrollPhysics() : null,
           slivers: [
             SliverSwayzeTable<_SharedSwayzeCellData>(
+              key: ObjectKey(widget.controller),
               controller: widget.controller,
               focusNode: _focusNode,
               verticalScrollController: _verticalScrollController,
