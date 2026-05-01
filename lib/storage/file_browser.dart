@@ -124,6 +124,8 @@ class FileBrowser extends StatefulWidget {
     this.separatorBuilder,
     this.emptyBuilder,
     this.showFilesWhenSelectingFolders = false,
+    this.allowedFileExtensions,
+    this.onPathChanged,
   });
 
   final RoomClient room;
@@ -137,6 +139,8 @@ class FileBrowser extends StatefulWidget {
   final FileBrowserSeparatorBuilder? separatorBuilder;
   final FileBrowserEmptyBuilder? emptyBuilder;
   final bool showFilesWhenSelectingFolders;
+  final Set<String>? allowedFileExtensions;
+  final void Function(String path)? onPathChanged;
 
   @override
   State createState() => _FileBrowser();
@@ -164,8 +168,15 @@ class _FileBrowser extends State<FileBrowser> {
         widget.onSelectionChanged?.call(selection.toList());
       });
     }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      widget.onPathChanged?.call(path);
+    });
 
     load();
+  }
+
+  void _notifyPathChanged() {
+    widget.onPathChanged?.call(path);
   }
 
   void load() async {
@@ -367,6 +378,7 @@ class _FileBrowser extends State<FileBrowser> {
       path = "";
       load();
     });
+    _notifyPathChanged();
   }
 
   void _openSegment(List<String> fileItems, int index) {
@@ -394,6 +406,7 @@ class _FileBrowser extends State<FileBrowser> {
         load();
       });
     }
+    _notifyPathChanged();
   }
 
   void _onEntryPressed(StorageEntry file) {
@@ -412,12 +425,14 @@ class _FileBrowser extends State<FileBrowser> {
           path = fullPath;
           load();
         });
+        _notifyPathChanged();
       } else {
         setState(() {
           path = join(path, file.name);
           selection.clear();
           load();
         });
+        _notifyPathChanged();
       }
     } else {
       setState(() {
@@ -543,8 +558,22 @@ class _FileBrowser extends State<FileBrowser> {
       return ShadAlert.destructive(description: Text("$error"));
     }
 
+    final allowedFileExtensions = widget.allowedFileExtensions?.map((extension) {
+      final lower = extension.toLowerCase();
+      return lower.startsWith('.') ? lower.substring(1) : lower;
+    }).toSet();
+    bool extensionAllowed(StorageEntry file) {
+      if (file.isFolder || allowedFileExtensions == null || allowedFileExtensions.isEmpty) {
+        return true;
+      }
+      final extension = p.extension(file.name).toLowerCase();
+      final normalized = extension.startsWith('.') ? extension.substring(1) : extension;
+      return allowedFileExtensions.contains(normalized);
+    }
+
     final showingFoldersOnly = widget.selectionMode == FileBrowserSelectionMode.folders && !widget.showFilesWhenSelectingFolders;
-    final filteredFiles = showingFoldersOnly ? files!.where((x) => x.isFolder) : files!;
+    final extensionFilteredFiles = files!.where(extensionAllowed);
+    final filteredFiles = showingFoldersOnly ? extensionFilteredFiles.where((x) => x.isFolder) : extensionFilteredFiles;
     final currentSelectionCount = filteredFiles.where((file) => selection.contains(join(path, file.name))).length;
 
     final fileItems = path.split("/");
