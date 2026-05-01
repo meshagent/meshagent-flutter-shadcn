@@ -1634,9 +1634,6 @@ class _SharedSwayzeCellData extends SwayzeCellData {
     if (display == _ColumnDisplay.image) {
       return Alignment.center;
     }
-    if (value is bool) {
-      return Alignment.center;
-    }
     if (value is num) {
       return Alignment.centerRight;
     }
