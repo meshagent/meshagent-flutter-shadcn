@@ -38,6 +38,7 @@ class SwayzeTableView extends StatefulWidget {
     this.showLeadingOuterBorders = false,
     this.showRowHeaders = true,
     this.showStatusBar = true,
+    this.showGridTopBorder = false,
     this.cancelToken = 0,
     this.onStatusChanged,
   });
@@ -60,6 +61,7 @@ class SwayzeTableView extends StatefulWidget {
   final bool showLeadingOuterBorders;
   final bool showRowHeaders;
   final bool showStatusBar;
+  final bool showGridTopBorder;
   final int cancelToken;
   final ValueChanged<SwayzeTableStatus>? onStatusChanged;
 
@@ -572,18 +574,24 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
           const Expanded(child: Center(child: CircularProgressIndicator()))
         else
           Expanded(
-            child: _SharedSwayzeGrid(
-              controller: _controller!,
-              columns: _columns,
-              availableRowCount: _loadedRowCount,
-              autoSizeHorizontally: widget.autoSizeHorizontally,
-              autoSizeVertically: widget.autoSizeVertically,
-              autoSizeColumns: widget.autoSizeColumns,
-              autoSizeRows: widget.autoSizeRows,
-              maxAutoSizeColumnExtent: widget.maxAutoSizeColumnExtent,
-              maxAutoSizeRowExtent: widget.maxAutoSizeRowExtent,
-              showLeadingOuterBorders: widget.showLeadingOuterBorders,
-              showRowHeaders: widget.showRowHeaders,
+            child: DecoratedBox(
+              position: DecorationPosition.foreground,
+              decoration: BoxDecoration(
+                border: widget.showGridTopBorder ? Border(top: BorderSide(color: borderColor)) : null,
+              ),
+              child: _SharedSwayzeGrid(
+                controller: _controller!,
+                columns: _columns,
+                availableRowCount: _loadedRowCount,
+                autoSizeHorizontally: widget.autoSizeHorizontally,
+                autoSizeVertically: widget.autoSizeVertically,
+                autoSizeColumns: widget.autoSizeColumns,
+                autoSizeRows: widget.autoSizeRows,
+                maxAutoSizeColumnExtent: widget.maxAutoSizeColumnExtent,
+                maxAutoSizeRowExtent: widget.maxAutoSizeRowExtent,
+                showLeadingOuterBorders: widget.showLeadingOuterBorders,
+                showRowHeaders: widget.showRowHeaders,
+              ),
             ),
           ),
       ],
