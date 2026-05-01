@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb, listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:interactive_viewer_2/interactive_viewer_2.dart';
 import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_flutter_shadcn/data_grid/swayze/controller.dart';
 import 'package:meshagent_flutter_shadcn/data_grid/swayze/delegates.dart';
@@ -160,7 +161,10 @@ String _formatBytes(int bytes) {
 
 class _SwayzeTableViewState extends State<SwayzeTableView> {
   StreamSubscription<ArrowRecordBatch>? _rowsSubscription;
+  final OverlayPortalController _imageViewerController = OverlayPortalController();
   _SharedSwayzeController? _controller;
+  LocalHistoryEntry? _imageViewerHistoryEntry;
+  Uint8List? _overlayImageBytes;
   Object? _error;
   List<String> _columns = const [];
   Map<String, _ColumnDisplay> _columnDisplays = const {};
@@ -212,7 +216,54 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
     unawaited(_rowsSubscription?.cancel());
     _cancelActiveSqlQuery();
     _disposeController();
+    final historyEntry = _imageViewerHistoryEntry;
+    _imageViewerHistoryEntry = null;
+    historyEntry?.remove();
     super.dispose();
+  }
+
+  void _hideImageViewer() {
+    _imageViewerController.hide();
+    if (mounted) {
+      setState(() {
+        _overlayImageBytes = null;
+      });
+    } else {
+      _overlayImageBytes = null;
+    }
+  }
+
+  void _closeImageViewer() {
+    final historyEntry = _imageViewerHistoryEntry;
+    if (historyEntry != null) {
+      _imageViewerHistoryEntry = null;
+      historyEntry.remove();
+      return;
+    }
+    _hideImageViewer();
+  }
+
+  void _openImageViewer(BuildContext context, Uint8List imageBytes) {
+    if (imageBytes.isEmpty) {
+      return;
+    }
+
+    final route = ModalRoute.of(context);
+    if (_imageViewerHistoryEntry == null && route != null) {
+      final historyEntry = LocalHistoryEntry(
+        onRemove: () {
+          _imageViewerHistoryEntry = null;
+          _hideImageViewer();
+        },
+      );
+      _imageViewerHistoryEntry = historyEntry;
+      route.addLocalHistoryEntry(historyEntry);
+    }
+
+    setState(() {
+      _overlayImageBytes = imageBytes;
+    });
+    _imageViewerController.show();
   }
 
   void _disposeController() {
@@ -585,7 +636,7 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
       );
     }
 
-    return Column(
+    final table = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (widget.showStatusBar)
@@ -643,10 +694,70 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
                 maxAutoSizeRowExtent: widget.maxAutoSizeRowExtent,
                 showLeadingOuterBorders: widget.showLeadingOuterBorders,
                 showRowHeaders: widget.showRowHeaders,
+                onOpenImage: _openImageViewer,
               ),
             ),
           ),
       ],
+    );
+
+    return OverlayPortal(
+      controller: _imageViewerController,
+      overlayLocation: OverlayChildLocation.rootOverlay,
+      overlayChildBuilder: (context) {
+        final imageBytes = _overlayImageBytes;
+        if (imageBytes == null) {
+          return const SizedBox.shrink();
+        }
+        return _DatabaseImageViewer(imageBytes: imageBytes, onClose: _closeImageViewer);
+      },
+      child: table,
+    );
+  }
+}
+
+class _DatabaseImageViewer extends StatelessWidget {
+  const _DatabaseImageViewer({required this.imageBytes, required this.onClose});
+
+  final Uint8List imageBytes;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned.fill(
+      child: Material(
+        color: Colors.black,
+        child: SafeArea(
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: InteractiveViewer2(
+                  child: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: UniversalImage(
+                        imageBytes,
+                        fit: BoxFit.contain,
+                        errorPlaceholder: Center(
+                          child: Text('Preview unavailable', style: ShadTheme.of(context).textTheme.p.copyWith(color: Colors.white70)),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 12,
+                left: 12,
+                child: ShadIconButton.ghost(
+                  icon: const Icon(LucideIcons.x, color: Colors.white),
+                  onPressed: onClose,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -832,6 +943,7 @@ class _SharedSwayzeGrid extends StatefulWidget {
     this.maxAutoSizeRowExtent = 300,
     this.showLeadingOuterBorders = false,
     this.showRowHeaders = true,
+    this.onOpenImage,
   });
 
   final _SharedSwayzeController controller;
@@ -847,6 +959,7 @@ class _SharedSwayzeGrid extends StatefulWidget {
   final double? maxAutoSizeRowExtent;
   final bool showLeadingOuterBorders;
   final bool showRowHeaders;
+  final void Function(BuildContext context, Uint8List imageBytes)? onOpenImage;
 
   @override
   State<_SharedSwayzeGrid> createState() => _SharedSwayzeGridState();
@@ -887,7 +1000,12 @@ class _SharedSwayzeGridState extends State<_SharedSwayzeGrid> {
   }
 
   _SharedSwayzeCellDelegate get _cellDelegate {
-    return _SharedSwayzeCellDelegate(controller: widget.controller, onCopySelection: _copySelectionToClipboard, wrapText: _wrapCellText);
+    return _SharedSwayzeCellDelegate(
+      controller: widget.controller,
+      onCopySelection: _copySelectionToClipboard,
+      wrapText: _wrapCellText,
+      onOpenImage: widget.onOpenImage,
+    );
   }
 
   @override
@@ -1551,25 +1669,33 @@ Uint8List? _imageBytesFromValue(Object? value) {
 }
 
 class _SharedSwayzeCellDelegate extends CellDelegate<_SharedSwayzeCellData> {
-  _SharedSwayzeCellDelegate({required this.controller, required this.onCopySelection, required this.wrapText});
+  _SharedSwayzeCellDelegate({required this.controller, required this.onCopySelection, required this.wrapText, this.onOpenImage});
 
   final _SharedSwayzeController controller;
   final Future<void> Function() onCopySelection;
   final bool wrapText;
+  final void Function(BuildContext context, Uint8List imageBytes)? onOpenImage;
 
   @override
   CellLayout getCellLayout(_SharedSwayzeCellData data) {
-    return _SharedSwayzeCellLayout(data, controller: controller, onCopySelection: onCopySelection, wrapText: wrapText);
+    return _SharedSwayzeCellLayout(
+      data,
+      controller: controller,
+      onCopySelection: onCopySelection,
+      wrapText: wrapText,
+      onOpenImage: onOpenImage,
+    );
   }
 }
 
 class _SharedSwayzeCellLayout extends CellLayout {
-  _SharedSwayzeCellLayout(this.data, {required this.controller, required this.onCopySelection, required this.wrapText});
+  _SharedSwayzeCellLayout(this.data, {required this.controller, required this.onCopySelection, required this.wrapText, this.onOpenImage});
 
   final _SharedSwayzeCellData data;
   final _SharedSwayzeController controller;
   final Future<void> Function() onCopySelection;
   final bool wrapText;
+  final void Function(BuildContext context, Uint8List imageBytes)? onOpenImage;
 
   @override
   Widget buildCell(BuildContext context, {bool isHover = false, bool isActive = false}) {
@@ -1608,6 +1734,7 @@ class _SharedSwayzeCellLayout extends CellLayout {
         data: data,
         controller: controller,
         onCopySelection: onCopySelection,
+        onDoubleTap: imageBytes == null || onOpenImage == null ? null : () => onOpenImage!(context, imageBytes),
         child: SizedBox.expand(child: child),
       );
     }
@@ -1647,6 +1774,7 @@ class _SharedSwayzeCellLayout extends CellLayout {
           data: data,
           controller: controller,
           onCopySelection: onCopySelection,
+          onDoubleTap: null,
           child: SizedBox.expand(
             child: Padding(
               padding: effectivePadding,
@@ -1775,12 +1903,14 @@ class _SharedSwayzeCellContextMenuRegion extends StatefulWidget {
     required this.controller,
     required this.onCopySelection,
     required this.child,
+    this.onDoubleTap,
   });
 
   final _SharedSwayzeCellData data;
   final _SharedSwayzeController controller;
   final Future<void> Function() onCopySelection;
   final Widget child;
+  final VoidCallback? onDoubleTap;
 
   @override
   State<_SharedSwayzeCellContextMenuRegion> createState() => _SharedSwayzeCellContextMenuRegionState();
@@ -1873,6 +2003,7 @@ class _SharedSwayzeCellContextMenuRegionState extends State<_SharedSwayzeCellCon
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTapDown: (_) => _hide(),
+        onDoubleTap: widget.onDoubleTap,
         onSecondaryTapDown: isWindows
             ? null
             : (details) async {
