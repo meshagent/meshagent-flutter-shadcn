@@ -9255,7 +9255,9 @@ class FileDropArea extends StatefulWidget {
 
   final Widget child;
 
-  const FileDropArea({super.key, required this.onFileDrop, required this.child});
+  final bool multiple;
+
+  const FileDropArea({super.key, required this.onFileDrop, required this.child, this.multiple = true});
 
   @override
   FileDropAreaState createState() => FileDropAreaState();
@@ -9324,8 +9326,10 @@ class FileDropAreaState extends State<FileDropArea> {
     setState(() => _dragging = false);
 
     final readers = event.session.items.map((m) => m.dataReader).toList();
+    var droppedFile = false;
 
     for (final reader in readers) {
+      if (!widget.multiple && droppedFile) break;
       if (reader == null) continue;
 
       try {
@@ -9358,10 +9362,12 @@ class FileDropAreaState extends State<FileDropArea> {
 
         if (folderPayload != null) {
           for (final file in folderPayload.files) {
+            if (!widget.multiple && droppedFile) break;
             final relativePath = file.relativePath.replaceAll('\\', '/');
             final uploadPath = relativePath.isEmpty ? folderPayload.folderName : '${folderPayload.folderName}/$relativePath';
 
             await widget.onFileDrop(uploadPath, file.dataStream, file.fileSize);
+            droppedFile = true;
           }
           continue;
         }
@@ -9371,6 +9377,7 @@ class FileDropAreaState extends State<FileDropArea> {
         final file = await _getFile(reader, fmt);
 
         await widget.onFileDrop(name, file.getStream(), file.fileSize);
+        droppedFile = true;
       } catch (err, st) {
         debugPrint('Error dropping file: $err\n$st');
       }

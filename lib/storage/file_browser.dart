@@ -447,7 +447,9 @@ class _FileBrowser extends State<FileBrowser> {
           if (selection.contains(fullPath)) {
             selection.clear();
           } else {
-            selection.add(fullPath);
+            selection
+              ..clear()
+              ..add(fullPath);
           }
         }
       });
@@ -490,7 +492,7 @@ class _FileBrowser extends State<FileBrowser> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         spacing: 8,
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Text(
             "Path: ",
