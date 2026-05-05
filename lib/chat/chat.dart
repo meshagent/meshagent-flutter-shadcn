@@ -64,11 +64,14 @@ const String _agentTurnStartType = "meshagent.agent.turn.start";
 const String _agentTurnSteerType = "meshagent.agent.turn.steer";
 const String _agentTurnInterruptType = "meshagent.agent.turn.interrupt";
 const String _agentThreadClearType = "meshagent.agent.thread.clear";
+const String _agentThreadOpenType = "meshagent.agent.thread.open";
+const String _agentThreadCloseType = "meshagent.agent.thread.close";
 const String _agentCapabilitiesRequestType = "meshagent.agent.capabilities_request";
 const String _agentCapabilitiesResponseType = "meshagent.agent.capabilities_response";
 const String _agentToolApproveType = "meshagent.agent.tool_call.approve";
 const String _agentToolRejectType = "meshagent.agent.tool_call.reject";
 const String _agentTurnStartAcceptedType = "meshagent.agent.turn.start.accepted";
+const String _agentTurnStartRejectedType = "meshagent.agent.turn.start.rejected";
 const String _agentTurnInterruptAcceptedType = "meshagent.agent.turn.interrupt.accepted";
 const String _agentTurnInterruptedType = "meshagent.agent.turn.interrupted";
 const String _agentTurnSteerAcceptedType = "meshagent.agent.turn.steer.accepted";
@@ -852,32 +855,35 @@ class _PendingSendWait {
   }
 }
 
-Set<String> _threadStatusAttributeCandidates(String path, String prefix) {
-  final candidates = <String>{"$prefix.$path"};
-  if (path.startsWith("/")) {
-    candidates.add("$prefix.${path.substring(1)}");
-  } else {
-    candidates.add("$prefix./$path");
+String? _threadStatusAttributeName(String path, String prefix) {
+  final normalizedPath = path.trim();
+  if (normalizedPath.isEmpty) {
+    return null;
   }
-  return candidates;
+  return "$prefix.$normalizedPath";
 }
 
 Map<String, dynamic>? _parsePendingMessagesStatus(Participant participant, String path) {
-  for (final key in _threadStatusAttributeCandidates(path, "thread.status.pending_messages")) {
-    final value = participant.getAttribute(key);
-    if (value is! String || value.trim().isEmpty) {
-      continue;
-    }
+  final key = _threadStatusAttributeName(path, "thread.status.pending_messages");
+  if (key == null) {
+    return null;
+  }
 
-    try {
-      final decoded = jsonDecode(value.trim());
-      if (decoded is Map<String, dynamic>) {
-        return decoded;
-      }
-      if (decoded is Map) {
-        return Map<String, dynamic>.from(decoded);
-      }
-    } catch (_) {}
+  final value = participant.getAttribute(key);
+  if (value is! String || value.trim().isEmpty) {
+    return null;
+  }
+
+  try {
+    final decoded = jsonDecode(value.trim());
+    if (decoded is Map<String, dynamic>) {
+      return decoded;
+    }
+    if (decoded is Map) {
+      return Map<String, dynamic>.from(decoded);
+    }
+  } catch (_) {
+    return null;
   }
 
   return null;
@@ -911,17 +917,16 @@ ChatThreadStatusState resolveChatThreadStatus({
   String? agentName,
   ChatThreadStatusState? previous,
 }) {
-  final keyCandidates = _threadStatusAttributeCandidates(path, "thread.status");
-  final textKeyCandidates = _threadStatusAttributeCandidates(path, "thread.status.text");
-  final modeKeyCandidates = _threadStatusAttributeCandidates(path, "thread.status.mode");
-  final startedAtKeyCandidates = _threadStatusAttributeCandidates(path, "thread.status.started_at");
-  final pendingItemIdKeyCandidates = _threadStatusAttributeCandidates(path, "thread.status.pending_item_id");
-
+  final key = _threadStatusAttributeName(path, "thread.status");
+  final textKey = _threadStatusAttributeName(path, "thread.status.text");
+  final modeKey = _threadStatusAttributeName(path, "thread.status.mode");
+  final startedAtKey = _threadStatusAttributeName(path, "thread.status.started_at");
+  final pendingItemIdKey = _threadStatusAttributeName(path, "thread.status.pending_item_id");
   final candidates = <Participant>[
     if (agentName != null)
       ...room.messaging.remoteParticipants.where((participant) => participant.getAttribute("name") == agentName)
     else
-      ...room.messaging.remoteParticipants.where((participant) => participant.role == "agent" || _supportsAgentMessages(participant)),
+      ...room.messaging.remoteParticipants,
   ];
 
   String? nextStatus;
@@ -937,22 +942,16 @@ ChatThreadStatusState resolveChatThreadStatus({
       nextSupportsAgentMessages = true;
     }
 
-    if (nextStatus == null) {
-      for (final key in textKeyCandidates) {
-        final value = participant.getAttribute(key);
-        if (value is String && value.trim().isNotEmpty) {
-          nextStatus = value.trim();
-          break;
-        }
+    if (nextStatus == null && textKey != null) {
+      final value = participant.getAttribute(textKey);
+      if (value is String && value.trim().isNotEmpty) {
+        nextStatus = value.trim();
       }
     }
-    if (nextStatus == null) {
-      for (final key in keyCandidates) {
-        final value = participant.getAttribute(key);
-        if (value is String && value.trim().isNotEmpty) {
-          nextStatus = value.trim();
-          break;
-        }
+    if (nextStatus == null && key != null) {
+      final value = participant.getAttribute(key);
+      if (value is String && value.trim().isNotEmpty) {
+        nextStatus = value.trim();
       }
     }
 
@@ -979,46 +978,28 @@ ChatThreadStatusState resolveChatThreadStatus({
       }
     }
 
-    if (nextMode == null) {
-      for (final key in modeKeyCandidates) {
-        final value = participant.getAttribute(key);
-        if (value is String) {
-          final normalized = value.trim().toLowerCase();
-          if (normalized == "busy" || normalized == "steerable") {
-            nextMode = normalized;
-            break;
-          }
+    if (nextMode == null && modeKey != null) {
+      final value = participant.getAttribute(modeKey);
+      if (value is String) {
+        final normalized = value.trim().toLowerCase();
+        if (normalized == "busy" || normalized == "steerable") {
+          nextMode = normalized;
         }
       }
     }
 
-    if (nextStartedAt == null) {
-      for (final key in startedAtKeyCandidates) {
-        final value = participant.getAttribute(key);
-        if (value is! String) {
-          continue;
-        }
-
+    if (nextStartedAt == null && startedAtKey != null) {
+      final value = participant.getAttribute(startedAtKey);
+      if (value is String) {
         final normalized = value.trim();
-        if (normalized.isEmpty) {
-          continue;
-        }
-
-        final parsed = DateTime.tryParse(normalized);
-        if (parsed != null) {
-          nextStartedAt = parsed;
-          break;
-        }
+        nextStartedAt = normalized.isEmpty ? null : DateTime.tryParse(normalized);
       }
     }
 
-    if (nextPendingItemId == null) {
-      for (final key in pendingItemIdKeyCandidates) {
-        final value = participant.getAttribute(key);
-        if (value is String && value.trim().isNotEmpty) {
-          nextPendingItemId = value.trim();
-          break;
-        }
+    if (nextPendingItemId == null && pendingItemIdKey != null) {
+      final value = participant.getAttribute(pendingItemIdKey);
+      if (value is String && value.trim().isNotEmpty) {
+        nextPendingItemId = value.trim();
       }
     }
 
@@ -1027,12 +1008,10 @@ ChatThreadStatusState resolveChatThreadStatus({
     }
   }
 
-  if (nextStatus == null) {
-    return ChatThreadStatusState(supportsAgentMessages: nextSupportsAgentMessages);
+  if (nextStatus != null) {
+    nextMode ??= "busy";
+    nextStartedAt ??= previous?.hasStatus == true ? previous?.startedAt : DateTime.now();
   }
-
-  nextMode ??= "busy";
-  nextStartedAt ??= previous?.hasStatus == true ? previous?.startedAt : DateTime.now();
 
   return ChatThreadStatusState(
     text: nextStatus,
@@ -1407,9 +1386,16 @@ class ChatThreadController extends ChangeNotifier {
       return;
     }
 
-    if (type == _agentTurnSteerRejectedType) {
+    if (type == _agentTurnStartRejectedType || type == _agentTurnSteerRejectedType) {
       final sourceMessageId = payload["source_message_id"];
-      _clearPendingAgentMessage(sourceMessageId is String ? sourceMessageId : null);
+      final normalizedSourceMessageId = sourceMessageId is String ? sourceMessageId : null;
+      _clearPendingAgentMessage(normalizedSourceMessageId);
+      final error = payload["error"];
+      final message = error is Map ? error["message"] : null;
+      outboundStatus.markFailed(
+        normalizedSourceMessageId ?? "",
+        message is String && message.trim().isNotEmpty ? message.trim() : "Message rejected",
+      );
       return;
     }
 
@@ -4445,6 +4431,95 @@ class ChatThreadMessages extends StatefulWidget {
   State<ChatThreadMessages> createState() => _ChatThreadMessagesState();
 }
 
+class ChatThreadMessageView extends StatelessWidget {
+  const ChatThreadMessageView({
+    super.key,
+    this.room,
+    required this.mine,
+    required this.isAgentMessage,
+    required this.text,
+    required this.authorName,
+    required this.createdAt,
+    this.shouldShowHeader = true,
+    this.header,
+    this.attachmentWidgets = const [],
+    this.trailing,
+    this.onDelete,
+    this.reactionActionBuilder,
+    this.showReactionAction = false,
+    this.onReactFromMenu,
+    this.mobileStorageSaveSurfacePresenter,
+  });
+
+  static const double chatBubbleHorizontalInset = 5;
+  static const double chatBubbleActionRailWidth = 80;
+  static const double chatBubbleSiblingSpacing = 6;
+  static const double chatMessageStackSpacing = 38;
+
+  final RoomClient? room;
+  final bool mine;
+  final bool isAgentMessage;
+  final String? text;
+  final String authorName;
+  final DateTime createdAt;
+  final bool shouldShowHeader;
+  final Widget? header;
+  final List<Widget> attachmentWidgets;
+  final Widget? trailing;
+  final VoidCallback? onDelete;
+  final Widget Function(ShadContextMenuController controller)? reactionActionBuilder;
+  final bool showReactionAction;
+  final VoidCallback? onReactFromMenu;
+  final ThreadStorageSaveSurfacePresenter? mobileStorageSaveSurfacePresenter;
+
+  @override
+  Widget build(BuildContext context) {
+    final messageText = text;
+    final hasText = messageText != null && messageText.trim().isNotEmpty;
+    final headerLeftInset = mine ? chatBubbleHorizontalInset + chatBubbleActionRailWidth : chatBubbleHorizontalInset;
+    final headerRightInset = mine || isAgentMessage ? chatBubbleHorizontalInset : chatBubbleHorizontalInset + chatBubbleActionRailWidth;
+
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (shouldShowHeader)
+          Container(
+            margin: EdgeInsets.only(left: headerLeftInset, right: headerRightInset, bottom: 6),
+            child: Align(
+              alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+              child: header ?? ChatThreadAuthorHeader(authorName: authorName, createdAt: createdAt, text: messageText),
+            ),
+          ),
+        if (hasText)
+          Padding(
+            padding: const EdgeInsets.only(top: 0),
+            child: ChatBubble(
+              room: room,
+              mine: mine,
+              fullWidth: isAgentMessage,
+              accented: !isAgentMessage,
+              text: messageText,
+              onDelete: onDelete,
+              mobileStorageSaveSurfacePresenter: mobileStorageSaveSurfacePresenter,
+              reactionActionBuilder: reactionActionBuilder,
+              showReactionAction: showReactionAction,
+              onReactFromMenu: onReactFromMenu,
+            ),
+          ),
+        for (var i = 0; i < attachmentWidgets.length; i++) ...[
+          if (hasText || i > 0) const SizedBox(height: chatBubbleSiblingSpacing),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: chatBubbleHorizontalInset),
+            child: attachmentWidgets[i],
+          ),
+        ],
+        ?trailing,
+      ],
+    );
+  }
+}
+
 class PendingChatThreadMessage extends StatelessWidget {
   const PendingChatThreadMessage({
     super.key,
@@ -4464,53 +4539,30 @@ class PendingChatThreadMessage extends StatelessWidget {
     final localParticipantName = room.localParticipant?.getAttribute("name");
     final authorName = message.senderName ?? (localParticipantName is String ? localParticipantName : "");
     final createdAt = message.createdAt ?? DateTime.now();
-    final hasText = message.text.trim().isNotEmpty;
     final opacity = message.awaitingOnline ? 0.72 : 1.0;
-    const headerLeftInset = _ChatThreadMessagesState._chatBubbleHorizontalInset + _ChatThreadMessagesState._chatBubbleActionRailWidth;
-    const headerRightInset = _ChatThreadMessagesState._chatBubbleHorizontalInset;
 
     return Opacity(
       opacity: opacity,
       child: SizedBox(
         key: ValueKey("pending-agent-message:${message.messageId}"),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (shouldShowAuthorNames)
-              Container(
-                margin: const EdgeInsets.only(left: headerLeftInset, right: headerRightInset, bottom: 6),
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: ChatThreadAuthorHeader(authorName: authorName, createdAt: createdAt, text: message.text),
+        child: ChatThreadMessageView(
+          room: room,
+          mine: true,
+          isAgentMessage: false,
+          text: message.text,
+          authorName: authorName,
+          createdAt: createdAt,
+          shouldShowHeader: shouldShowAuthorNames,
+          mobileStorageSaveSurfacePresenter: mobileStorageSaveSurfacePresenter,
+          attachmentWidgets: [
+            for (final attachment in message.attachments)
+              Align(
+                alignment: Alignment.centerRight,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 312.5),
+                  child: FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: _defaultSuggestedFileNameFromPath(attachment)),
                 ),
               ),
-            if (hasText)
-              Padding(
-                padding: const EdgeInsets.only(top: 0),
-                child: ChatBubble(
-                  room: room,
-                  mine: true,
-                  text: message.text,
-                  mobileStorageSaveSurfacePresenter: mobileStorageSaveSurfacePresenter,
-                ),
-              ),
-            for (var i = 0; i < message.attachments.length; i++) ...[
-              if (hasText || i > 0) const SizedBox(height: _ChatThreadMessagesState._chatBubbleSiblingSpacing),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 5),
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 312.5),
-                    child: FileDefaultPreviewCard(
-                      icon: LucideIcons.paperclip,
-                      text: _defaultSuggestedFileNameFromPath(message.attachments[i]),
-                    ),
-                  ),
-                ),
-              ),
-            ],
           ],
         ),
       ),
@@ -4519,10 +4571,7 @@ class PendingChatThreadMessage extends StatelessWidget {
 }
 
 class _ChatThreadMessagesState extends State<ChatThreadMessages> {
-  static const double _chatBubbleHorizontalInset = 5;
-  static const double _chatBubbleActionRailWidth = 80;
-  static const double _chatBubbleSiblingSpacing = 6;
-  static const double _chatMessageStackSpacing = 38;
+  static const double _chatMessageStackSpacing = ChatThreadMessageView.chatMessageStackSpacing;
   static const double _statusBottomSpacer = 20;
   static const Duration _statusCollapseDelay = Duration(milliseconds: 500);
   static const Duration _statusAnimationDuration = Duration(seconds: 1);
@@ -5763,13 +5812,10 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     final mine = !isAgentMessage && message.getAttribute("author_name") == localParticipantName;
     final useDefaultHeaderBuilder = messageHeaderBuilder == null;
     final shouldShowHeader = !useDefaultHeaderBuilder || widget.shouldShowAuthorNames;
-    final headerLeftInset = mine ? _chatBubbleHorizontalInset + _chatBubbleActionRailWidth : _chatBubbleHorizontalInset;
-    final headerRightInset = mine || isAgentMessage ? _chatBubbleHorizontalInset : _chatBubbleHorizontalInset + _chatBubbleActionRailWidth;
 
     final id = message.getAttribute("id");
     final text = message.getAttribute("text");
     final messageText = text is String ? text : null;
-    final hasText = messageText != null && messageText.trim().isNotEmpty;
     final attachments = message.getChildren().whereType<MeshElement>().where(_isThreadAttachmentElement).toList();
     final hasMessageLevelReactions = _reactionElementsForTarget(message: message, target: _reactionTargetMessage).isNotEmpty;
     final selectedMessageReaction = _selectedReactionForTarget(message: message, target: _reactionTargetMessage);
@@ -5806,67 +5852,45 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
 
     return SizedBox(
       key: ValueKey(id),
-      child: Column(
-        mainAxisAlignment: .start,
-        mainAxisSize: .min,
-        children: [
-          if (shouldShowHeader)
-            Container(
-              margin: .only(left: headerLeftInset, right: headerRightInset, bottom: 6),
-              child: Align(
-                alignment: mine ? .centerRight : .centerLeft,
-                child:
-                    messageHeaderBuilder?.call(context, message.doc as MeshDocument, message) ??
-                    defaultMessageHeaderBuilder(context, message, shouldShowAuthorNames: widget.shouldShowAuthorNames),
+      child: ChatThreadMessageView(
+        room: room,
+        mine: mine,
+        isAgentMessage: isAgentMessage,
+        text: messageText,
+        authorName: (message.getAttribute("author_name") ?? "").toString(),
+        createdAt: _messageCreatedAt(message),
+        shouldShowHeader: shouldShowHeader,
+        header:
+            messageHeaderBuilder?.call(context, message.doc as MeshDocument, message) ??
+            defaultMessageHeaderBuilder(context, message, shouldShowAuthorNames: widget.shouldShowAuthorNames),
+        onDelete: message.delete,
+        mobileStorageSaveSurfacePresenter: mobileStorageSaveSurfacePresenter,
+        reactionActionBuilder: localParticipantReactionName == null
+            ? null
+            : (controller) => _ReactionPickerButton(
+                controller: controller,
+                reactionOptions: _defaultReactionOptions,
+                selectedReaction: selectedMessageReaction,
+                onSelected: (reaction) {
+                  _toggleReaction(message: message, reaction: reaction, target: _reactionTargetMessage, removeIfSame: true);
+                },
               ),
-            ),
-
-          if (hasText)
-            Padding(
-              padding: EdgeInsets.only(top: 0),
-              child: ChatBubble(
-                room: room,
-                mine: mine,
-                fullWidth: isAgentMessage,
-                accented: !isAgentMessage,
-                text: messageText,
-                onDelete: message.delete,
-                mobileStorageSaveSurfacePresenter: mobileStorageSaveSurfacePresenter,
-                reactionActionBuilder: localParticipantReactionName == null
-                    ? null
-                    : (controller) => _ReactionPickerButton(
-                        controller: controller,
-                        reactionOptions: _defaultReactionOptions,
-                        selectedReaction: selectedMessageReaction,
-                        onSelected: (reaction) {
-                          _toggleReaction(message: message, reaction: reaction, target: _reactionTargetMessage, removeIfSame: true);
-                        },
-                      ),
-                showReactionAction: localParticipantReactionName != null && !hasMessageLevelReactions,
-                onReactFromMenu: localParticipantReactionName == null
-                    ? null
-                    : () {
-                        _showReactionPickerDialog(
-                          context,
-                          selectedReaction: selectedMessageReaction,
-                          onSelected: (reaction) {
-                            _toggleReaction(message: message, reaction: reaction, target: _reactionTargetMessage, removeIfSame: true);
-                          },
-                        );
-                      },
-              ),
-            ),
-
-          for (var i = 0; i < attachments.length; i++) ...[
-            if (hasText || i > 0) const SizedBox(height: _chatBubbleSiblingSpacing),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 5),
-              child: _buildAttachmentInThread(context, message, mine, attachments[i], feedImages: feedImages),
-            ),
-          ],
-
-          _buildReactionRow(context, message: message, mine: mine, target: _reactionTargetMessage, showAddWhenEmpty: false),
+        showReactionAction: localParticipantReactionName != null && !hasMessageLevelReactions,
+        onReactFromMenu: localParticipantReactionName == null
+            ? null
+            : () {
+                _showReactionPickerDialog(
+                  context,
+                  selectedReaction: selectedMessageReaction,
+                  onSelected: (reaction) {
+                    _toggleReaction(message: message, reaction: reaction, target: _reactionTargetMessage, removeIfSame: true);
+                  },
+                );
+              },
+        attachmentWidgets: [
+          for (final attachment in attachments) _buildAttachmentInThread(context, message, mine, attachment, feedImages: feedImages),
         ],
+        trailing: _buildReactionRow(context, message: message, mine: mine, target: _reactionTargetMessage, showAddWhenEmpty: false),
       ),
     );
   }
@@ -7920,13 +7944,24 @@ class ChatThreadAuthorHeader extends StatelessWidget {
 
 Widget defaultMessageHeaderBuilder(BuildContext context, MeshElement message, {bool shouldShowAuthorNames = true}) {
   final name = message.getAttribute("author_name") ?? "";
-  final createdAt = message.getAttribute("created_at") == null ? DateTime.now() : DateTime.parse(message.getAttribute("created_at"));
+  final createdAt = _messageCreatedAt(message);
 
   if (shouldShowAuthorNames) {
     return ChatThreadAuthorHeader(authorName: name.toString(), createdAt: createdAt, text: message.getAttribute("text") as String?);
   } else {
     return SizedBox(height: 0);
   }
+}
+
+DateTime _messageCreatedAt(MeshElement message) {
+  final createdAt = message.getAttribute("created_at");
+  if (createdAt is DateTime) {
+    return createdAt;
+  }
+  if (createdAt is String) {
+    return DateTime.tryParse(createdAt) ?? DateTime.now();
+  }
+  return DateTime.now();
 }
 
 class ChatThreadSnapshot {
@@ -8005,6 +8040,8 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
   String? pendingItemId;
   String? _capabilitiesRequestKey;
   String? _capabilitiesResponseKey;
+  String? _openedPath;
+  String? _openedAgentParticipantId;
 
   @override
   void initState() {
@@ -8026,6 +8063,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
     super.didUpdateWidget(oldWidget);
 
     if (oldWidget.room != widget.room) {
+      _closeThreadSubscription(room: oldWidget.room);
       sub.cancel();
       oldWidget.room.messaging.removeListener(_onMessagingChanged);
       sub = widget.room.listen(_onRoomMessage);
@@ -8038,6 +8076,9 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
     }
 
     if (oldWidget.room != widget.room || oldWidget.path != widget.path || oldWidget.agentName != widget.agentName) {
+      if (oldWidget.room == widget.room) {
+        _closeThreadSubscription(room: widget.room);
+      }
       _clearCapabilities();
     }
 
@@ -8124,24 +8165,78 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
       if (mounted) {
         setState(() {});
       }
-
-      if (online) {
-        widget.room.messaging.sendMessage(to: agent, type: "opened", message: {"path": widget.path});
-      }
     }
 
     if (agent != null) {
+      _openThreadSubscription(agent: agent);
       unawaited(_requestCapabilities(agent: agent));
+    } else {
+      _closeThreadSubscription(room: widget.room);
     }
+  }
+
+  void _openThreadSubscription({required RemoteParticipant agent}) {
+    if (_openedPath == widget.path && _openedAgentParticipantId == agent.id) {
+      return;
+    }
+    _closeThreadSubscription(room: widget.room);
+    _openedPath = widget.path;
+    _openedAgentParticipantId = agent.id;
+
+    if (_supportsAgentMessages(agent)) {
+      _sendThreadSubscriptionMessageNowait(room: widget.room, agent: agent, messageType: _agentThreadOpenType, path: widget.path);
+      return;
+    }
+
+    unawaited(() async {
+      try {
+        await widget.room.messaging.sendMessage(to: agent, type: "opened", ignoreOffline: true, message: {"path": widget.path});
+      } catch (_) {}
+    }());
+  }
+
+  void _closeThreadSubscription({required RoomClient room}) {
+    final openedPath = _openedPath;
+    final openedAgentParticipantId = _openedAgentParticipantId;
+    _openedPath = null;
+    _openedAgentParticipantId = null;
+    if (openedPath == null || openedAgentParticipantId == null) {
+      return;
+    }
+    final agent = room.messaging.remoteParticipants.firstWhereOrNull((participant) => participant.id == openedAgentParticipantId);
+    if (agent == null || !_supportsAgentMessages(agent)) {
+      return;
+    }
+    _sendThreadSubscriptionMessageNowait(room: room, agent: agent, messageType: _agentThreadCloseType, path: openedPath);
+  }
+
+  void _sendThreadSubscriptionMessageNowait({
+    required RoomClient room,
+    required RemoteParticipant agent,
+    required String messageType,
+    required String path,
+  }) {
+    unawaited(() async {
+      try {
+        await room.messaging.sendMessage(
+          to: agent,
+          type: _agentRoomMessageType,
+          ignoreOffline: true,
+          message: {
+            "payload": {"type": messageType, "thread_id": path},
+          },
+        );
+      } catch (_) {}
+    }());
   }
 
   @override
   void dispose() {
-    super.dispose();
-
+    _closeThreadSubscription(room: widget.room);
     sub.cancel();
     widget.room.messaging.removeListener(_onMessagingChanged);
     widget.document.removeListener(_onDocumentChanged);
+    super.dispose();
   }
 
   void _onDocumentChanged() {

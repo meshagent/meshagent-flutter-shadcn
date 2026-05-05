@@ -16,17 +16,20 @@ class ChatAgentConversationDescriptor {
     this.chatThreadDisplayMode = ChatThreadDisplayMode.singleThread,
     this.threadDir,
     this.threadListPath,
+    this.threadPath,
   });
 
   const ChatAgentConversationDescriptor.chat({
     ChatThreadDisplayMode chatThreadDisplayMode = ChatThreadDisplayMode.singleThread,
     String? threadDir,
     String? threadListPath,
+    String? threadPath,
   }) : this._(
          kind: ChatAgentConversationKind.chat,
          chatThreadDisplayMode: chatThreadDisplayMode,
          threadDir: threadDir,
          threadListPath: threadListPath,
+         threadPath: threadPath,
        );
 
   const ChatAgentConversationDescriptor.voiceOnly() : this._(kind: ChatAgentConversationKind.voiceOnly);
@@ -37,6 +40,7 @@ class ChatAgentConversationDescriptor {
   final ChatThreadDisplayMode chatThreadDisplayMode;
   final String? threadDir;
   final String? threadListPath;
+  final String? threadPath;
 
   bool get isChat => kind == ChatAgentConversationKind.chat;
   bool get isVoiceOnly => kind == ChatAgentConversationKind.voiceOnly;
@@ -139,15 +143,21 @@ String? participantThreadListPath(RemoteParticipant participant) {
   return _threadListPathFromThreadDir(participantThreadDir(participant));
 }
 
+String? participantThreadPath(RemoteParticipant participant) {
+  return normalizedAnnotationString(participant.getAttribute("meshagent.chatbot.thread-path"));
+}
+
 ChatAgentConversationDescriptor? participantConversationDescriptor(RemoteParticipant participant) {
   final supportsVoice = participantSupportsVoice(participant);
   final supportsChatOverride = participantSupportsChatOverride(participant);
   final threadDir = participantThreadDir(participant);
   final threadListPath = participantThreadListPath(participant);
+  final threadPath = participantThreadPath(participant);
   final hasThreadAnnotations =
       normalizedAnnotationString(participant.getAttribute("meshagent.chatbot.threading")) != null ||
       threadDir != null ||
-      threadListPath != null;
+      threadListPath != null ||
+      threadPath != null;
 
   if (supportsChatOverride == false) {
     return supportsVoice ? const ChatAgentConversationDescriptor.voiceOnly() : null;
@@ -162,6 +172,7 @@ ChatAgentConversationDescriptor? participantConversationDescriptor(RemotePartici
       chatThreadDisplayMode: chatThreadDisplayModeFromAnnotation(participant.getAttribute("meshagent.chatbot.threading")),
       threadDir: threadDir,
       threadListPath: threadListPath,
+      threadPath: threadPath,
     );
   }
 
@@ -202,6 +213,26 @@ String? serviceThreadListPath(ServiceSpec service, {Iterable<RemoteParticipant> 
   return null;
 }
 
+String? serviceThreadPath(ServiceSpec service, {Iterable<RemoteParticipant> remoteParticipants = const []}) {
+  final annotationPath = normalizedAnnotationString(service.agents.firstOrNull?.annotations["meshagent.chatbot.thread-path"]);
+  if (annotationPath != null) {
+    return annotationPath;
+  }
+
+  final agentName = service.agents.firstOrNull?.name;
+  if (agentName == null || agentName.trim().isEmpty) {
+    return null;
+  }
+
+  for (final participant in remoteParticipants) {
+    if (participant.getAttribute("name") == agentName) {
+      return participantThreadPath(participant);
+    }
+  }
+
+  return null;
+}
+
 ChatAgentConversationDescriptor? serviceConversationDescriptor(
   ServiceSpec service, {
   Iterable<RemoteParticipant> remoteParticipants = const [],
@@ -223,6 +254,7 @@ ChatAgentConversationDescriptor? serviceConversationDescriptor(
     chatThreadDisplayMode: chatThreadDisplayModeFromAnnotation(service.agents.firstOrNull?.annotations["meshagent.chatbot.threading"]),
     threadDir: serviceThreadDir(service),
     threadListPath: serviceThreadListPath(service, remoteParticipants: remoteParticipants),
+    threadPath: serviceThreadPath(service, remoteParticipants: remoteParticipants),
   );
 }
 
@@ -285,6 +317,9 @@ String? resolvedThreadListPath(String? threadListPath, {String? threadDir, Strin
 String chatDocumentPath(String? agentName, {String? threadDir, String fallbackPath = ".threads/main.thread"}) {
   final normalizedDir = normalizedThreadDir(threadDir);
   if (normalizedDir != null) {
+    if (normalizedDir.startsWith('dataset://') || normalizedDir.startsWith('tmp://')) {
+      return "$normalizedDir/main";
+    }
     return "$normalizedDir/main.thread";
   }
 

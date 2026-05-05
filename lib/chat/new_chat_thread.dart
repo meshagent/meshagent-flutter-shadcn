@@ -342,25 +342,28 @@ class _NewChatThreadState extends State<NewChatThread> {
         throw RoomServerException("${widget.toolkit}.${widget.tool} response missing path");
       }
       final path = responsePath.trim();
+      final responseMessageId = content.json["message_id"];
+      final messageId = responseMessageId is String && responseMessageId.trim().isNotEmpty
+          ? responseMessageId.trim()
+          : pendingFirstMessage.messageId;
       final responseName = content.json["name"];
       final threadName = responseName is String && responseName.trim().isNotEmpty ? responseName.trim() : null;
       if (!mounted || operationId != _newThreadOperationId) {
         return;
       }
 
-      _controller.markPendingAgentMessage(
-        PendingAgentMessage(
-          messageId: pendingFirstMessage.messageId,
-          messageType: pendingFirstMessage.messageType,
-          threadPath: path,
-          text: pendingFirstMessage.text,
-          attachments: pendingFirstMessage.attachments,
-          senderName: pendingFirstMessage.senderName,
-          createdAt: pendingFirstMessage.createdAt,
-          matchByContentOnly: pendingFirstMessage.matchByContentOnly,
-          awaitingAcceptance: pendingFirstMessage.awaitingAcceptance,
-        ),
+      final resolvedPendingMessage = PendingAgentMessage(
+        messageId: messageId,
+        messageType: pendingFirstMessage.messageType,
+        threadPath: path,
+        text: pendingFirstMessage.text,
+        attachments: pendingFirstMessage.attachments,
+        senderName: pendingFirstMessage.senderName,
+        createdAt: pendingFirstMessage.createdAt,
+        matchByContentOnly: false,
+        awaitingAcceptance: pendingFirstMessage.awaitingAcceptance,
       );
+      _controller.markPendingAgentMessage(resolvedPendingMessage);
 
       final defersToParent = widget.onThreadPathChanged != null || widget.onThreadResolved != null;
       setState(() {
@@ -368,7 +371,7 @@ class _NewChatThreadState extends State<NewChatThread> {
         _newThreadError = null;
         _creatingNewThread = false;
         _waitingForAgent = false;
-        _pendingFirstMessage = defersToParent ? pendingFirstMessage : null;
+        _pendingFirstMessage = defersToParent ? resolvedPendingMessage : null;
       });
       _notifyThreadResolved(path, threadName);
       _notifyThreadPathChanged(path);
