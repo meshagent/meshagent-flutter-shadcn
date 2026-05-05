@@ -59,7 +59,8 @@ class _UsageGraphState extends State<UsageGraph> {
     final theme = ShadTheme.of(context);
     final total = widget.summaryValue ?? widget.points.fold<double>(0.0, (total, point) => total + point.value);
     final totalLabel = widget.formatValue(total);
-    final averageValue = _averageReferenceValue(widget.points);
+    final usesHourlyLabels = _usesHourlyLabels(widget.points);
+    final averageValue = _averageReferenceValue(widget.points, usesHourlyLabels: usesHourlyLabels);
     final averageLabel = averageValue == null ? null : widget.formatValue(averageValue);
 
     return LayoutBuilder(
@@ -84,7 +85,10 @@ class _UsageGraphState extends State<UsageGraph> {
                 averageLabel: averageLabel,
                 hoveredIndex: _hoveredIndex,
                 hoveredLabel: _hoveredIndex == null ? null : widget.formatValue(widget.points[_hoveredIndex!].value),
-                hoveredDateLabel: _hoveredIndex == null ? null : DateFormat.MMMd().format(widget.points[_hoveredIndex!].periodStart),
+                hoveredDateLabel: _hoveredIndex == null
+                    ? null
+                    : _formatPeriodLabel(widget.points[_hoveredIndex!].periodStart, usesHourlyLabels),
+                usesHourlyLabels: usesHourlyLabels,
                 layout: layout,
                 theme: theme,
               ),
@@ -95,8 +99,8 @@ class _UsageGraphState extends State<UsageGraph> {
     );
   }
 
-  double? _averageReferenceValue(List<UsageGraphPoint> points) {
-    final completedPoints = points.where((point) => !_isSameLocalDayAsToday(point.periodStart)).toList();
+  double? _averageReferenceValue(List<UsageGraphPoint> points, {required bool usesHourlyLabels}) {
+    final completedPoints = points.where((point) => !_isCurrentPeriod(point.periodStart, usesHourlyLabels)).toList();
     final referencePoints = completedPoints.length >= 2 ? completedPoints : points;
     if (referencePoints.length < 2) {
       return null;
@@ -278,6 +282,7 @@ class _UsageGraphPainter extends CustomPainter {
     required this.hoveredIndex,
     required this.hoveredLabel,
     required this.hoveredDateLabel,
+    required this.usesHourlyLabels,
     required this.layout,
     required this.theme,
   });
@@ -291,6 +296,7 @@ class _UsageGraphPainter extends CustomPainter {
   final int? hoveredIndex;
   final String? hoveredLabel;
   final String? hoveredDateLabel;
+  final bool usesHourlyLabels;
   final _UsageGraphLayout layout;
   final ShadThemeData theme;
 
@@ -313,10 +319,10 @@ class _UsageGraphPainter extends CustomPainter {
       ..strokeWidth = 1;
     canvas.drawLine(Offset(chartRect.left, chartRect.bottom), Offset(chartRect.right, chartRect.bottom), baselinePaint);
 
-    final highlightedValuesByDay = _valuesByDay(highlightedPoints);
+    final highlightedValuesByPeriod = _valuesByPeriod(highlightedPoints);
     for (var i = 0; i < points.length; i++) {
       final rect = _UsageGraphGeometry.barRect(points, i, layout);
-      final isPartial = _isSameLocalDayAsToday(points[i].periodStart);
+      final isPartial = _isCurrentPeriod(points[i].periodStart, usesHourlyLabels);
       final color = i == hoveredIndex
           ? _UsageGraphGeometry.hoverColor(theme)
           : isPartial
@@ -328,7 +334,7 @@ class _UsageGraphPainter extends CustomPainter {
         canvas,
         rect: rect,
         totalValue: points[i].value,
-        highlightedValue: highlightedValuesByDay[_dayKey(points[i].periodStart)] ?? 0.0,
+        highlightedValue: highlightedValuesByPeriod[_periodKey(points[i].periodStart, usesHourlyLabels)] ?? 0.0,
         barColor: color,
       );
     }
@@ -414,13 +420,13 @@ class _UsageGraphPainter extends CustomPainter {
     canvas.drawRect(segmentRect, Paint()..color = segmentColor);
   }
 
-  Map<DateTime, double> _valuesByDay(List<UsageGraphPoint> points) {
-    final valuesByDay = <DateTime, double>{};
+  Map<DateTime, double> _valuesByPeriod(List<UsageGraphPoint> points) {
+    final valuesByPeriod = <DateTime, double>{};
     for (final point in points) {
-      final key = _dayKey(point.periodStart);
-      valuesByDay[key] = (valuesByDay[key] ?? 0.0) + point.value;
+      final key = _periodKey(point.periodStart, usesHourlyLabels);
+      valuesByPeriod[key] = (valuesByPeriod[key] ?? 0.0) + point.value;
     }
-    return valuesByDay;
+    return valuesByPeriod;
   }
 
   void _paintDashedLine(Canvas canvas, Offset start, Offset end, Paint paint) {
@@ -503,7 +509,7 @@ class _UsageGraphPainter extends CustomPainter {
     );
   }
 
-  String _formatAxisDate(DateTime date) => DateFormat.MMMd().format(date);
+  String _formatAxisDate(DateTime date) => _formatPeriodLabel(date, usesHourlyLabels);
 
   @override
   bool shouldRepaint(covariant _UsageGraphPainter oldDelegate) {
@@ -516,9 +522,29 @@ class _UsageGraphPainter extends CustomPainter {
         oldDelegate.hoveredIndex != hoveredIndex ||
         oldDelegate.hoveredLabel != hoveredLabel ||
         oldDelegate.hoveredDateLabel != hoveredDateLabel ||
+        oldDelegate.usesHourlyLabels != usesHourlyLabels ||
         oldDelegate.layout != layout ||
         oldDelegate.theme != theme;
   }
+}
+
+bool _usesHourlyLabels(List<UsageGraphPoint> points) {
+  if (points.length < 2) {
+    return false;
+  }
+  for (var i = 1; i < points.length; i++) {
+    final previous = points[i - 1].periodStart;
+    final current = points[i].periodStart;
+    final delta = current.difference(previous).abs();
+    if (delta < const Duration(hours: 23)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+DateTime _periodKey(DateTime date, bool hourly) {
+  return hourly ? _hourKey(date) : _dayKey(date);
 }
 
 DateTime _dayKey(DateTime date) {
@@ -526,8 +552,21 @@ DateTime _dayKey(DateTime date) {
   return DateTime(localDate.year, localDate.month, localDate.day);
 }
 
-bool _isSameLocalDayAsToday(DateTime date) {
+DateTime _hourKey(DateTime date) {
+  final localDate = date.toLocal();
+  return DateTime(localDate.year, localDate.month, localDate.day, localDate.hour);
+}
+
+bool _isCurrentPeriod(DateTime date, bool hourly) {
   final now = DateTime.now();
   final localDate = date.toLocal();
-  return localDate.year == now.year && localDate.month == now.month && localDate.day == now.day;
+  if (localDate.year != now.year || localDate.month != now.month || localDate.day != now.day) {
+    return false;
+  }
+  return !hourly || localDate.hour == now.hour;
+}
+
+String _formatPeriodLabel(DateTime date, bool hourly) {
+  final localDate = date.toLocal();
+  return hourly ? DateFormat.MMMd().add_j().format(localDate) : DateFormat.MMMd().format(localDate);
 }

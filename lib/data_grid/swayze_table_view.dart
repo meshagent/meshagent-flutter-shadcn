@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb, listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:interactive_viewer_2/interactive_viewer_2.dart';
 import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_flutter_shadcn/data_grid/swayze/controller.dart';
 import 'package:meshagent_flutter_shadcn/data_grid/swayze/delegates.dart';
@@ -26,6 +27,7 @@ class SwayzeTableView extends StatefulWidget {
     this.filter,
     this.sqlQuery,
     this.sqlTables,
+    this.displaySchema,
     this.branch,
     this.version,
     this.reloadToken = 0,
@@ -49,6 +51,7 @@ class SwayzeTableView extends StatefulWidget {
   final String? filter;
   final String? sqlQuery;
   final List<TableRef>? sqlTables;
+  final ArrowSchema? displaySchema;
   final String? branch;
   final int? version;
   final int reloadToken;
@@ -158,9 +161,13 @@ String _formatBytes(int bytes) {
 
 class _SwayzeTableViewState extends State<SwayzeTableView> {
   StreamSubscription<ArrowRecordBatch>? _rowsSubscription;
+  final OverlayPortalController _imageViewerController = OverlayPortalController();
   _SharedSwayzeController? _controller;
+  LocalHistoryEntry? _imageViewerHistoryEntry;
+  Uint8List? _overlayImageBytes;
   Object? _error;
   List<String> _columns = const [];
+  Map<String, _ColumnDisplay> _columnDisplays = const {};
   int _skippedBinaryCount = 0;
   int? _rowCount;
   int _loadedRowCount = 0;
@@ -194,6 +201,7 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
         oldWidget.filter != widget.filter ||
         oldWidget.sqlQuery != widget.sqlQuery ||
         !_tableRefsEqual(oldWidget.sqlTables, widget.sqlTables) ||
+        oldWidget.displaySchema != widget.displaySchema ||
         oldWidget.branch != widget.branch ||
         oldWidget.version != widget.version ||
         oldWidget.reloadToken != widget.reloadToken) {
@@ -208,7 +216,54 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
     unawaited(_rowsSubscription?.cancel());
     _cancelActiveSqlQuery();
     _disposeController();
+    final historyEntry = _imageViewerHistoryEntry;
+    _imageViewerHistoryEntry = null;
+    historyEntry?.remove();
     super.dispose();
+  }
+
+  void _hideImageViewer() {
+    _imageViewerController.hide();
+    if (mounted) {
+      setState(() {
+        _overlayImageBytes = null;
+      });
+    } else {
+      _overlayImageBytes = null;
+    }
+  }
+
+  void _closeImageViewer() {
+    final historyEntry = _imageViewerHistoryEntry;
+    if (historyEntry != null) {
+      _imageViewerHistoryEntry = null;
+      historyEntry.remove();
+      return;
+    }
+    _hideImageViewer();
+  }
+
+  void _openImageViewer(BuildContext context, Uint8List imageBytes) {
+    if (imageBytes.isEmpty) {
+      return;
+    }
+
+    final route = ModalRoute.of(context);
+    if (_imageViewerHistoryEntry == null && route != null) {
+      final historyEntry = LocalHistoryEntry(
+        onRemove: () {
+          _imageViewerHistoryEntry = null;
+          _hideImageViewer();
+        },
+      );
+      _imageViewerHistoryEntry = historyEntry;
+      route.addLocalHistoryEntry(historyEntry);
+    }
+
+    setState(() {
+      _overlayImageBytes = imageBytes;
+    });
+    _imageViewerController.show();
   }
 
   void _disposeController() {
@@ -230,6 +285,7 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
       setState(() {
         _error = null;
         _columns = const [];
+        _columnDisplays = const {};
         _skippedBinaryCount = 0;
         _rowCount = null;
         _loadedRowCount = 0;
@@ -340,6 +396,7 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
       version: widget.version,
     );
     final columns = _selectableColumns(schema);
+    final columnDisplays = _columnDisplaysForSchema(schema, columns);
     final rowCount = await widget.room.datasets.count(
       table: widget.tableName,
       where: _normalizedFilter,
@@ -356,6 +413,7 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
         ? _SharedSwayzeController(
             id: 'room-table:${widget.namespace?.join("/") ?? ""}:${widget.tableName}',
             columns: columns,
+            columnDisplays: columnDisplays,
             rowCount: rowCount,
           )
         : null;
@@ -363,6 +421,7 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
     setState(() {
       _controller = controller;
       _columns = columns;
+      _columnDisplays = columnDisplays;
       _skippedBinaryCount = _skippedBinaryColumnCount(schema);
       _rowCount = rowCount;
       _loadedRowCount = 0;
@@ -460,13 +519,15 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
     }
     _activeSqlQueryId = opened.queryId;
     final schema = opened.schema;
-    final columns = _selectableColumns(schema);
+    final columns = _selectableColumns(schema, displaySchema: widget.displaySchema);
+    final columnDisplays = _columnDisplaysForSchema(schema, columns, displaySchema: widget.displaySchema);
     final rows = <Map<String, Object?>>[];
-    final skippedBinaryCount = _skippedBinaryColumnCount(schema);
+    final skippedBinaryCount = _skippedBinaryColumnCount(schema, displaySchema: widget.displaySchema);
 
     if (mounted && generation == _loadGeneration) {
       setState(() {
         _columns = columns;
+        _columnDisplays = columnDisplays;
         _skippedBinaryCount = skippedBinaryCount;
         _isLoadingMetadata = false;
         _isLoadingRows = true;
@@ -500,6 +561,7 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
         ? _SharedSwayzeController(
             id: 'room-sql:${widget.namespace?.join("/") ?? ""}:${widget.tableName}:${widget.reloadToken}',
             columns: columns,
+            columnDisplays: columnDisplays,
             rowCount: rows.length,
           )
         : null;
@@ -529,8 +591,14 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
         final row = rows[rowIndex];
         for (var columnIndex = 0; columnIndex < columns.length; columnIndex++) {
           final columnName = columns[columnIndex];
+          final columnDisplay = controller.columnDisplays[columnName] ?? _ColumnDisplay.text;
           modifier.putCell(
-            _SharedSwayzeCellData(id: '$absoluteRow:$columnIndex', position: IntVector2(columnIndex, absoluteRow), value: row[columnName]),
+            _SharedSwayzeCellData(
+              id: '$absoluteRow:$columnIndex',
+              position: IntVector2(columnIndex, absoluteRow),
+              value: row[columnName],
+              display: columnDisplay,
+            ),
           );
         }
       }
@@ -568,7 +636,7 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
       );
     }
 
-    return Column(
+    final table = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (widget.showStatusBar)
@@ -616,6 +684,7 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
               child: _SharedSwayzeGrid(
                 controller: _controller!,
                 columns: _columns,
+                columnDisplays: _columnDisplays,
                 availableRowCount: _loadedRowCount,
                 autoSizeHorizontally: widget.autoSizeHorizontally,
                 autoSizeVertically: widget.autoSizeVertically,
@@ -625,10 +694,70 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
                 maxAutoSizeRowExtent: widget.maxAutoSizeRowExtent,
                 showLeadingOuterBorders: widget.showLeadingOuterBorders,
                 showRowHeaders: widget.showRowHeaders,
+                onOpenImage: _openImageViewer,
               ),
             ),
           ),
       ],
+    );
+
+    return OverlayPortal(
+      controller: _imageViewerController,
+      overlayLocation: OverlayChildLocation.rootOverlay,
+      overlayChildBuilder: (context) {
+        final imageBytes = _overlayImageBytes;
+        if (imageBytes == null) {
+          return const SizedBox.shrink();
+        }
+        return _DatabaseImageViewer(imageBytes: imageBytes, onClose: _closeImageViewer);
+      },
+      child: table,
+    );
+  }
+}
+
+class _DatabaseImageViewer extends StatelessWidget {
+  const _DatabaseImageViewer({required this.imageBytes, required this.onClose});
+
+  final Uint8List imageBytes;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned.fill(
+      child: Material(
+        color: Colors.black,
+        child: SafeArea(
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: InteractiveViewer2(
+                  child: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: UniversalImage(
+                        imageBytes,
+                        fit: BoxFit.contain,
+                        errorPlaceholder: Center(
+                          child: Text('Preview unavailable', style: ShadTheme.of(context).textTheme.p.copyWith(color: Colors.white70)),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 12,
+                left: 12,
+                child: ShadIconButton.ghost(
+                  icon: const Icon(LucideIcons.x, color: Colors.white),
+                  onPressed: onClose,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -720,6 +849,7 @@ class _InMemoryTableState extends State<InMemoryTable> {
     final controller = _SharedSwayzeController(
       id: 'in-memory-table:${identityHashCode(this)}',
       columns: widget.columns,
+      columnDisplays: const {},
       rowCount: widget.rows.length,
     );
 
@@ -728,7 +858,14 @@ class _InMemoryTableState extends State<InMemoryTable> {
         final row = widget.rows[rowIndex];
         for (var columnIndex = 0; columnIndex < widget.columns.length; columnIndex++) {
           final value = columnIndex < row.length ? row[columnIndex] : '';
-          modifier.putCell(_SharedSwayzeCellData(id: '$rowIndex:$columnIndex', position: IntVector2(columnIndex, rowIndex), value: value));
+          modifier.putCell(
+            _SharedSwayzeCellData(
+              id: '$rowIndex:$columnIndex',
+              position: IntVector2(columnIndex, rowIndex),
+              value: value,
+              display: _ColumnDisplay.text,
+            ),
+          );
         }
       }
     });
@@ -748,6 +885,7 @@ class _InMemoryTableState extends State<InMemoryTable> {
       child: _SharedSwayzeGrid(
         controller: controller,
         columns: widget.columns,
+        columnDisplays: const {},
         availableRowCount: widget.rows.length,
         maxHeight: widget.maxHeight,
         autoSizeHorizontally: widget.autoSizeHorizontally,
@@ -794,6 +932,7 @@ class _SharedSwayzeGrid extends StatefulWidget {
   const _SharedSwayzeGrid({
     required this.controller,
     required this.columns,
+    required this.columnDisplays,
     required this.availableRowCount,
     this.maxHeight,
     this.autoSizeHorizontally = false,
@@ -804,10 +943,12 @@ class _SharedSwayzeGrid extends StatefulWidget {
     this.maxAutoSizeRowExtent = 300,
     this.showLeadingOuterBorders = false,
     this.showRowHeaders = true,
+    this.onOpenImage,
   });
 
   final _SharedSwayzeController controller;
   final List<String> columns;
+  final Map<String, _ColumnDisplay> columnDisplays;
   final int availableRowCount;
   final double? maxHeight;
   final bool autoSizeHorizontally;
@@ -818,6 +959,7 @@ class _SharedSwayzeGrid extends StatefulWidget {
   final double? maxAutoSizeRowExtent;
   final bool showLeadingOuterBorders;
   final bool showRowHeaders;
+  final void Function(BuildContext context, Uint8List imageBytes)? onOpenImage;
 
   @override
   State<_SharedSwayzeGrid> createState() => _SharedSwayzeGridState();
@@ -847,6 +989,7 @@ class _SharedSwayzeGridState extends State<_SharedSwayzeGrid> {
       widget.maxAutoSizeColumnExtent,
       widget.maxAutoSizeRowExtent,
       Object.hashAll(widget.columns),
+      Object.hashAll(widget.columnDisplays.entries.map((entry) => Object.hash(entry.key, entry.value))),
       headerTextStyle,
       cellTextStyle,
       cellPadding,
@@ -857,7 +1000,12 @@ class _SharedSwayzeGridState extends State<_SharedSwayzeGrid> {
   }
 
   _SharedSwayzeCellDelegate get _cellDelegate {
-    return _SharedSwayzeCellDelegate(controller: widget.controller, onCopySelection: _copySelectionToClipboard, wrapText: _wrapCellText);
+    return _SharedSwayzeCellDelegate(
+      controller: widget.controller,
+      onCopySelection: _copySelectionToClipboard,
+      wrapText: _wrapCellText,
+      onOpenImage: widget.onOpenImage,
+    );
   }
 
   @override
@@ -875,7 +1023,8 @@ class _SharedSwayzeGridState extends State<_SharedSwayzeGrid> {
         oldWidget.autoSizeRows != widget.autoSizeRows ||
         oldWidget.maxAutoSizeColumnExtent != widget.maxAutoSizeColumnExtent ||
         oldWidget.maxAutoSizeRowExtent != widget.maxAutoSizeRowExtent ||
-        !listEquals(oldWidget.columns, widget.columns)) {
+        !listEquals(oldWidget.columns, widget.columns) ||
+        !_columnDisplaysEqual(oldWidget.columnDisplays, widget.columnDisplays)) {
       _applyAutoSizingIfNeeded(force: true);
     }
   }
@@ -1283,23 +1432,23 @@ double? _resolveGridHeight({
   return math.min(maxHeight, math.max(minimumHeight, contentHeight));
 }
 
-List<String> _selectableColumns(Object schema) {
+List<String> _selectableColumns(Object schema, {ArrowSchema? displaySchema}) {
   if (schema is! ArrowSchema) {
     return const [];
   }
 
   return [
     for (final field in schema.fields)
-      if (!_isBinaryColumn(field.type)) field.name,
+      if (_isSelectableField(field, displaySchema: displaySchema)) field.name,
   ];
 }
 
-int _skippedBinaryColumnCount(Object schema) {
+int _skippedBinaryColumnCount(Object schema, {ArrowSchema? displaySchema}) {
   if (schema is! ArrowSchema) {
     return 0;
   }
 
-  return schema.fields.where((field) => _isBinaryColumn(field.type)).length;
+  return schema.fields.where((field) => _isBinaryColumn(field.type) && !_isImageContentField(field, displaySchema: displaySchema)).length;
 }
 
 bool _isBinaryColumn(ArrowDataType type) {
@@ -1308,6 +1457,69 @@ bool _isBinaryColumn(ArrowDataType type) {
   }
 
   return type is ArrowBinaryType || type is ArrowFixedSizeBinaryType;
+}
+
+const _contentTypeMetadataKey = 'content-type';
+
+enum _ColumnDisplay { text, image }
+
+bool _isSelectableField(ArrowField field, {ArrowSchema? displaySchema}) {
+  return !_isBinaryColumn(field.type) || _isImageContentField(field, displaySchema: displaySchema);
+}
+
+bool _isImageContentField(ArrowField field, {ArrowSchema? displaySchema}) {
+  final contentType = field.metadata[_contentTypeMetadataKey]?.trim().toLowerCase();
+  if (contentType != null && contentType.startsWith('image/')) {
+    return true;
+  }
+  final displayField = _fieldByName(displaySchema, field.name);
+  final displayContentType = displayField?.metadata[_contentTypeMetadataKey]?.trim().toLowerCase();
+  return displayContentType != null && displayContentType.startsWith('image/');
+}
+
+ArrowField? _fieldByName(ArrowSchema? schema, String name) {
+  if (schema == null) {
+    return null;
+  }
+  for (final field in schema.fields) {
+    if (field.name == name) {
+      return field;
+    }
+  }
+  return null;
+}
+
+Map<String, _ColumnDisplay> _columnDisplaysForSchema(Object schema, List<String> columns, {ArrowSchema? displaySchema}) {
+  if (schema is! ArrowSchema || columns.isEmpty) {
+    return const {};
+  }
+
+  final selectedColumns = columns.toSet();
+  final displays = <String, _ColumnDisplay>{};
+  for (final field in schema.fields) {
+    if (!selectedColumns.contains(field.name)) {
+      continue;
+    }
+    if (_isImageContentField(field, displaySchema: displaySchema)) {
+      displays[field.name] = _ColumnDisplay.image;
+    }
+  }
+  return displays.isEmpty ? const {} : Map.unmodifiable(displays);
+}
+
+bool _columnDisplaysEqual(Map<String, _ColumnDisplay> a, Map<String, _ColumnDisplay> b) {
+  if (identical(a, b)) {
+    return true;
+  }
+  if (a.length != b.length) {
+    return false;
+  }
+  for (final entry in a.entries) {
+    if (b[entry.key] != entry.value) {
+      return false;
+    }
+  }
+  return true;
 }
 
 bool _tableRefsEqual(List<TableRef>? a, List<TableRef>? b) {
@@ -1332,7 +1544,13 @@ bool _tableRefsEqual(List<TableRef>? a, List<TableRef>? b) {
 }
 
 class _SharedSwayzeController extends SwayzeController {
-  _SharedSwayzeController({required String id, required List<String> columns, required int rowCount}) {
+  _SharedSwayzeController({
+    required String id,
+    required List<String> columns,
+    required Map<String, _ColumnDisplay> columnDisplays,
+    required int rowCount,
+  }) : columnDisplays = Map.unmodifiable(columnDisplays) {
+    final hasImageColumns = columnDisplays.values.contains(_ColumnDisplay.image);
     tableDataController = SwayzeTableDataController<_SharedSwayzeController>(
       parent: this,
       id: id,
@@ -1340,9 +1558,15 @@ class _SharedSwayzeController extends SwayzeController {
       rowCount: rowCount,
       columns: [
         for (var index = 0; index < columns.length; index++)
-          SwayzeHeaderData(index: index, extent: _estimateColumnExtent(columns[index]), hidden: false),
+          SwayzeHeaderData(
+            index: index,
+            extent: _estimateColumnExtent(columns[index], columnDisplays[columns[index]] ?? _ColumnDisplay.text),
+            hidden: false,
+          ),
       ],
-      rows: const [],
+      rows: hasImageColumns
+          ? [for (var index = 0; index < rowCount; index++) SwayzeHeaderData(index: index, extent: _kImageRowExtent, hidden: false)]
+          : const [],
       frozenColumns: 0,
       frozenRows: 0,
       allowElasticExpansion: false,
@@ -1362,6 +1586,8 @@ class _SharedSwayzeController extends SwayzeController {
   @override
   late final SwayzeCellsController<_SharedSwayzeCellData> cellsController;
 
+  final Map<String, _ColumnDisplay> columnDisplays;
+
   @override
   late final SwayzeTableDataController<_SharedSwayzeController> tableDataController;
 
@@ -1373,18 +1599,29 @@ class _SharedSwayzeController extends SwayzeController {
   }
 }
 
-double _estimateColumnExtent(String columnName) {
+const _kImageColumnExtent = 220.0;
+const _kImageRowExtent = 180.0;
+
+double _estimateColumnExtent(String columnName, _ColumnDisplay display) {
+  if (display == _ColumnDisplay.image) {
+    return _kImageColumnExtent;
+  }
   return math.min(320, math.max(160, columnName.length * 12 + 40)).toDouble();
 }
 
 class _SharedSwayzeCellData extends SwayzeCellData {
-  const _SharedSwayzeCellData({required super.id, required super.position, required this.value});
+  const _SharedSwayzeCellData({required super.id, required super.position, required this.value, required this.display});
 
   final Object? value;
+  final _ColumnDisplay display;
 
   bool get isNull => value == null;
 
   String get preview {
+    if (display == _ColumnDisplay.image) {
+      final bytes = _imageBytesFromValue(value);
+      return bytes == null ? '' : '[image ${_formatBytes(bytes.length)}]';
+    }
     final text = _stringifyTableValue(value, pretty: false);
     if (text.length <= 160) {
       return text;
@@ -1394,7 +1631,7 @@ class _SharedSwayzeCellData extends SwayzeCellData {
 
   @override
   Alignment get contentAlignment {
-    if (value is bool) {
+    if (display == _ColumnDisplay.image) {
       return Alignment.center;
     }
     if (value is num) {
@@ -1405,6 +1642,9 @@ class _SharedSwayzeCellData extends SwayzeCellData {
 
   @override
   bool get hasVisibleContent {
+    if (display == _ColumnDisplay.image) {
+      return _imageBytesFromValue(value) != null;
+    }
     if (value == null) {
       return true;
     }
@@ -1415,26 +1655,44 @@ class _SharedSwayzeCellData extends SwayzeCellData {
 const _kMinimumReadableCellWidth = 50.0;
 const _kAutoFitMeasurementSampleText = 'Mg';
 
+Uint8List? _imageBytesFromValue(Object? value) {
+  if (value is Uint8List) {
+    return value;
+  }
+  if (value is List<int>) {
+    return Uint8List.fromList(value);
+  }
+  return null;
+}
+
 class _SharedSwayzeCellDelegate extends CellDelegate<_SharedSwayzeCellData> {
-  _SharedSwayzeCellDelegate({required this.controller, required this.onCopySelection, required this.wrapText});
+  _SharedSwayzeCellDelegate({required this.controller, required this.onCopySelection, required this.wrapText, this.onOpenImage});
 
   final _SharedSwayzeController controller;
   final Future<void> Function() onCopySelection;
   final bool wrapText;
+  final void Function(BuildContext context, Uint8List imageBytes)? onOpenImage;
 
   @override
   CellLayout getCellLayout(_SharedSwayzeCellData data) {
-    return _SharedSwayzeCellLayout(data, controller: controller, onCopySelection: onCopySelection, wrapText: wrapText);
+    return _SharedSwayzeCellLayout(
+      data,
+      controller: controller,
+      onCopySelection: onCopySelection,
+      wrapText: wrapText,
+      onOpenImage: onOpenImage,
+    );
   }
 }
 
 class _SharedSwayzeCellLayout extends CellLayout {
-  _SharedSwayzeCellLayout(this.data, {required this.controller, required this.onCopySelection, required this.wrapText});
+  _SharedSwayzeCellLayout(this.data, {required this.controller, required this.onCopySelection, required this.wrapText, this.onOpenImage});
 
   final _SharedSwayzeCellData data;
   final _SharedSwayzeController controller;
   final Future<void> Function() onCopySelection;
   final bool wrapText;
+  final void Function(BuildContext context, Uint8List imageBytes)? onOpenImage;
 
   @override
   Widget buildCell(BuildContext context, {bool isHover = false, bool isActive = false}) {
@@ -1443,6 +1701,40 @@ class _SharedSwayzeCellLayout extends CellLayout {
     final baseTextStyle = tableTheme.cellStyle ?? theme.textTheme.muted.copyWith(color: theme.colorScheme.foreground);
     final cellPadding = _resolveGridCellPadding(context, tableTheme);
     final textColor = data.isNull ? theme.colorScheme.mutedForeground : (baseTextStyle.color ?? theme.colorScheme.foreground);
+
+    if (data.display == _ColumnDisplay.image) {
+      final imageBytes = _imageBytesFromValue(data.value);
+      final child = imageBytes == null
+          ? Center(
+              child: Text('No preview', style: baseTextStyle.copyWith(color: theme.colorScheme.mutedForeground)),
+            )
+          : Padding(
+              padding: const EdgeInsets.all(6),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: ColoredBox(
+                  color: theme.colorScheme.muted.withValues(alpha: 0.35),
+                  child: UniversalImage(
+                    imageBytes,
+                    fit: BoxFit.contain,
+                    width: double.infinity,
+                    height: double.infinity,
+                    errorPlaceholder: Center(
+                      child: Text('Preview unavailable', style: baseTextStyle.copyWith(color: theme.colorScheme.mutedForeground)),
+                    ),
+                  ),
+                ),
+              ),
+            );
+
+      return _SharedSwayzeCellContextMenuRegion(
+        data: data,
+        controller: controller,
+        onCopySelection: onCopySelection,
+        onDoubleTap: imageBytes == null || onOpenImage == null ? null : () => onOpenImage!(context, imageBytes),
+        child: SizedBox.expand(child: child),
+      );
+    }
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -1479,6 +1771,7 @@ class _SharedSwayzeCellLayout extends CellLayout {
           data: data,
           controller: controller,
           onCopySelection: onCopySelection,
+          onDoubleTap: null,
           child: SizedBox.expand(
             child: Padding(
               padding: effectivePadding,
@@ -1607,12 +1900,14 @@ class _SharedSwayzeCellContextMenuRegion extends StatefulWidget {
     required this.controller,
     required this.onCopySelection,
     required this.child,
+    this.onDoubleTap,
   });
 
   final _SharedSwayzeCellData data;
   final _SharedSwayzeController controller;
   final Future<void> Function() onCopySelection;
   final Widget child;
+  final VoidCallback? onDoubleTap;
 
   @override
   State<_SharedSwayzeCellContextMenuRegion> createState() => _SharedSwayzeCellContextMenuRegionState();
@@ -1705,6 +2000,7 @@ class _SharedSwayzeCellContextMenuRegionState extends State<_SharedSwayzeCellCon
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTapDown: (_) => _hide(),
+        onDoubleTap: widget.onDoubleTap,
         onSecondaryTapDown: isWindows
             ? null
             : (details) async {
@@ -1817,6 +2113,9 @@ String _clipboardFieldText(_SharedSwayzeCellData? cell) {
 String _rawClipboardFieldText(_SharedSwayzeCellData? cell) {
   if (cell == null) {
     return '';
+  }
+  if (cell.display == _ColumnDisplay.image) {
+    return cell.preview;
   }
 
   return _stringifyTableValue(cell.value, pretty: false);
