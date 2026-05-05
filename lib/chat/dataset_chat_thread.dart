@@ -34,7 +34,10 @@ const String _agentToolCallPendingType = 'meshagent.agent.tool_call.pending';
 const String _agentToolCallInProgressType = 'meshagent.agent.tool_call.in_progress';
 const String _agentToolCallStartedType = 'meshagent.agent.tool_call.started';
 const String _agentToolCallEndedType = 'meshagent.agent.tool_call.ended';
-const String _agentThreadImageType = 'meshagent.agent.thread.image';
+const String _agentImageGenerationStartedType = 'meshagent.agent.image_generation.started';
+const String _agentImageGenerationPartialType = 'meshagent.agent.image_generation.partial';
+const String _agentImageGenerationCompletedType = 'meshagent.agent.image_generation.completed';
+const String _agentImageGenerationFailedType = 'meshagent.agent.image_generation.failed';
 
 class DatasetChatThread extends StatefulWidget {
   const DatasetChatThread({
@@ -92,6 +95,10 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   int _nextAgentSequence = 0;
   String? _openedPath;
   String? _openedAgentParticipantId;
+  final OverlayPortalController _imageViewerController = OverlayPortalController();
+  LocalHistoryEntry? _imageViewerHistoryEntry;
+  List<ChatThreadFeedImage> _overlayImages = const <ChatThreadFeedImage>[];
+  int _overlayInitialIndex = 0;
 
   @override
   void initState() {
@@ -140,6 +147,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     _watchSubscription?.cancel();
     _closeOpenSubscription();
     _roomSubscription?.cancel();
+    final historyEntry = _imageViewerHistoryEntry;
+    _imageViewerHistoryEntry = null;
+    historyEntry?.remove();
     widget.room.messaging.removeListener(_onMessagingChanged);
     if (_ownsController) {
       _controller.dispose();
@@ -308,6 +318,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       if (existing == null || !const DeepCollectionEquality().equals(existing, normalized)) {
         target[itemId] = normalized;
         _agentRowsByItemId.remove(itemId);
+        _removeReconciledAgentRowsForDatasetRow(normalized);
         changed = true;
       }
     }
@@ -316,6 +327,30 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       changed = _rebaseAgentRowsAfterDatasetRows() || changed;
     }
     return changed;
+  }
+
+  void _removeReconciledAgentRowsForDatasetRow(Map<String, Object?> datasetRow) {
+    final datasetData = _rowData(datasetRow);
+    if (datasetData?['kind'] != 'image_generation') {
+      return;
+    }
+    final datasetKeys = _imageGenerationCorrelationKeys(datasetRow);
+    if (datasetKeys.isEmpty) {
+      return;
+    }
+    final liveItemIds = _agentRowsByItemId.entries
+        .where((entry) {
+          final liveData = _rowData(entry.value);
+          if (liveData?['kind'] != 'image_generation') {
+            return false;
+          }
+          return _imageGenerationCorrelationKeys(entry.value).any(datasetKeys.contains);
+        })
+        .map((entry) => entry.key)
+        .toList(growable: false);
+    for (final liveItemId in liveItemIds) {
+      _agentRowsByItemId.remove(liveItemId);
+    }
   }
 
   void _advanceNextAgentSequencePastDatasetRows() {
@@ -439,13 +474,6 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         changed = _materializePendingMessage(payload['source_message_id']?.toString()) || _materializeTurnInputPayload(payload) || changed;
         break;
       case _agentTextContentStartedType:
-        changed =
-            _upsertAgentRow(
-              itemId: _payloadItemId(payload),
-              turnId: _payloadTurnId(payload),
-              data: const {'kind': 'message', 'role': 'assistant', 'text': ''},
-            ) ||
-            changed;
         break;
       case _agentTextContentDeltaType:
         changed =
@@ -519,36 +547,51 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       case _agentToolCallInProgressType:
       case _agentToolCallStartedType:
       case _agentToolCallEndedType:
+        final tool = payload['tool']?.toString() ?? payload['tool_name']?.toString() ?? payload['name']?.toString() ?? '';
+        final isImageGeneration = tool.trim().toLowerCase() == 'image_generation';
+        if (isImageGeneration && type == _agentToolCallEndedType && payload['error'] == null) {
+          break;
+        }
         changed =
             _upsertAgentRow(
               itemId: _payloadItemId(payload),
               turnId: _payloadTurnId(payload),
-              data: {
-                'kind': 'tool_call',
-                'role': 'assistant',
-                'toolkit': payload['toolkit']?.toString() ?? payload['toolkit_name']?.toString() ?? '',
-                'tool': payload['tool']?.toString() ?? payload['tool_name']?.toString() ?? payload['name']?.toString() ?? '',
-                'status': type == _agentToolCallEndedType ? 'completed' : 'running',
-              },
+              data: isImageGeneration
+                  ? {
+                      'kind': 'image_generation',
+                      'role': 'assistant',
+                      'status': payload['error'] == null ? 'in_progress' : 'failed',
+                      'status_detail': payload['error'] == null ? 'Generating image' : payload['error']?.toString(),
+                      'call_id': payload['call_id']?.toString(),
+                      'arguments': _mapValue(payload['arguments']),
+                    }
+                  : {
+                      'kind': 'tool_call',
+                      'role': 'assistant',
+                      'toolkit': payload['toolkit']?.toString() ?? payload['toolkit_name']?.toString() ?? '',
+                      'tool': tool,
+                      'status': type == _agentToolCallEndedType ? 'completed' : 'running',
+                    },
             ) ||
             changed;
         break;
-      case _agentThreadImageType:
+      case _agentImageGenerationStartedType:
+      case _agentImageGenerationPartialType:
+      case _agentImageGenerationCompletedType:
+      case _agentImageGenerationFailedType:
         changed =
             _upsertAgentRow(
               itemId: _payloadItemId(payload),
               turnId: _payloadTurnId(payload),
               timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
               data: {
-                'kind': 'image',
+                'kind': 'image_generation',
                 'role': 'assistant',
-                'image_id': payload['image_id']?.toString(),
-                'mime_type': payload['mime_type']?.toString(),
-                'status': payload['status']?.toString(),
+                'status': _imageGenerationStatusFromType(type),
                 'status_detail': payload['status_detail']?.toString(),
-                'created_by': payload['created_by']?.toString(),
-                'width': payload['width'],
-                'height': payload['height'],
+                'call_id': payload['call_id']?.toString(),
+                'arguments': _mapValue(payload['arguments']),
+                'message': payload,
               },
             ) ||
             changed;
@@ -649,6 +692,10 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (_rowsByItemId.containsKey(itemId) || _initialRowsByItemId.containsKey(itemId)) {
       return false;
     }
+    final candidateRow = <String, Object?>{'turn_id': turnId, 'item_id': itemId, 'data': data};
+    if (_isReconciledByDatasetRows(candidateRow)) {
+      return false;
+    }
     final existing = _agentRowsByItemId[itemId];
     final row = <String, Object?>{
       'turn_id': turnId ?? existing?['turn_id'],
@@ -662,6 +709,27 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     }
     _agentRowsByItemId[itemId] = row;
     return true;
+  }
+
+  bool _isReconciledByDatasetRows(Map<String, Object?> liveRow) {
+    final liveData = _rowData(liveRow);
+    if (liveData?['kind'] != 'image_generation') {
+      return false;
+    }
+    final liveKeys = _imageGenerationCorrelationKeys(liveRow);
+    if (liveKeys.isEmpty) {
+      return false;
+    }
+    for (final datasetRow in [..._rowsByItemId.values, ..._initialRowsByItemId.values]) {
+      final datasetData = _rowData(datasetRow);
+      if (datasetData?['kind'] != 'image_generation') {
+        continue;
+      }
+      if (_imageGenerationCorrelationKeys(datasetRow).any(liveKeys.contains)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   bool _appendAgentRowText({
@@ -786,6 +854,13 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (message.kind == 'tool_call') {
       return _showCompletedToolCalls;
     }
+    final image = message.image;
+    if (image != null) {
+      final hasImageReference = _stringValue(image.imageId) != null || _stringValue(image.uri) != null;
+      if (!hasImageReference && !_isImageGenerationPendingStatus(image.status) && !_isImageGenerationFailedStatus(image.status)) {
+        return false;
+      }
+    }
     return true;
   }
 
@@ -892,6 +967,78 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     );
   }
 
+  void _hideThreadImageViewer() {
+    _imageViewerController.hide();
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  void _closeThreadImageViewer() {
+    final historyEntry = _imageViewerHistoryEntry;
+    if (historyEntry != null) {
+      _imageViewerHistoryEntry = null;
+      historyEntry.remove();
+      return;
+    }
+    _hideThreadImageViewer();
+  }
+
+  void _openThreadImageViewer(BuildContext context, {required List<ChatThreadFeedImage> images, required int initialIndex}) {
+    if (images.isEmpty) {
+      return;
+    }
+
+    final route = ModalRoute.of(context);
+    if (_imageViewerHistoryEntry == null && route != null) {
+      final historyEntry = LocalHistoryEntry(
+        onRemove: () {
+          _imageViewerHistoryEntry = null;
+          _hideThreadImageViewer();
+        },
+      );
+      _imageViewerHistoryEntry = historyEntry;
+      route.addLocalHistoryEntry(historyEntry);
+    }
+
+    final clampedInitialIndex = initialIndex.clamp(0, images.length - 1);
+    setState(() {
+      _overlayImages = List<ChatThreadFeedImage>.unmodifiable(images);
+      _overlayInitialIndex = clampedInitialIndex;
+    });
+    _imageViewerController.show();
+  }
+
+  List<ChatThreadFeedImage> _collectThreadImages(List<_DatasetThreadMessage> messages) {
+    final imagesInThread = <ChatThreadFeedImage>[];
+    for (final message in messages) {
+      final image = message.image;
+      if (image == null) {
+        continue;
+      }
+
+      final imageId = image.imageId?.trim() ?? "";
+      final imageUri = image.uri?.trim();
+      if (imageId.isEmpty && (imageUri == null || imageUri.isEmpty)) {
+        continue;
+      }
+
+      imagesInThread.add(
+        ChatThreadFeedImage(
+          attachmentElementId: message.id,
+          imageId: imageId,
+          imageUri: imageUri,
+          mimeType: image.mimeType,
+          status: image.status,
+          statusDetail: image.statusDetail,
+          widthPx: image.width,
+          heightPx: image.height,
+        ),
+      );
+    }
+    return imagesInThread;
+  }
+
   Widget _buildInput(BuildContext context, ChatThreadSnapshot snapshot, List<PendingAgentMessage> pendingMessages) {
     PendingAgentMessage? waitingForOnlineMessage;
     for (final pending in pendingMessages) {
@@ -923,7 +1070,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     );
   }
 
-  Widget _buildMessage(BuildContext context, _DatasetThreadMessage message) {
+  Widget _buildMessage(BuildContext context, _DatasetThreadMessage message, {required List<ChatThreadFeedImage> feedImages}) {
     final theme = ShadTheme.of(context);
     if (message.kind != 'message') {
       return Padding(
@@ -939,6 +1086,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         !isAgentMessage &&
         (rawAuthorName == localParticipantName || ((rawAuthorName == null || rawAuthorName.trim().isEmpty) && message.role == 'user'));
     final authorName = rawAuthorName ?? (isAgentMessage ? _displayAgentName(widget.agentName ?? 'agent') : '');
+    final imageAttachmentId = message.id;
+    final imageInitialIndex = feedImages.indexWhere((entry) => entry.attachmentElementId == imageAttachmentId);
 
     return ChatThreadMessageView(
       key: ValueKey(message.id),
@@ -958,24 +1107,39 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
           ChatThreadImageAttachment(
             room: widget.room,
             imageId: message.image!.imageId,
+            imageUri: message.image!.uri,
             fallbackMimeType: message.image!.mimeType,
             status: message.image!.status,
             statusDetail: message.image!.statusDetail,
             widthPx: message.image!.width,
             heightPx: message.image!.height,
             roundedCorners: false,
+            onOpenFullscreen: imageInitialIndex == -1
+                ? null
+                : () => _openThreadImageViewer(context, images: feedImages, initialIndex: imageInitialIndex),
           ),
       ],
     );
   }
 
-  List<Widget> _buildMessageWidgets(BuildContext context, List<_DatasetThreadMessage> messages, List<PendingAgentMessage> pendingMessages) {
+  List<Widget> _buildMessageWidgets(
+    BuildContext context,
+    List<_DatasetThreadMessage> messages,
+    List<PendingAgentMessage> pendingMessages, {
+    required List<ChatThreadFeedImage> feedImages,
+  }) {
     final messageWidgets = <Widget>[];
     for (final message in messages.indexed) {
       if (messageWidgets.isNotEmpty) {
         messageWidgets.insert(0, const SizedBox(height: ChatThreadMessageView.chatMessageStackSpacing));
       }
-      messageWidgets.insert(0, Container(key: ValueKey(message.$2.id), child: _buildMessage(context, message.$2)));
+      messageWidgets.insert(
+        0,
+        Container(
+          key: ValueKey(message.$2.id),
+          child: _buildMessage(context, message.$2, feedImages: feedImages),
+        ),
+      );
     }
     for (final pending in pendingMessages) {
       if (messageWidgets.isNotEmpty) {
@@ -989,7 +1153,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   Widget _buildThreadViewport(BuildContext context, List<_DatasetThreadMessage> messages, List<PendingAgentMessage> pendingMessages) {
     final statusText = _status.text?.trim();
     final showStatus = statusText != null && statusText.isNotEmpty;
-    return ChatThreadViewportBody(
+    final feedImages = _collectThreadImages(messages);
+    final threadView = ChatThreadViewportBody(
       scrollController: _controller.threadScrollController,
       bottomAlign: true,
       centerContent: ChatThreadEmptyStateContent(
@@ -1017,7 +1182,24 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ),
           ),
       ],
-      children: _buildMessageWidgets(context, messages, pendingMessages),
+      children: _buildMessageWidgets(context, messages, pendingMessages, feedImages: feedImages),
+    );
+
+    return OverlayPortal(
+      controller: _imageViewerController,
+      overlayLocation: OverlayChildLocation.rootOverlay,
+      overlayChildBuilder: (context) {
+        if (_overlayImages.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        return ChatThreadImageGalleryPage(
+          room: widget.room,
+          images: _overlayImages,
+          initialIndex: _overlayInitialIndex,
+          onClose: _closeThreadImageViewer,
+        );
+      },
+      child: threadView,
     );
   }
 
@@ -1079,8 +1261,9 @@ class _DatasetThreadMessage {
 }
 
 class _DatasetThreadImage {
-  const _DatasetThreadImage({this.imageId, this.mimeType, this.status, this.statusDetail, this.width, this.height});
+  const _DatasetThreadImage({this.uri, this.imageId, this.mimeType, this.status, this.statusDetail, this.width, this.height});
 
+  final String? uri;
   final String? imageId;
   final String? mimeType;
   final String? status;
@@ -1115,42 +1298,60 @@ _DatasetThreadMessage? _messageForRow(Map<String, Object?> row) {
   final role = data['role']?.toString();
   switch (kind) {
     case 'message':
+      final text = data['text']?.toString() ?? '';
+      final attachments = _stringList(data['attachments']);
+      if (text.trim().isEmpty && attachments.isEmpty) {
+        return null;
+      }
       return _DatasetThreadMessage(
         id: itemId,
         kind: 'message',
         role: role == 'assistant' ? 'agent' : (role ?? 'agent'),
-        text: data['text']?.toString() ?? '',
+        text: text,
         authorName: data['sender_name']?.toString(),
-        attachments: _stringList(data['attachments']),
+        attachments: attachments,
         createdAt: _rowTimestamp(row),
       );
     case 'file':
+      final urls = _stringList(data['urls']);
+      if (urls.isEmpty) {
+        return null;
+      }
       return _DatasetThreadMessage(
         id: itemId,
         kind: 'message',
         role: role == 'assistant' ? 'agent' : (role ?? 'agent'),
         text: '',
         authorName: data['sender_name']?.toString(),
-        attachments: _stringList(data['urls']),
+        attachments: urls,
         createdAt: _rowTimestamp(row),
       );
-    case 'image':
+    case 'image_generation':
       final message = _mapValue(data['message']);
+      final image = _firstGeneratedImage(message);
+      final dimensions = _imageGenerationDimensions(data: data, message: message, image: image);
+      final imageUri = _stringValue(image?['uri']);
+      final imageId = _imageIdFromDatasetUri(imageUri);
       return _DatasetThreadMessage(
         id: itemId,
         kind: 'message',
         role: 'agent',
         text: '',
-        authorName: _stringValue(data['created_by']) ?? _stringValue(message?['created_by']),
+        authorName: _stringValue(image?['created_by']),
         attachments: const [],
         createdAt: _rowTimestamp(row),
         image: _DatasetThreadImage(
-          imageId: _stringValue(data['image_id']) ?? _stringValue(message?['image_id']),
-          mimeType: _stringValue(data['mime_type']) ?? _stringValue(message?['mime_type']),
-          status: _stringValue(data['status']) ?? _stringValue(message?['status']),
-          statusDetail: _stringValue(data['status_detail']) ?? _stringValue(message?['status_detail']),
-          width: _doubleValue(data['width']) ?? _doubleValue(message?['width']),
-          height: _doubleValue(data['height']) ?? _doubleValue(message?['height']),
+          uri: imageUri,
+          imageId: imageId,
+          mimeType: _stringValue(image?['mime_type']),
+          status:
+              _stringValue(data['status']) ??
+              _stringValue(image?['status']) ??
+              _imageGenerationStatusFromType(_stringValue(message?['type'])),
+          statusDetail:
+              _stringValue(data['status_detail']) ?? _stringValue(message?['status_detail']) ?? _stringValue(image?['status_detail']),
+          width: dimensions.$1,
+          height: dimensions.$2,
         ),
       );
     case 'reasoning':
@@ -1325,6 +1526,124 @@ Map<String, Object?>? _mapValue(Object? raw) {
     }
   }
   return null;
+}
+
+Map<String, Object?>? _firstGeneratedImage(Map<String, Object?>? message) {
+  if (message == null) {
+    return null;
+  }
+  final images = message['images'];
+  if (images is List && images.isNotEmpty) {
+    return _mapValue(images.first);
+  }
+  return _mapValue(message['image']);
+}
+
+Set<String> _imageGenerationCorrelationKeys(Map<String, Object?> row) {
+  final keys = <String>{};
+  final itemId = _stringValue(row['item_id']);
+  if (itemId != null) {
+    keys.add('item:$itemId');
+  }
+  final data = _rowData(row);
+  final message = _mapValue(data?['message']);
+  for (final value in <Object?>[data?['call_id'], message?['call_id']]) {
+    final callId = _stringValue(value);
+    if (callId != null) {
+      keys.add('call:$callId');
+    }
+  }
+  for (final value in <Object?>[message?['item_id'], message?['message_id']]) {
+    final id = _stringValue(value);
+    if (id != null) {
+      keys.add('item:$id');
+    }
+  }
+  return keys;
+}
+
+(double?, double?) _imageGenerationDimensions({
+  required Map<String, Object?> data,
+  required Map<String, Object?>? message,
+  required Map<String, Object?>? image,
+}) {
+  var width = _doubleValue(image?['width']);
+  var height = _doubleValue(image?['height']);
+
+  final argumentMaps = <Map<String, Object?>?>[_mapValue(data['arguments']), _mapValue(message?['arguments'])];
+  for (final arguments in argumentMaps) {
+    if (arguments == null) {
+      continue;
+    }
+    width ??= _doubleValue(arguments['width']);
+    height ??= _doubleValue(arguments['height']);
+    if (width == null || height == null) {
+      final parsed = _parseImageSize(arguments['size']);
+      width ??= parsed.$1;
+      height ??= parsed.$2;
+    }
+    if (width != null && height != null) {
+      break;
+    }
+  }
+
+  return (width, height);
+}
+
+(double?, double?) _parseImageSize(Object? value) {
+  if (value is! String) {
+    return (null, null);
+  }
+  final match = RegExp(r'^\s*(\d+)\s*[xX]\s*(\d+)\s*$').firstMatch(value);
+  if (match == null) {
+    return (null, null);
+  }
+  return (double.tryParse(match.group(1) ?? ''), double.tryParse(match.group(2) ?? ''));
+}
+
+String _imageGenerationStatusFromType(String? type) {
+  switch (type) {
+    case _agentImageGenerationCompletedType:
+      return 'completed';
+    case _agentImageGenerationFailedType:
+      return 'failed';
+    case _agentImageGenerationPartialType:
+      return 'in_progress';
+    default:
+      return 'pending';
+  }
+}
+
+bool _isImageGenerationPendingStatus(String? status) {
+  if (status == null || status.trim().isEmpty) {
+    return false;
+  }
+  final normalized = status.trim().toLowerCase();
+  return normalized == 'generating' ||
+      normalized == 'in_progress' ||
+      normalized == 'queued' ||
+      normalized == 'running' ||
+      normalized == 'pending';
+}
+
+bool _isImageGenerationFailedStatus(String? status) {
+  if (status == null || status.trim().isEmpty) {
+    return false;
+  }
+  final normalized = status.trim().toLowerCase();
+  return normalized == 'failed' || normalized == 'cancelled';
+}
+
+String? _imageIdFromDatasetUri(String? uri) {
+  if (uri == null || uri.trim().isEmpty) {
+    return null;
+  }
+  final parsed = Uri.tryParse(uri.trim());
+  if (parsed == null || parsed.scheme != 'dataset') {
+    return null;
+  }
+  final imageId = parsed.queryParameters['id']?.trim();
+  return imageId == null || imageId.isEmpty ? null : imageId;
 }
 
 String? _stringValue(Object? value) {

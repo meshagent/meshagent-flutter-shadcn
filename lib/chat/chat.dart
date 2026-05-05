@@ -4511,7 +4511,7 @@ class ChatThreadMessageView extends StatelessWidget {
           if (hasText || i > 0) const SizedBox(height: chatBubbleSiblingSpacing),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: chatBubbleHorizontalInset),
-            child: attachmentWidgets[i],
+            child: Align(alignment: mine ? Alignment.centerRight : Alignment.centerLeft, child: attachmentWidgets[i]),
           ),
         ],
         ?trailing,
@@ -4675,7 +4675,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   ThreadStorageSaveSurfacePresenter? get mobileStorageSaveSurfacePresenter => widget.mobileStorageSaveSurfacePresenter;
 
   final OverlayPortalController _imageViewerController = OverlayPortalController();
-  List<_ThreadFeedImage> _overlayImages = const <_ThreadFeedImage>[];
+  List<ChatThreadFeedImage> _overlayImages = const <ChatThreadFeedImage>[];
   int _overlayInitialIndex = 0;
   LocalHistoryEntry? _imageViewerHistoryEntry;
   final LinkedHashMap<String, _ThreadImageRecord> _imageCache = LinkedHashMap<String, _ThreadImageRecord>();
@@ -5181,7 +5181,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     _hideThreadImageViewer();
   }
 
-  void _openThreadImageViewer(BuildContext context, {required List<_ThreadFeedImage> images, required int initialIndex}) {
+  void _openThreadImageViewer(BuildContext context, {required List<ChatThreadFeedImage> images, required int initialIndex}) {
     if (images.isEmpty) {
       return;
     }
@@ -5200,7 +5200,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
 
     final clampedInitialIndex = initialIndex.clamp(0, images.length - 1);
     setState(() {
-      _overlayImages = List<_ThreadFeedImage>.unmodifiable(images);
+      _overlayImages = List<ChatThreadFeedImage>.unmodifiable(images);
       _overlayInitialIndex = clampedInitialIndex;
     });
     _imageViewerController.show();
@@ -5219,8 +5219,8 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     super.dispose();
   }
 
-  List<_ThreadFeedImage> _collectThreadImages() {
-    final imagesInThread = <_ThreadFeedImage>[];
+  List<ChatThreadFeedImage> _collectThreadImages() {
+    final imagesInThread = <ChatThreadFeedImage>[];
 
     for (final message in messages) {
       for (final attachment in message.getChildren().whereType<MeshElement>()) {
@@ -5248,7 +5248,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
         final height = _parsePositiveDimension(attachment.getAttribute("height"));
 
         imagesInThread.add(
-          _ThreadFeedImage(
+          ChatThreadFeedImage(
             attachmentElementId: attachmentElementId,
             imageId: imageId,
             mimeType: mimeType,
@@ -5540,7 +5540,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     ];
   }
 
-  Widget _buildImageInThread(BuildContext context, MeshElement attachment, {required List<_ThreadFeedImage> feedImages}) {
+  Widget _buildImageInThread(BuildContext context, MeshElement attachment, {required List<ChatThreadFeedImage> feedImages}) {
     final imageIdAttribute = attachment.getAttribute("id");
     final imageId = (imageIdAttribute is String && imageIdAttribute.trim().isNotEmpty) ? imageIdAttribute.trim() : null;
 
@@ -5595,7 +5595,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     MeshElement message,
     bool mine,
     MeshElement attachment, {
-    required List<_ThreadFeedImage> feedImages,
+    required List<ChatThreadFeedImage> feedImages,
   }) {
     final normalizedAttachmentRef = _normalizeReactionAttachmentRef(attachment.id);
 
@@ -5803,7 +5803,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     MeshElement? previous,
     MeshElement message,
     MeshElement? next, {
-    required List<_ThreadFeedImage> feedImages,
+    required List<ChatThreadFeedImage> feedImages,
   }) {
     final localParticipantName = room.localParticipant?.getAttribute("name");
     final localParticipantReactionName = _localParticipantName();
@@ -6010,7 +6010,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
           if (_overlayImages.isEmpty) {
             return const SizedBox.shrink();
           }
-          return _ThreadImageGalleryPage(
+          return ChatThreadImageGalleryPage(
             room: room,
             images: _overlayImages,
             initialIndex: _overlayInitialIndex,
@@ -6686,6 +6686,64 @@ Future<_ThreadImageRecord?> _loadGeneratedThreadImageRecord(RoomClient room, {re
   }
 }
 
+Future<_ThreadImageRecord?> _loadGeneratedThreadImageRecordFromUri(
+  RoomClient room, {
+  required String imageUri,
+  String? fallbackMimeType,
+}) async {
+  final parsed = Uri.tryParse(imageUri.trim());
+  if (parsed == null || parsed.scheme != 'dataset') {
+    return null;
+  }
+  final imageId = parsed.queryParameters['id']?.trim();
+  if (imageId == null || imageId.isEmpty) {
+    return null;
+  }
+
+  final pathParts = <String>[
+    if (parsed.host.trim().isNotEmpty) parsed.host.trim(),
+    ...parsed.pathSegments.where((part) => part.trim().isNotEmpty),
+  ];
+  if (pathParts.isEmpty) {
+    return null;
+  }
+  final tableName = pathParts.last;
+  final namespace = pathParts.length > 1 ? pathParts.sublist(0, pathParts.length - 1) : null;
+
+  try {
+    final table = await room.datasets.searchTable(
+      table: tableName,
+      namespace: namespace,
+      where: {"id": imageId},
+      limit: 1,
+      select: const ["data", "mime_type"],
+    );
+    final rows = table.toRows();
+    if (rows.isEmpty) {
+      return null;
+    }
+
+    final row = rows.first;
+    final rawData = row["data"];
+    final Uint8List data;
+    if (rawData is Uint8List) {
+      data = rawData;
+    } else if (rawData is List<int>) {
+      data = Uint8List.fromList(rawData);
+    } else {
+      return null;
+    }
+
+    final rawMimeType = row["mime_type"];
+    final storedMimeType = rawMimeType is String ? rawMimeType.trim() : "";
+    final fallback = fallbackMimeType?.trim() ?? "";
+    final mimeType = storedMimeType.isNotEmpty ? storedMimeType : (fallback.isNotEmpty ? fallback : "image/png");
+    return _ThreadImageRecord(data: data, mimeType: mimeType);
+  } catch (_) {
+    return null;
+  }
+}
+
 class _ThreadImageLookup extends StatefulWidget {
   const _ThreadImageLookup({required this.lookupKey, required this.readCached, required this.lookupImage, required this.builder});
 
@@ -6729,10 +6787,11 @@ class _ThreadImageLookupState extends State<_ThreadImageLookup> {
   }
 }
 
-class _ThreadFeedImage {
-  const _ThreadFeedImage({
+class ChatThreadFeedImage {
+  const ChatThreadFeedImage({
     required this.attachmentElementId,
     required this.imageId,
+    this.imageUri,
     this.mimeType,
     this.status,
     this.statusDetail,
@@ -6742,6 +6801,7 @@ class _ThreadFeedImage {
 
   final String attachmentElementId;
   final String imageId;
+  final String? imageUri;
   final String? mimeType;
   final String? status;
   final String? statusDetail;
@@ -6754,6 +6814,7 @@ class ChatThreadImageAttachment extends StatefulWidget {
     super.key,
     required this.room,
     required this.imageId,
+    this.imageUri,
     this.fallbackMimeType,
     this.status,
     this.statusDetail,
@@ -6765,6 +6826,7 @@ class ChatThreadImageAttachment extends StatefulWidget {
 
   final RoomClient room;
   final String? imageId;
+  final String? imageUri;
   final String? fallbackMimeType;
   final String? status;
   final String? statusDetail;
@@ -6789,12 +6851,24 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
   @override
   void didUpdateWidget(covariant ChatThreadImageAttachment oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.imageId != widget.imageId || oldWidget.room != widget.room) {
+    if (oldWidget.imageId != widget.imageId || oldWidget.imageUri != widget.imageUri || oldWidget.room != widget.room) {
       _lookup = _loadImage();
     }
   }
 
   Future<_ThreadImageRecord?> _loadImage() async {
+    final imageUri = widget.imageUri;
+    if (imageUri != null && imageUri.trim().isNotEmpty) {
+      final record = await _loadGeneratedThreadImageRecordFromUri(
+        widget.room,
+        imageUri: imageUri,
+        fallbackMimeType: widget.fallbackMimeType,
+      );
+      if (record != null) {
+        return record;
+      }
+    }
+
     final imageId = widget.imageId;
     if (imageId == null || imageId.trim().isEmpty) {
       return null;
@@ -7055,14 +7129,35 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
   Widget build(BuildContext context) {
     final status = widget.status?.trim();
     final hasImageId = widget.imageId != null && widget.imageId!.trim().isNotEmpty;
+    final imageUri = widget.imageUri?.trim();
+    final hasImageUri = imageUri != null && imageUri.isNotEmpty;
     final statusDetail = widget.statusDetail?.trim();
 
-    if (!hasImageId) {
+    if (!hasImageId && !hasImageUri) {
       if (_isFailedStatus(status)) {
         return FileDefaultPreviewCard(icon: LucideIcons.imageOff, text: statusDetail?.isNotEmpty == true ? statusDetail! : "Image failed");
       }
+      final label = _isGeneratingStatus(status) ? "Generating image" : "Loading image";
+      return _buildPlaceholder(context, showSpinner: true, label: statusDetail?.isNotEmpty == true ? statusDetail : label);
+    }
 
-      return _buildPlaceholder(context, showSpinner: true, label: statusDetail?.isNotEmpty == true ? statusDetail : "Generating image");
+    final parsedUri = imageUri == null ? null : Uri.tryParse(imageUri);
+    if (!hasImageId && parsedUri != null && (parsedUri.scheme == "http" || parsedUri.scheme == "https")) {
+      final size = _displaySize();
+      return _wrapTapTarget(
+        SizedBox(
+          width: size.width,
+          height: size.height,
+          child: _wrapWithCorners(
+            Image.network(
+              imageUri!,
+              fit: (widget.widthPx != null && widget.heightPx != null) ? BoxFit.contain : BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) =>
+                  const FileDefaultPreviewCard(icon: LucideIcons.imageOff, text: "Image unavailable"),
+            ),
+          ),
+        ),
+      );
     }
 
     return FutureBuilder<_ThreadImageRecord?>(
@@ -7102,19 +7197,25 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
   }
 }
 
-class _ThreadImageGalleryPage extends StatefulWidget {
-  const _ThreadImageGalleryPage({required this.room, required this.images, required this.initialIndex, required this.onClose});
+class ChatThreadImageGalleryPage extends StatefulWidget {
+  const ChatThreadImageGalleryPage({
+    super.key,
+    required this.room,
+    required this.images,
+    required this.initialIndex,
+    required this.onClose,
+  });
 
   final RoomClient room;
-  final List<_ThreadFeedImage> images;
+  final List<ChatThreadFeedImage> images;
   final int initialIndex;
   final VoidCallback onClose;
 
   @override
-  State<_ThreadImageGalleryPage> createState() => _ThreadImageGalleryPageState();
+  State<ChatThreadImageGalleryPage> createState() => _ThreadImageGalleryPageState();
 }
 
-class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
+class _ThreadImageGalleryPageState extends State<ChatThreadImageGalleryPage> {
   late final PageController _controller;
   late int _currentIndex;
 
@@ -7161,6 +7262,13 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
 
   Future<_ThreadImageRecord?> _loadCurrentImage() async {
     final entry = widget.images[_currentIndex];
+    final imageUri = entry.imageUri?.trim();
+    if (imageUri != null && imageUri.isNotEmpty) {
+      final record = await _loadGeneratedThreadImageRecordFromUri(widget.room, imageUri: imageUri, fallbackMimeType: entry.mimeType);
+      if (record != null) {
+        return record;
+      }
+    }
     if (entry.imageId.trim().isEmpty) {
       return null;
     }
@@ -7330,6 +7438,7 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
                     return _ThreadFullscreenImage(
                       room: widget.room,
                       imageId: image.imageId,
+                      imageUri: image.imageUri,
                       fallbackMimeType: image.mimeType,
                       status: image.status,
                       statusDetail: image.statusDetail,
@@ -7412,6 +7521,7 @@ class _ThreadFullscreenImage extends StatelessWidget {
   const _ThreadFullscreenImage({
     required this.room,
     required this.imageId,
+    this.imageUri,
     this.fallbackMimeType,
     this.status,
     this.statusDetail,
@@ -7421,6 +7531,7 @@ class _ThreadFullscreenImage extends StatelessWidget {
 
   final RoomClient room;
   final String imageId;
+  final String? imageUri;
   final String? fallbackMimeType;
   final String? status;
   final String? statusDetail;
@@ -7428,6 +7539,13 @@ class _ThreadFullscreenImage extends StatelessWidget {
   final Future<void> Function(_ThreadImageRecord image)? onSaveImage;
 
   Future<_ThreadImageRecord?> _loadImage() async {
+    final uri = imageUri?.trim();
+    if (uri != null && uri.isNotEmpty) {
+      final record = await _loadGeneratedThreadImageRecordFromUri(room, imageUri: uri, fallbackMimeType: fallbackMimeType);
+      if (record != null) {
+        return record;
+      }
+    }
     if (imageId.trim().isEmpty) {
       return null;
     }
@@ -7459,6 +7577,24 @@ class _ThreadFullscreenImage extends StatelessWidget {
   Widget build(BuildContext context) {
     final detail = statusDetail?.trim();
     final normalizedStatus = status?.trim();
+    final uri = imageUri?.trim();
+    final parsedUri = uri == null ? null : Uri.tryParse(uri);
+
+    if (imageId.trim().isEmpty && uri != null && parsedUri != null && (parsedUri.scheme == "http" || parsedUri.scheme == "https")) {
+      return InteractiveViewer2(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Image.network(
+              uri,
+              fit: BoxFit.contain,
+              errorBuilder: (context, error, stackTrace) =>
+                  Text("Image unavailable", style: ShadTheme.of(context).textTheme.p.copyWith(color: Colors.white70)),
+            ),
+          ),
+        ),
+      );
+    }
 
     return FutureBuilder<_ThreadImageRecord?>(
       future: _loadImage(),
