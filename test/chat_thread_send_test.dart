@@ -170,6 +170,17 @@ class _FakeMessagingServer {
     );
   }
 
+  Future<void> sendAgentMessage(Protocol protocol, Map<String, dynamic> payload) async {
+    await protocol.send(
+      'messaging.send',
+      packMessage({
+        'from_participant_id': 'remote-1',
+        'type': 'agent-message',
+        'message': {'payload': payload},
+      }),
+    );
+  }
+
   Content _decodeInput({required Message message, required Map<String, dynamic> request}) {
     final arguments = Map<String, dynamic>.from(request['arguments'] as Map);
     return unpackContent(packMessage(arguments, message.payload.isEmpty ? null : message.payload));
@@ -401,5 +412,45 @@ void main() {
 
     expect(state.text, 'Generating image');
     expect(state.mode, 'busy');
+  });
+
+  test('agent-message usage payload is observable and parseable on the Dart room event stream', () async {
+    final harness = await _startMessagingHarness();
+    addTearDown(harness.dispose);
+
+    await harness.room.messaging.enable();
+    await _waitUntil(() => harness.room.messaging.remoteParticipants.isNotEmpty);
+
+    AgentUsageSnapshot? latestUsage;
+    final subscription = harness.room.listen((event) {
+      if (event is! RoomMessageEvent || event.message.type != 'agent-message') {
+        return;
+      }
+      final payload = event.message.message['payload'];
+      if (payload is Map<String, dynamic>) {
+        latestUsage = AgentUsageSnapshot.fromPayload(payload);
+      } else if (payload is Map) {
+        latestUsage = AgentUsageSnapshot.fromPayload(Map<String, dynamic>.from(payload));
+      }
+    });
+    addTearDown(subscription.cancel);
+
+    await harness.server.sendAgentMessage(harness.pair.serverProtocol, {
+      'type': 'meshagent.agent.usage.updated',
+      'thread_id': '/threads/test.thread',
+      'message_id': 'usage-1',
+      'turn_id': 'turn-1',
+      'usage': {'input_tokens': 120.0, 'output_tokens': 30.0},
+      'context_window': {'used_tokens': 480, 'total_tokens': 128000},
+    });
+    await _waitUntil(() => latestUsage != null);
+
+    final usage = latestUsage;
+    expect(usage, isNotNull);
+    expect(usage!.threadPath, '/threads/test.thread');
+    expect(usage.turnId, 'turn-1');
+    expect(usage.contextUsedTokens, 480);
+    expect(usage.contextTotalTokens, 128000);
+    expect(usage.totalTokens, 150);
   });
 }

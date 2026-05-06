@@ -53,6 +53,7 @@ class ChatBotView extends StatefulWidget {
     this.threadListCollapsedHeight = 220,
     this.initialShowCompletedToolCalls = false,
     this.shouldShowAuthorNames = true,
+    this.showUsageFooter = false,
   });
 
   final RoomClient room;
@@ -95,6 +96,7 @@ class ChatBotView extends StatefulWidget {
   final double threadListCollapsedHeight;
   final bool initialShowCompletedToolCalls;
   final bool shouldShowAuthorNames;
+  final bool showUsageFooter;
 
   @override
   State<ChatBotView> createState() => _ChatBotViewState();
@@ -184,6 +186,7 @@ class _ChatBotViewState extends State<ChatBotView> {
         inputContextMenuBuilder: widget.inputContextMenuBuilder,
         inputOnPressedOutside: widget.inputOnPressedOutside,
         initialShowCompletedToolCalls: widget.initialShowCompletedToolCalls,
+        showUsageFooter: widget.showUsageFooter,
       );
     }
 
@@ -217,6 +220,7 @@ class _ChatBotViewState extends State<ChatBotView> {
       agentName: widget.agentName,
       initialShowCompletedToolCalls: widget.initialShowCompletedToolCalls,
       shouldShowAuthorNames: widget.shouldShowAuthorNames,
+      showUsageFooter: widget.showUsageFooter,
     );
   }
 
@@ -237,6 +241,7 @@ class _ChatBotViewState extends State<ChatBotView> {
       onSelectedThreadResolved: widget.onSelectedThreadResolved,
       newThreadResetVersion: widget.newThreadResetVersion,
       centerComposer: widget.centerComposer,
+      showUsageFooter: widget.showUsageFooter,
       emptyState: widget.emptyState,
       inputContextMenuBuilder: widget.inputContextMenuBuilder,
       inputOnPressedOutside: widget.inputOnPressedOutside,

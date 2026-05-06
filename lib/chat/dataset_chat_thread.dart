@@ -8,6 +8,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:uuid/uuid.dart';
 
 import 'chat.dart';
+import 'usage_footer_tooltip.dart';
 
 const String _agentRoomMessageType = 'agent-message';
 const String _agentTurnStartType = 'meshagent.agent.turn.start';
@@ -38,6 +39,7 @@ const String _agentImageGenerationStartedType = 'meshagent.agent.image_generatio
 const String _agentImageGenerationPartialType = 'meshagent.agent.image_generation.partial';
 const String _agentImageGenerationCompletedType = 'meshagent.agent.image_generation.completed';
 const String _agentImageGenerationFailedType = 'meshagent.agent.image_generation.failed';
+const String _agentContextCompactedType = 'meshagent.agent.context.compacted';
 
 class DatasetChatThread extends StatefulWidget {
   const DatasetChatThread({
@@ -56,6 +58,7 @@ class DatasetChatThread extends StatefulWidget {
     this.inputContextMenuBuilder,
     this.inputOnPressedOutside,
     this.initialShowCompletedToolCalls = false,
+    this.showUsageFooter = false,
   });
 
   final RoomClient room;
@@ -72,6 +75,7 @@ class DatasetChatThread extends StatefulWidget {
   final EditableTextContextMenuBuilder? inputContextMenuBuilder;
   final TapRegionCallback? inputOnPressedOutside;
   final bool initialShowCompletedToolCalls;
+  final bool showUsageFooter;
 
   @override
   State<DatasetChatThread> createState() => _DatasetChatThreadState();
@@ -92,6 +96,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   bool _ready = false;
   late bool _showCompletedToolCalls;
   ChatThreadStatusState _status = const ChatThreadStatusState();
+  AgentUsageSnapshot? _usage;
   int _nextAgentSequence = 0;
   String? _openedPath;
   String? _openedAgentParticipantId;
@@ -133,6 +138,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       _composerInputKey = widget.composerKey ?? GlobalObjectKey(_controller);
     }
     if (oldWidget.path != widget.path || oldWidget.agentName != widget.agentName || oldWidget.room != widget.room) {
+      _usage = null;
       _refreshStatus();
       _syncOpenSubscription();
     }
@@ -167,6 +173,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     _error = null;
     _fatalError = false;
     _ready = false;
+    _usage = null;
 
     if (_isTmpThreadPath(widget.path)) {
       _ready = true;
@@ -286,6 +293,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         ..clear()
         ..addAll(_initialRowsByItemId);
       _initialRowsByItemId.clear();
+      _advanceNextAgentSequencePastDatasetRows();
+      _rebaseAgentRowsAfterDatasetRows();
+      _usage = _latestUsageFromRows();
       _ready = true;
     });
     _controller.scrollThreadToBottom(animated: false);
@@ -298,6 +308,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         return;
       }
       setState(() {
+        if (changed) {
+          _refreshUsageFromRows();
+        }
         _ready = true;
       });
       if (changed) {
@@ -327,6 +340,54 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       changed = _rebaseAgentRowsAfterDatasetRows() || changed;
     }
     return changed;
+  }
+
+  bool _refreshUsageFromRows() {
+    final latestUsage = _latestUsageFromRows();
+    if (latestUsage == null || _sameUsage(_usage, latestUsage)) {
+      return false;
+    }
+    _usage = latestUsage;
+    return true;
+  }
+
+  AgentUsageSnapshot? _latestUsageFromRows() {
+    final rows = [..._rowsByItemId.values, ..._initialRowsByItemId.values, ..._agentRowsByItemId.values]..sort(_compareDatasetThreadRows);
+    AgentUsageSnapshot? latestUsage;
+    for (final row in rows) {
+      final data = _rowData(row);
+      if (data?['kind'] != 'usage') {
+        continue;
+      }
+      final message = _mapValue(data?['message']);
+      if (message == null) {
+        continue;
+      }
+      final usage = AgentUsageSnapshot.fromPayload(message);
+      if (usage == null || usage.threadPath != widget.path) {
+        continue;
+      }
+      if (shouldReplaceAgentUsageSnapshot(latestUsage, usage)) {
+        latestUsage = usage;
+      }
+    }
+    return latestUsage;
+  }
+
+  bool _sameUsage(AgentUsageSnapshot? left, AgentUsageSnapshot? right) {
+    if (identical(left, right)) {
+      return true;
+    }
+    if (left == null || right == null) {
+      return false;
+    }
+    return left.threadPath == right.threadPath &&
+        left.turnId == right.turnId &&
+        left.contextUsedTokens == right.contextUsedTokens &&
+        left.contextTotalTokens == right.contextTotalTokens &&
+        left.compactionMode == right.compactionMode &&
+        left.compactionThreshold == right.compactionThreshold &&
+        const MapEquality<String, double>().equals(left.usage, right.usage);
   }
 
   void _removeReconciledAgentRowsForDatasetRow(Map<String, Object?> datasetRow) {
@@ -442,12 +503,42 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   void _handleAgentMessagePayload(Map<String, dynamic> payload) {
+    if (_handleUsagePayload(payload)) {
+      return;
+    }
     final changed = _applyAgentMessagePayload(payload);
     _controller.handleAgentMessagePayload(payload);
     if (changed && mounted) {
       setState(() {});
       _controller.scrollThreadToBottom(animated: false);
     }
+  }
+
+  bool _handleUsagePayload(Map<String, dynamic> payload) {
+    final usage = AgentUsageSnapshot.fromPayload(payload);
+    if (usage == null) {
+      return false;
+    }
+    if (usage.threadPath != widget.path) {
+      return true;
+    }
+
+    final changed = _upsertAgentRow(
+      itemId: _payloadItemId(payload),
+      turnId: _payloadTurnId(payload),
+      timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
+      data: {'kind': 'usage', 'status': 'completed', 'message': payload},
+    );
+    if (!shouldReplaceAgentUsageSnapshot(_usage, usage)) {
+      return true;
+    }
+    _usage = usage;
+    if (mounted) {
+      setState(() {});
+    } else if (changed) {
+      return true;
+    }
+    return true;
   }
 
   bool _applyAgentMessagePayload(Map<String, dynamic> payload) {
@@ -593,6 +684,16 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                 'arguments': _mapValue(payload['arguments']),
                 'message': payload,
               },
+            ) ||
+            changed;
+        break;
+      case _agentContextCompactedType:
+        changed =
+            _upsertAgentRow(
+              itemId: _payloadItemId(payload),
+              turnId: _payloadTurnId(payload),
+              timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
+              data: {'kind': 'compaction', 'role': 'assistant', 'status': 'completed', 'message': payload},
             ) ||
             changed;
         break;
@@ -845,7 +946,10 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   bool _hasWireBackedContent() {
-    return _agentRowsByItemId.isNotEmpty ||
+    return _agentRowsByItemId.values.any((row) {
+          final kind = _rowData(row)?['kind'];
+          return kind != 'usage';
+        }) ||
         _status.pendingMessages.isNotEmpty ||
         _controller.pendingAgentMessagesForPath(widget.path).isNotEmpty;
   }
@@ -964,7 +1068,105 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       threadTurnId: _status.turnId,
       pendingMessages: pendingMessages,
       pendingItemId: _status.pendingItemId,
+      usage: _usage,
     );
+  }
+
+  Widget? _buildUsageFooter(BuildContext context, AgentUsageSnapshot? usage) {
+    if (!widget.showUsageFooter) {
+      return null;
+    }
+
+    final theme = ShadTheme.of(context);
+    final label = usage == null ? 'context --' : _formatUsageFooter(usage);
+    final text = Text(
+      label,
+      overflow: TextOverflow.ellipsis,
+      textAlign: TextAlign.right,
+      style: theme.textTheme.small.copyWith(color: theme.colorScheme.mutedForeground, fontSize: 11),
+    );
+    if (usage == null) {
+      return text;
+    }
+    return UsageFooterTooltip(
+      tooltip: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 360),
+        child: Text(_formatUsageTooltip(usage), style: ShadTheme.of(context).textTheme.small),
+      ),
+      child: text,
+    );
+  }
+
+  Widget _buildComposerWithUsageFooter(BuildContext context, {required Widget input, required AgentUsageSnapshot? usage}) {
+    final usageFooter = _buildUsageFooter(context, usage);
+    if (usageFooter == null) {
+      return input;
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        input,
+        Padding(
+          padding: const EdgeInsets.only(left: 8, top: 3, right: 8),
+          child: Align(alignment: Alignment.centerRight, child: usageFooter),
+        ),
+      ],
+    );
+  }
+
+  String _formatUsageFooter(AgentUsageSnapshot usage) {
+    var contextLabel = _formatTokenCount(usage.contextUsedTokens);
+    final contextLimitTokens = usage.compactionThreshold ?? usage.contextTotalTokens;
+    if (contextLimitTokens != null) {
+      contextLabel = '$contextLabel/${_formatTokenCount(contextLimitTokens)}';
+    }
+    final compactionMode = usage.compactionMode;
+    if (compactionMode != null) {
+      return '$compactionMode context $contextLabel';
+    }
+    return 'context $contextLabel';
+  }
+
+  String _formatUsageTooltip(AgentUsageSnapshot usage) {
+    final entries = usage.usage.entries.toList()..sort((left, right) => left.key.compareTo(right.key));
+    final lines = <String>['context used: ${_formatTokenCount(usage.contextUsedTokens)}'];
+    final compactionMode = usage.compactionMode;
+    if (compactionMode != null) {
+      var compaction = 'compaction: $compactionMode';
+      final threshold = usage.compactionThreshold;
+      if (threshold != null) {
+        compaction = '$compaction @ ${_formatTokenCount(threshold)}';
+      }
+      lines.add(compaction);
+    }
+    final contextTotalTokens = usage.contextTotalTokens;
+    if (usage.compactionThreshold != null && contextTotalTokens != null) {
+      lines.add('model window: ${_formatTokenCount(contextTotalTokens)}');
+    }
+    lines.addAll(entries.map((entry) => '${entry.key}: ${_formatTokenCount(entry.value)}'));
+    return lines.join('\n');
+  }
+
+  String _formatTokenCount(num value) {
+    final count = value.toDouble();
+    final magnitude = count.abs();
+    if (magnitude >= 1000000) {
+      return '${_trimFixed(count / 1000000)}M';
+    }
+    if (magnitude >= 1000) {
+      return '${_trimFixed(count / 1000)}K';
+    }
+    return count.round().toString();
+  }
+
+  String _trimFixed(double value) {
+    final fixed = value.toStringAsFixed(1);
+    if (fixed.endsWith('.0')) {
+      return fixed.substring(0, fixed.length - 2);
+    }
+    return fixed;
   }
 
   void _hideThreadImageViewer() {
@@ -1229,7 +1431,14 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
           child: Column(
             children: [
               Expanded(child: _buildThreadViewport(context, messages, pendingMessages)),
-              ChatThreadInputFrame(child: _buildInput(context, snapshot, pendingMessages)),
+              ChatThreadInputFrame(
+                hasFooter: widget.showUsageFooter,
+                child: _buildComposerWithUsageFooter(
+                  context,
+                  input: _buildInput(context, snapshot, pendingMessages),
+                  usage: snapshot.usage,
+                ),
+              ),
             ],
           ),
         );
@@ -1375,6 +1584,15 @@ _DatasetThreadMessage? _messageForRow(Map<String, Object?> row) {
         kind: 'tool_call',
         role: 'agent',
         text: summary.isEmpty ? 'Tool call' : summary,
+        attachments: const [],
+        createdAt: _rowTimestamp(row),
+      );
+    case 'compaction':
+      return _DatasetThreadMessage(
+        id: itemId,
+        kind: 'compaction',
+        role: 'agent',
+        text: 'Context compacted',
         attachments: const [],
         createdAt: _rowTimestamp(row),
       );

@@ -36,6 +36,7 @@ import 'package:meshagent_flutter_shadcn/file_preview/image.dart';
 import 'ansi.dart';
 import 'outbound_delivery_status.dart';
 import 'folder_drop.dart';
+import 'usage_footer_tooltip.dart';
 
 const webPDFFormat = SimpleFileFormat(uniformTypeIdentifiers: ['com.adobe.pdf'], mimeTypes: ['web application/pdf']);
 const List<String> _emojiFontFamilyFallback = <String>['Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji'];
@@ -78,6 +79,7 @@ const String _agentTurnSteerAcceptedType = "meshagent.agent.turn.steer.accepted"
 const String _agentTurnSteerRejectedType = "meshagent.agent.turn.steer.rejected";
 const String _agentTurnEndedType = "meshagent.agent.turn.ended";
 const String _agentThreadClearedType = "meshagent.agent.thread.cleared";
+const String _agentUsageUpdatedType = "meshagent.agent.usage.updated";
 const double _mobileScreenWidthMax = 600;
 const double _mobileComposerPillCornerRadius = 999;
 const double _mobileComposerCornerRadius = 18;
@@ -1864,14 +1866,15 @@ double chatThreadStatusHorizontalPadding(double maxWidth) {
 }
 
 class ChatThreadInputFrame extends StatelessWidget {
-  const ChatThreadInputFrame({super.key, required this.child});
+  const ChatThreadInputFrame({super.key, required this.child, this.hasFooter = false});
 
   final Widget child;
+  final bool hasFooter;
 
   @override
   Widget build(BuildContext context) {
     final keyboardOpen = _usesMobileContextLayout(context) && MediaQuery.viewInsetsOf(context).bottom > 0;
-    final bottomPadding = keyboardOpen ? 4.0 : 8.0;
+    final bottomPadding = keyboardOpen ? 4.0 : (hasFooter ? 4.0 : 8.0);
 
     return Padding(
       padding: EdgeInsets.fromLTRB(15, 8, 15, bottomPadding),
@@ -3337,6 +3340,7 @@ class ChatThread extends StatefulWidget {
     this.onVisibleMessagesEmpty,
     this.initialShowCompletedToolCalls = false,
     this.shouldShowAuthorNames = true,
+    this.showUsageFooter = false,
     this.inputContextMenuBuilder,
     this.inputOnPressedOutside,
     this.mobileStorageSaveSurfacePresenter,
@@ -3362,6 +3366,7 @@ class ChatThread extends StatefulWidget {
   final FutureOr<void> Function()? onVisibleMessagesEmpty;
   final bool initialShowCompletedToolCalls;
   final bool shouldShowAuthorNames;
+  final bool showUsageFooter;
 
   final Widget Function(BuildContext, MeshDocument, MeshElement)? messageHeaderBuilder;
   final Widget Function(BuildContext, List<String>)? waitingForParticipantsBuilder;
@@ -3715,6 +3720,187 @@ class ChatMessage {
   final List<String> attachments;
 }
 
+class AgentUsageSnapshot {
+  const AgentUsageSnapshot({
+    required this.threadPath,
+    required this.contextUsedTokens,
+    required this.contextTotalTokens,
+    required this.totalTokens,
+    required this.usage,
+    this.compactionMode,
+    this.compactionThreshold,
+    this.turnId,
+  });
+
+  final String threadPath;
+  final String? turnId;
+  final int contextUsedTokens;
+  final int? contextTotalTokens;
+  final String? compactionMode;
+  final int? compactionThreshold;
+  final double? totalTokens;
+  final Map<String, double> usage;
+
+  static AgentUsageSnapshot? fromPayload(Map<String, Object?> payload) {
+    if (payload["type"] != _agentUsageUpdatedType) {
+      return null;
+    }
+
+    final rawThreadPath = payload["thread_id"];
+    if (rawThreadPath is! String || rawThreadPath.trim().isEmpty) {
+      return null;
+    }
+
+    final rawContextWindow = payload["context_window"];
+    if (rawContextWindow is! Map) {
+      return null;
+    }
+
+    final rawUsedTokens = rawContextWindow["used_tokens"];
+    final usedTokens = _asInt(rawUsedTokens);
+    if (usedTokens == null) {
+      return null;
+    }
+
+    final rawTotalTokens = rawContextWindow["total_tokens"];
+    final totalContextTokens = rawTotalTokens == null ? null : _asInt(rawTotalTokens);
+    final rawCompactionMode = rawContextWindow["compaction_mode"];
+    final compactionMode = rawCompactionMode is String && rawCompactionMode.trim().isNotEmpty ? rawCompactionMode.trim() : null;
+    final rawCompactionThreshold = rawContextWindow["compaction_threshold"];
+    final compactionThreshold = rawCompactionThreshold == null ? null : _asInt(rawCompactionThreshold);
+
+    final totalTokens = _usageTotalTokens(payload["usage"]);
+    final usage = _usageValues(payload["usage"]);
+
+    final rawTurnId = payload["turn_id"];
+    return AgentUsageSnapshot(
+      threadPath: rawThreadPath.trim(),
+      turnId: rawTurnId is String && rawTurnId.trim().isNotEmpty ? rawTurnId.trim() : null,
+      contextUsedTokens: usedTokens,
+      contextTotalTokens: totalContextTokens,
+      compactionMode: compactionMode,
+      compactionThreshold: compactionThreshold,
+      totalTokens: totalTokens,
+      usage: usage,
+    );
+  }
+
+  static int? _asInt(Object? value) {
+    if (value is int) {
+      return value;
+    }
+    if (value is double && value.isFinite) {
+      return value.toInt();
+    }
+    return null;
+  }
+
+  static double? _asDouble(Object? value) {
+    if (value is int) {
+      return value.toDouble();
+    }
+    if (value is double && value.isFinite) {
+      return value;
+    }
+    return null;
+  }
+
+  static double? _usageTotalTokens(Object? rawUsage) {
+    if (rawUsage is! Map) {
+      return null;
+    }
+
+    final explicitTotal = _sumUsageKeys(rawUsage, const {"total_tokens"});
+    if (explicitTotal != null) {
+      return explicitTotal;
+    }
+
+    final inputTokens = _sumUsageKeys(rawUsage, const {
+      "input_tokens",
+      "audio_input_tokens",
+      "image_input_tokens",
+      "cache_creation_input_tokens",
+      "cache_read_input_tokens",
+    });
+    final outputTokens = _sumUsageKeys(rawUsage, const {"output_tokens", "audio_output_tokens", "image_output_tokens"});
+    final cachedTokens = _sumUsageKeys(rawUsage, const {"cached_tokens", "audio_cached_tokens", "image_cached_tokens"});
+    final reasoningTokens = _sumUsageKeys(rawUsage, const {"reasoning_tokens"});
+
+    var total = 0.0;
+    var hasTotal = false;
+    if (inputTokens != null) {
+      total += inputTokens;
+      hasTotal = true;
+    } else if (cachedTokens != null) {
+      total += cachedTokens;
+      hasTotal = true;
+    }
+    if (outputTokens != null) {
+      total += outputTokens;
+      hasTotal = true;
+    } else if (reasoningTokens != null) {
+      total += reasoningTokens;
+      hasTotal = true;
+    }
+    return hasTotal ? total : null;
+  }
+
+  static Map<String, double> _usageValues(Object? rawUsage) {
+    if (rawUsage is! Map) {
+      return const {};
+    }
+    final usage = <String, double>{};
+    for (final entry in rawUsage.entries) {
+      final key = entry.key;
+      if (key is! String || key.trim().isEmpty) {
+        continue;
+      }
+      final value = _asDouble(entry.value);
+      if (value == null) {
+        continue;
+      }
+      usage[key.trim()] = value;
+    }
+    return Map.unmodifiable(usage);
+  }
+
+  static double? _sumUsageKeys(Map rawUsage, Set<String> names) {
+    var total = 0.0;
+    var found = false;
+    for (final entry in rawUsage.entries) {
+      if (!_usageKeyMatches(entry.key, names)) {
+        continue;
+      }
+      final numericValue = _asDouble(entry.value);
+      if (numericValue == null) {
+        continue;
+      }
+      total += numericValue;
+      found = true;
+    }
+    return found ? total : null;
+  }
+
+  static bool _usageKeyMatches(Object? key, Set<String> names) {
+    if (key is! String) {
+      return false;
+    }
+    for (final name in names) {
+      if (key == name || key.endsWith(".$name")) {
+        return true;
+      }
+    }
+    return false;
+  }
+}
+
+bool shouldReplaceAgentUsageSnapshot(AgentUsageSnapshot? current, AgentUsageSnapshot next) {
+  if (current != null && current.contextUsedTokens > 0 && next.contextUsedTokens == 0 && next.usage.isEmpty) {
+    return false;
+  }
+  return true;
+}
+
 class _ChatThreadState extends State<ChatThread> {
   late final ChatThreadController controller;
   late Key _composerInputKey;
@@ -3916,6 +4102,7 @@ class _ChatThreadState extends State<ChatThread> {
       threadTurnId: null,
       pendingMessages: controller.pendingAgentMessagesForPath(widget.path),
       pendingItemId: null,
+      usage: null,
     );
   }
 
@@ -3929,6 +4116,103 @@ class _ChatThreadState extends State<ChatThread> {
       return null;
     }
     return AgentTurnToolkitConfig(clientOptions: {"servers": servers});
+  }
+
+  Widget? _buildUsageFooter(BuildContext context, AgentUsageSnapshot? usage) {
+    if (!widget.showUsageFooter) {
+      return null;
+    }
+
+    final theme = ShadTheme.of(context);
+    final label = usage == null ? "context --" : _formatUsageFooter(usage);
+    final text = Text(
+      label,
+      overflow: TextOverflow.ellipsis,
+      textAlign: TextAlign.right,
+      style: theme.textTheme.small.copyWith(color: theme.colorScheme.mutedForeground, fontSize: 11),
+    );
+    if (usage == null) {
+      return text;
+    }
+    return UsageFooterTooltip(
+      tooltip: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 360),
+        child: Text(_formatUsageTooltip(usage), style: ShadTheme.of(context).textTheme.small),
+      ),
+      child: text,
+    );
+  }
+
+  String _formatUsageFooter(AgentUsageSnapshot usage) {
+    var contextLabel = _formatTokenCount(usage.contextUsedTokens);
+    final contextLimitTokens = usage.compactionThreshold ?? usage.contextTotalTokens;
+    if (contextLimitTokens != null) {
+      contextLabel = "$contextLabel/${_formatTokenCount(contextLimitTokens)}";
+    }
+    final compactionMode = usage.compactionMode;
+    if (compactionMode != null) {
+      return "$compactionMode context $contextLabel";
+    }
+    return "context $contextLabel";
+  }
+
+  String _formatUsageTooltip(AgentUsageSnapshot usage) {
+    final entries = usage.usage.entries.toList()..sort((left, right) => left.key.compareTo(right.key));
+    final lines = <String>["context used: ${_formatTokenCount(usage.contextUsedTokens)}"];
+    final compactionMode = usage.compactionMode;
+    if (compactionMode != null) {
+      var compaction = "compaction: $compactionMode";
+      final threshold = usage.compactionThreshold;
+      if (threshold != null) {
+        compaction = "$compaction @ ${_formatTokenCount(threshold)}";
+      }
+      lines.add(compaction);
+    }
+    final contextTotalTokens = usage.contextTotalTokens;
+    if (usage.compactionThreshold != null && contextTotalTokens != null) {
+      lines.add("model window: ${_formatTokenCount(contextTotalTokens)}");
+    }
+    lines.addAll(entries.map((entry) => "${entry.key}: ${_formatTokenCount(entry.value)}"));
+    return lines.join("\n");
+  }
+
+  String _formatTokenCount(num value) {
+    final count = value.toDouble();
+    final magnitude = count.abs();
+    if (magnitude >= 1000000) {
+      return "${_trimFixed(count / 1000000)}M";
+    }
+    if (magnitude >= 1000) {
+      return "${_trimFixed(count / 1000)}K";
+    }
+    return count.round().toString();
+  }
+
+  String _trimFixed(double value) {
+    final fixed = value.toStringAsFixed(1);
+    if (fixed.endsWith(".0")) {
+      return fixed.substring(0, fixed.length - 2);
+    }
+    return fixed;
+  }
+
+  Widget _buildComposerWithUsageFooter(BuildContext context, {required Widget input, required AgentUsageSnapshot? usage}) {
+    final usageFooter = _buildUsageFooter(context, usage);
+    if (usageFooter == null) {
+      return input;
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        input,
+        Padding(
+          padding: const EdgeInsets.only(left: 8, top: 3, right: 8),
+          child: Align(alignment: Alignment.centerRight, child: usageFooter),
+        ),
+      ],
+    );
   }
 
   @override
@@ -4098,7 +4382,8 @@ class _ChatThreadState extends State<ChatThread> {
   }
 
   Widget _buildConnectingInputBox(BuildContext context) {
-    final toolArea = _buildToolArea(context, _buildLoadingSnapshot());
+    final state = _buildLoadingSnapshot();
+    final toolArea = _buildToolArea(context, state);
     return ChatThreadInput(
       key: _composerInputKey,
       focusTrigger: controller,
@@ -4201,6 +4486,7 @@ class _ChatThreadState extends State<ChatThread> {
                         .toList(growable: false);
                     final canInterruptActiveTurn = _canInterruptActiveTurn(state: state, pendingMessages: pendingMessages);
                     return ChatThreadInputFrame(
+                      hasFooter: widget.showUsageFooter,
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -4253,10 +4539,13 @@ class _ChatThreadState extends State<ChatThread> {
                                 ],
                               ),
                             ),
-                          if (widget.chatInputBoxBuilder != null)
-                            widget.chatInputBoxBuilder!(context, _buildInputChatBox(context, document, pendingMessages, state))
-                          else
-                            _buildInputChatBox(context, document, pendingMessages, state),
+                          _buildComposerWithUsageFooter(
+                            context,
+                            input: widget.chatInputBoxBuilder != null
+                                ? widget.chatInputBoxBuilder!(context, _buildInputChatBox(context, document, pendingMessages, state))
+                                : _buildInputChatBox(context, document, pendingMessages, state),
+                            usage: state.usage,
+                          ),
                         ],
                       ),
                     );
@@ -4271,6 +4560,7 @@ class _ChatThreadState extends State<ChatThread> {
   }
 
   Widget _buildPendingThreadWithoutDocument(BuildContext context, List<PendingAgentMessage> pendingMessages) {
+    final state = _buildLoadingSnapshot();
     final input = widget.chatInputBoxBuilder != null
         ? widget.chatInputBoxBuilder!(context, _buildConnectingInputBox(context))
         : _buildConnectingInputBox(context);
@@ -4308,7 +4598,10 @@ class _ChatThreadState extends State<ChatThread> {
               mobileStorageSaveSurfacePresenter: widget.mobileStorageSaveSurfacePresenter,
               mobileUnderHeaderContentPadding: widget.mobileUnderHeaderContentPadding,
             ),
-            ChatThreadInputFrame(child: input),
+            ChatThreadInputFrame(
+              hasFooter: widget.showUsageFooter,
+              child: _buildComposerWithUsageFooter(context, input: input, usage: state.usage),
+            ),
           ],
         ),
       ),
@@ -4316,6 +4609,7 @@ class _ChatThreadState extends State<ChatThread> {
   }
 
   Widget _buildConnectingThread(BuildContext context) {
+    final state = _buildLoadingSnapshot();
     final input = widget.chatInputBoxBuilder != null
         ? widget.chatInputBoxBuilder!(context, _buildConnectingInputBox(context))
         : _buildConnectingInputBox(context);
@@ -4328,7 +4622,10 @@ class _ChatThreadState extends State<ChatThread> {
           Expanded(
             child: Center(child: Text("Unable to load thread", style: ShadTheme.of(context).textTheme.p)),
           ),
-        ChatThreadInputFrame(child: input),
+        ChatThreadInputFrame(
+          hasFooter: widget.showUsageFooter,
+          child: _buildComposerWithUsageFooter(context, input: input, usage: state.usage),
+        ),
       ],
     );
   }
@@ -8117,6 +8414,7 @@ class ChatThreadSnapshot {
     required this.threadTurnId,
     required this.pendingMessages,
     required this.pendingItemId,
+    required this.usage,
   });
 
   final bool agentOnline;
@@ -8134,6 +8432,7 @@ class ChatThreadSnapshot {
   final String? threadTurnId;
   final List<PendingAgentMessage> pendingMessages;
   final String? pendingItemId;
+  final AgentUsageSnapshot? usage;
 }
 
 class ChatThreadBuilder extends StatefulWidget {
@@ -8174,6 +8473,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
   String? threadTurnId;
   List<PendingAgentMessage> pendingMessages = const [];
   String? pendingItemId;
+  AgentUsageSnapshot? usage;
   String? _capabilitiesRequestKey;
   String? _capabilitiesResponseKey;
   String? _openedPath;
@@ -8216,6 +8516,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         _closeThreadSubscription(room: widget.room);
       }
       _clearCapabilities();
+      usage = null;
     }
 
     _getParticipants();
@@ -8285,6 +8586,25 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
       }
     } catch (_) {}
 
+    return true;
+  }
+
+  bool _handleUsagePayload(Map<String, dynamic> payload) {
+    final nextUsage = AgentUsageSnapshot.fromPayload(payload);
+    if (nextUsage == null) {
+      return false;
+    }
+    if (nextUsage.threadPath != widget.path) {
+      return true;
+    }
+
+    if (!shouldReplaceAgentUsageSnapshot(usage, nextUsage)) {
+      return true;
+    }
+    usage = nextUsage;
+    if (mounted) {
+      setState(() {});
+    }
     return true;
   }
 
@@ -8409,10 +8729,16 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
           if (_handleCapabilitiesPayload(event: event, payload: payload)) {
             return;
           }
+          if (_handleUsagePayload(payload)) {
+            return;
+          }
           widget.controller.handleAgentMessagePayload(payload);
         } else if (payload is Map) {
           final normalized = Map<String, dynamic>.from(payload);
           if (_handleCapabilitiesPayload(event: event, payload: normalized)) {
+            return;
+          }
+          if (_handleUsagePayload(normalized)) {
             return;
           }
           widget.controller.handleAgentMessagePayload(normalized);
@@ -8559,6 +8885,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         threadTurnId: threadTurnId,
         pendingMessages: pendingMessages,
         pendingItemId: pendingItemId,
+        usage: usage,
       ),
     );
   }
