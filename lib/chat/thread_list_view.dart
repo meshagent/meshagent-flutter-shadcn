@@ -42,6 +42,7 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
   Object? _error;
   bool _loading = true;
   final Set<RemoteParticipant> _listenedParticipants = <RemoteParticipant>{};
+  late StreamSubscription<RoomEvent> _roomSubscription;
 
   String? _normalizePath(String? path) {
     final normalized = path?.trim();
@@ -247,6 +248,26 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
     }
   }
 
+  void _onRoomEvent(RoomEvent event) {
+    if (!mounted || event is! RoomMessageEvent || event.message.type != "agent-message") {
+      return;
+    }
+
+    final payload = event.message.message["payload"];
+    final normalizedPayload = payload is Map<String, dynamic>
+        ? payload
+        : payload is Map
+        ? Map<String, dynamic>.from(payload)
+        : null;
+    if (normalizedPayload == null) {
+      return;
+    }
+
+    if (trackAgentThreadStatusPayload(room: widget.room, payload: normalizedPayload) && mounted) {
+      setState(() {});
+    }
+  }
+
   Future<void> _closeDocument() async {
     final document = _document;
     final openedPath = _openedPath;
@@ -320,6 +341,7 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
   @override
   void initState() {
     super.initState();
+    _roomSubscription = widget.room.listen(_onRoomEvent);
     widget.room.messaging.addListener(_onMessagingChanged);
     _rebindParticipantListeners();
     unawaited(_rebindDocument());
@@ -330,7 +352,9 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.room != widget.room) {
       _unbindParticipantListeners();
+      _roomSubscription.cancel();
       oldWidget.room.messaging.removeListener(_onMessagingChanged);
+      _roomSubscription = widget.room.listen(_onRoomEvent);
       widget.room.messaging.addListener(_onMessagingChanged);
       _rebindParticipantListeners();
     }
@@ -349,6 +373,7 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
   @override
   void dispose() {
     _unbindParticipantListeners();
+    _roomSubscription.cancel();
     widget.room.messaging.removeListener(_onMessagingChanged);
     unawaited(_closeDocument());
     super.dispose();

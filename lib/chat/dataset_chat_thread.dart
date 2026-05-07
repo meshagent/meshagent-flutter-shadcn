@@ -494,9 +494,12 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (event.message.type == _agentRoomMessageType) {
       final payload = event.message.message['payload'];
       if (payload is Map<String, dynamic>) {
+        trackAgentThreadStatusPayload(room: widget.room, payload: payload);
         _handleAgentMessagePayload(payload);
       } else if (payload is Map) {
-        _handleAgentMessagePayload(Map<String, dynamic>.from(payload));
+        final normalized = Map<String, dynamic>.from(payload);
+        trackAgentThreadStatusPayload(room: widget.room, payload: normalized);
+        _handleAgentMessagePayload(normalized);
       }
     }
     _refreshStatus(notify: true);
@@ -757,10 +760,25 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
 
   bool _materializePendingMessagesForThread() {
     var changed = false;
-    for (final pending in _controller.pendingAgentMessagesForPath(widget.path)) {
+    for (final pending in _pendingAgentMessagesForThread()) {
       changed = _materializePendingMessage(pending.messageId) || changed;
     }
     return changed;
+  }
+
+  List<PendingAgentMessage> _pendingAgentMessagesForThread() {
+    final combined = <String, PendingAgentMessage>{};
+    for (final pending in _status.pendingMessages) {
+      combined[pending.messageId] = pending;
+    }
+    final currentStatus = resolveChatThreadStatus(room: widget.room, path: widget.path, agentName: widget.agentName, previous: _status);
+    for (final pending in currentStatus.pendingMessages) {
+      combined[pending.messageId] = pending;
+    }
+    for (final pending in _controller.pendingAgentMessagesForPath(widget.path)) {
+      combined[pending.messageId] = pending;
+    }
+    return combined.values.toList(growable: false);
   }
 
   bool _materializePendingMessage(String? messageId) {
@@ -768,7 +786,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       return false;
     }
     PendingAgentMessage? pending;
-    for (final candidate in _controller.pendingAgentMessagesForPath(widget.path)) {
+    for (final candidate in _pendingAgentMessagesForThread()) {
       if (candidate.messageId == messageId) {
         pending = candidate;
         break;
@@ -1338,7 +1356,13 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         ),
       );
     }
-    for (final pending in pendingMessages) {
+    final pendingFeedMessages = pendingMessages.where((pending) {
+      if (pending.messageType == _agentTurnSteerType || pending.matchByContentOnly) {
+        return false;
+      }
+      return pending.awaitingApplication || !messages.any((message) => message.id == pending.messageId);
+    });
+    for (final pending in pendingFeedMessages) {
       if (messageWidgets.isNotEmpty) {
         messageWidgets.insert(0, const SizedBox(height: ChatThreadMessageView.chatMessageStackSpacing));
       }

@@ -699,6 +699,84 @@ void main() {
     expect(find.text('context 480/128K'), findsNothing);
   });
 
+  testWidgets('Dataset ChatBotView materializes accepted pending input when turn is applied', (tester) async {
+    final harness = (await tester.runAsync<_MessagingHarness>(() async {
+      final harness = await _startMessagingHarness(initialDatasetBatch: _threadRowsBatch(const []));
+      await harness.room.messaging.enable();
+      await _waitUntil(() => harness.room.messaging.remoteParticipants.isNotEmpty);
+      return harness;
+    }))!;
+    addTearDown(harness.dispose);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox.expand(
+            child: ChatBotView(room: harness.room, agentName: 'assistant', documentPath: 'dataset://threads/test'),
+          ),
+        ),
+      ),
+    );
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    });
+    await tester.pump();
+
+    await tester.runAsync(() async {
+      await harness.server.sendAgentMessage(harness.pair.serverProtocol, {
+        'type': 'meshagent.agent.turn.start.accepted',
+        'thread_id': 'dataset://threads/test',
+        'source_message_id': 'user-message-1',
+        'sender_name': 'self',
+        'content': [
+          {'type': 'text', 'text': 'hello dataset'},
+        ],
+      });
+    });
+    await tester.pump(const Duration(milliseconds: 50));
+
+    await _pumpUntil(
+      tester,
+      () => find.byType(PendingChatThreadMessage).evaluate().isNotEmpty && find.text('hello dataset').evaluate().isNotEmpty,
+      describe: () {
+        final texts = tester.widgetList<Text>(find.byType(Text)).map((text) => text.data).whereType<String>().join(' | ');
+        return 'accepted dataset pending input did not render as pending before status. Rendered text: $texts';
+      },
+    );
+
+    await tester.runAsync(() async {
+      await harness.server.sendAgentMessage(harness.pair.serverProtocol, {
+        'type': 'meshagent.agent.thread.status',
+        'thread_id': 'dataset://threads/test',
+        'status': 'Working',
+        'mode': 'busy',
+        'started_at': '2026-05-07T16:00:00Z',
+        'turn_id': 'turn-1',
+      });
+    });
+    await tester.pump(const Duration(milliseconds: 50));
+
+    await tester.runAsync(() async {
+      await harness.server.sendAgentMessage(harness.pair.serverProtocol, {
+        'type': 'meshagent.agent.turn.started',
+        'thread_id': 'dataset://threads/test',
+        'turn_id': 'turn-1',
+        'source_message_id': 'user-message-1',
+      });
+    });
+    await _pumpUntil(
+      tester,
+      () => find.byType(PendingChatThreadMessage).evaluate().isEmpty && find.text('hello dataset').evaluate().isNotEmpty,
+      describe: () {
+        final texts = tester.widgetList<Text>(find.byType(Text)).map((text) => text.data).whereType<String>().join(' | ');
+        return 'applied dataset pending input did not materialize into the message feed. Rendered text: $texts';
+      },
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 500));
+  });
+
   testWidgets('ChatBotView renders direct compaction events in the feed', (tester) async {
     final harness = (await tester.runAsync<_MessagingHarness>(() async {
       final harness = await _startMessagingHarness();

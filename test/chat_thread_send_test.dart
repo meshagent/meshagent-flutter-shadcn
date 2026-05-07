@@ -354,6 +354,118 @@ void main() {
     expect(state.startedAt, DateTime.parse('2026-05-04T12:00:00Z'));
   });
 
+  test('resolveChatThreadStatus reads status from agent messages before attributes', () async {
+    final harness = await _startMessagingHarness();
+    addTearDown(harness.dispose);
+
+    await harness.room.messaging.enable();
+    await _waitUntil(() => harness.room.messaging.remoteParticipants.isNotEmpty);
+
+    const threadPath = 'dataset://agents/dataset/threads/thread-1';
+    await harness.server.sendParticipantAttributes(harness.pair.serverProtocol, {
+      'thread.status.text.$threadPath': 'Old attribute status',
+      'thread.status.mode.$threadPath': 'busy',
+      'thread.status.pending_item_id.$threadPath': 'old-item',
+    });
+    await _waitUntil(
+      () => harness.room.messaging.remoteParticipants.first.getAttribute('thread.status.text.$threadPath') == 'Old attribute status',
+    );
+
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.thread.status',
+        'thread_id': threadPath,
+        'status': 'Generating image',
+        'mode': 'steerable',
+        'started_at': '2026-05-04T12:00:00Z',
+        'turn_id': 'turn-1',
+      },
+    );
+
+    final state = resolveChatThreadStatus(room: harness.room, path: threadPath, agentName: 'assistant');
+
+    expect(state.text, 'Generating image');
+    expect(state.mode, 'steerable');
+    expect(state.turnId, 'turn-1');
+    expect(state.pendingItemId, isNull);
+    expect(state.startedAt, DateTime.parse('2026-05-04T12:00:00Z'));
+    expect(state.supportsAgentMessages, isTrue);
+  });
+
+  test('resolveChatThreadStatus tracks accepted pending messages until applied', () async {
+    final harness = await _startMessagingHarness();
+    addTearDown(harness.dispose);
+
+    const threadPath = '/threads/test.thread';
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.turn.start.accepted',
+        'thread_id': threadPath,
+        'source_message_id': 'message-1',
+        'sender_name': 'sender',
+        'content': [
+          {'type': 'text', 'text': 'hello'},
+        ],
+      },
+    );
+
+    final pendingState = resolveChatThreadStatus(room: harness.room, path: threadPath, agentName: 'assistant');
+
+    expect(pendingState.pendingMessages, hasLength(1));
+    expect(pendingState.pendingMessages.single.messageId, 'message-1');
+    expect(pendingState.pendingMessages.single.text, 'hello');
+    expect(pendingState.pendingMessages.single.awaitingAcceptance, isFalse);
+    expect(pendingState.pendingMessages.single.awaitingApplication, isTrue);
+    expect(pendingState.supportsAgentMessages, isTrue);
+
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {'type': 'meshagent.agent.turn.started', 'thread_id': threadPath, 'turn_id': 'turn-1', 'source_message_id': 'message-1'},
+    );
+
+    final appliedState = resolveChatThreadStatus(room: harness.room, path: threadPath, agentName: 'assistant');
+
+    expect(appliedState.pendingMessages, hasLength(1));
+    expect(appliedState.pendingMessages.single.awaitingApplication, isFalse);
+    expect(appliedState.turnId, 'turn-1');
+    expect(appliedState.supportsAgentMessages, isTrue);
+  });
+
+  test('ChatThreadController marks replayed pending messages when applied', () async {
+    final harness = await _startMessagingHarness();
+    addTearDown(harness.dispose);
+
+    const threadPath = '/threads/test.thread';
+    final controller = ChatThreadController(room: harness.room);
+    addTearDown(controller.dispose);
+
+    controller.handleAgentMessagePayload({
+      'type': 'meshagent.agent.turn.steer.accepted',
+      'thread_id': threadPath,
+      'turn_id': 'turn-1',
+      'source_message_id': 'message-1',
+      'sender_name': 'sender',
+      'content': [
+        {'type': 'text', 'text': 'wait'},
+      ],
+    });
+
+    expect(controller.pendingAgentMessagesForPath(threadPath), hasLength(1));
+    expect(controller.pendingAgentMessagesForPath(threadPath).single.text, 'wait');
+
+    controller.handleAgentMessagePayload({
+      'type': 'meshagent.agent.turn.steered',
+      'thread_id': threadPath,
+      'turn_id': 'turn-1',
+      'source_message_id': 'message-1',
+    });
+
+    expect(controller.pendingAgentMessagesForPath(threadPath), hasLength(1));
+    expect(controller.pendingAgentMessagesForPath(threadPath).single.awaitingApplication, isFalse);
+  });
+
   test('resolveChatThreadStatus preserves active turn without visible status text', () async {
     final harness = await _startMessagingHarness();
     addTearDown(harness.dispose);

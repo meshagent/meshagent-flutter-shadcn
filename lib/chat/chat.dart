@@ -77,8 +77,11 @@ const String _agentTurnInterruptAcceptedType = "meshagent.agent.turn.interrupt.a
 const String _agentTurnInterruptedType = "meshagent.agent.turn.interrupted";
 const String _agentTurnSteerAcceptedType = "meshagent.agent.turn.steer.accepted";
 const String _agentTurnSteerRejectedType = "meshagent.agent.turn.steer.rejected";
+const String _agentTurnStartedType = "meshagent.agent.turn.started";
+const String _agentTurnSteeredType = "meshagent.agent.turn.steered";
 const String _agentTurnEndedType = "meshagent.agent.turn.ended";
 const String _agentThreadClearedType = "meshagent.agent.thread.cleared";
+const String _agentThreadStatusType = "meshagent.agent.thread.status";
 const String _agentUsageUpdatedType = "meshagent.agent.usage.updated";
 const double _mobileScreenWidthMax = 600;
 const double _mobileComposerPillCornerRadius = 999;
@@ -425,6 +428,13 @@ bool _threadMessageHasId(MeshElement message, String id) {
   }
 
   return false;
+}
+
+bool _pendingAgentMessageIsOptimisticallyRendered({required PendingAgentMessage pending, required Iterable<MeshElement> messages}) {
+  if (pending.messageType == _agentTurnSteerType || pending.matchByContentOnly) {
+    return false;
+  }
+  return pending.awaitingApplication || !messages.any((message) => _threadMessageHasId(message, pending.messageId));
 }
 
 List<String> _threadAttachmentPaths(MeshElement message) {
@@ -777,6 +787,7 @@ class PendingAgentMessage {
     this.createdAt,
     this.matchByContentOnly = false,
     this.awaitingAcceptance = false,
+    this.awaitingApplication = false,
     this.awaitingOnline = false,
   });
 
@@ -789,10 +800,10 @@ class PendingAgentMessage {
   final DateTime? createdAt;
   final bool matchByContentOnly;
   final bool awaitingAcceptance;
+  final bool awaitingApplication;
   final bool awaitingOnline;
 
-  factory PendingAgentMessage.fromQueueJson(Map<String, dynamic> json) {
-    final content = json["content"];
+  static ({String text, List<String> attachments}) _parseContent(Object? content) {
     final textParts = <String>[];
     final attachments = <String>[];
     if (content is List) {
@@ -814,7 +825,11 @@ class PendingAgentMessage {
         }
       }
     }
+    return (text: textParts.join("\n\n"), attachments: attachments);
+  }
 
+  factory PendingAgentMessage.fromQueueJson(Map<String, dynamic> json) {
+    final parsedContent = _parseContent(json["content"]);
     final senderName = json["sender_name"];
     final messageType = json["message_type"];
     final messageId = json["message_id"];
@@ -824,11 +839,34 @@ class PendingAgentMessage {
       messageId: messageId is String ? messageId : const Uuid().v4(),
       messageType: messageType is String ? messageType : _agentTurnSteerType,
       threadPath: threadPath is String ? threadPath : "",
-      text: textParts.join("\n\n"),
-      attachments: attachments,
+      text: parsedContent.text,
+      attachments: parsedContent.attachments,
       senderName: senderName is String && senderName.trim().isNotEmpty ? senderName.trim() : null,
       createdAt: createdAt is String ? DateTime.tryParse(createdAt) : null,
       matchByContentOnly: false,
+      awaitingApplication: true,
+      awaitingOnline: false,
+    );
+  }
+
+  factory PendingAgentMessage.fromAcceptedPayload(Map<String, dynamic> payload) {
+    final parsedContent = _parseContent(payload["content"]);
+    final type = payload["type"];
+    final senderName = payload["sender_name"];
+    final sourceMessageId = payload["source_message_id"];
+    final threadPath = payload["thread_id"];
+    final createdAt = payload["created_at"];
+    return PendingAgentMessage(
+      messageId: sourceMessageId is String && sourceMessageId.trim().isNotEmpty ? sourceMessageId.trim() : const Uuid().v4(),
+      messageType: type == _agentTurnStartAcceptedType ? _agentTurnStartType : _agentTurnSteerType,
+      threadPath: threadPath is String ? threadPath : "",
+      text: parsedContent.text,
+      attachments: parsedContent.attachments,
+      senderName: senderName is String && senderName.trim().isNotEmpty ? senderName.trim() : null,
+      createdAt: createdAt is String ? DateTime.tryParse(createdAt) : null,
+      matchByContentOnly: false,
+      awaitingAcceptance: false,
+      awaitingApplication: true,
       awaitingOnline: false,
     );
   }
@@ -891,6 +929,233 @@ Map<String, dynamic>? _parsePendingMessagesStatus(Participant participant, Strin
   return null;
 }
 
+final Expando<_AgentThreadMessageStatusStore> _agentThreadMessageStatusStores = Expando<_AgentThreadMessageStatusStore>();
+
+_AgentThreadMessageStatusStore _agentThreadMessageStatusStore(RoomClient room) {
+  final existing = _agentThreadMessageStatusStores[room];
+  if (existing != null) {
+    return existing;
+  }
+
+  final created = _AgentThreadMessageStatusStore();
+  _agentThreadMessageStatusStores[room] = created;
+  return created;
+}
+
+bool trackAgentThreadStatusPayload({required RoomClient room, required Map<String, dynamic> payload}) {
+  return _agentThreadMessageStatusStore(room).apply(payload);
+}
+
+class _AgentThreadMessageStatus {
+  const _AgentThreadMessageStatus({this.text, this.startedAt, this.mode, this.turnId});
+
+  final String? text;
+  final DateTime? startedAt;
+  final String? mode;
+  final String? turnId;
+}
+
+class _AgentThreadMessageStatusStore {
+  final Set<String> _touchedThreadPaths = <String>{};
+  final Map<String, _AgentThreadMessageStatus> _statusByThreadPath = <String, _AgentThreadMessageStatus>{};
+  final Map<String, LinkedHashMap<String, PendingAgentMessage>> _pendingMessagesByThreadPath =
+      <String, LinkedHashMap<String, PendingAgentMessage>>{};
+
+  bool apply(Map<String, dynamic> payload) {
+    final type = payload["type"];
+    final threadPath = payload["thread_id"];
+    if (type is! String || threadPath is! String || threadPath.trim().isEmpty) {
+      return false;
+    }
+    final normalizedThreadPath = threadPath.trim();
+
+    switch (type) {
+      case _agentThreadStatusType:
+        _touchedThreadPaths.add(normalizedThreadPath);
+        return _applyStatus(normalizedThreadPath, payload);
+      case _agentTurnStartAcceptedType:
+      case _agentTurnSteerAcceptedType:
+        _touchedThreadPaths.add(normalizedThreadPath);
+        return _applyAccepted(normalizedThreadPath, payload);
+      case _agentTurnStartedType:
+        _touchedThreadPaths.add(normalizedThreadPath);
+        return _markPendingApplied(normalizedThreadPath, payload["source_message_id"], turnId: payload["turn_id"]);
+      case _agentTurnSteeredType:
+        _touchedThreadPaths.add(normalizedThreadPath);
+        return _markPendingApplied(normalizedThreadPath, payload["source_message_id"]);
+      case _agentTurnStartRejectedType:
+      case _agentTurnSteerRejectedType:
+        _touchedThreadPaths.add(normalizedThreadPath);
+        return _removePending(normalizedThreadPath, payload["source_message_id"]);
+      case _agentTurnEndedType:
+      case _agentThreadClearedType:
+        _touchedThreadPaths.add(normalizedThreadPath);
+        final hadPending = _pendingMessagesByThreadPath.remove(normalizedThreadPath)?.isNotEmpty == true;
+        final hadStatus = _statusByThreadPath.remove(normalizedThreadPath) != null;
+        return hadPending || hadStatus;
+    }
+
+    return false;
+  }
+
+  bool hasThread(String path) => _touchedThreadPaths.contains(path.trim());
+
+  ChatThreadStatusState state({required String path, ChatThreadStatusState? previous, required bool supportsAgentMessages}) {
+    final normalizedPath = path.trim();
+    final status = _statusByThreadPath[normalizedPath];
+    final pendingMessages = List<PendingAgentMessage>.unmodifiable(
+      _pendingMessagesByThreadPath[normalizedPath]?.values ?? const <PendingAgentMessage>[],
+    );
+
+    if (status == null && pendingMessages.isEmpty) {
+      return ChatThreadStatusState(supportsAgentMessages: supportsAgentMessages);
+    }
+
+    var startedAt = status?.startedAt;
+    if (status?.text != null) {
+      startedAt ??= previous?.hasStatus == true ? previous?.startedAt : DateTime.now();
+    }
+
+    return ChatThreadStatusState(
+      text: status?.text,
+      startedAt: startedAt,
+      mode: status?.text == null ? status?.mode : status?.mode ?? "busy",
+      turnId: status?.turnId,
+      pendingMessages: pendingMessages,
+      supportsAgentMessages: true,
+    );
+  }
+
+  bool _applyStatus(String threadPath, Map<String, dynamic> payload) {
+    final rawStatus = payload["status"];
+    final rawMode = payload["mode"];
+    final rawStartedAt = payload["started_at"];
+    final rawTurnId = payload["turn_id"];
+
+    final text = rawStatus is String && rawStatus.trim().isNotEmpty ? rawStatus.trim() : null;
+    final mode = rawMode is String && (rawMode.trim().toLowerCase() == "busy" || rawMode.trim().toLowerCase() == "steerable")
+        ? rawMode.trim().toLowerCase()
+        : null;
+    final startedAt = rawStartedAt is String && rawStartedAt.trim().isNotEmpty ? DateTime.tryParse(rawStartedAt.trim()) : null;
+    final turnId = rawTurnId is String && rawTurnId.trim().isNotEmpty ? rawTurnId.trim() : null;
+
+    if (text == null && mode == null && startedAt == null && turnId == null) {
+      return _statusByThreadPath.remove(threadPath) != null;
+    }
+
+    final next = _AgentThreadMessageStatus(text: text, startedAt: startedAt, mode: mode, turnId: turnId);
+    final previous = _statusByThreadPath[threadPath];
+    if (previous != null &&
+        previous.text == next.text &&
+        previous.mode == next.mode &&
+        previous.turnId == next.turnId &&
+        previous.startedAt?.millisecondsSinceEpoch == next.startedAt?.millisecondsSinceEpoch) {
+      return false;
+    }
+
+    _statusByThreadPath[threadPath] = next;
+    return true;
+  }
+
+  bool _applyAccepted(String threadPath, Map<String, dynamic> payload) {
+    final parsedMessage = PendingAgentMessage.fromAcceptedPayload(payload);
+    if (parsedMessage.messageId.trim().isEmpty) {
+      return false;
+    }
+    final pendingMessages = _pendingMessagesByThreadPath.putIfAbsent(threadPath, LinkedHashMap<String, PendingAgentMessage>.new);
+    final existing = pendingMessages[parsedMessage.messageId];
+    final message = existing != null && !existing.awaitingApplication
+        ? PendingAgentMessage(
+            messageId: parsedMessage.messageId,
+            messageType: parsedMessage.messageType,
+            threadPath: parsedMessage.threadPath,
+            text: parsedMessage.text,
+            attachments: parsedMessage.attachments,
+            senderName: parsedMessage.senderName,
+            createdAt: parsedMessage.createdAt,
+            matchByContentOnly: parsedMessage.matchByContentOnly,
+            awaitingAcceptance: parsedMessage.awaitingAcceptance,
+            awaitingApplication: false,
+            awaitingOnline: parsedMessage.awaitingOnline,
+          )
+        : parsedMessage;
+    if (existing != null &&
+        existing.messageType == message.messageType &&
+        existing.text == message.text &&
+        const DeepCollectionEquality().equals(existing.attachments, message.attachments) &&
+        existing.senderName == message.senderName &&
+        existing.awaitingApplication == message.awaitingApplication) {
+      return false;
+    }
+    pendingMessages[message.messageId] = message;
+    return true;
+  }
+
+  bool _markPendingApplied(String threadPath, Object? sourceMessageId, {Object? turnId}) {
+    var changed = false;
+    final pendingMessages = _pendingMessagesByThreadPath[threadPath];
+    final normalizedSourceMessageId = sourceMessageId is String ? sourceMessageId.trim() : "";
+    if (normalizedSourceMessageId.isNotEmpty) {
+      final existing = pendingMessages?[normalizedSourceMessageId];
+      if (existing != null && existing.awaitingApplication) {
+        pendingMessages![normalizedSourceMessageId] = PendingAgentMessage(
+          messageId: existing.messageId,
+          messageType: existing.messageType,
+          threadPath: existing.threadPath,
+          text: existing.text,
+          attachments: existing.attachments,
+          senderName: existing.senderName,
+          createdAt: existing.createdAt,
+          matchByContentOnly: existing.matchByContentOnly,
+          awaitingAcceptance: existing.awaitingAcceptance,
+          awaitingApplication: false,
+          awaitingOnline: existing.awaitingOnline,
+        );
+        changed = true;
+      }
+    }
+
+    if (turnId is String && turnId.trim().isNotEmpty) {
+      final previous = _statusByThreadPath[threadPath];
+      if (previous?.turnId != turnId.trim()) {
+        _statusByThreadPath[threadPath] = _AgentThreadMessageStatus(
+          text: previous?.text,
+          startedAt: previous?.startedAt,
+          mode: previous?.mode,
+          turnId: turnId.trim(),
+        );
+        changed = true;
+      }
+    }
+
+    return changed;
+  }
+
+  bool _removePending(String threadPath, Object? sourceMessageId, {Object? turnId}) {
+    final pendingMessages = _pendingMessagesByThreadPath[threadPath];
+    final normalizedSourceMessageId = sourceMessageId is String ? sourceMessageId.trim() : "";
+    final changed = normalizedSourceMessageId.isNotEmpty && pendingMessages?.remove(normalizedSourceMessageId) != null;
+    if (pendingMessages != null && pendingMessages.isEmpty) {
+      _pendingMessagesByThreadPath.remove(threadPath);
+    }
+
+    if (turnId is String && turnId.trim().isNotEmpty) {
+      final previous = _statusByThreadPath[threadPath];
+      if (previous?.turnId != turnId.trim()) {
+        _statusByThreadPath[threadPath] = _AgentThreadMessageStatus(
+          text: previous?.text,
+          startedAt: previous?.startedAt,
+          mode: previous?.mode,
+          turnId: turnId.trim(),
+        );
+        return true;
+      }
+    }
+
+    return changed;
+  }
+}
+
 class ChatThreadStatusState {
   const ChatThreadStatusState({
     this.text,
@@ -930,34 +1195,37 @@ ChatThreadStatusState resolveChatThreadStatus({
     else
       ...room.messaging.remoteParticipants,
   ];
+  final messageStatusStore = _agentThreadMessageStatusStore(room);
+  final hasMessageStatus = messageStatusStore.hasThread(path);
+  final messageState = messageStatusStore.state(path: path, previous: previous, supportsAgentMessages: hasMessageStatus);
 
-  String? nextStatus;
-  String? nextMode;
-  DateTime? nextStartedAt;
-  String? nextTurnId;
-  List<PendingAgentMessage> nextPendingMessages = const [];
+  String? nextStatus = messageState.text;
+  String? nextMode = messageState.mode;
+  DateTime? nextStartedAt = messageState.startedAt;
+  String? nextTurnId = messageState.turnId;
+  List<PendingAgentMessage> nextPendingMessages = messageState.pendingMessages;
   String? nextPendingItemId;
-  bool nextSupportsAgentMessages = false;
+  bool nextSupportsAgentMessages = messageState.supportsAgentMessages;
 
   for (final participant in candidates) {
     if (_supportsAgentMessages(participant)) {
       nextSupportsAgentMessages = true;
     }
 
-    if (nextStatus == null && textKey != null) {
+    if (!hasMessageStatus && nextStatus == null && textKey != null) {
       final value = participant.getAttribute(textKey);
       if (value is String && value.trim().isNotEmpty) {
         nextStatus = value.trim();
       }
     }
-    if (nextStatus == null && key != null) {
+    if (!hasMessageStatus && nextStatus == null && key != null) {
       final value = participant.getAttribute(key);
       if (value is String && value.trim().isNotEmpty) {
         nextStatus = value.trim();
       }
     }
 
-    final pendingStatus = _parsePendingMessagesStatus(participant, path);
+    final pendingStatus = hasMessageStatus ? null : _parsePendingMessagesStatus(participant, path);
     if (pendingStatus != null) {
       if (nextTurnId == null) {
         final turnId = pendingStatus["turn_id"];
@@ -980,7 +1248,7 @@ ChatThreadStatusState resolveChatThreadStatus({
       }
     }
 
-    if (nextMode == null && modeKey != null) {
+    if (!hasMessageStatus && nextMode == null && modeKey != null) {
       final value = participant.getAttribute(modeKey);
       if (value is String) {
         final normalized = value.trim().toLowerCase();
@@ -990,7 +1258,7 @@ ChatThreadStatusState resolveChatThreadStatus({
       }
     }
 
-    if (nextStartedAt == null && startedAtKey != null) {
+    if (!hasMessageStatus && nextStartedAt == null && startedAtKey != null) {
       final value = participant.getAttribute(startedAtKey);
       if (value is String) {
         final normalized = value.trim();
@@ -998,7 +1266,7 @@ ChatThreadStatusState resolveChatThreadStatus({
       }
     }
 
-    if (nextPendingItemId == null && pendingItemIdKey != null) {
+    if (!hasMessageStatus && nextPendingItemId == null && pendingItemIdKey != null) {
       final value = participant.getAttribute(pendingItemIdKey);
       if (value is String && value.trim().isNotEmpty) {
         nextPendingItemId = value.trim();
@@ -1311,7 +1579,34 @@ class ChatThreadController extends ChangeNotifier {
       createdAt: existing.createdAt,
       matchByContentOnly: existing.matchByContentOnly,
       awaitingAcceptance: false,
+      awaitingApplication: true,
       awaitingOnline: false,
+    );
+    notifyListeners();
+  }
+
+  void _markPendingAgentMessageApplied(String? messageId) {
+    if (messageId == null || messageId.trim().isEmpty) {
+      return;
+    }
+
+    final existing = _pendingAgentMessages[messageId];
+    if (existing == null || !existing.awaitingApplication) {
+      return;
+    }
+
+    _pendingAgentMessages[messageId] = PendingAgentMessage(
+      messageId: existing.messageId,
+      messageType: existing.messageType,
+      threadPath: existing.threadPath,
+      text: existing.text,
+      attachments: existing.attachments,
+      senderName: existing.senderName,
+      createdAt: existing.createdAt,
+      matchByContentOnly: existing.matchByContentOnly,
+      awaitingAcceptance: existing.awaitingAcceptance,
+      awaitingApplication: false,
+      awaitingOnline: existing.awaitingOnline,
     );
     notifyListeners();
   }
@@ -1336,6 +1631,7 @@ class ChatThreadController extends ChangeNotifier {
       createdAt: existing.createdAt,
       matchByContentOnly: existing.matchByContentOnly,
       awaitingAcceptance: existing.awaitingAcceptance,
+      awaitingApplication: existing.awaitingApplication,
       awaitingOnline: awaitingOnline,
     );
     notifyListeners();
@@ -1380,7 +1676,19 @@ class ChatThreadController extends ChangeNotifier {
     final normalizedThreadPath = threadPath is String ? threadPath.trim() : "";
 
     if (type == _agentTurnStartAcceptedType || type == _agentTurnSteerAcceptedType) {
-      _markPendingAgentMessageAccepted(normalizedSourceMessageId);
+      if (normalizedSourceMessageId != null && _pendingAgentMessages.containsKey(normalizedSourceMessageId)) {
+        _markPendingAgentMessageAccepted(normalizedSourceMessageId);
+      } else {
+        final pendingMessage = PendingAgentMessage.fromAcceptedPayload(payload);
+        if (pendingMessage.threadPath.trim().isNotEmpty) {
+          _markPendingAgentMessage(message: pendingMessage);
+        }
+      }
+      return;
+    }
+
+    if (type == _agentTurnStartedType || type == _agentTurnSteeredType) {
+      _markPendingAgentMessageApplied(normalizedSourceMessageId);
       return;
     }
 
@@ -1769,6 +2077,7 @@ class ChatThreadController extends ChangeNotifier {
             createdAt: DateTime.now(),
             matchByContentOnly: false,
             awaitingAcceptance: true,
+            awaitingApplication: true,
             awaitingOnline: false,
           ),
         );
@@ -1821,7 +2130,6 @@ class ChatThreadController extends ChangeNotifier {
         await Future.wait(sentMessages);
         outboundStatus.markDelivered(message.id);
         onMessageSent?.call(message);
-        clear();
       } on ChatSendCancelledException {
         outboundStatus.clear(message.id);
         if (useAgentMessages) {
@@ -3929,11 +4237,13 @@ class _ChatThreadState extends State<ChatThread> {
     }
     final values = combined.values
         .where(
-          (pending) => !state.messages.any(
-            (message) =>
-                _shouldRenderThreadMessageElement(message, showCompletedToolCalls: _showCompletedToolCalls) &&
-                _threadMessageMatchesPendingAgentMessage(message, pending),
-          ),
+          (pending) =>
+              pending.awaitingApplication ||
+              !state.messages.any(
+                (message) =>
+                    _shouldRenderThreadMessageElement(message, showCompletedToolCalls: _showCompletedToolCalls) &&
+                    _threadMessageMatchesPendingAgentMessage(message, pending),
+              ),
         )
         .toList();
     return [...values.where((message) => !message.awaitingAcceptance), ...values.where((message) => message.awaitingAcceptance)];
@@ -4476,9 +4786,16 @@ class _ChatThreadState extends State<ChatThread> {
                   listenable: controller,
                   builder: (context, _) {
                     final pendingMessages = _combinedPendingMessages(state);
-                    final queuedSteerPendingMessages = pendingMessages
-                        .where((message) => message.messageType == _agentTurnSteerType)
-                        .toList(growable: false);
+                    final hasThreadStatus = state.threadStatus != null && state.threadStatus!.trim().isNotEmpty;
+                    final queuedPendingMessages = hasThreadStatus
+                        ? pendingMessages
+                              .where(
+                                (message) =>
+                                    (message.messageType == _agentTurnStartType || message.messageType == _agentTurnSteerType) &&
+                                    !_pendingAgentMessageIsOptimisticallyRendered(pending: message, messages: state.messages),
+                              )
+                              .toList(growable: false)
+                        : const <PendingAgentMessage>[];
                     final canInterruptActiveTurn = _canInterruptActiveTurn(state: state, pendingMessages: pendingMessages);
                     return ChatThreadInputFrame(
                       hasFooter: widget.showUsageFooter,
@@ -4486,7 +4803,7 @@ class _ChatThreadState extends State<ChatThread> {
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          if (queuedSteerPendingMessages.isNotEmpty)
+                          if (queuedPendingMessages.isNotEmpty)
                             Padding(
                               padding: const EdgeInsets.only(bottom: 10),
                               child: Row(
@@ -4505,7 +4822,7 @@ class _ChatThreadState extends State<ChatThread> {
                                           style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
                                         ),
                                         const SizedBox(height: 4),
-                                        for (final pending in queuedSteerPendingMessages)
+                                        for (final pending in queuedPendingMessages)
                                           Padding(
                                             padding: const EdgeInsets.only(bottom: 4),
                                             child: Text(
@@ -6065,31 +6382,6 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     return _shouldRenderThreadMessageElement(message, showCompletedToolCalls: widget.showCompletedToolCalls);
   }
 
-  List<PendingAgentMessage> _optimisticPendingMessages(List<MeshElement> visibleMessages) {
-    return widget.pendingMessages
-        .where((message) {
-          if (visibleMessages.any((visibleMessage) => _threadMessageMatchesPendingAgentMessage(visibleMessage, message))) {
-            return false;
-          }
-
-          if (message.messageType == _agentTurnStartType) {
-            return true;
-          }
-
-          return false;
-        })
-        .toList(growable: false);
-  }
-
-  Widget _buildPendingMessage(BuildContext context, PendingAgentMessage message) {
-    return PendingChatThreadMessage(
-      room: room,
-      message: message,
-      shouldShowAuthorNames: widget.shouldShowAuthorNames,
-      mobileStorageSaveSurfacePresenter: mobileStorageSaveSurfacePresenter,
-    );
-  }
-
   Widget _buildMessage(
     BuildContext context,
     MeshElement? previous,
@@ -6189,8 +6481,11 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
 
   @override
   Widget build(BuildContext context) {
-    final visibleMessages = messages.where(_shouldRenderThreadMessage).toList();
-    final optimisticPendingMessages = _optimisticPendingMessages(visibleMessages);
+    final pendingApplicationMessages = widget.pendingMessages.where((message) => message.awaitingApplication).toList(growable: false);
+    final visibleMessages = messages
+        .where(_shouldRenderThreadMessage)
+        .where((message) => !pendingApplicationMessages.any((pending) => _threadMessageMatchesPendingAgentMessage(message, pending)))
+        .toList();
     const bool bottomAlign = true;
     final feedImages = _collectThreadImages();
 
@@ -6210,13 +6505,24 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
       }
       messageWidgets.insert(0, messageWidget);
     }
-
-    for (final pending in optimisticPendingMessages) {
+    final pendingFeedMessages = widget.pendingMessages.where(
+      (pending) => _pendingAgentMessageIsOptimisticallyRendered(pending: pending, messages: messages),
+    );
+    for (final pending in pendingFeedMessages) {
       if (messageWidgets.isNotEmpty) {
         messageWidgets.insert(0, const SizedBox(height: _chatMessageStackSpacing));
       }
-      messageWidgets.insert(0, _buildPendingMessage(context, pending));
+      messageWidgets.insert(
+        0,
+        PendingChatThreadMessage(
+          room: room,
+          message: pending,
+          shouldShowAuthorNames: widget.shouldShowAuthorNames,
+          mobileStorageSaveSurfacePresenter: mobileStorageSaveSurfacePresenter,
+        ),
+      );
     }
+
     final threadView = ChatThreadViewportBody(
       scrollController: widget.scrollController,
       tapRegionGroupId: widget.composerTapRegionGroupId,
@@ -8716,28 +9022,44 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
     }
 
     if (event is RoomMessageEvent) {
-      _getThreadStatus();
-
       if (event.message.type == _agentRoomMessageType) {
         final payload = event.message.message["payload"];
         if (payload is Map<String, dynamic>) {
+          final statusChanged = trackAgentThreadStatusPayload(room: widget.room, payload: payload);
           if (_handleCapabilitiesPayload(event: event, payload: payload)) {
+            if (statusChanged) {
+              _getThreadStatus();
+            }
             return;
           }
           if (_handleUsagePayload(payload)) {
+            if (statusChanged) {
+              _getThreadStatus();
+            }
             return;
           }
           widget.controller.handleAgentMessagePayload(payload);
+          _getThreadStatus();
         } else if (payload is Map) {
           final normalized = Map<String, dynamic>.from(payload);
+          final statusChanged = trackAgentThreadStatusPayload(room: widget.room, payload: normalized);
           if (_handleCapabilitiesPayload(event: event, payload: normalized)) {
+            if (statusChanged) {
+              _getThreadStatus();
+            }
             return;
           }
           if (_handleUsagePayload(normalized)) {
+            if (statusChanged) {
+              _getThreadStatus();
+            }
             return;
           }
           widget.controller.handleAgentMessagePayload(normalized);
+          _getThreadStatus();
         }
+      } else {
+        _getThreadStatus();
       }
 
       if (event.message.type.startsWith("participant")) {
@@ -8819,9 +9141,35 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         nextState.pendingMessages.length == pendingMessages.length &&
         const DeepCollectionEquality().equals(
           nextState.pendingMessages
-              .map((x) => [x.messageId, x.messageType, x.text, x.attachments, x.senderName, x.matchByContentOnly])
+              .map(
+                (x) => [
+                  x.messageId,
+                  x.messageType,
+                  x.text,
+                  x.attachments,
+                  x.senderName,
+                  x.matchByContentOnly,
+                  x.awaitingAcceptance,
+                  x.awaitingApplication,
+                  x.awaitingOnline,
+                ],
+              )
               .toList(),
-          pendingMessages.map((x) => [x.messageId, x.messageType, x.text, x.attachments, x.senderName, x.matchByContentOnly]).toList(),
+          pendingMessages
+              .map(
+                (x) => [
+                  x.messageId,
+                  x.messageType,
+                  x.text,
+                  x.attachments,
+                  x.senderName,
+                  x.matchByContentOnly,
+                  x.awaitingAcceptance,
+                  x.awaitingApplication,
+                  x.awaitingOnline,
+                ],
+              )
+              .toList(),
         );
     if (nextState.text == threadStatus &&
         nextState.mode == threadStatusMode &&
