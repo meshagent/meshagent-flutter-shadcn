@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -158,6 +159,28 @@ class _FakeMessagingServer {
     }
   }
 
+  Future<void> sendParticipantAttributes(Protocol protocol, Map<String, dynamic> attributes) async {
+    await protocol.send(
+      'messaging.send',
+      packMessage({
+        'from_participant_id': 'remote-1',
+        'type': 'participant.attributes',
+        'message': {'attributes': attributes},
+      }),
+    );
+  }
+
+  Future<void> sendAgentMessage(Protocol protocol, Map<String, dynamic> payload) async {
+    await protocol.send(
+      'messaging.send',
+      packMessage({
+        'from_participant_id': 'remote-1',
+        'type': 'agent-message',
+        'message': {'payload': payload},
+      }),
+    );
+  }
+
   Content _decodeInput({required Message message, required Map<String, dynamic> request}) {
     final arguments = Map<String, dynamic>.from(request['arguments'] as Map);
     return unpackContent(packMessage(arguments, message.payload.isEmpty ? null : message.payload));
@@ -303,5 +326,131 @@ void main() {
     expect(harness.server.requests.map((request) => request.tool).toList(), ['enable', 'send']);
     expect(harness.server.requests.where((request) => request.tool == 'send'), hasLength(1));
     expect(harness.server.requests.last.input['to_participant_id'], 'remote-1');
+  });
+
+  test('resolveChatThreadStatus reads the exact dataset thread path', () async {
+    final harness = await _startMessagingHarness();
+    addTearDown(harness.dispose);
+
+    await harness.room.messaging.enable();
+    await _waitUntil(() => harness.room.messaging.remoteParticipants.isNotEmpty);
+
+    const threadPath = 'dataset://agents/dataset/threads/thread-1';
+    await harness.server.sendParticipantAttributes(harness.pair.serverProtocol, {
+      'thread.status.text.$threadPath': 'Generating image',
+      'thread.status.mode.$threadPath': 'busy',
+      'thread.status.started_at.$threadPath': '2026-05-04T12:00:00Z',
+      'thread.status.pending_item_id.$threadPath': 'image-1',
+    });
+    await _waitUntil(
+      () => harness.room.messaging.remoteParticipants.first.getAttribute('thread.status.text.$threadPath') == 'Generating image',
+    );
+
+    final state = resolveChatThreadStatus(room: harness.room, path: threadPath, agentName: 'assistant');
+
+    expect(state.text, 'Generating image');
+    expect(state.mode, 'busy');
+    expect(state.pendingItemId, 'image-1');
+    expect(state.startedAt, DateTime.parse('2026-05-04T12:00:00Z'));
+  });
+
+  test('resolveChatThreadStatus preserves active turn without visible status text', () async {
+    final harness = await _startMessagingHarness();
+    addTearDown(harness.dispose);
+
+    await harness.room.messaging.enable();
+    await _waitUntil(() => harness.room.messaging.remoteParticipants.isNotEmpty);
+
+    const threadPath = 'dataset://agents/dataset/threads/thread-1';
+    await harness.server.sendParticipantAttributes(harness.pair.serverProtocol, {
+      'supports_agent_messages': true,
+      'thread.status.pending_messages.$threadPath': jsonEncode({
+        'turn_id': 'turn-1',
+        'messages': [
+          {
+            'message_id': 'message-1',
+            'message_type': 'meshagent.agent.turn.steer',
+            'sender_name': 'self',
+            'created_at': '2026-05-04T12:00:00Z',
+            'content': [
+              {'type': 'text', 'text': 'hello'},
+            ],
+          },
+        ],
+      }),
+    });
+    await _waitUntil(
+      () => harness.room.messaging.remoteParticipants.first.getAttribute('thread.status.pending_messages.$threadPath') != null,
+    );
+
+    final state = resolveChatThreadStatus(room: harness.room, path: threadPath, agentName: 'assistant');
+
+    expect(state.text, isNull);
+    expect(state.turnId, 'turn-1');
+    expect(state.pendingMessages, hasLength(1));
+    expect(state.pendingMessages.single.text, 'hello');
+    expect(state.supportsAgentMessages, isTrue);
+  });
+
+  test('resolveChatThreadStatus does not require supports agent messages when agent name is omitted', () async {
+    final harness = await _startMessagingHarness();
+    addTearDown(harness.dispose);
+
+    await harness.room.messaging.enable();
+    await _waitUntil(() => harness.room.messaging.remoteParticipants.isNotEmpty);
+
+    const threadPath = 'dataset://agents/dataset/threads/thread-1';
+    await harness.server.sendParticipantAttributes(harness.pair.serverProtocol, {
+      'thread.status.text.$threadPath': 'Generating image',
+      'thread.status.mode.$threadPath': 'busy',
+    });
+    await _waitUntil(
+      () => harness.room.messaging.remoteParticipants.first.getAttribute('thread.status.text.$threadPath') == 'Generating image',
+    );
+
+    final state = resolveChatThreadStatus(room: harness.room, path: threadPath);
+
+    expect(state.text, 'Generating image');
+    expect(state.mode, 'busy');
+  });
+
+  test('agent-message usage payload is observable and parseable on the Dart room event stream', () async {
+    final harness = await _startMessagingHarness();
+    addTearDown(harness.dispose);
+
+    await harness.room.messaging.enable();
+    await _waitUntil(() => harness.room.messaging.remoteParticipants.isNotEmpty);
+
+    AgentUsageSnapshot? latestUsage;
+    final subscription = harness.room.listen((event) {
+      if (event is! RoomMessageEvent || event.message.type != 'agent-message') {
+        return;
+      }
+      final payload = event.message.message['payload'];
+      if (payload is Map<String, dynamic>) {
+        latestUsage = AgentUsageSnapshot.fromPayload(payload);
+      } else if (payload is Map) {
+        latestUsage = AgentUsageSnapshot.fromPayload(Map<String, dynamic>.from(payload));
+      }
+    });
+    addTearDown(subscription.cancel);
+
+    await harness.server.sendAgentMessage(harness.pair.serverProtocol, {
+      'type': 'meshagent.agent.usage.updated',
+      'thread_id': '/threads/test.thread',
+      'message_id': 'usage-1',
+      'turn_id': 'turn-1',
+      'usage': {'input_tokens': 120.0, 'output_tokens': 30.0},
+      'context_window': {'used_tokens': 480, 'total_tokens': 128000},
+    });
+    await _waitUntil(() => latestUsage != null);
+
+    final usage = latestUsage;
+    expect(usage, isNotNull);
+    expect(usage!.threadPath, '/threads/test.thread');
+    expect(usage.turnId, 'turn-1');
+    expect(usage.contextUsedTokens, 480);
+    expect(usage.contextTotalTokens, 128000);
+    expect(usage.totalTokens, 150);
   });
 }

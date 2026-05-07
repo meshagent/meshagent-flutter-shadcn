@@ -26,6 +26,7 @@ class NewChatThread extends StatefulWidget {
     this.onThreadPathChanged,
     this.onThreadResolved,
     this.centerComposer = true,
+    this.showUsageFooter = false,
     this.emptyState,
     this.inputContextMenuBuilder,
     this.inputOnPressedOutside,
@@ -43,6 +44,7 @@ class NewChatThread extends StatefulWidget {
   final ValueChanged<String?>? onThreadPathChanged;
   final void Function(String? path, String? displayName)? onThreadResolved;
   final bool centerComposer;
+  final bool showUsageFooter;
   final Widget? emptyState;
   final EditableTextContextMenuBuilder? inputContextMenuBuilder;
   final TapRegionCallback? inputOnPressedOutside;
@@ -88,6 +90,34 @@ class _NewChatThreadState extends State<NewChatThread> {
     }
 
     return "Message $normalizedAgentName...";
+  }
+
+  Widget _buildUsageFooter(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    return Text(
+      "",
+      overflow: TextOverflow.ellipsis,
+      textAlign: TextAlign.right,
+      style: theme.textTheme.small.copyWith(color: theme.colorScheme.mutedForeground, fontSize: 11),
+    );
+  }
+
+  Widget _buildComposerWithUsageFooter(BuildContext context, Widget input) {
+    if (!widget.showUsageFooter) {
+      return input;
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        input,
+        Padding(
+          padding: const EdgeInsets.only(left: 8, top: 3, right: 8),
+          child: Align(alignment: Alignment.centerRight, child: _buildUsageFooter(context)),
+        ),
+      ],
+    );
   }
 
   void _notifyThreadPathChanged(String? path) {
@@ -342,25 +372,28 @@ class _NewChatThreadState extends State<NewChatThread> {
         throw RoomServerException("${widget.toolkit}.${widget.tool} response missing path");
       }
       final path = responsePath.trim();
+      final responseMessageId = content.json["message_id"];
+      final messageId = responseMessageId is String && responseMessageId.trim().isNotEmpty
+          ? responseMessageId.trim()
+          : pendingFirstMessage.messageId;
       final responseName = content.json["name"];
       final threadName = responseName is String && responseName.trim().isNotEmpty ? responseName.trim() : null;
       if (!mounted || operationId != _newThreadOperationId) {
         return;
       }
 
-      _controller.markPendingAgentMessage(
-        PendingAgentMessage(
-          messageId: pendingFirstMessage.messageId,
-          messageType: pendingFirstMessage.messageType,
-          threadPath: path,
-          text: pendingFirstMessage.text,
-          attachments: pendingFirstMessage.attachments,
-          senderName: pendingFirstMessage.senderName,
-          createdAt: pendingFirstMessage.createdAt,
-          matchByContentOnly: pendingFirstMessage.matchByContentOnly,
-          awaitingAcceptance: pendingFirstMessage.awaitingAcceptance,
-        ),
+      final resolvedPendingMessage = PendingAgentMessage(
+        messageId: messageId,
+        messageType: pendingFirstMessage.messageType,
+        threadPath: path,
+        text: pendingFirstMessage.text,
+        attachments: pendingFirstMessage.attachments,
+        senderName: pendingFirstMessage.senderName,
+        createdAt: pendingFirstMessage.createdAt,
+        matchByContentOnly: false,
+        awaitingAcceptance: pendingFirstMessage.awaitingAcceptance,
       );
+      _controller.markPendingAgentMessage(resolvedPendingMessage);
 
       final defersToParent = widget.onThreadPathChanged != null || widget.onThreadResolved != null;
       setState(() {
@@ -368,7 +401,7 @@ class _NewChatThreadState extends State<NewChatThread> {
         _newThreadError = null;
         _creatingNewThread = false;
         _waitingForAgent = false;
-        _pendingFirstMessage = defersToParent ? pendingFirstMessage : null;
+        _pendingFirstMessage = defersToParent ? resolvedPendingMessage : null;
       });
       _notifyThreadResolved(path, threadName);
       _notifyThreadPathChanged(path);
@@ -449,6 +482,7 @@ class _NewChatThreadState extends State<NewChatThread> {
       threadTurnId: null,
       pendingMessages: const [],
       pendingItemId: null,
+      usage: null,
     );
   }
 
@@ -525,6 +559,7 @@ class _NewChatThreadState extends State<NewChatThread> {
       contextMenuBuilder: widget.inputContextMenuBuilder,
       onPressedOutside: widget.inputOnPressedOutside,
     );
+    final composer = _buildComposerWithUsageFooter(context, input);
 
     final content = !widget.centerComposer
         ? Column(
@@ -540,7 +575,7 @@ class _NewChatThreadState extends State<NewChatThread> {
                     ),
                   ),
                 ),
-              ChatThreadInputFrame(child: input),
+              ChatThreadInputFrame(hasFooter: widget.showUsageFooter, child: composer),
             ],
           )
         : _pendingFirstMessage != null
@@ -557,7 +592,7 @@ class _NewChatThreadState extends State<NewChatThread> {
                     ),
                   ),
                 ),
-              ChatThreadInputFrame(child: input),
+              ChatThreadInputFrame(hasFooter: widget.showUsageFooter, child: composer),
             ],
           )
         : Center(
@@ -570,7 +605,7 @@ class _NewChatThreadState extends State<NewChatThread> {
                   spacing: 12,
                   children: [
                     Text("Start a new thread", style: headingStyle),
-                    input,
+                    composer,
                     if (_newThreadError != null) ...[
                       ShadAlert.destructive(title: const Text("Unable to start thread"), description: Text(_newThreadError!)),
                     ],

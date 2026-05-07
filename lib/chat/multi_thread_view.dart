@@ -22,6 +22,7 @@ class MultiThreadView extends StatefulWidget {
     this.onSelectedThreadResolved,
     this.newThreadResetVersion = 0,
     this.centerComposer = true,
+    this.showUsageFooter = false,
     this.emptyState,
     this.inputContextMenuBuilder,
     this.inputOnPressedOutside,
@@ -39,6 +40,7 @@ class MultiThreadView extends StatefulWidget {
   final void Function(String? path, String? displayName)? onSelectedThreadResolved;
   final int newThreadResetVersion;
   final bool centerComposer;
+  final bool showUsageFooter;
   final Widget? emptyState;
   final EditableTextContextMenuBuilder? inputContextMenuBuilder;
   final TapRegionCallback? inputOnPressedOutside;
@@ -108,6 +110,7 @@ class _MultiThreadViewState extends State<MultiThreadView> {
       onThreadPathChanged: widget.onSelectedThreadPathChanged,
       onThreadResolved: widget.onSelectedThreadResolved,
       centerComposer: widget.centerComposer,
+      showUsageFooter: widget.showUsageFooter,
       emptyState: widget.emptyState,
       inputContextMenuBuilder: widget.inputContextMenuBuilder,
       inputOnPressedOutside: widget.inputOnPressedOutside,

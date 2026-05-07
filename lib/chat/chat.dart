@@ -36,6 +36,7 @@ import 'package:meshagent_flutter_shadcn/file_preview/image.dart';
 import 'ansi.dart';
 import 'outbound_delivery_status.dart';
 import 'folder_drop.dart';
+import 'usage_footer_tooltip.dart';
 
 const webPDFFormat = SimpleFileFormat(uniformTypeIdentifiers: ['com.adobe.pdf'], mimeTypes: ['web application/pdf']);
 const List<String> _emojiFontFamilyFallback = <String>['Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji'];
@@ -64,17 +65,21 @@ const String _agentTurnStartType = "meshagent.agent.turn.start";
 const String _agentTurnSteerType = "meshagent.agent.turn.steer";
 const String _agentTurnInterruptType = "meshagent.agent.turn.interrupt";
 const String _agentThreadClearType = "meshagent.agent.thread.clear";
+const String _agentThreadOpenType = "meshagent.agent.thread.open";
+const String _agentThreadCloseType = "meshagent.agent.thread.close";
 const String _agentCapabilitiesRequestType = "meshagent.agent.capabilities_request";
 const String _agentCapabilitiesResponseType = "meshagent.agent.capabilities_response";
 const String _agentToolApproveType = "meshagent.agent.tool_call.approve";
 const String _agentToolRejectType = "meshagent.agent.tool_call.reject";
 const String _agentTurnStartAcceptedType = "meshagent.agent.turn.start.accepted";
+const String _agentTurnStartRejectedType = "meshagent.agent.turn.start.rejected";
 const String _agentTurnInterruptAcceptedType = "meshagent.agent.turn.interrupt.accepted";
 const String _agentTurnInterruptedType = "meshagent.agent.turn.interrupted";
 const String _agentTurnSteerAcceptedType = "meshagent.agent.turn.steer.accepted";
 const String _agentTurnSteerRejectedType = "meshagent.agent.turn.steer.rejected";
 const String _agentTurnEndedType = "meshagent.agent.turn.ended";
 const String _agentThreadClearedType = "meshagent.agent.thread.cleared";
+const String _agentUsageUpdatedType = "meshagent.agent.usage.updated";
 const double _mobileScreenWidthMax = 600;
 const double _mobileComposerPillCornerRadius = 999;
 const double _mobileComposerCornerRadius = 18;
@@ -852,32 +857,35 @@ class _PendingSendWait {
   }
 }
 
-Set<String> _threadStatusAttributeCandidates(String path, String prefix) {
-  final candidates = <String>{"$prefix.$path"};
-  if (path.startsWith("/")) {
-    candidates.add("$prefix.${path.substring(1)}");
-  } else {
-    candidates.add("$prefix./$path");
+String? _threadStatusAttributeName(String path, String prefix) {
+  final normalizedPath = path.trim();
+  if (normalizedPath.isEmpty) {
+    return null;
   }
-  return candidates;
+  return "$prefix.$normalizedPath";
 }
 
 Map<String, dynamic>? _parsePendingMessagesStatus(Participant participant, String path) {
-  for (final key in _threadStatusAttributeCandidates(path, "thread.status.pending_messages")) {
-    final value = participant.getAttribute(key);
-    if (value is! String || value.trim().isEmpty) {
-      continue;
-    }
+  final key = _threadStatusAttributeName(path, "thread.status.pending_messages");
+  if (key == null) {
+    return null;
+  }
 
-    try {
-      final decoded = jsonDecode(value.trim());
-      if (decoded is Map<String, dynamic>) {
-        return decoded;
-      }
-      if (decoded is Map) {
-        return Map<String, dynamic>.from(decoded);
-      }
-    } catch (_) {}
+  final value = participant.getAttribute(key);
+  if (value is! String || value.trim().isEmpty) {
+    return null;
+  }
+
+  try {
+    final decoded = jsonDecode(value.trim());
+    if (decoded is Map<String, dynamic>) {
+      return decoded;
+    }
+    if (decoded is Map) {
+      return Map<String, dynamic>.from(decoded);
+    }
+  } catch (_) {
+    return null;
   }
 
   return null;
@@ -911,17 +919,16 @@ ChatThreadStatusState resolveChatThreadStatus({
   String? agentName,
   ChatThreadStatusState? previous,
 }) {
-  final keyCandidates = _threadStatusAttributeCandidates(path, "thread.status");
-  final textKeyCandidates = _threadStatusAttributeCandidates(path, "thread.status.text");
-  final modeKeyCandidates = _threadStatusAttributeCandidates(path, "thread.status.mode");
-  final startedAtKeyCandidates = _threadStatusAttributeCandidates(path, "thread.status.started_at");
-  final pendingItemIdKeyCandidates = _threadStatusAttributeCandidates(path, "thread.status.pending_item_id");
-
+  final key = _threadStatusAttributeName(path, "thread.status");
+  final textKey = _threadStatusAttributeName(path, "thread.status.text");
+  final modeKey = _threadStatusAttributeName(path, "thread.status.mode");
+  final startedAtKey = _threadStatusAttributeName(path, "thread.status.started_at");
+  final pendingItemIdKey = _threadStatusAttributeName(path, "thread.status.pending_item_id");
   final candidates = <Participant>[
     if (agentName != null)
       ...room.messaging.remoteParticipants.where((participant) => participant.getAttribute("name") == agentName)
     else
-      ...room.messaging.remoteParticipants.where((participant) => participant.role == "agent" || _supportsAgentMessages(participant)),
+      ...room.messaging.remoteParticipants,
   ];
 
   String? nextStatus;
@@ -937,22 +944,16 @@ ChatThreadStatusState resolveChatThreadStatus({
       nextSupportsAgentMessages = true;
     }
 
-    if (nextStatus == null) {
-      for (final key in textKeyCandidates) {
-        final value = participant.getAttribute(key);
-        if (value is String && value.trim().isNotEmpty) {
-          nextStatus = value.trim();
-          break;
-        }
+    if (nextStatus == null && textKey != null) {
+      final value = participant.getAttribute(textKey);
+      if (value is String && value.trim().isNotEmpty) {
+        nextStatus = value.trim();
       }
     }
-    if (nextStatus == null) {
-      for (final key in keyCandidates) {
-        final value = participant.getAttribute(key);
-        if (value is String && value.trim().isNotEmpty) {
-          nextStatus = value.trim();
-          break;
-        }
+    if (nextStatus == null && key != null) {
+      final value = participant.getAttribute(key);
+      if (value is String && value.trim().isNotEmpty) {
+        nextStatus = value.trim();
       }
     }
 
@@ -979,46 +980,28 @@ ChatThreadStatusState resolveChatThreadStatus({
       }
     }
 
-    if (nextMode == null) {
-      for (final key in modeKeyCandidates) {
-        final value = participant.getAttribute(key);
-        if (value is String) {
-          final normalized = value.trim().toLowerCase();
-          if (normalized == "busy" || normalized == "steerable") {
-            nextMode = normalized;
-            break;
-          }
+    if (nextMode == null && modeKey != null) {
+      final value = participant.getAttribute(modeKey);
+      if (value is String) {
+        final normalized = value.trim().toLowerCase();
+        if (normalized == "busy" || normalized == "steerable") {
+          nextMode = normalized;
         }
       }
     }
 
-    if (nextStartedAt == null) {
-      for (final key in startedAtKeyCandidates) {
-        final value = participant.getAttribute(key);
-        if (value is! String) {
-          continue;
-        }
-
+    if (nextStartedAt == null && startedAtKey != null) {
+      final value = participant.getAttribute(startedAtKey);
+      if (value is String) {
         final normalized = value.trim();
-        if (normalized.isEmpty) {
-          continue;
-        }
-
-        final parsed = DateTime.tryParse(normalized);
-        if (parsed != null) {
-          nextStartedAt = parsed;
-          break;
-        }
+        nextStartedAt = normalized.isEmpty ? null : DateTime.tryParse(normalized);
       }
     }
 
-    if (nextPendingItemId == null) {
-      for (final key in pendingItemIdKeyCandidates) {
-        final value = participant.getAttribute(key);
-        if (value is String && value.trim().isNotEmpty) {
-          nextPendingItemId = value.trim();
-          break;
-        }
+    if (nextPendingItemId == null && pendingItemIdKey != null) {
+      final value = participant.getAttribute(pendingItemIdKey);
+      if (value is String && value.trim().isNotEmpty) {
+        nextPendingItemId = value.trim();
       }
     }
 
@@ -1027,12 +1010,10 @@ ChatThreadStatusState resolveChatThreadStatus({
     }
   }
 
-  if (nextStatus == null) {
-    return ChatThreadStatusState(supportsAgentMessages: nextSupportsAgentMessages);
+  if (nextStatus != null) {
+    nextMode ??= "busy";
+    nextStartedAt ??= previous?.hasStatus == true ? previous?.startedAt : DateTime.now();
   }
-
-  nextMode ??= "busy";
-  nextStartedAt ??= previous?.hasStatus == true ? previous?.startedAt : DateTime.now();
 
   return ChatThreadStatusState(
     text: nextStatus,
@@ -1407,9 +1388,16 @@ class ChatThreadController extends ChangeNotifier {
       return;
     }
 
-    if (type == _agentTurnSteerRejectedType) {
+    if (type == _agentTurnStartRejectedType || type == _agentTurnSteerRejectedType) {
       final sourceMessageId = payload["source_message_id"];
-      _clearPendingAgentMessage(sourceMessageId is String ? sourceMessageId : null);
+      final normalizedSourceMessageId = sourceMessageId is String ? sourceMessageId : null;
+      _clearPendingAgentMessage(normalizedSourceMessageId);
+      final error = payload["error"];
+      final message = error is Map ? error["message"] : null;
+      outboundStatus.markFailed(
+        normalizedSourceMessageId ?? "",
+        message is String && message.trim().isNotEmpty ? message.trim() : "Message rejected",
+      );
       return;
     }
 
@@ -1878,14 +1866,15 @@ double chatThreadStatusHorizontalPadding(double maxWidth) {
 }
 
 class ChatThreadInputFrame extends StatelessWidget {
-  const ChatThreadInputFrame({super.key, required this.child});
+  const ChatThreadInputFrame({super.key, required this.child, this.hasFooter = false});
 
   final Widget child;
+  final bool hasFooter;
 
   @override
   Widget build(BuildContext context) {
     final keyboardOpen = _usesMobileContextLayout(context) && MediaQuery.viewInsetsOf(context).bottom > 0;
-    final bottomPadding = keyboardOpen ? 4.0 : 8.0;
+    final bottomPadding = keyboardOpen ? 4.0 : (hasFooter ? 4.0 : 8.0);
 
     return Padding(
       padding: EdgeInsets.fromLTRB(15, 8, 15, bottomPadding),
@@ -3351,6 +3340,7 @@ class ChatThread extends StatefulWidget {
     this.onVisibleMessagesEmpty,
     this.initialShowCompletedToolCalls = false,
     this.shouldShowAuthorNames = true,
+    this.showUsageFooter = false,
     this.inputContextMenuBuilder,
     this.inputOnPressedOutside,
     this.mobileStorageSaveSurfacePresenter,
@@ -3376,6 +3366,7 @@ class ChatThread extends StatefulWidget {
   final FutureOr<void> Function()? onVisibleMessagesEmpty;
   final bool initialShowCompletedToolCalls;
   final bool shouldShowAuthorNames;
+  final bool showUsageFooter;
 
   final Widget Function(BuildContext, MeshDocument, MeshElement)? messageHeaderBuilder;
   final Widget Function(BuildContext, List<String>)? waitingForParticipantsBuilder;
@@ -3729,6 +3720,187 @@ class ChatMessage {
   final List<String> attachments;
 }
 
+class AgentUsageSnapshot {
+  const AgentUsageSnapshot({
+    required this.threadPath,
+    required this.contextUsedTokens,
+    required this.contextTotalTokens,
+    required this.totalTokens,
+    required this.usage,
+    this.compactionMode,
+    this.compactionThreshold,
+    this.turnId,
+  });
+
+  final String threadPath;
+  final String? turnId;
+  final int contextUsedTokens;
+  final int? contextTotalTokens;
+  final String? compactionMode;
+  final int? compactionThreshold;
+  final double? totalTokens;
+  final Map<String, double> usage;
+
+  static AgentUsageSnapshot? fromPayload(Map<String, Object?> payload) {
+    if (payload["type"] != _agentUsageUpdatedType) {
+      return null;
+    }
+
+    final rawThreadPath = payload["thread_id"];
+    if (rawThreadPath is! String || rawThreadPath.trim().isEmpty) {
+      return null;
+    }
+
+    final rawContextWindow = payload["context_window"];
+    if (rawContextWindow is! Map) {
+      return null;
+    }
+
+    final rawUsedTokens = rawContextWindow["used_tokens"];
+    final usedTokens = _asInt(rawUsedTokens);
+    if (usedTokens == null) {
+      return null;
+    }
+
+    final rawTotalTokens = rawContextWindow["total_tokens"];
+    final totalContextTokens = rawTotalTokens == null ? null : _asInt(rawTotalTokens);
+    final rawCompactionMode = rawContextWindow["compaction_mode"];
+    final compactionMode = rawCompactionMode is String && rawCompactionMode.trim().isNotEmpty ? rawCompactionMode.trim() : null;
+    final rawCompactionThreshold = rawContextWindow["compaction_threshold"];
+    final compactionThreshold = rawCompactionThreshold == null ? null : _asInt(rawCompactionThreshold);
+
+    final totalTokens = _usageTotalTokens(payload["usage"]);
+    final usage = _usageValues(payload["usage"]);
+
+    final rawTurnId = payload["turn_id"];
+    return AgentUsageSnapshot(
+      threadPath: rawThreadPath.trim(),
+      turnId: rawTurnId is String && rawTurnId.trim().isNotEmpty ? rawTurnId.trim() : null,
+      contextUsedTokens: usedTokens,
+      contextTotalTokens: totalContextTokens,
+      compactionMode: compactionMode,
+      compactionThreshold: compactionThreshold,
+      totalTokens: totalTokens,
+      usage: usage,
+    );
+  }
+
+  static int? _asInt(Object? value) {
+    if (value is int) {
+      return value;
+    }
+    if (value is double && value.isFinite) {
+      return value.toInt();
+    }
+    return null;
+  }
+
+  static double? _asDouble(Object? value) {
+    if (value is int) {
+      return value.toDouble();
+    }
+    if (value is double && value.isFinite) {
+      return value;
+    }
+    return null;
+  }
+
+  static double? _usageTotalTokens(Object? rawUsage) {
+    if (rawUsage is! Map) {
+      return null;
+    }
+
+    final explicitTotal = _sumUsageKeys(rawUsage, const {"total_tokens"});
+    if (explicitTotal != null) {
+      return explicitTotal;
+    }
+
+    final inputTokens = _sumUsageKeys(rawUsage, const {
+      "input_tokens",
+      "audio_input_tokens",
+      "image_input_tokens",
+      "cache_creation_input_tokens",
+      "cache_read_input_tokens",
+    });
+    final outputTokens = _sumUsageKeys(rawUsage, const {"output_tokens", "audio_output_tokens", "image_output_tokens"});
+    final cachedTokens = _sumUsageKeys(rawUsage, const {"cached_tokens", "audio_cached_tokens", "image_cached_tokens"});
+    final reasoningTokens = _sumUsageKeys(rawUsage, const {"reasoning_tokens"});
+
+    var total = 0.0;
+    var hasTotal = false;
+    if (inputTokens != null) {
+      total += inputTokens;
+      hasTotal = true;
+    } else if (cachedTokens != null) {
+      total += cachedTokens;
+      hasTotal = true;
+    }
+    if (outputTokens != null) {
+      total += outputTokens;
+      hasTotal = true;
+    } else if (reasoningTokens != null) {
+      total += reasoningTokens;
+      hasTotal = true;
+    }
+    return hasTotal ? total : null;
+  }
+
+  static Map<String, double> _usageValues(Object? rawUsage) {
+    if (rawUsage is! Map) {
+      return const {};
+    }
+    final usage = <String, double>{};
+    for (final entry in rawUsage.entries) {
+      final key = entry.key;
+      if (key is! String || key.trim().isEmpty) {
+        continue;
+      }
+      final value = _asDouble(entry.value);
+      if (value == null) {
+        continue;
+      }
+      usage[key.trim()] = value;
+    }
+    return Map.unmodifiable(usage);
+  }
+
+  static double? _sumUsageKeys(Map rawUsage, Set<String> names) {
+    var total = 0.0;
+    var found = false;
+    for (final entry in rawUsage.entries) {
+      if (!_usageKeyMatches(entry.key, names)) {
+        continue;
+      }
+      final numericValue = _asDouble(entry.value);
+      if (numericValue == null) {
+        continue;
+      }
+      total += numericValue;
+      found = true;
+    }
+    return found ? total : null;
+  }
+
+  static bool _usageKeyMatches(Object? key, Set<String> names) {
+    if (key is! String) {
+      return false;
+    }
+    for (final name in names) {
+      if (key == name || key.endsWith(".$name")) {
+        return true;
+      }
+    }
+    return false;
+  }
+}
+
+bool shouldReplaceAgentUsageSnapshot(AgentUsageSnapshot? current, AgentUsageSnapshot next) {
+  if (current != null && current.contextUsedTokens > 0 && next.contextUsedTokens == 0 && next.usage.isEmpty) {
+    return false;
+  }
+  return true;
+}
+
 class _ChatThreadState extends State<ChatThread> {
   late final ChatThreadController controller;
   late Key _composerInputKey;
@@ -3930,6 +4102,7 @@ class _ChatThreadState extends State<ChatThread> {
       threadTurnId: null,
       pendingMessages: controller.pendingAgentMessagesForPath(widget.path),
       pendingItemId: null,
+      usage: null,
     );
   }
 
@@ -3943,6 +4116,98 @@ class _ChatThreadState extends State<ChatThread> {
       return null;
     }
     return AgentTurnToolkitConfig(clientOptions: {"servers": servers});
+  }
+
+  Widget? _buildUsageFooter(BuildContext context, AgentUsageSnapshot? usage) {
+    if (!widget.showUsageFooter) {
+      return null;
+    }
+
+    final theme = ShadTheme.of(context);
+    final label = usage == null ? "" : _formatUsageFooter(usage);
+    final text = Text(
+      label,
+      overflow: TextOverflow.ellipsis,
+      textAlign: TextAlign.right,
+      style: theme.textTheme.small.copyWith(color: theme.colorScheme.mutedForeground, fontSize: 11),
+    );
+    if (usage == null) {
+      return text;
+    }
+    return UsageFooterTooltip(
+      tooltip: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 360),
+        child: Text(_formatUsageTooltip(usage), style: ShadTheme.of(context).textTheme.small),
+      ),
+      child: text,
+    );
+  }
+
+  String _formatUsageFooter(AgentUsageSnapshot usage) {
+    var contextLabel = _formatTokenCount(usage.contextUsedTokens);
+    final contextLimitTokens = usage.compactionThreshold ?? usage.contextTotalTokens;
+    if (contextLimitTokens != null) {
+      contextLabel = "$contextLabel/${_formatTokenCount(contextLimitTokens)}";
+    }
+    return "context $contextLabel";
+  }
+
+  String _formatUsageTooltip(AgentUsageSnapshot usage) {
+    final entries = usage.usage.entries.toList()..sort((left, right) => left.key.compareTo(right.key));
+    final lines = <String>["context used: ${_formatTokenCount(usage.contextUsedTokens)}"];
+    final compactionMode = usage.compactionMode;
+    if (compactionMode != null) {
+      lines.add("context management: $compactionMode");
+      final threshold = usage.compactionThreshold;
+      if (threshold != null) {
+        lines.add("context threshold: ${_formatTokenCount(threshold)}");
+      }
+    }
+    final contextTotalTokens = usage.contextTotalTokens;
+    if (usage.compactionThreshold != null && contextTotalTokens != null) {
+      lines.add("model window: ${_formatTokenCount(contextTotalTokens)}");
+    }
+    lines.addAll(entries.map((entry) => "${entry.key}: ${_formatTokenCount(entry.value)}"));
+    return lines.join("\n");
+  }
+
+  String _formatTokenCount(num value) {
+    final count = value.toDouble();
+    final magnitude = count.abs();
+    if (magnitude >= 1000000) {
+      return "${_trimFixed(count / 1000000)}M";
+    }
+    if (magnitude >= 1000) {
+      return "${_trimFixed(count / 1000)}K";
+    }
+    return count.round().toString();
+  }
+
+  String _trimFixed(double value) {
+    final fixed = value.toStringAsFixed(1);
+    if (fixed.endsWith(".0")) {
+      return fixed.substring(0, fixed.length - 2);
+    }
+    return fixed;
+  }
+
+  Widget _buildComposerWithUsageFooter(BuildContext context, {required Widget input, required AgentUsageSnapshot? usage}) {
+    final usageFooter = _buildUsageFooter(context, usage);
+    if (usageFooter == null) {
+      return input;
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        input,
+        Padding(
+          padding: const EdgeInsets.only(left: 8, top: 3, right: 8),
+          child: Align(alignment: Alignment.centerRight, child: usageFooter),
+        ),
+      ],
+    );
   }
 
   @override
@@ -4112,7 +4377,8 @@ class _ChatThreadState extends State<ChatThread> {
   }
 
   Widget _buildConnectingInputBox(BuildContext context) {
-    final toolArea = _buildToolArea(context, _buildLoadingSnapshot());
+    final state = _buildLoadingSnapshot();
+    final toolArea = _buildToolArea(context, state);
     return ChatThreadInput(
       key: _composerInputKey,
       focusTrigger: controller,
@@ -4215,6 +4481,7 @@ class _ChatThreadState extends State<ChatThread> {
                         .toList(growable: false);
                     final canInterruptActiveTurn = _canInterruptActiveTurn(state: state, pendingMessages: pendingMessages);
                     return ChatThreadInputFrame(
+                      hasFooter: widget.showUsageFooter,
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -4267,10 +4534,13 @@ class _ChatThreadState extends State<ChatThread> {
                                 ],
                               ),
                             ),
-                          if (widget.chatInputBoxBuilder != null)
-                            widget.chatInputBoxBuilder!(context, _buildInputChatBox(context, document, pendingMessages, state))
-                          else
-                            _buildInputChatBox(context, document, pendingMessages, state),
+                          _buildComposerWithUsageFooter(
+                            context,
+                            input: widget.chatInputBoxBuilder != null
+                                ? widget.chatInputBoxBuilder!(context, _buildInputChatBox(context, document, pendingMessages, state))
+                                : _buildInputChatBox(context, document, pendingMessages, state),
+                            usage: state.usage,
+                          ),
                         ],
                       ),
                     );
@@ -4285,6 +4555,7 @@ class _ChatThreadState extends State<ChatThread> {
   }
 
   Widget _buildPendingThreadWithoutDocument(BuildContext context, List<PendingAgentMessage> pendingMessages) {
+    final state = _buildLoadingSnapshot();
     final input = widget.chatInputBoxBuilder != null
         ? widget.chatInputBoxBuilder!(context, _buildConnectingInputBox(context))
         : _buildConnectingInputBox(context);
@@ -4322,7 +4593,10 @@ class _ChatThreadState extends State<ChatThread> {
               mobileStorageSaveSurfacePresenter: widget.mobileStorageSaveSurfacePresenter,
               mobileUnderHeaderContentPadding: widget.mobileUnderHeaderContentPadding,
             ),
-            ChatThreadInputFrame(child: input),
+            ChatThreadInputFrame(
+              hasFooter: widget.showUsageFooter,
+              child: _buildComposerWithUsageFooter(context, input: input, usage: state.usage),
+            ),
           ],
         ),
       ),
@@ -4330,6 +4604,7 @@ class _ChatThreadState extends State<ChatThread> {
   }
 
   Widget _buildConnectingThread(BuildContext context) {
+    final state = _buildLoadingSnapshot();
     final input = widget.chatInputBoxBuilder != null
         ? widget.chatInputBoxBuilder!(context, _buildConnectingInputBox(context))
         : _buildConnectingInputBox(context);
@@ -4342,7 +4617,10 @@ class _ChatThreadState extends State<ChatThread> {
           Expanded(
             child: Center(child: Text("Unable to load thread", style: ShadTheme.of(context).textTheme.p)),
           ),
-        ChatThreadInputFrame(child: input),
+        ChatThreadInputFrame(
+          hasFooter: widget.showUsageFooter,
+          child: _buildComposerWithUsageFooter(context, input: input, usage: state.usage),
+        ),
       ],
     );
   }
@@ -4445,6 +4723,95 @@ class ChatThreadMessages extends StatefulWidget {
   State<ChatThreadMessages> createState() => _ChatThreadMessagesState();
 }
 
+class ChatThreadMessageView extends StatelessWidget {
+  const ChatThreadMessageView({
+    super.key,
+    this.room,
+    required this.mine,
+    required this.isAgentMessage,
+    required this.text,
+    required this.authorName,
+    required this.createdAt,
+    this.shouldShowHeader = true,
+    this.header,
+    this.attachmentWidgets = const [],
+    this.trailing,
+    this.onDelete,
+    this.reactionActionBuilder,
+    this.showReactionAction = false,
+    this.onReactFromMenu,
+    this.mobileStorageSaveSurfacePresenter,
+  });
+
+  static const double chatBubbleHorizontalInset = 5;
+  static const double chatBubbleActionRailWidth = 80;
+  static const double chatBubbleSiblingSpacing = 6;
+  static const double chatMessageStackSpacing = 38;
+
+  final RoomClient? room;
+  final bool mine;
+  final bool isAgentMessage;
+  final String? text;
+  final String authorName;
+  final DateTime createdAt;
+  final bool shouldShowHeader;
+  final Widget? header;
+  final List<Widget> attachmentWidgets;
+  final Widget? trailing;
+  final VoidCallback? onDelete;
+  final Widget Function(ShadContextMenuController controller)? reactionActionBuilder;
+  final bool showReactionAction;
+  final VoidCallback? onReactFromMenu;
+  final ThreadStorageSaveSurfacePresenter? mobileStorageSaveSurfacePresenter;
+
+  @override
+  Widget build(BuildContext context) {
+    final messageText = text;
+    final hasText = messageText != null && messageText.trim().isNotEmpty;
+    final headerLeftInset = mine ? chatBubbleHorizontalInset + chatBubbleActionRailWidth : chatBubbleHorizontalInset;
+    final headerRightInset = mine || isAgentMessage ? chatBubbleHorizontalInset : chatBubbleHorizontalInset + chatBubbleActionRailWidth;
+
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (shouldShowHeader)
+          Container(
+            margin: EdgeInsets.only(left: headerLeftInset, right: headerRightInset, bottom: 6),
+            child: Align(
+              alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+              child: header ?? ChatThreadAuthorHeader(authorName: authorName, createdAt: createdAt, text: messageText),
+            ),
+          ),
+        if (hasText)
+          Padding(
+            padding: const EdgeInsets.only(top: 0),
+            child: ChatBubble(
+              room: room,
+              mine: mine,
+              fullWidth: isAgentMessage,
+              accented: !isAgentMessage,
+              text: messageText,
+              onDelete: onDelete,
+              mobileStorageSaveSurfacePresenter: mobileStorageSaveSurfacePresenter,
+              reactionActionBuilder: reactionActionBuilder,
+              showReactionAction: showReactionAction,
+              onReactFromMenu: onReactFromMenu,
+            ),
+          ),
+        for (var i = 0; i < attachmentWidgets.length; i++) ...[
+          if (hasText || i > 0) const SizedBox(height: chatBubbleSiblingSpacing),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: chatBubbleHorizontalInset),
+            child: Align(alignment: mine ? Alignment.centerRight : Alignment.centerLeft, child: attachmentWidgets[i]),
+          ),
+        ],
+        ?trailing,
+      ],
+    );
+  }
+}
+
 class PendingChatThreadMessage extends StatelessWidget {
   const PendingChatThreadMessage({
     super.key,
@@ -4464,53 +4831,30 @@ class PendingChatThreadMessage extends StatelessWidget {
     final localParticipantName = room.localParticipant?.getAttribute("name");
     final authorName = message.senderName ?? (localParticipantName is String ? localParticipantName : "");
     final createdAt = message.createdAt ?? DateTime.now();
-    final hasText = message.text.trim().isNotEmpty;
     final opacity = message.awaitingOnline ? 0.72 : 1.0;
-    const headerLeftInset = _ChatThreadMessagesState._chatBubbleHorizontalInset + _ChatThreadMessagesState._chatBubbleActionRailWidth;
-    const headerRightInset = _ChatThreadMessagesState._chatBubbleHorizontalInset;
 
     return Opacity(
       opacity: opacity,
       child: SizedBox(
         key: ValueKey("pending-agent-message:${message.messageId}"),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (shouldShowAuthorNames)
-              Container(
-                margin: const EdgeInsets.only(left: headerLeftInset, right: headerRightInset, bottom: 6),
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: ChatThreadAuthorHeader(authorName: authorName, createdAt: createdAt, text: message.text),
+        child: ChatThreadMessageView(
+          room: room,
+          mine: true,
+          isAgentMessage: false,
+          text: message.text,
+          authorName: authorName,
+          createdAt: createdAt,
+          shouldShowHeader: shouldShowAuthorNames,
+          mobileStorageSaveSurfacePresenter: mobileStorageSaveSurfacePresenter,
+          attachmentWidgets: [
+            for (final attachment in message.attachments)
+              Align(
+                alignment: Alignment.centerRight,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 312.5),
+                  child: FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: _defaultSuggestedFileNameFromPath(attachment)),
                 ),
               ),
-            if (hasText)
-              Padding(
-                padding: const EdgeInsets.only(top: 0),
-                child: ChatBubble(
-                  room: room,
-                  mine: true,
-                  text: message.text,
-                  mobileStorageSaveSurfacePresenter: mobileStorageSaveSurfacePresenter,
-                ),
-              ),
-            for (var i = 0; i < message.attachments.length; i++) ...[
-              if (hasText || i > 0) const SizedBox(height: _ChatThreadMessagesState._chatBubbleSiblingSpacing),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 5),
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 312.5),
-                    child: FileDefaultPreviewCard(
-                      icon: LucideIcons.paperclip,
-                      text: _defaultSuggestedFileNameFromPath(message.attachments[i]),
-                    ),
-                  ),
-                ),
-              ),
-            ],
           ],
         ),
       ),
@@ -4519,10 +4863,7 @@ class PendingChatThreadMessage extends StatelessWidget {
 }
 
 class _ChatThreadMessagesState extends State<ChatThreadMessages> {
-  static const double _chatBubbleHorizontalInset = 5;
-  static const double _chatBubbleActionRailWidth = 80;
-  static const double _chatBubbleSiblingSpacing = 6;
-  static const double _chatMessageStackSpacing = 38;
+  static const double _chatMessageStackSpacing = ChatThreadMessageView.chatMessageStackSpacing;
   static const double _statusBottomSpacer = 20;
   static const Duration _statusCollapseDelay = Duration(milliseconds: 500);
   static const Duration _statusAnimationDuration = Duration(seconds: 1);
@@ -4626,7 +4967,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   ThreadStorageSaveSurfacePresenter? get mobileStorageSaveSurfacePresenter => widget.mobileStorageSaveSurfacePresenter;
 
   final OverlayPortalController _imageViewerController = OverlayPortalController();
-  List<_ThreadFeedImage> _overlayImages = const <_ThreadFeedImage>[];
+  List<ChatThreadFeedImage> _overlayImages = const <ChatThreadFeedImage>[];
   int _overlayInitialIndex = 0;
   LocalHistoryEntry? _imageViewerHistoryEntry;
   final LinkedHashMap<String, _ThreadImageRecord> _imageCache = LinkedHashMap<String, _ThreadImageRecord>();
@@ -5132,7 +5473,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     _hideThreadImageViewer();
   }
 
-  void _openThreadImageViewer(BuildContext context, {required List<_ThreadFeedImage> images, required int initialIndex}) {
+  void _openThreadImageViewer(BuildContext context, {required List<ChatThreadFeedImage> images, required int initialIndex}) {
     if (images.isEmpty) {
       return;
     }
@@ -5151,7 +5492,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
 
     final clampedInitialIndex = initialIndex.clamp(0, images.length - 1);
     setState(() {
-      _overlayImages = List<_ThreadFeedImage>.unmodifiable(images);
+      _overlayImages = List<ChatThreadFeedImage>.unmodifiable(images);
       _overlayInitialIndex = clampedInitialIndex;
     });
     _imageViewerController.show();
@@ -5170,8 +5511,8 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     super.dispose();
   }
 
-  List<_ThreadFeedImage> _collectThreadImages() {
-    final imagesInThread = <_ThreadFeedImage>[];
+  List<ChatThreadFeedImage> _collectThreadImages() {
+    final imagesInThread = <ChatThreadFeedImage>[];
 
     for (final message in messages) {
       for (final attachment in message.getChildren().whereType<MeshElement>()) {
@@ -5199,7 +5540,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
         final height = _parsePositiveDimension(attachment.getAttribute("height"));
 
         imagesInThread.add(
-          _ThreadFeedImage(
+          ChatThreadFeedImage(
             attachmentElementId: attachmentElementId,
             imageId: imageId,
             mimeType: mimeType,
@@ -5491,7 +5832,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     ];
   }
 
-  Widget _buildImageInThread(BuildContext context, MeshElement attachment, {required List<_ThreadFeedImage> feedImages}) {
+  Widget _buildImageInThread(BuildContext context, MeshElement attachment, {required List<ChatThreadFeedImage> feedImages}) {
     final imageIdAttribute = attachment.getAttribute("id");
     final imageId = (imageIdAttribute is String && imageIdAttribute.trim().isNotEmpty) ? imageIdAttribute.trim() : null;
 
@@ -5546,7 +5887,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     MeshElement message,
     bool mine,
     MeshElement attachment, {
-    required List<_ThreadFeedImage> feedImages,
+    required List<ChatThreadFeedImage> feedImages,
   }) {
     final normalizedAttachmentRef = _normalizeReactionAttachmentRef(attachment.id);
 
@@ -5754,7 +6095,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     MeshElement? previous,
     MeshElement message,
     MeshElement? next, {
-    required List<_ThreadFeedImage> feedImages,
+    required List<ChatThreadFeedImage> feedImages,
   }) {
     final localParticipantName = room.localParticipant?.getAttribute("name");
     final localParticipantReactionName = _localParticipantName();
@@ -5763,13 +6104,10 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     final mine = !isAgentMessage && message.getAttribute("author_name") == localParticipantName;
     final useDefaultHeaderBuilder = messageHeaderBuilder == null;
     final shouldShowHeader = !useDefaultHeaderBuilder || widget.shouldShowAuthorNames;
-    final headerLeftInset = mine ? _chatBubbleHorizontalInset + _chatBubbleActionRailWidth : _chatBubbleHorizontalInset;
-    final headerRightInset = mine || isAgentMessage ? _chatBubbleHorizontalInset : _chatBubbleHorizontalInset + _chatBubbleActionRailWidth;
 
     final id = message.getAttribute("id");
     final text = message.getAttribute("text");
     final messageText = text is String ? text : null;
-    final hasText = messageText != null && messageText.trim().isNotEmpty;
     final attachments = message.getChildren().whereType<MeshElement>().where(_isThreadAttachmentElement).toList();
     final hasMessageLevelReactions = _reactionElementsForTarget(message: message, target: _reactionTargetMessage).isNotEmpty;
     final selectedMessageReaction = _selectedReactionForTarget(message: message, target: _reactionTargetMessage);
@@ -5806,67 +6144,45 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
 
     return SizedBox(
       key: ValueKey(id),
-      child: Column(
-        mainAxisAlignment: .start,
-        mainAxisSize: .min,
-        children: [
-          if (shouldShowHeader)
-            Container(
-              margin: .only(left: headerLeftInset, right: headerRightInset, bottom: 6),
-              child: Align(
-                alignment: mine ? .centerRight : .centerLeft,
-                child:
-                    messageHeaderBuilder?.call(context, message.doc as MeshDocument, message) ??
-                    defaultMessageHeaderBuilder(context, message, shouldShowAuthorNames: widget.shouldShowAuthorNames),
+      child: ChatThreadMessageView(
+        room: room,
+        mine: mine,
+        isAgentMessage: isAgentMessage,
+        text: messageText,
+        authorName: (message.getAttribute("author_name") ?? "").toString(),
+        createdAt: _messageCreatedAt(message),
+        shouldShowHeader: shouldShowHeader,
+        header:
+            messageHeaderBuilder?.call(context, message.doc as MeshDocument, message) ??
+            defaultMessageHeaderBuilder(context, message, shouldShowAuthorNames: widget.shouldShowAuthorNames),
+        onDelete: message.delete,
+        mobileStorageSaveSurfacePresenter: mobileStorageSaveSurfacePresenter,
+        reactionActionBuilder: localParticipantReactionName == null
+            ? null
+            : (controller) => _ReactionPickerButton(
+                controller: controller,
+                reactionOptions: _defaultReactionOptions,
+                selectedReaction: selectedMessageReaction,
+                onSelected: (reaction) {
+                  _toggleReaction(message: message, reaction: reaction, target: _reactionTargetMessage, removeIfSame: true);
+                },
               ),
-            ),
-
-          if (hasText)
-            Padding(
-              padding: EdgeInsets.only(top: 0),
-              child: ChatBubble(
-                room: room,
-                mine: mine,
-                fullWidth: isAgentMessage,
-                accented: !isAgentMessage,
-                text: messageText,
-                onDelete: message.delete,
-                mobileStorageSaveSurfacePresenter: mobileStorageSaveSurfacePresenter,
-                reactionActionBuilder: localParticipantReactionName == null
-                    ? null
-                    : (controller) => _ReactionPickerButton(
-                        controller: controller,
-                        reactionOptions: _defaultReactionOptions,
-                        selectedReaction: selectedMessageReaction,
-                        onSelected: (reaction) {
-                          _toggleReaction(message: message, reaction: reaction, target: _reactionTargetMessage, removeIfSame: true);
-                        },
-                      ),
-                showReactionAction: localParticipantReactionName != null && !hasMessageLevelReactions,
-                onReactFromMenu: localParticipantReactionName == null
-                    ? null
-                    : () {
-                        _showReactionPickerDialog(
-                          context,
-                          selectedReaction: selectedMessageReaction,
-                          onSelected: (reaction) {
-                            _toggleReaction(message: message, reaction: reaction, target: _reactionTargetMessage, removeIfSame: true);
-                          },
-                        );
-                      },
-              ),
-            ),
-
-          for (var i = 0; i < attachments.length; i++) ...[
-            if (hasText || i > 0) const SizedBox(height: _chatBubbleSiblingSpacing),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 5),
-              child: _buildAttachmentInThread(context, message, mine, attachments[i], feedImages: feedImages),
-            ),
-          ],
-
-          _buildReactionRow(context, message: message, mine: mine, target: _reactionTargetMessage, showAddWhenEmpty: false),
+        showReactionAction: localParticipantReactionName != null && !hasMessageLevelReactions,
+        onReactFromMenu: localParticipantReactionName == null
+            ? null
+            : () {
+                _showReactionPickerDialog(
+                  context,
+                  selectedReaction: selectedMessageReaction,
+                  onSelected: (reaction) {
+                    _toggleReaction(message: message, reaction: reaction, target: _reactionTargetMessage, removeIfSame: true);
+                  },
+                );
+              },
+        attachmentWidgets: [
+          for (final attachment in attachments) _buildAttachmentInThread(context, message, mine, attachment, feedImages: feedImages),
         ],
+        trailing: _buildReactionRow(context, message: message, mine: mine, target: _reactionTargetMessage, showAddWhenEmpty: false),
       ),
     );
   }
@@ -5986,7 +6302,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
           if (_overlayImages.isEmpty) {
             return const SizedBox.shrink();
           }
-          return _ThreadImageGalleryPage(
+          return ChatThreadImageGalleryPage(
             room: room,
             images: _overlayImages,
             initialIndex: _overlayInitialIndex,
@@ -6662,6 +6978,64 @@ Future<_ThreadImageRecord?> _loadGeneratedThreadImageRecord(RoomClient room, {re
   }
 }
 
+Future<_ThreadImageRecord?> _loadGeneratedThreadImageRecordFromUri(
+  RoomClient room, {
+  required String imageUri,
+  String? fallbackMimeType,
+}) async {
+  final parsed = Uri.tryParse(imageUri.trim());
+  if (parsed == null || parsed.scheme != 'dataset') {
+    return null;
+  }
+  final imageId = parsed.queryParameters['id']?.trim();
+  if (imageId == null || imageId.isEmpty) {
+    return null;
+  }
+
+  final pathParts = <String>[
+    if (parsed.host.trim().isNotEmpty) parsed.host.trim(),
+    ...parsed.pathSegments.where((part) => part.trim().isNotEmpty),
+  ];
+  if (pathParts.isEmpty) {
+    return null;
+  }
+  final tableName = pathParts.last;
+  final namespace = pathParts.length > 1 ? pathParts.sublist(0, pathParts.length - 1) : null;
+
+  try {
+    final table = await room.datasets.searchTable(
+      table: tableName,
+      namespace: namespace,
+      where: {"id": imageId},
+      limit: 1,
+      select: const ["data", "mime_type"],
+    );
+    final rows = table.toRows();
+    if (rows.isEmpty) {
+      return null;
+    }
+
+    final row = rows.first;
+    final rawData = row["data"];
+    final Uint8List data;
+    if (rawData is Uint8List) {
+      data = rawData;
+    } else if (rawData is List<int>) {
+      data = Uint8List.fromList(rawData);
+    } else {
+      return null;
+    }
+
+    final rawMimeType = row["mime_type"];
+    final storedMimeType = rawMimeType is String ? rawMimeType.trim() : "";
+    final fallback = fallbackMimeType?.trim() ?? "";
+    final mimeType = storedMimeType.isNotEmpty ? storedMimeType : (fallback.isNotEmpty ? fallback : "image/png");
+    return _ThreadImageRecord(data: data, mimeType: mimeType);
+  } catch (_) {
+    return null;
+  }
+}
+
 class _ThreadImageLookup extends StatefulWidget {
   const _ThreadImageLookup({required this.lookupKey, required this.readCached, required this.lookupImage, required this.builder});
 
@@ -6705,10 +7079,11 @@ class _ThreadImageLookupState extends State<_ThreadImageLookup> {
   }
 }
 
-class _ThreadFeedImage {
-  const _ThreadFeedImage({
+class ChatThreadFeedImage {
+  const ChatThreadFeedImage({
     required this.attachmentElementId,
     required this.imageId,
+    this.imageUri,
     this.mimeType,
     this.status,
     this.statusDetail,
@@ -6718,6 +7093,7 @@ class _ThreadFeedImage {
 
   final String attachmentElementId;
   final String imageId;
+  final String? imageUri;
   final String? mimeType;
   final String? status;
   final String? statusDetail;
@@ -6730,6 +7106,7 @@ class ChatThreadImageAttachment extends StatefulWidget {
     super.key,
     required this.room,
     required this.imageId,
+    this.imageUri,
     this.fallbackMimeType,
     this.status,
     this.statusDetail,
@@ -6741,6 +7118,7 @@ class ChatThreadImageAttachment extends StatefulWidget {
 
   final RoomClient room;
   final String? imageId;
+  final String? imageUri;
   final String? fallbackMimeType;
   final String? status;
   final String? statusDetail;
@@ -6765,12 +7143,24 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
   @override
   void didUpdateWidget(covariant ChatThreadImageAttachment oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.imageId != widget.imageId || oldWidget.room != widget.room) {
+    if (oldWidget.imageId != widget.imageId || oldWidget.imageUri != widget.imageUri || oldWidget.room != widget.room) {
       _lookup = _loadImage();
     }
   }
 
   Future<_ThreadImageRecord?> _loadImage() async {
+    final imageUri = widget.imageUri;
+    if (imageUri != null && imageUri.trim().isNotEmpty) {
+      final record = await _loadGeneratedThreadImageRecordFromUri(
+        widget.room,
+        imageUri: imageUri,
+        fallbackMimeType: widget.fallbackMimeType,
+      );
+      if (record != null) {
+        return record;
+      }
+    }
+
     final imageId = widget.imageId;
     if (imageId == null || imageId.trim().isEmpty) {
       return null;
@@ -7031,14 +7421,35 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
   Widget build(BuildContext context) {
     final status = widget.status?.trim();
     final hasImageId = widget.imageId != null && widget.imageId!.trim().isNotEmpty;
+    final imageUri = widget.imageUri?.trim();
+    final hasImageUri = imageUri != null && imageUri.isNotEmpty;
     final statusDetail = widget.statusDetail?.trim();
 
-    if (!hasImageId) {
+    if (!hasImageId && !hasImageUri) {
       if (_isFailedStatus(status)) {
         return FileDefaultPreviewCard(icon: LucideIcons.imageOff, text: statusDetail?.isNotEmpty == true ? statusDetail! : "Image failed");
       }
+      final label = _isGeneratingStatus(status) ? "Generating image" : "Loading image";
+      return _buildPlaceholder(context, showSpinner: true, label: statusDetail?.isNotEmpty == true ? statusDetail : label);
+    }
 
-      return _buildPlaceholder(context, showSpinner: true, label: statusDetail?.isNotEmpty == true ? statusDetail : "Generating image");
+    final parsedUri = imageUri == null ? null : Uri.tryParse(imageUri);
+    if (!hasImageId && parsedUri != null && (parsedUri.scheme == "http" || parsedUri.scheme == "https")) {
+      final size = _displaySize();
+      return _wrapTapTarget(
+        SizedBox(
+          width: size.width,
+          height: size.height,
+          child: _wrapWithCorners(
+            Image.network(
+              imageUri!,
+              fit: (widget.widthPx != null && widget.heightPx != null) ? BoxFit.contain : BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) =>
+                  const FileDefaultPreviewCard(icon: LucideIcons.imageOff, text: "Image unavailable"),
+            ),
+          ),
+        ),
+      );
     }
 
     return FutureBuilder<_ThreadImageRecord?>(
@@ -7078,19 +7489,25 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
   }
 }
 
-class _ThreadImageGalleryPage extends StatefulWidget {
-  const _ThreadImageGalleryPage({required this.room, required this.images, required this.initialIndex, required this.onClose});
+class ChatThreadImageGalleryPage extends StatefulWidget {
+  const ChatThreadImageGalleryPage({
+    super.key,
+    required this.room,
+    required this.images,
+    required this.initialIndex,
+    required this.onClose,
+  });
 
   final RoomClient room;
-  final List<_ThreadFeedImage> images;
+  final List<ChatThreadFeedImage> images;
   final int initialIndex;
   final VoidCallback onClose;
 
   @override
-  State<_ThreadImageGalleryPage> createState() => _ThreadImageGalleryPageState();
+  State<ChatThreadImageGalleryPage> createState() => _ThreadImageGalleryPageState();
 }
 
-class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
+class _ThreadImageGalleryPageState extends State<ChatThreadImageGalleryPage> {
   late final PageController _controller;
   late int _currentIndex;
 
@@ -7137,6 +7554,13 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
 
   Future<_ThreadImageRecord?> _loadCurrentImage() async {
     final entry = widget.images[_currentIndex];
+    final imageUri = entry.imageUri?.trim();
+    if (imageUri != null && imageUri.isNotEmpty) {
+      final record = await _loadGeneratedThreadImageRecordFromUri(widget.room, imageUri: imageUri, fallbackMimeType: entry.mimeType);
+      if (record != null) {
+        return record;
+      }
+    }
     if (entry.imageId.trim().isEmpty) {
       return null;
     }
@@ -7306,6 +7730,7 @@ class _ThreadImageGalleryPageState extends State<_ThreadImageGalleryPage> {
                     return _ThreadFullscreenImage(
                       room: widget.room,
                       imageId: image.imageId,
+                      imageUri: image.imageUri,
                       fallbackMimeType: image.mimeType,
                       status: image.status,
                       statusDetail: image.statusDetail,
@@ -7388,6 +7813,7 @@ class _ThreadFullscreenImage extends StatelessWidget {
   const _ThreadFullscreenImage({
     required this.room,
     required this.imageId,
+    this.imageUri,
     this.fallbackMimeType,
     this.status,
     this.statusDetail,
@@ -7397,6 +7823,7 @@ class _ThreadFullscreenImage extends StatelessWidget {
 
   final RoomClient room;
   final String imageId;
+  final String? imageUri;
   final String? fallbackMimeType;
   final String? status;
   final String? statusDetail;
@@ -7404,6 +7831,13 @@ class _ThreadFullscreenImage extends StatelessWidget {
   final Future<void> Function(_ThreadImageRecord image)? onSaveImage;
 
   Future<_ThreadImageRecord?> _loadImage() async {
+    final uri = imageUri?.trim();
+    if (uri != null && uri.isNotEmpty) {
+      final record = await _loadGeneratedThreadImageRecordFromUri(room, imageUri: uri, fallbackMimeType: fallbackMimeType);
+      if (record != null) {
+        return record;
+      }
+    }
     if (imageId.trim().isEmpty) {
       return null;
     }
@@ -7435,6 +7869,24 @@ class _ThreadFullscreenImage extends StatelessWidget {
   Widget build(BuildContext context) {
     final detail = statusDetail?.trim();
     final normalizedStatus = status?.trim();
+    final uri = imageUri?.trim();
+    final parsedUri = uri == null ? null : Uri.tryParse(uri);
+
+    if (imageId.trim().isEmpty && uri != null && parsedUri != null && (parsedUri.scheme == "http" || parsedUri.scheme == "https")) {
+      return InteractiveViewer2(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Image.network(
+              uri,
+              fit: BoxFit.contain,
+              errorBuilder: (context, error, stackTrace) =>
+                  Text("Image unavailable", style: ShadTheme.of(context).textTheme.p.copyWith(color: Colors.white70)),
+            ),
+          ),
+        ),
+      );
+    }
 
     return FutureBuilder<_ThreadImageRecord?>(
       future: _loadImage(),
@@ -7920,13 +8372,24 @@ class ChatThreadAuthorHeader extends StatelessWidget {
 
 Widget defaultMessageHeaderBuilder(BuildContext context, MeshElement message, {bool shouldShowAuthorNames = true}) {
   final name = message.getAttribute("author_name") ?? "";
-  final createdAt = message.getAttribute("created_at") == null ? DateTime.now() : DateTime.parse(message.getAttribute("created_at"));
+  final createdAt = _messageCreatedAt(message);
 
   if (shouldShowAuthorNames) {
     return ChatThreadAuthorHeader(authorName: name.toString(), createdAt: createdAt, text: message.getAttribute("text") as String?);
   } else {
     return SizedBox(height: 0);
   }
+}
+
+DateTime _messageCreatedAt(MeshElement message) {
+  final createdAt = message.getAttribute("created_at");
+  if (createdAt is DateTime) {
+    return createdAt;
+  }
+  if (createdAt is String) {
+    return DateTime.tryParse(createdAt) ?? DateTime.now();
+  }
+  return DateTime.now();
 }
 
 class ChatThreadSnapshot {
@@ -7946,6 +8409,7 @@ class ChatThreadSnapshot {
     required this.threadTurnId,
     required this.pendingMessages,
     required this.pendingItemId,
+    required this.usage,
   });
 
   final bool agentOnline;
@@ -7963,6 +8427,7 @@ class ChatThreadSnapshot {
   final String? threadTurnId;
   final List<PendingAgentMessage> pendingMessages;
   final String? pendingItemId;
+  final AgentUsageSnapshot? usage;
 }
 
 class ChatThreadBuilder extends StatefulWidget {
@@ -8003,8 +8468,11 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
   String? threadTurnId;
   List<PendingAgentMessage> pendingMessages = const [];
   String? pendingItemId;
+  AgentUsageSnapshot? usage;
   String? _capabilitiesRequestKey;
   String? _capabilitiesResponseKey;
+  String? _openedPath;
+  String? _openedAgentParticipantId;
 
   @override
   void initState() {
@@ -8026,6 +8494,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
     super.didUpdateWidget(oldWidget);
 
     if (oldWidget.room != widget.room) {
+      _closeThreadSubscription(room: oldWidget.room);
       sub.cancel();
       oldWidget.room.messaging.removeListener(_onMessagingChanged);
       sub = widget.room.listen(_onRoomMessage);
@@ -8038,7 +8507,11 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
     }
 
     if (oldWidget.room != widget.room || oldWidget.path != widget.path || oldWidget.agentName != widget.agentName) {
+      if (oldWidget.room == widget.room) {
+        _closeThreadSubscription(room: widget.room);
+      }
       _clearCapabilities();
+      usage = null;
     }
 
     _getParticipants();
@@ -8111,6 +8584,25 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
     return true;
   }
 
+  bool _handleUsagePayload(Map<String, dynamic> payload) {
+    final nextUsage = AgentUsageSnapshot.fromPayload(payload);
+    if (nextUsage == null) {
+      return false;
+    }
+    if (nextUsage.threadPath != widget.path) {
+      return true;
+    }
+
+    if (!shouldReplaceAgentUsageSnapshot(usage, nextUsage)) {
+      return true;
+    }
+    usage = nextUsage;
+    if (mounted) {
+      setState(() {});
+    }
+    return true;
+  }
+
   void _checkAgent() {
     final agent = widget.room.messaging.remoteParticipants.firstWhereOrNull(
       (participant) => participant.getAttribute("name") == widget.agentName,
@@ -8124,24 +8616,78 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
       if (mounted) {
         setState(() {});
       }
-
-      if (online) {
-        widget.room.messaging.sendMessage(to: agent, type: "opened", message: {"path": widget.path});
-      }
     }
 
     if (agent != null) {
+      _openThreadSubscription(agent: agent);
       unawaited(_requestCapabilities(agent: agent));
+    } else {
+      _closeThreadSubscription(room: widget.room);
     }
+  }
+
+  void _openThreadSubscription({required RemoteParticipant agent}) {
+    if (_openedPath == widget.path && _openedAgentParticipantId == agent.id) {
+      return;
+    }
+    _closeThreadSubscription(room: widget.room);
+    _openedPath = widget.path;
+    _openedAgentParticipantId = agent.id;
+
+    if (_supportsAgentMessages(agent)) {
+      _sendThreadSubscriptionMessageNowait(room: widget.room, agent: agent, messageType: _agentThreadOpenType, path: widget.path);
+      return;
+    }
+
+    unawaited(() async {
+      try {
+        await widget.room.messaging.sendMessage(to: agent, type: "opened", ignoreOffline: true, message: {"path": widget.path});
+      } catch (_) {}
+    }());
+  }
+
+  void _closeThreadSubscription({required RoomClient room}) {
+    final openedPath = _openedPath;
+    final openedAgentParticipantId = _openedAgentParticipantId;
+    _openedPath = null;
+    _openedAgentParticipantId = null;
+    if (openedPath == null || openedAgentParticipantId == null) {
+      return;
+    }
+    final agent = room.messaging.remoteParticipants.firstWhereOrNull((participant) => participant.id == openedAgentParticipantId);
+    if (agent == null || !_supportsAgentMessages(agent)) {
+      return;
+    }
+    _sendThreadSubscriptionMessageNowait(room: room, agent: agent, messageType: _agentThreadCloseType, path: openedPath);
+  }
+
+  void _sendThreadSubscriptionMessageNowait({
+    required RoomClient room,
+    required RemoteParticipant agent,
+    required String messageType,
+    required String path,
+  }) {
+    unawaited(() async {
+      try {
+        await room.messaging.sendMessage(
+          to: agent,
+          type: _agentRoomMessageType,
+          ignoreOffline: true,
+          message: {
+            "payload": {"type": messageType, "thread_id": path},
+          },
+        );
+      } catch (_) {}
+    }());
   }
 
   @override
   void dispose() {
-    super.dispose();
-
+    _closeThreadSubscription(room: widget.room);
     sub.cancel();
     widget.room.messaging.removeListener(_onMessagingChanged);
     widget.document.removeListener(_onDocumentChanged);
+    super.dispose();
   }
 
   void _onDocumentChanged() {
@@ -8178,10 +8724,16 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
           if (_handleCapabilitiesPayload(event: event, payload: payload)) {
             return;
           }
+          if (_handleUsagePayload(payload)) {
+            return;
+          }
           widget.controller.handleAgentMessagePayload(payload);
         } else if (payload is Map) {
           final normalized = Map<String, dynamic>.from(payload);
           if (_handleCapabilitiesPayload(event: event, payload: normalized)) {
+            return;
+          }
+          if (_handleUsagePayload(normalized)) {
             return;
           }
           widget.controller.handleAgentMessagePayload(normalized);
@@ -8328,6 +8880,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         threadTurnId: threadTurnId,
         pendingMessages: pendingMessages,
         pendingItemId: pendingItemId,
+        usage: usage,
       ),
     );
   }

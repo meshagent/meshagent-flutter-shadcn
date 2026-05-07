@@ -6,6 +6,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 
 import 'chat.dart';
 import 'conversation_descriptor.dart';
+import 'dataset_chat_thread.dart';
 import 'multi_thread_view.dart';
 import 'thread_list_view.dart';
 
@@ -52,6 +53,7 @@ class ChatBotView extends StatefulWidget {
     this.threadListCollapsedHeight = 220,
     this.initialShowCompletedToolCalls = false,
     this.shouldShowAuthorNames = true,
+    this.showUsageFooter = false,
   });
 
   final RoomClient room;
@@ -94,6 +96,7 @@ class ChatBotView extends StatefulWidget {
   final double threadListCollapsedHeight;
   final bool initialShowCompletedToolCalls;
   final bool shouldShowAuthorNames;
+  final bool showUsageFooter;
 
   @override
   State<ChatBotView> createState() => _ChatBotViewState();
@@ -166,6 +169,27 @@ class _ChatBotViewState extends State<ChatBotView> {
   }
 
   Widget _buildThread(String path, ChatThreadController controller, {GlobalKey? composerKey}) {
+    if (path.startsWith('dataset://') || path.startsWith('tmp://')) {
+      return DatasetChatThread(
+        key: ValueKey(path),
+        path: path,
+        room: widget.room,
+        controller: controller,
+        composerKey: composerKey,
+        agentName: widget.agentName,
+        emptyStateTitle: widget.emptyStateTitle,
+        emptyStateDescription: widget.emptyStateDescription,
+        openFile: widget.openFile,
+        toolsBuilder: widget.toolsBuilder,
+        inputPlaceholder: widget.inputPlaceholder,
+        attachmentBuilder: widget.attachmentBuilder,
+        inputContextMenuBuilder: widget.inputContextMenuBuilder,
+        inputOnPressedOutside: widget.inputOnPressedOutside,
+        initialShowCompletedToolCalls: widget.initialShowCompletedToolCalls,
+        showUsageFooter: widget.showUsageFooter,
+      );
+    }
+
     return ChatThread(
       key: ValueKey(path),
       path: path,
@@ -196,6 +220,7 @@ class _ChatBotViewState extends State<ChatBotView> {
       agentName: widget.agentName,
       initialShowCompletedToolCalls: widget.initialShowCompletedToolCalls,
       shouldShowAuthorNames: widget.shouldShowAuthorNames,
+      showUsageFooter: widget.showUsageFooter,
     );
   }
 
@@ -216,6 +241,7 @@ class _ChatBotViewState extends State<ChatBotView> {
       onSelectedThreadResolved: widget.onSelectedThreadResolved,
       newThreadResetVersion: widget.newThreadResetVersion,
       centerComposer: widget.centerComposer,
+      showUsageFooter: widget.showUsageFooter,
       emptyState: widget.emptyState,
       inputContextMenuBuilder: widget.inputContextMenuBuilder,
       inputOnPressedOutside: widget.inputOnPressedOutside,
