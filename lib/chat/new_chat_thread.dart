@@ -95,7 +95,7 @@ class _NewChatThreadState extends State<NewChatThread> {
   Widget _buildUsageFooter(BuildContext context) {
     final theme = ShadTheme.of(context);
     return Text(
-      "context --",
+      "",
       overflow: TextOverflow.ellipsis,
       textAlign: TextAlign.right,
       style: theme.textTheme.small.copyWith(color: theme.colorScheme.mutedForeground, fontSize: 11),

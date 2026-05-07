@@ -429,7 +429,7 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('context --'), findsOneWidget);
+    expect(find.text('context --'), findsNothing);
 
     await tester.runAsync(() async {
       await harness.server.sendAgentMessage(harness.pair.serverProtocol, {
@@ -450,7 +450,6 @@ void main() {
       },
     );
 
-    expect(find.text('context --'), findsNothing);
     expect(find.text('context 22/128K'), findsOneWidget);
   });
 
@@ -536,15 +535,26 @@ void main() {
     });
     await _pumpUntil(
       tester,
-      () => find.text('auto context 480/64K').evaluate().isNotEmpty,
+      () => find.text('context 480/64K').evaluate().isNotEmpty,
       describe: () {
         final texts = tester.widgetList<Text>(find.byType(Text)).map((text) => text.data).whereType<String>().join(' | ');
         return 'compaction threshold usage footer did not render. Rendered text: $texts';
       },
     );
 
-    expect(find.text('auto context 480/64K'), findsOneWidget);
-    expect(find.text('auto context 480/128K'), findsNothing);
+    expect(find.text('context 480/64K'), findsOneWidget);
+    expect(find.text('auto context 480/64K'), findsNothing);
+    expect(find.text('context 480/128K'), findsNothing);
+
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await gesture.addPointer();
+    await gesture.moveTo(tester.getCenter(find.text('context 480/64K')));
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pump();
+
+    expect(find.textContaining('context management: auto'), findsOneWidget);
+    expect(find.textContaining('context threshold: 64K'), findsOneWidget);
+    await gesture.removePointer();
   });
 
   testWidgets('ChatBotView usage footer initializes from dataset usage rows', (tester) async {

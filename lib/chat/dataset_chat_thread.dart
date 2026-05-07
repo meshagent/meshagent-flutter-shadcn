@@ -1078,7 +1078,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     }
 
     final theme = ShadTheme.of(context);
-    final label = usage == null ? 'context --' : _formatUsageFooter(usage);
+    final label = usage == null ? '' : _formatUsageFooter(usage);
     final text = Text(
       label,
       overflow: TextOverflow.ellipsis,
@@ -1122,10 +1122,6 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (contextLimitTokens != null) {
       contextLabel = '$contextLabel/${_formatTokenCount(contextLimitTokens)}';
     }
-    final compactionMode = usage.compactionMode;
-    if (compactionMode != null) {
-      return '$compactionMode context $contextLabel';
-    }
     return 'context $contextLabel';
   }
 
@@ -1134,12 +1130,11 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     final lines = <String>['context used: ${_formatTokenCount(usage.contextUsedTokens)}'];
     final compactionMode = usage.compactionMode;
     if (compactionMode != null) {
-      var compaction = 'compaction: $compactionMode';
+      lines.add('context management: $compactionMode');
       final threshold = usage.compactionThreshold;
       if (threshold != null) {
-        compaction = '$compaction @ ${_formatTokenCount(threshold)}';
+        lines.add('context threshold: ${_formatTokenCount(threshold)}');
       }
-      lines.add(compaction);
     }
     final contextTotalTokens = usage.contextTotalTokens;
     if (usage.compactionThreshold != null && contextTotalTokens != null) {
