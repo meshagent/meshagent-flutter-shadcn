@@ -8,6 +8,11 @@ import 'package:meshagent_flutter_shadcn/chat/chat.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:uuid/uuid.dart';
 
+const String _agentRoomMessageType = "agent-message";
+const String _agentThreadStartType = "meshagent.agent.thread.start";
+const String _agentThreadStartedType = "meshagent.agent.thread.started";
+const String _agentTurnStartType = "meshagent.agent.turn.start";
+
 typedef NewChatThreadBuilder = Widget Function(BuildContext context, String threadPath);
 typedef NewChatThreadToolsBuilder = Widget Function(BuildContext context, ChatThreadController controller, ChatThreadSnapshot state);
 
@@ -263,28 +268,56 @@ class _NewChatThreadState extends State<NewChatThread> {
     }
   }
 
-  Future<void> _waitForToolkitAvailable({required String toolkitName}) async {
-    while (true) {
-      final agent = _agent ?? await _waitForAgentOnline();
+  List<Map<String, Object?>> _agentInputContent({required String text, required List<String> attachments}) {
+    return [
+      if (text.trim().isNotEmpty) {"type": "text", "text": text},
+      for (final path in attachments)
+        if (path.trim().isNotEmpty) {"type": "file", "url": path},
+    ];
+  }
 
-      try {
-        final toolkits = await widget.room.agents.listToolkits(participantId: agent.id, timeout: 1000);
-        if (toolkits.any((toolkit) => toolkit.name == toolkitName)) {
-          return;
-        }
-      } catch (_) {}
-
-      final completer = Completer<void>();
-      _waitForAgentReadyCompleter = completer;
-      try {
-        await Future.any([completer.future, Future<void>.delayed(const Duration(milliseconds: 250))]);
-      } on ChatSendCancelledException {
-        rethrow;
-      } finally {
-        if (identical(_waitForAgentReadyCompleter, completer)) {
-          _waitForAgentReadyCompleter = null;
-        }
+  Future<String> _sendStartThreadMessage({
+    required RemoteParticipant agent,
+    required String messageId,
+    required String text,
+    required List<String> attachmentPaths,
+    required String? senderName,
+  }) async {
+    final completer = Completer<String>();
+    late final StreamSubscription<RoomEvent> subscription;
+    subscription = widget.room.listen((event) {
+      if (event is! RoomMessageEvent || event.message.fromParticipantId != agent.id || event.message.type != _agentRoomMessageType) {
+        return;
       }
+      final rawMessage = event.message.message;
+      final rawPayload = rawMessage["payload"];
+      if (rawPayload is! Map) {
+        return;
+      }
+      if (rawPayload["type"] != _agentThreadStartedType || rawPayload["source_message_id"] != messageId) {
+        return;
+      }
+      final threadId = rawPayload["thread_id"];
+      if (threadId is String && threadId.trim().isNotEmpty && !completer.isCompleted) {
+        completer.complete(threadId.trim());
+      }
+    });
+
+    try {
+      final payload = <String, Object?>{
+        "type": _agentThreadStartType,
+        "message_id": messageId,
+        "content": _agentInputContent(text: text, attachments: attachmentPaths),
+      };
+      if (senderName != null && senderName.trim().isNotEmpty) {
+        payload["sender_name"] = senderName.trim();
+      }
+      await widget.room.messaging.sendMessage(to: agent, type: _agentRoomMessageType, message: {"payload": payload});
+      return await completer.future.timeout(const Duration(seconds: 30));
+    } on TimeoutException {
+      throw RoomServerException("Timed out waiting for thread to start.");
+    } finally {
+      await subscription.cancel();
     }
   }
 
@@ -307,7 +340,7 @@ class _NewChatThreadState extends State<NewChatThread> {
     final senderName = widget.room.localParticipant?.getAttribute("name");
     final pendingFirstMessage = PendingAgentMessage(
       messageId: pendingMessageId,
-      messageType: "meshagent.agent.turn.start",
+      messageType: _agentTurnStartType,
       threadPath: "",
       text: prompt,
       attachments: attachmentPaths,
@@ -327,7 +360,6 @@ class _NewChatThreadState extends State<NewChatThread> {
 
     try {
       final agent = _agent ?? await _waitForAgentOnline();
-      await _waitForToolkitAvailable(toolkitName: widget.toolkit);
       final readyAgent = _agent ?? agent;
       if (!mounted || operationId != _newThreadOperationId) {
         return;
@@ -340,44 +372,15 @@ class _NewChatThreadState extends State<NewChatThread> {
         });
       }
 
-      final result = await widget.room.agents.invokeTool(
-        toolkit: widget.toolkit,
-        tool: widget.tool,
-        participantId: readyAgent.id,
-        input: ToolContentInput(
-          JsonContent(
-            json: {
-              "message": {
-                "text": prompt,
-                "attachments": [
-                  for (final path in attachmentPaths) {"path": path},
-                ],
-              },
-            },
-          ),
-        ),
+      final path = await _sendStartThreadMessage(
+        agent: readyAgent,
+        messageId: pendingFirstMessage.messageId,
+        text: prompt,
+        attachmentPaths: attachmentPaths,
+        senderName: pendingFirstMessage.senderName,
       );
-
-      final content = switch (result) {
-        ToolContentOutput(:final content) => content,
-        ToolStreamOutput() => throw RoomServerException("${widget.toolkit}.${widget.tool} returned a stream; expected json content"),
-      };
-
-      if (content is! JsonContent) {
-        throw RoomServerException("${widget.toolkit}.${widget.tool} returned ${content.runtimeType}; expected json content");
-      }
-
-      final responsePath = content.json["path"];
-      if (responsePath is! String || responsePath.trim().isEmpty) {
-        throw RoomServerException("${widget.toolkit}.${widget.tool} response missing path");
-      }
-      final path = responsePath.trim();
-      final responseMessageId = content.json["message_id"];
-      final messageId = responseMessageId is String && responseMessageId.trim().isNotEmpty
-          ? responseMessageId.trim()
-          : pendingFirstMessage.messageId;
-      final responseName = content.json["name"];
-      final threadName = responseName is String && responseName.trim().isNotEmpty ? responseName.trim() : null;
+      final messageId = pendingFirstMessage.messageId;
+      final threadName = null;
       if (!mounted || operationId != _newThreadOperationId) {
         return;
       }
