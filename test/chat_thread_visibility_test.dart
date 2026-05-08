@@ -586,7 +586,7 @@ void main() {
       "source_message_id": "pending-steer-1",
     });
 
-    expect(controller.pendingAgentMessages.single.awaitingApplication, isFalse);
+    expect(controller.pendingAgentMessages, isEmpty);
   });
 
   testWidgets('does not render matching thread messages while pending application', (tester) async {

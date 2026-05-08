@@ -40,6 +40,7 @@ const String _agentImageGenerationPartialType = 'meshagent.agent.image_generatio
 const String _agentImageGenerationCompletedType = 'meshagent.agent.image_generation.completed';
 const String _agentImageGenerationFailedType = 'meshagent.agent.image_generation.failed';
 const String _agentContextCompactedType = 'meshagent.agent.context.compacted';
+const String _agentUsageUpdatedType = 'meshagent.agent.usage.updated';
 
 class DatasetChatThread extends StatefulWidget {
   const DatasetChatThread({
@@ -323,14 +324,14 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     var changed = false;
     for (final row in rows) {
       final normalized = Map<String, Object?>.from(row);
+      final rowKey = _datasetRowKey(normalized);
       final itemId = normalized['item_id']?.toString();
-      if (itemId == null || itemId.trim().isEmpty) {
+      if (rowKey == null || itemId == null || itemId.trim().isEmpty) {
         continue;
       }
-      final existing = target[itemId];
+      final existing = target[rowKey];
       if (existing == null || !const DeepCollectionEquality().equals(existing, normalized)) {
-        target[itemId] = normalized;
-        _agentRowsByItemId.remove(itemId);
+        target[rowKey] = normalized;
         _removeReconciledAgentRowsForDatasetRow(normalized);
         changed = true;
       }
@@ -356,10 +357,15 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     AgentUsageSnapshot? latestUsage;
     for (final row in rows) {
       final data = _rowData(row);
-      if (data?['kind'] != 'usage') {
+      if (data == null) {
         continue;
       }
-      final message = _mapValue(data?['message']);
+      final rawType = data['type']?.toString();
+      final message = rawType == _agentUsageUpdatedType
+          ? data
+          : data['kind'] == 'usage'
+          ? _mapValue(data['message'])
+          : null;
       if (message == null) {
         continue;
       }
@@ -391,21 +397,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   void _removeReconciledAgentRowsForDatasetRow(Map<String, Object?> datasetRow) {
-    final datasetData = _rowData(datasetRow);
-    if (datasetData?['kind'] != 'image_generation') {
-      return;
-    }
-    final datasetKeys = _imageGenerationCorrelationKeys(datasetRow);
-    if (datasetKeys.isEmpty) {
-      return;
-    }
     final liveItemIds = _agentRowsByItemId.entries
         .where((entry) {
-          final liveData = _rowData(entry.value);
-          if (liveData?['kind'] != 'image_generation') {
-            return false;
-          }
-          return _imageGenerationCorrelationKeys(entry.value).any(datasetKeys.contains);
+          return _datasetRowReconcilesLiveRow(datasetRow: datasetRow, liveRow: entry.value);
         })
         .map((entry) => entry.key)
         .toList(growable: false);
@@ -422,7 +416,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   bool _rebaseAgentRowsAfterDatasetRows() {
-    final maxDatasetSequence = _maxDatasetSequence();
+    final maxDatasetSequence = _maxVisibleDatasetSequence();
     if (maxDatasetSequence < 0 || _agentRowsByItemId.isEmpty) {
       return false;
     }
@@ -435,7 +429,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       if (itemId == null || itemId.trim().isEmpty) {
         continue;
       }
-      if (_rowsByItemId.containsKey(itemId) || _initialRowsByItemId.containsKey(itemId)) {
+      if (_datasetRowsContainItemId(itemId)) {
         continue;
       }
       final sequence = _intValue(row['sequence']);
@@ -464,15 +458,44 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return maxSequence;
   }
 
+  int _maxVisibleDatasetSequence() {
+    var maxSequence = -1;
+    final rows = [..._rowsByItemId.values, ..._initialRowsByItemId.values];
+    final turnInputPayloadsById = _turnInputPayloadsById(rows);
+    for (final row in rows) {
+      final message = _messageForRow(row, turnInputPayloadsById: turnInputPayloadsById);
+      if (message == null || !_shouldRenderDatasetThreadMessage(message)) {
+        continue;
+      }
+      final sequence = _intValue(row['sequence']);
+      if (sequence > maxSequence) {
+        maxSequence = sequence;
+      }
+    }
+    return maxSequence;
+  }
+
+  bool _datasetRowsContainItemId(String itemId) {
+    final normalized = itemId.trim();
+    if (normalized.isEmpty) {
+      return false;
+    }
+    return _rowsByItemId.values.any((row) => row['item_id']?.toString() == normalized) ||
+        _initialRowsByItemId.values.any((row) => row['item_id']?.toString() == normalized);
+  }
+
   bool _applyDeletePredicate(String predicate, Map<String, Map<String, Object?>> target) {
     final itemIds = _itemIdsForDeletePredicate(predicate);
     if (itemIds.isEmpty) {
       return false;
     }
     var changed = false;
-    for (final itemId in itemIds) {
-      changed = target.remove(itemId) != null || changed;
-    }
+    target.removeWhere((key, row) {
+      final rowItemId = row['item_id']?.toString();
+      final remove = itemIds.contains(key) || (rowItemId != null && itemIds.contains(rowItemId));
+      changed = changed || remove;
+      return remove;
+    });
     return changed;
   }
 
@@ -560,12 +583,33 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     var changed = false;
 
     switch (type) {
+      case _agentTurnStartType:
+      case _agentTurnSteerType:
+        break;
       case _agentTurnStartAcceptedType:
       case _agentTurnSteerAcceptedType:
         break;
       case _agentTurnStartedType:
+        changed =
+            _upsertAgentRow(
+              itemId: _turnApplicationItemId(payload, 'started'),
+              turnId: _payloadTurnId(payload),
+              timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
+              data: payload,
+            ) ||
+            changed;
+        changed = _materializePendingMessage(payload['source_message_id']?.toString()) || changed;
+        break;
       case _agentTurnSteeredType:
-        changed = _materializePendingMessage(payload['source_message_id']?.toString()) || _materializeTurnInputPayload(payload) || changed;
+        changed =
+            _upsertAgentRow(
+              itemId: _turnApplicationItemId(payload, 'steered'),
+              turnId: _payloadTurnId(payload),
+              timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
+              data: payload,
+            ) ||
+            changed;
+        changed = _materializePendingMessage(payload['source_message_id']?.toString()) || changed;
         break;
       case _agentTextContentStartedType:
         break;
@@ -704,60 +748,6 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return changed;
   }
 
-  bool _materializeTurnInputPayload(Map<String, dynamic> payload) {
-    final messageId = payload['source_message_id']?.toString() ?? payload['message_id']?.toString();
-    if (messageId == null || messageId.trim().isEmpty) {
-      return false;
-    }
-    if (_rowsByItemId.containsKey(messageId) || _initialRowsByItemId.containsKey(messageId) || _agentRowsByItemId.containsKey(messageId)) {
-      return false;
-    }
-
-    final content = payload['content'];
-    if (content is! List) {
-      return false;
-    }
-
-    final textParts = <String>[];
-    final attachments = <String>[];
-    for (final item in content) {
-      final contentItem = item is Map<String, dynamic> ? item : (item is Map ? Map<String, dynamic>.from(item) : null);
-      if (contentItem == null) {
-        continue;
-      }
-      final contentType = contentItem['type'];
-      if (contentType == 'text') {
-        final text = contentItem['text']?.toString();
-        if (text != null && text.isNotEmpty) {
-          textParts.add(text);
-        }
-      } else if (contentType == 'file') {
-        final url = contentItem['url']?.toString();
-        if (url != null && url.trim().isNotEmpty) {
-          attachments.add(url.trim());
-        }
-      }
-    }
-
-    final text = textParts.join('\n');
-    if (text.trim().isEmpty && attachments.isEmpty) {
-      return false;
-    }
-
-    return _upsertAgentRow(
-      itemId: messageId,
-      turnId: payload['turn_id']?.toString(),
-      timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
-      data: {
-        'kind': 'message',
-        'role': 'user',
-        'text': text,
-        'sender_name': payload['sender_name']?.toString(),
-        'attachments': attachments,
-      },
-    );
-  }
-
   bool _materializePendingMessagesForThread() {
     var changed = false;
     for (final pending in _pendingAgentMessagesForThread()) {
@@ -808,11 +798,14 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (itemId.trim().isEmpty) {
       return false;
     }
-    if (_rowsByItemId.containsKey(itemId) || _initialRowsByItemId.containsKey(itemId)) {
-      return false;
-    }
     final candidateRow = <String, Object?>{'turn_id': turnId, 'item_id': itemId, 'data': data};
     if (_isReconciledByDatasetRows(candidateRow)) {
+      return false;
+    }
+    final dataKind = data['kind']?.toString();
+    final dataRole = data['role']?.toString();
+    final canOverlayDatasetLifecycleRow = dataKind == 'file' || dataKind == 'image_generation' || dataRole == 'assistant';
+    if (_datasetRowsContainItemId(itemId) && !canOverlayDatasetLifecycleRow) {
       return false;
     }
     final existing = _agentRowsByItemId[itemId];
@@ -831,24 +824,34 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   bool _isReconciledByDatasetRows(Map<String, Object?> liveRow) {
-    final liveData = _rowData(liveRow);
-    if (liveData?['kind'] != 'image_generation') {
-      return false;
-    }
-    final liveKeys = _imageGenerationCorrelationKeys(liveRow);
-    if (liveKeys.isEmpty) {
-      return false;
-    }
     for (final datasetRow in [..._rowsByItemId.values, ..._initialRowsByItemId.values]) {
-      final datasetData = _rowData(datasetRow);
-      if (datasetData?['kind'] != 'image_generation') {
-        continue;
-      }
-      if (_imageGenerationCorrelationKeys(datasetRow).any(liveKeys.contains)) {
+      if (_datasetRowReconcilesLiveRow(datasetRow: datasetRow, liveRow: liveRow)) {
         return true;
       }
     }
     return false;
+  }
+
+  bool _datasetRowReconcilesLiveRow({required Map<String, Object?> datasetRow, required Map<String, Object?> liveRow}) {
+    if (_isImageGenerationRow(liveRow) || _isImageGenerationRow(datasetRow)) {
+      if (!_imageGenerationRowsReconcile(datasetRow: datasetRow, liveRow: liveRow)) {
+        return false;
+      }
+      final liveMessage = _messageForRow(liveRow);
+      final datasetMessage = _messageForRow(datasetRow);
+      if (liveMessage?.image == null || datasetMessage?.image == null) {
+        return true;
+      }
+      return _datasetThreadMessageReconcilesLiveMessage(datasetMessage: datasetMessage!, liveMessage: liveMessage!);
+    }
+
+    final liveMessage = _messageForRow(liveRow);
+    final turnInputPayloadsById = _turnInputPayloadsById([..._initialRowsByItemId.values, ..._rowsByItemId.values, datasetRow]);
+    final datasetMessage = _messageForRow(datasetRow, turnInputPayloadsById: turnInputPayloadsById);
+    if (liveMessage == null || datasetMessage == null) {
+      return false;
+    }
+    return _datasetThreadMessageReconcilesLiveMessage(datasetMessage: datasetMessage, liveMessage: liveMessage);
   }
 
   bool _appendAgentRowText({
@@ -953,14 +956,35 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     mergedRowsByItemId.addAll(_agentRowsByItemId);
     mergedRowsByItemId.addAll(_rowsByItemId);
     final rows = mergedRowsByItemId.values.toList(growable: false)..sort(_compareDatasetThreadRows);
-    final messages = <_DatasetThreadMessage>[];
+    final turnInputPayloadsById = _turnInputPayloadsById(rows);
+    final messagesById = <String, _DatasetThreadMessage>{};
     for (final row in rows) {
-      final message = _messageForRow(row);
+      final message = _messageForRow(row, turnInputPayloadsById: turnInputPayloadsById);
       if (message != null && _shouldRenderDatasetThreadMessage(message)) {
-        messages.add(message);
+        final messageKey = _datasetThreadMessageDedupeKey(row: row, message: message);
+        final existing = messagesById[messageKey];
+        messagesById[messageKey] = existing == null ? message : _mergeDuplicateDatasetThreadMessage(existing, message);
       }
     }
-    return messages;
+    return messagesById.values.toList(growable: false);
+  }
+
+  Map<String, Map<String, Object?>> _turnInputPayloadsById(Iterable<Map<String, Object?>> rows) {
+    final payloadsById = <String, Map<String, Object?>>{};
+    for (final row in rows) {
+      final data = _rowData(row);
+      final type = data?['type']?.toString();
+      if (type != _agentTurnStartType && type != _agentTurnSteerType) {
+        continue;
+      }
+      final messageId = data?['message_id']?.toString().trim();
+      final rowItemId = row['item_id']?.toString().trim();
+      final inputId = messageId != null && messageId.isNotEmpty ? messageId : rowItemId;
+      if (inputId != null && inputId.isNotEmpty && data != null) {
+        payloadsById[inputId] = data;
+      }
+    }
+    return payloadsById;
   }
 
   bool _hasWireBackedContent() {
@@ -994,10 +1018,74 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     for (final pending in _controller.pendingAgentMessagesForPath(widget.path)) {
       combined[pending.messageId] = pending;
     }
+    for (final pending in _pendingSteeringMessagesFromDatasetRows()) {
+      combined[pending.messageId] = pending;
+    }
     final values = combined.values.where((pending) {
       return !messages.any((message) => _datasetThreadMessageMatchesPendingAgentMessage(message, pending));
     }).toList();
     return [...values.where((message) => !message.awaitingAcceptance), ...values.where((message) => message.awaitingAcceptance)];
+  }
+
+  List<PendingAgentMessage> _pendingSteeringMessagesFromDatasetRows() {
+    final pendingByMessageId = <String, PendingAgentMessage>{};
+    final rows = [..._initialRowsByItemId.values, ..._rowsByItemId.values, ..._agentRowsByItemId.values]..sort(_compareDatasetThreadRows);
+    for (final row in rows) {
+      final data = _rowData(row);
+      final type = data?['type']?.toString();
+      if (type == _agentTurnSteeredType || type == _agentTurnSteerRejectedType) {
+        final sourceMessageId = data?['source_message_id']?.toString();
+        if (sourceMessageId != null && sourceMessageId.trim().isNotEmpty) {
+          pendingByMessageId.remove(sourceMessageId.trim());
+        }
+        continue;
+      }
+      if (type == _agentTurnSteerAcceptedType) {
+        final sourceMessageId = data?['source_message_id']?.toString();
+        final existing = sourceMessageId == null ? null : pendingByMessageId[sourceMessageId.trim()];
+        if (existing != null && existing.awaitingAcceptance) {
+          pendingByMessageId[existing.messageId] = PendingAgentMessage(
+            messageId: existing.messageId,
+            messageType: existing.messageType,
+            threadPath: existing.threadPath,
+            text: existing.text,
+            attachments: existing.attachments,
+            senderName: existing.senderName,
+            createdAt: existing.createdAt,
+            awaitingAcceptance: false,
+            awaitingApplication: existing.awaitingApplication,
+          );
+        }
+        continue;
+      }
+      if (type != _agentTurnSteerType || data == null) {
+        continue;
+      }
+      final sourceMessageId = data['message_id']?.toString() ?? row['item_id']?.toString();
+      if (sourceMessageId == null || sourceMessageId.trim().isEmpty) {
+        continue;
+      }
+      final content = data['content'];
+      if (content is! List) {
+        continue;
+      }
+      final extracted = _agentInputContentParts(content);
+      if (extracted.text.trim().isEmpty && extracted.attachments.isEmpty) {
+        continue;
+      }
+      pendingByMessageId[sourceMessageId.trim()] = PendingAgentMessage(
+        messageId: sourceMessageId.trim(),
+        messageType: _agentTurnSteerType,
+        threadPath: widget.path,
+        text: extracted.text,
+        attachments: extracted.attachments,
+        senderName: data['sender_name']?.toString(),
+        createdAt: _rowTimestamp(row),
+        awaitingAcceptance: true,
+        awaitingApplication: true,
+      );
+    }
+    return pendingByMessageId.values.toList(growable: false);
   }
 
   bool _canInterruptActiveTurn(List<PendingAgentMessage> pendingMessages) {
@@ -1371,6 +1459,63 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return messageWidgets;
   }
 
+  Widget? _buildQueuedPendingMessages(
+    BuildContext context,
+    List<_DatasetThreadMessage> messages,
+    List<PendingAgentMessage> pendingMessages,
+  ) {
+    final queuedPendingMessages = pendingMessages
+        .where(
+          (pending) =>
+              (pending.messageType == _agentTurnStartType || pending.messageType == _agentTurnSteerType) &&
+              !_pendingDatasetMessageIsOptimisticallyRendered(pending: pending, messages: messages),
+        )
+        .toList(growable: false);
+    if (queuedPendingMessages.isEmpty) {
+      return null;
+    }
+    final textStyle = TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(width: 10),
+          const SizedBox(width: 24, height: 24),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Pending messages:', style: textStyle),
+                const SizedBox(height: 4),
+                for (final pending in queuedPendingMessages)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(
+                      [
+                        if (pending.senderName != null) '${_displayAgentName(pending.senderName!)}:',
+                        if (pending.text.trim().isNotEmpty) pending.text.trim(),
+                        if (pending.attachments.isNotEmpty)
+                          '${pending.attachments.length} attachment${pending.attachments.length == 1 ? "" : "s"}',
+                      ].join(' '),
+                      style: textStyle,
+                    ),
+                  ),
+                if (_canInterruptActiveTurn(pendingMessages))
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text('Messages will be processed shortly. Press Esc to interrupt and send now.', style: textStyle),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildThreadViewport(BuildContext context, List<_DatasetThreadMessage> messages, List<PendingAgentMessage> pendingMessages) {
     final statusText = _status.text?.trim();
     final showStatus = statusText != null && statusText.isNotEmpty;
@@ -1452,10 +1597,13 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
               Expanded(child: _buildThreadViewport(context, messages, pendingMessages)),
               ChatThreadInputFrame(
                 hasFooter: widget.showUsageFooter,
-                child: _buildComposerWithUsageFooter(
-                  context,
-                  input: _buildInput(context, snapshot, pendingMessages),
-                  usage: snapshot.usage,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    ?_buildQueuedPendingMessages(context, messages, pendingMessages),
+                    _buildComposerWithUsageFooter(context, input: _buildInput(context, snapshot, pendingMessages), usage: snapshot.usage),
+                  ],
                 ),
               ),
             ],
@@ -1488,6 +1636,67 @@ class _DatasetThreadMessage {
   final String? authorName;
 }
 
+_DatasetThreadMessage _mergeDuplicateDatasetThreadMessage(_DatasetThreadMessage existing, _DatasetThreadMessage next) {
+  if (existing.kind != next.kind || existing.role != next.role) {
+    return existing;
+  }
+  return _DatasetThreadMessage(
+    id: existing.id,
+    kind: existing.kind,
+    role: existing.role,
+    text: existing.text.trim().isEmpty ? next.text : existing.text,
+    attachments: existing.attachments.isEmpty ? next.attachments : existing.attachments,
+    createdAt: existing.createdAt.isBefore(next.createdAt) ? existing.createdAt : next.createdAt,
+    image: existing.image ?? next.image,
+    authorName: existing.authorName ?? next.authorName,
+  );
+}
+
+String _datasetThreadMessageDedupeKey({required Map<String, Object?> row, required _DatasetThreadMessage message}) {
+  if (message.role == 'user') {
+    return 'user:${message.id}';
+  }
+  return [message.role, message.kind, row['item_id']?.toString() ?? message.id, row['sequence']?.toString() ?? ''].join(':');
+}
+
+bool _datasetThreadMessageReconcilesLiveMessage({
+  required _DatasetThreadMessage datasetMessage,
+  required _DatasetThreadMessage liveMessage,
+}) {
+  if (datasetMessage.id != liveMessage.id || datasetMessage.kind != liveMessage.kind || datasetMessage.role != liveMessage.role) {
+    return false;
+  }
+
+  final liveImage = liveMessage.image;
+  final datasetImage = datasetMessage.image;
+  if (liveImage != null || datasetImage != null) {
+    if (liveImage == null || datasetImage == null) {
+      return false;
+    }
+    if (_isTerminalImageGenerationStatus(liveImage.status) && !_isTerminalImageGenerationStatus(datasetImage.status)) {
+      return false;
+    }
+    final liveKeys = _datasetThreadImageReferenceKeys(liveImage);
+    final datasetKeys = _datasetThreadImageReferenceKeys(datasetImage);
+    if (liveKeys.isNotEmpty) {
+      return datasetKeys.any(liveKeys.contains);
+    }
+    return _normalizedImageGenerationStatus(datasetImage.status) == _normalizedImageGenerationStatus(liveImage.status);
+  }
+
+  if (liveMessage.attachments.isNotEmpty) {
+    final datasetAttachments = datasetMessage.attachments.map(_comparableThreadAttachmentPath).toSet();
+    return liveMessage.attachments.map(_comparableThreadAttachmentPath).every(datasetAttachments.contains);
+  }
+
+  final liveText = liveMessage.text.trim();
+  if (liveText.isNotEmpty) {
+    return datasetMessage.text.trim() == liveText;
+  }
+
+  return true;
+}
+
 class _DatasetThreadImage {
   const _DatasetThreadImage({this.uri, this.imageId, this.mimeType, this.status, this.statusDetail, this.width, this.height});
 
@@ -1516,11 +1725,19 @@ int _compareDatasetThreadRows(Map<String, Object?> left, Map<String, Object?> ri
   return (left['item_id']?.toString() ?? '').compareTo(right['item_id']?.toString() ?? '');
 }
 
-_DatasetThreadMessage? _messageForRow(Map<String, Object?> row) {
+_DatasetThreadMessage? _messageForRow(
+  Map<String, Object?> row, {
+  Map<String, Map<String, Object?>> turnInputPayloadsById = const <String, Map<String, Object?>>{},
+}) {
   final data = _rowData(row);
   if (data == null) {
     return null;
   }
+  final agentMessage = _messageForAgentPayload(row, data, turnInputPayloadsById: turnInputPayloadsById);
+  if (agentMessage != null) {
+    return agentMessage;
+  }
+
   final kind = data['kind']?.toString();
   final itemId = row['item_id']?.toString() ?? const Uuid().v4();
   final role = data['role']?.toString();
@@ -1619,6 +1836,147 @@ _DatasetThreadMessage? _messageForRow(Map<String, Object?> row) {
   return null;
 }
 
+_DatasetThreadMessage? _messageForAgentPayload(
+  Map<String, Object?> row,
+  Map<String, Object?> payload, {
+  Map<String, Map<String, Object?>> turnInputPayloadsById = const <String, Map<String, Object?>>{},
+}) {
+  final type = payload['type']?.toString();
+  if (type == null || type.trim().isEmpty) {
+    return null;
+  }
+
+  final itemId = row['item_id']?.toString() ?? _payloadItemId(Map<String, dynamic>.from(payload));
+  final createdAt = _rowTimestamp(row);
+  switch (type) {
+    case _agentTurnStartType:
+    case _agentTurnSteerType:
+      return null;
+    case _agentTurnStartedType:
+    case _agentTurnSteeredType:
+      final sourceMessageId = payload['source_message_id']?.toString().trim();
+      if (sourceMessageId == null || sourceMessageId.isEmpty) {
+        return null;
+      }
+      final inputPayload = turnInputPayloadsById[sourceMessageId] ?? payload;
+      final content = inputPayload['content'];
+      if (content is! List) {
+        return null;
+      }
+      final extracted = _agentInputContentParts(content);
+      if (extracted.text.trim().isEmpty && extracted.attachments.isEmpty) {
+        return null;
+      }
+      return _DatasetThreadMessage(
+        id: sourceMessageId,
+        kind: 'message',
+        role: 'user',
+        text: extracted.text,
+        authorName: inputPayload['sender_name']?.toString(),
+        attachments: extracted.attachments,
+        createdAt: createdAt,
+      );
+    case _agentTurnStartAcceptedType:
+    case _agentTurnSteerAcceptedType:
+      return null;
+    case _agentTextContentDeltaType:
+      final text = payload['text']?.toString() ?? '';
+      return text.trim().isEmpty
+          ? null
+          : _DatasetThreadMessage(
+              id: itemId,
+              kind: 'message',
+              role: 'agent',
+              text: text,
+              authorName: payload['sender_name']?.toString(),
+              attachments: const [],
+              createdAt: createdAt,
+            );
+    case _agentReasoningContentDeltaType:
+      final text = payload['text']?.toString() ?? '';
+      return text.trim().isEmpty
+          ? null
+          : _DatasetThreadMessage(id: itemId, kind: 'reasoning', role: 'agent', text: text, attachments: const [], createdAt: createdAt);
+    case _agentFileContentDeltaType:
+      final url = payload['url']?.toString();
+      return url == null || url.trim().isEmpty
+          ? null
+          : _DatasetThreadMessage(id: itemId, kind: 'message', role: 'agent', text: '', attachments: [url.trim()], createdAt: createdAt);
+    case _agentImageGenerationStartedType:
+    case _agentImageGenerationPartialType:
+    case _agentImageGenerationCompletedType:
+    case _agentImageGenerationFailedType:
+      final image = _firstGeneratedImage(payload);
+      final dimensions = _imageGenerationDimensions(data: const <String, Object?>{}, message: payload, image: image);
+      final imageUri = _stringValue(image?['uri']);
+      return _DatasetThreadMessage(
+        id: itemId,
+        kind: 'message',
+        role: 'agent',
+        text: '',
+        authorName: _stringValue(image?['created_by']),
+        attachments: const [],
+        createdAt: createdAt,
+        image: _DatasetThreadImage(
+          uri: imageUri,
+          imageId: _imageIdFromDatasetUri(imageUri),
+          mimeType: _stringValue(image?['mime_type']),
+          status: _stringValue(image?['status']) ?? _imageGenerationStatusFromType(type),
+          statusDetail: _stringValue(payload['status_detail']) ?? _stringValue(image?['status_detail']),
+          width: dimensions.$1,
+          height: dimensions.$2,
+        ),
+      );
+    case _agentToolCallStartedType:
+    case _agentToolCallEndedType:
+      final toolkit = payload['toolkit']?.toString() ?? '';
+      final tool = payload['tool']?.toString() ?? '';
+      final summary = [toolkit, tool].where((part) => part.trim().isNotEmpty).join('.');
+      return _DatasetThreadMessage(
+        id: itemId,
+        kind: 'tool_call',
+        role: 'agent',
+        text: summary.isEmpty ? 'Tool call' : summary,
+        attachments: const [],
+        createdAt: createdAt,
+      );
+    case _agentContextCompactedType:
+      return _DatasetThreadMessage(
+        id: itemId,
+        kind: 'compaction',
+        role: 'agent',
+        text: 'Context compacted',
+        attachments: const [],
+        createdAt: createdAt,
+      );
+  }
+  return null;
+}
+
+({String text, List<String> attachments}) _agentInputContentParts(List<Object?> content) {
+  final textParts = <String>[];
+  final attachments = <String>[];
+  for (final item in content) {
+    final contentItem = item is Map<String, dynamic> ? item : (item is Map ? Map<String, dynamic>.from(item) : null);
+    if (contentItem == null) {
+      continue;
+    }
+    final contentType = contentItem['type'];
+    if (contentType == 'text') {
+      final text = contentItem['text']?.toString();
+      if (text != null && text.isNotEmpty) {
+        textParts.add(text);
+      }
+    } else if (contentType == 'file') {
+      final url = contentItem['url']?.toString();
+      if (url != null && url.trim().isNotEmpty) {
+        attachments.add(url.trim());
+      }
+    }
+  }
+  return (text: textParts.join('\n'), attachments: attachments);
+}
+
 bool _datasetThreadMessageMatchesPendingAgentMessage(_DatasetThreadMessage message, PendingAgentMessage pending) {
   if (message.kind != 'message' || message.role == 'agent') {
     return false;
@@ -1633,6 +1991,16 @@ bool _datasetThreadMessageMatchesPendingAgentMessage(_DatasetThreadMessage messa
   }
 
   return _datasetThreadMessageContentMatchesPendingAgentMessage(message, pending);
+}
+
+bool _pendingDatasetMessageIsOptimisticallyRendered({
+  required PendingAgentMessage pending,
+  required Iterable<_DatasetThreadMessage> messages,
+}) {
+  if (pending.messageType == _agentTurnSteerType || pending.matchByContentOnly) {
+    return false;
+  }
+  return pending.awaitingApplication || !messages.any((message) => message.id == pending.messageId);
 }
 
 bool _datasetThreadMessageContentMatchesPendingAgentMessage(_DatasetThreadMessage message, PendingAgentMessage pending) {
@@ -1687,6 +2055,30 @@ bool _isDatasetTableNotFoundError(Object error) {
 }
 
 String _payloadItemId(Map<String, dynamic> payload) {
+  final explicitItemId = _payloadExplicitItemId(payload);
+  if (explicitItemId != null) {
+    return explicitItemId;
+  }
+  return const Uuid().v4();
+}
+
+String _turnApplicationItemId(Map<String, dynamic> payload, String suffix) {
+  final explicitItemId = _payloadExplicitItemId(payload);
+  if (explicitItemId != null) {
+    return explicitItemId;
+  }
+  final sourceMessageId = payload['source_message_id'];
+  if (sourceMessageId is String && sourceMessageId.trim().isNotEmpty) {
+    return '${sourceMessageId.trim()}.$suffix';
+  }
+  final turnId = payload['turn_id'];
+  if (turnId is String && turnId.trim().isNotEmpty) {
+    return '${turnId.trim()}.$suffix';
+  }
+  return const Uuid().v4();
+}
+
+String? _payloadExplicitItemId(Map<String, dynamic> payload) {
   final itemId = payload['item_id'];
   if (itemId is String && itemId.trim().isNotEmpty) {
     return itemId.trim();
@@ -1695,7 +2087,7 @@ String _payloadItemId(Map<String, dynamic> payload) {
   if (messageId is String && messageId.trim().isNotEmpty) {
     return messageId.trim();
   }
-  return const Uuid().v4();
+  return null;
 }
 
 String? _payloadTurnId(Map<String, dynamic> payload) {
@@ -1749,6 +2141,34 @@ Map<String, Object?>? _rowData(Map<String, Object?> row) {
   return _mapValue(raw);
 }
 
+String? _datasetRowKey(Map<String, Object?> row) {
+  final itemId = row['item_id']?.toString();
+  if (itemId == null || itemId.trim().isEmpty) {
+    return null;
+  }
+  final sequence = row['sequence'];
+  if (sequence != null) {
+    final normalizedSequence = sequence.toString().trim();
+    if (normalizedSequence.isNotEmpty) {
+      return 'sequence:$normalizedSequence';
+    }
+  }
+  final data = _rowData(row);
+  final type = data?['type']?.toString();
+  if (type != null && type.trim().isNotEmpty) {
+    final messageId = data?['message_id']?.toString();
+    final timestamp = row['timestamp']?.toString();
+    return [
+      'agent',
+      itemId,
+      type,
+      if (messageId != null && messageId.trim().isNotEmpty) messageId.trim(),
+      if (timestamp != null && timestamp.trim().isNotEmpty) timestamp.trim(),
+    ].join(':');
+  }
+  return itemId;
+}
+
 Map<String, Object?>? _mapValue(Object? raw) {
   if (raw is Map<String, Object?>) {
     return raw;
@@ -1776,6 +2196,22 @@ Map<String, Object?>? _firstGeneratedImage(Map<String, Object?>? message) {
   return _mapValue(message['image']);
 }
 
+bool _isImageGenerationRow(Map<String, Object?> row) {
+  final data = _rowData(row);
+  if (data == null) {
+    return false;
+  }
+  final kind = data['kind']?.toString();
+  if (kind == 'image_generation') {
+    return true;
+  }
+  final type = data['type']?.toString();
+  return type == _agentImageGenerationStartedType ||
+      type == _agentImageGenerationPartialType ||
+      type == _agentImageGenerationCompletedType ||
+      type == _agentImageGenerationFailedType;
+}
+
 Set<String> _imageGenerationCorrelationKeys(Map<String, Object?> row) {
   final keys = <String>{};
   final itemId = _stringValue(row['item_id']);
@@ -1783,7 +2219,14 @@ Set<String> _imageGenerationCorrelationKeys(Map<String, Object?> row) {
     keys.add('item:$itemId');
   }
   final data = _rowData(row);
-  final message = _mapValue(data?['message']);
+  final rawType = data?['type']?.toString();
+  final message =
+      rawType == _agentImageGenerationStartedType ||
+          rawType == _agentImageGenerationPartialType ||
+          rawType == _agentImageGenerationCompletedType ||
+          rawType == _agentImageGenerationFailedType
+      ? data
+      : _mapValue(data?['message']);
   for (final value in <Object?>[data?['call_id'], message?['call_id']]) {
     final callId = _stringValue(value);
     if (callId != null) {
@@ -1795,6 +2238,36 @@ Set<String> _imageGenerationCorrelationKeys(Map<String, Object?> row) {
     if (id != null) {
       keys.add('item:$id');
     }
+  }
+  return keys;
+}
+
+bool _imageGenerationRowsReconcile({required Map<String, Object?> datasetRow, required Map<String, Object?> liveRow}) {
+  if (!_isImageGenerationRow(datasetRow) || !_isImageGenerationRow(liveRow)) {
+    return false;
+  }
+  final liveKeys = _imageGenerationCorrelationKeys(liveRow);
+  if (liveKeys.isEmpty || !_imageGenerationCorrelationKeys(datasetRow).any(liveKeys.contains)) {
+    return false;
+  }
+
+  final liveStatus = _messageForRow(liveRow)?.image?.status;
+  final datasetStatus = _messageForRow(datasetRow)?.image?.status;
+  if (_isTerminalImageGenerationStatus(liveStatus)) {
+    return _isTerminalImageGenerationStatus(datasetStatus);
+  }
+  return true;
+}
+
+Set<String> _datasetThreadImageReferenceKeys(_DatasetThreadImage image) {
+  final keys = <String>{};
+  final imageId = _stringValue(image.imageId);
+  if (imageId != null) {
+    keys.add('image:$imageId');
+  }
+  final uri = _stringValue(image.uri);
+  if (uri != null) {
+    keys.add('uri:$uri');
   }
   return keys;
 }
@@ -1869,6 +2342,18 @@ bool _isImageGenerationFailedStatus(String? status) {
   }
   final normalized = status.trim().toLowerCase();
   return normalized == 'failed' || normalized == 'cancelled';
+}
+
+bool _isTerminalImageGenerationStatus(String? status) {
+  final normalized = _normalizedImageGenerationStatus(status);
+  return normalized == 'completed' || _isImageGenerationFailedStatus(normalized);
+}
+
+String? _normalizedImageGenerationStatus(String? status) {
+  if (status == null || status.trim().isEmpty) {
+    return null;
+  }
+  return status.trim().toLowerCase();
 }
 
 String? _imageIdFromDatasetUri(String? uri) {

@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:interactive_viewer_2/interactive_viewer_2.dart';
 import 'package:meshagent/meshagent.dart';
+import 'package:meshagent_flutter_shadcn/chat_bubble_markdown_config.dart';
 import 'package:meshagent_flutter_shadcn/data_grid/swayze/controller.dart';
 import 'package:meshagent_flutter_shadcn/data_grid/swayze/delegates.dart';
 import 'package:meshagent_flutter_shadcn/data_grid/swayze/helpers.dart';
@@ -16,6 +17,8 @@ import 'package:meshagent_flutter_shadcn/data_grid/swayze/src/widgets/headers/he
 import 'package:meshagent_flutter_shadcn/data_grid/swayze/widgets.dart';
 import 'package:meshagent_flutter_shadcn/data_grid/swayze_math/swayze_math.dart';
 import 'package:meshagent_flutter_shadcn/ui/coordinated_context_menu.dart';
+import 'package:re_highlight/styles/base16/material-darker.dart';
+import 'package:re_highlight/styles/base16/material-lighter.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 class SwayzeTableView extends StatefulWidget {
@@ -43,6 +46,8 @@ class SwayzeTableView extends StatefulWidget {
     this.showGridTopBorder = false,
     this.cancelToken = 0,
     this.onStatusChanged,
+    this.onOpenFile,
+    this.tableWatchEvents,
   });
 
   final RoomClient room;
@@ -67,6 +72,8 @@ class SwayzeTableView extends StatefulWidget {
   final bool showGridTopBorder;
   final int cancelToken;
   final ValueChanged<SwayzeTableStatus>? onStatusChanged;
+  final FutureOr<void> Function(String file)? onOpenFile;
+  final Stream<DatasetTableWatchEvent>? tableWatchEvents;
 
   @override
   State<SwayzeTableView> createState() => _SwayzeTableViewState();
@@ -161,6 +168,7 @@ String _formatBytes(int bytes) {
 
 class _SwayzeTableViewState extends State<SwayzeTableView> {
   StreamSubscription<ArrowRecordBatch>? _rowsSubscription;
+  StreamSubscription<DatasetTableWatchEvent>? _tableWatchSubscription;
   final OverlayPortalController _imageViewerController = OverlayPortalController();
   _SharedSwayzeController? _controller;
   LocalHistoryEntry? _imageViewerHistoryEntry;
@@ -177,6 +185,8 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
   int _loadGeneration = 0;
   String? _activeSqlQueryId;
   SwayzeTableStatus? _lastEmittedStatus;
+  final Map<Object, int> _rowIndexByKey = <Object, int>{};
+  final List<ArrowRecordBatch> _pendingWatchBatches = <ArrowRecordBatch>[];
 
   String? get _normalizedFilter {
     final trimmed = widget.filter?.trim();
@@ -189,6 +199,7 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
   @override
   void initState() {
     super.initState();
+    _subscribeToTableWatchEvents();
     _reload();
   }
 
@@ -209,11 +220,15 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
     } else if (oldWidget.cancelToken != widget.cancelToken) {
       _cancelCurrentLoad();
     }
+    if (oldWidget.tableWatchEvents != widget.tableWatchEvents) {
+      _subscribeToTableWatchEvents();
+    }
   }
 
   @override
   void dispose() {
     unawaited(_rowsSubscription?.cancel());
+    unawaited(_tableWatchSubscription?.cancel());
     _cancelActiveSqlQuery();
     _disposeController();
     final historyEntry = _imageViewerHistoryEntry;
@@ -280,6 +295,8 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
       await previousSubscription.cancel();
     }
     _disposeController();
+    _rowIndexByKey.clear();
+    _pendingWatchBatches.clear();
 
     if (mounted) {
       setState(() {
@@ -312,6 +329,78 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
         _isLoadingRows = false;
       });
     }
+  }
+
+  void _subscribeToTableWatchEvents() {
+    unawaited(_tableWatchSubscription?.cancel());
+    final events = widget.tableWatchEvents;
+    _tableWatchSubscription = events?.listen(_handleTableWatchEvent);
+  }
+
+  void _handleTableWatchEvent(DatasetTableWatchEvent event) {
+    if (!mounted || _normalizedSqlQuery != null) {
+      return;
+    }
+    if (event.phase == DatasetTableWatchPhase.initial || event.kind == 'ready') {
+      return;
+    }
+    if (event.kind == 'delete' || event.changeType == 'delete' || event.kind == 'transactions' || event.changeType == 'transactions') {
+      return;
+    }
+    final batch = event.batch;
+    if (batch == null) {
+      return;
+    }
+    if (_controller == null || _isLoadingMetadata || _isLoadingRows) {
+      _pendingWatchBatches.add(batch);
+      return;
+    }
+    _applyWatchBatch(batch);
+  }
+
+  void _applyPendingWatchBatches() {
+    if (_pendingWatchBatches.isEmpty || _controller == null || _isLoadingMetadata || _isLoadingRows) {
+      return;
+    }
+    final batches = List<ArrowRecordBatch>.of(_pendingWatchBatches);
+    _pendingWatchBatches.clear();
+    for (final batch in batches) {
+      _applyWatchBatch(batch);
+    }
+  }
+
+  void _applyWatchBatch(ArrowRecordBatch batch) {
+    final controller = _controller;
+    if (controller == null || _columns.isEmpty) {
+      return;
+    }
+    final rows = batch.toRows();
+    if (rows.isEmpty) {
+      return;
+    }
+    _applyBatchSchemaDisplay(controller, batch.schema, _columns);
+    var nextLoadedRowCount = _loadedRowCount;
+    for (final row in rows) {
+      if (!_rowMatchesNormalizedFilter(row)) {
+        continue;
+      }
+      final rowKey = _rowKeyFor(row);
+      var rowIndex = rowKey == null ? null : _rowIndexByKey[rowKey];
+      if (rowIndex == null) {
+        rowIndex = nextLoadedRowCount;
+        if (rowKey != null) {
+          _rowIndexByKey[rowKey] = rowIndex;
+        }
+        nextLoadedRowCount++;
+      }
+      _setControllerRowCount(controller, math.max(controller.tableDataController.rows.value.count, rowIndex + 1));
+      _putRow(controller: controller, row: row, columns: _columns, rowIndex: rowIndex);
+    }
+    setState(() {
+      _loadedRowCount = math.max(_loadedRowCount, nextLoadedRowCount);
+      _rowCount = math.max(_rowCount ?? 0, _loadedRowCount);
+      _loadedByteCount += batch.ipcBytes.length;
+    });
   }
 
   SwayzeTableStatus get _status {
@@ -455,6 +544,7 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
               return;
             }
 
+            _applyBatchSchemaDisplay(controller, batch.schema, columns);
             _putRows(controller: controller, rows: rows, columns: columns, rowOffset: rowOffset);
 
             rowOffset += rows.length;
@@ -479,6 +569,7 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
             setState(() {
               _isLoadingRows = false;
             });
+            _applyPendingWatchBatches();
           },
           cancelOnError: false,
         );
@@ -589,20 +680,109 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
       for (var rowIndex = 0; rowIndex < rows.length; rowIndex++) {
         final absoluteRow = rowOffset + rowIndex;
         final row = rows[rowIndex];
-        for (var columnIndex = 0; columnIndex < columns.length; columnIndex++) {
-          final columnName = columns[columnIndex];
-          final columnDisplay = controller.columnDisplays[columnName] ?? _ColumnDisplay.text;
-          modifier.putCell(
-            _SharedSwayzeCellData(
-              id: '$absoluteRow:$columnIndex',
-              position: IntVector2(columnIndex, absoluteRow),
-              value: row[columnName],
-              display: columnDisplay,
-            ),
-          );
+        if (!_rowMatchesNormalizedFilter(row)) {
+          continue;
         }
+        final rowKey = _rowKeyFor(row);
+        if (rowKey != null) {
+          _rowIndexByKey[rowKey] = absoluteRow;
+        }
+        _putRowWithModifier(modifier: modifier, controller: controller, row: row, columns: columns, rowIndex: absoluteRow);
       }
     });
+  }
+
+  void _putRow({
+    required _SharedSwayzeController controller,
+    required Map<String, Object?> row,
+    required List<String> columns,
+    required int rowIndex,
+  }) {
+    controller.cellsController.updateState((modifier) {
+      _putRowWithModifier(modifier: modifier, controller: controller, row: row, columns: columns, rowIndex: rowIndex);
+    });
+  }
+
+  void _putRowWithModifier({
+    required CellsModifier<_SharedSwayzeCellData> modifier,
+    required _SharedSwayzeController controller,
+    required Map<String, Object?> row,
+    required List<String> columns,
+    required int rowIndex,
+  }) {
+    for (var columnIndex = 0; columnIndex < columns.length; columnIndex++) {
+      final columnName = columns[columnIndex];
+      final value = row[columnName];
+      final columnDisplay = controller.columnDisplays[columnName] ?? _ColumnDisplay.text;
+      modifier.putCell(
+        _SharedSwayzeCellData(
+          id: '$rowIndex:$columnIndex',
+          position: IntVector2(columnIndex, rowIndex),
+          value: value,
+          display: columnDisplay,
+        ),
+      );
+    }
+  }
+
+  Object? _rowKeyFor(Map<String, Object?> row) {
+    final column = _rowKeyColumn(_columns);
+    if (column == null) {
+      return null;
+    }
+    final value = row[column];
+    return value == null ? null : '$column:$value';
+  }
+
+  bool _rowMatchesNormalizedFilter(Map<String, Object?> row) {
+    final filter = _normalizedFilter;
+    if (filter == null) {
+      return true;
+    }
+    final type = _typeFilterValue(filter);
+    if (type != null) {
+      return row['type'] == type;
+    }
+    return true;
+  }
+
+  String? _typeFilterValue(String filter) {
+    final match = RegExp(r"^type\s*=\s*'((?:''|[^'])*)'$", caseSensitive: false).firstMatch(filter.trim());
+    if (match == null) {
+      return null;
+    }
+    return match.group(1)!.replaceAll("''", "'");
+  }
+
+  String? _rowKeyColumn(List<String> columns) {
+    const preferredColumns = ['item_id', 'id', 'message_id'];
+    for (final column in preferredColumns) {
+      if (columns.contains(column)) {
+        return column;
+      }
+    }
+    return null;
+  }
+
+  void _setControllerRowCount(_SharedSwayzeController controller, int rowCount) {
+    final rows = controller.tableDataController.rows;
+    if (rowCount <= rows.value.count) {
+      return;
+    }
+    rows.updateState((state) => state.copyWith(count: rowCount, elasticCount: math.max(state.elasticCount, rowCount)));
+  }
+
+  void _applyBatchSchemaDisplay(_SharedSwayzeController controller, ArrowSchema schema, List<String> columns) {
+    final columnDisplays = _columnDisplaysForSchema(schema, columns);
+    if (columnDisplays.isEmpty || _columnDisplaysEqual(controller.columnDisplays, columnDisplays)) {
+      return;
+    }
+    controller.updateColumnDisplays(columnDisplays);
+    if (mounted) {
+      setState(() {
+        _columnDisplays = columnDisplays;
+      });
+    }
   }
 
   @override
@@ -695,6 +875,7 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
                 showLeadingOuterBorders: widget.showLeadingOuterBorders,
                 showRowHeaders: widget.showRowHeaders,
                 onOpenImage: _openImageViewer,
+                onOpenFile: widget.onOpenFile,
               ),
             ),
           ),
@@ -777,6 +958,7 @@ class InMemoryTable extends StatefulWidget {
     this.showLeadingOuterBorders = false,
     this.showRowHeaders = true,
     this.onSelectedRowsChanged,
+    this.onOpenFile,
   });
 
   final List<String> columns;
@@ -791,6 +973,7 @@ class InMemoryTable extends StatefulWidget {
   final bool showLeadingOuterBorders;
   final bool showRowHeaders;
   final ValueChanged<Set<int>>? onSelectedRowsChanged;
+  final FutureOr<void> Function(String file)? onOpenFile;
 
   @override
   State<InMemoryTable> createState() => _InMemoryTableState();
@@ -896,6 +1079,7 @@ class _InMemoryTableState extends State<InMemoryTable> {
         maxAutoSizeRowExtent: widget.maxAutoSizeRowExtent,
         showLeadingOuterBorders: widget.showLeadingOuterBorders,
         showRowHeaders: widget.showRowHeaders,
+        onOpenFile: widget.onOpenFile,
       ),
     );
   }
@@ -944,6 +1128,7 @@ class _SharedSwayzeGrid extends StatefulWidget {
     this.showLeadingOuterBorders = false,
     this.showRowHeaders = true,
     this.onOpenImage,
+    this.onOpenFile,
   });
 
   final _SharedSwayzeController controller;
@@ -960,6 +1145,7 @@ class _SharedSwayzeGrid extends StatefulWidget {
   final bool showLeadingOuterBorders;
   final bool showRowHeaders;
   final void Function(BuildContext context, Uint8List imageBytes)? onOpenImage;
+  final FutureOr<void> Function(String file)? onOpenFile;
 
   @override
   State<_SharedSwayzeGrid> createState() => _SharedSwayzeGridState();
@@ -1005,6 +1191,7 @@ class _SharedSwayzeGridState extends State<_SharedSwayzeGrid> {
       onCopySelection: _copySelectionToClipboard,
       wrapText: _wrapCellText,
       onOpenImage: widget.onOpenImage,
+      onOpenFile: widget.onOpenFile,
     );
   }
 
@@ -1461,7 +1648,7 @@ bool _isBinaryColumn(ArrowDataType type) {
 
 const _contentTypeMetadataKey = 'content-type';
 
-enum _ColumnDisplay { text, image }
+enum _ColumnDisplay { text, image, json }
 
 bool _isSelectableField(ArrowField field, {ArrowSchema? displaySchema}) {
   return !_isBinaryColumn(field.type) || _isImageContentField(field, displaySchema: displaySchema);
@@ -1475,6 +1662,26 @@ bool _isImageContentField(ArrowField field, {ArrowSchema? displaySchema}) {
   final displayField = _fieldByName(displaySchema, field.name);
   final displayContentType = displayField?.metadata[_contentTypeMetadataKey]?.trim().toLowerCase();
   return displayContentType != null && displayContentType.startsWith('image/');
+}
+
+bool _isJsonContentField(ArrowField field, {ArrowSchema? displaySchema}) {
+  if (_isJsonFieldMetadata(field)) {
+    return true;
+  }
+  final displayField = _fieldByName(displaySchema, field.name);
+  return displayField != null && _isJsonFieldMetadata(displayField);
+}
+
+bool _isJsonFieldMetadata(ArrowField field) {
+  final contentType = field.metadata[_contentTypeMetadataKey]?.trim().toLowerCase();
+  if (contentType == 'application/json' ||
+      contentType == 'application/x-ndjson' ||
+      contentType?.startsWith('application/json;') == true ||
+      contentType?.endsWith('+json') == true) {
+    return true;
+  }
+  final extensionName = field.extensionName?.trim().toLowerCase();
+  return extensionName == 'json' || extensionName == 'jsonb' || extensionName == 'arrow.json' || extensionName == 'meshagent.json';
 }
 
 ArrowField? _fieldByName(ArrowSchema? schema, String name) {
@@ -1502,6 +1709,8 @@ Map<String, _ColumnDisplay> _columnDisplaysForSchema(Object schema, List<String>
     }
     if (_isImageContentField(field, displaySchema: displaySchema)) {
       displays[field.name] = _ColumnDisplay.image;
+    } else if (_isJsonContentField(field, displaySchema: displaySchema)) {
+      displays[field.name] = _ColumnDisplay.json;
     }
   }
   return displays.isEmpty ? const {} : Map.unmodifiable(displays);
@@ -1549,7 +1758,8 @@ class _SharedSwayzeController extends SwayzeController {
     required List<String> columns,
     required Map<String, _ColumnDisplay> columnDisplays,
     required int rowCount,
-  }) : columnDisplays = Map.unmodifiable(columnDisplays) {
+  }) : columns = List.unmodifiable(columns),
+       columnDisplays = Map.unmodifiable(columnDisplays) {
     final hasImageColumns = columnDisplays.values.contains(_ColumnDisplay.image);
     tableDataController = SwayzeTableDataController<_SharedSwayzeController>(
       parent: this,
@@ -1586,10 +1796,15 @@ class _SharedSwayzeController extends SwayzeController {
   @override
   late final SwayzeCellsController<_SharedSwayzeCellData> cellsController;
 
-  final Map<String, _ColumnDisplay> columnDisplays;
+  final List<String> columns;
+  Map<String, _ColumnDisplay> columnDisplays;
 
   @override
   late final SwayzeTableDataController<_SharedSwayzeController> tableDataController;
+
+  void updateColumnDisplays(Map<String, _ColumnDisplay> nextColumnDisplays) {
+    columnDisplays = Map.unmodifiable(nextColumnDisplays);
+  }
 
   @override
   void dispose() {
@@ -1665,13 +1880,140 @@ Uint8List? _imageBytesFromValue(Object? value) {
   return null;
 }
 
+Object? _jsonValueFromCellValue(Object? value, {required bool parseText}) {
+  if (value is DatasetJson) {
+    return value.toJson();
+  }
+  if (value is Uint8List) {
+    final text = utf8.decode(value, allowMalformed: true);
+    return parseText ? jsonDecode(text) : text;
+  }
+  if (parseText && value is String) {
+    return jsonDecode(value);
+  }
+  return value;
+}
+
+String? _jsonTextForCell(_SharedSwayzeCellData cell) {
+  final value = cell.value;
+  if (cell.display != _ColumnDisplay.json) {
+    return null;
+  }
+  try {
+    return const JsonEncoder.withIndent('  ').convert(_jsonValueFromCellValue(value, parseText: true));
+  } catch (_) {
+    return cell.display == _ColumnDisplay.json ? _rawJsonTextForCellValue(value) : null;
+  }
+}
+
+String? _rawJsonTextForCellValue(Object? value) {
+  if (value == null) {
+    return 'null';
+  }
+  if (value is String) {
+    final trimmed = value.trim();
+    return trimmed.isEmpty ? null : value;
+  }
+  if (value is Uint8List) {
+    final text = utf8.decode(value, allowMalformed: true);
+    return text.trim().isEmpty ? null : text;
+  }
+  try {
+    return const JsonEncoder.withIndent('  ').convert(_jsonValueFromCellValue(value, parseText: false));
+  } catch (_) {
+    final text = '$value';
+    return text.trim().isEmpty ? null : text;
+  }
+}
+
+String _jsonDataUrlForCell(_SharedSwayzeController controller, _SharedSwayzeCellData cell) {
+  final columnName = cell.position.dx >= 0 && cell.position.dx < controller.columns.length ? controller.columns[cell.position.dx] : 'value';
+  final title = '${_safeJsonFileName(columnName)}-${cell.position.dy + 1}.json';
+  final text = _jsonTextForCell(cell);
+  if (text == null) {
+    throw StateError('Cell does not contain displayable JSON.');
+  }
+  final encodedName = Uri.encodeComponent(title);
+  final encodedData = base64Encode(utf8.encode(text));
+  return 'data:application/json;name=$encodedName;base64,$encodedData';
+}
+
+String _safeJsonFileName(String value) {
+  final normalized = value.trim().replaceAll(RegExp(r'[^A-Za-z0-9._-]+'), '-').replaceAll(RegExp(r'-+'), '-');
+  final trimmed = normalized.replaceAll(RegExp(r'^[-.]+|[-.]+$'), '');
+  return trimmed.isEmpty ? 'cell' : trimmed;
+}
+
+TextSpan _cellTextSpan(
+  BuildContext context, {
+  required _SharedSwayzeCellData data,
+  required String displayText,
+  required TextStyle textStyle,
+  required bool syntaxHighlight,
+}) {
+  if (!syntaxHighlight || displayText.isEmpty) {
+    return TextSpan(text: displayText, style: textStyle);
+  }
+
+  if (data.display == _ColumnDisplay.json) {
+    return highlightCodeSpanWithReHighlight(
+      context: context,
+      code: displayText,
+      languageOrFilename: 'cell.json',
+      textStyle: textStyle,
+      theme: _cellSyntaxTheme(context),
+    );
+  }
+
+  return TextSpan(text: displayText, style: _cellValueTextStyle(context, textStyle, data.value));
+}
+
+Map<String, TextStyle> _cellSyntaxTheme(BuildContext context) {
+  final brightness = ShadTheme.of(context).brightness;
+  return brightness == Brightness.dark ? materialDarkerTheme : materialLighterTheme;
+}
+
+TextStyle _cellValueTextStyle(BuildContext context, TextStyle textStyle, Object? value) {
+  if (value == null) {
+    return _cellTokenStyle(context, textStyle, 'comment');
+  }
+  if (value is bool) {
+    return _cellTokenStyle(context, textStyle, 'literal');
+  }
+  if (value is num) {
+    return _cellTokenStyle(context, textStyle, 'number');
+  }
+  if (value is DateTime) {
+    return _cellTokenStyle(context, textStyle, 'string');
+  }
+  if (value is String) {
+    return _cellTokenStyle(context, textStyle, 'string');
+  }
+  return _cellTokenStyle(context, textStyle, 'meta');
+}
+
+TextStyle _cellTokenStyle(BuildContext context, TextStyle textStyle, String token) {
+  final tokenStyle = _cellSyntaxTheme(context)[token];
+  if (tokenStyle == null) {
+    return textStyle;
+  }
+  return textStyle.merge(tokenStyle);
+}
+
 class _SharedSwayzeCellDelegate extends CellDelegate<_SharedSwayzeCellData> {
-  _SharedSwayzeCellDelegate({required this.controller, required this.onCopySelection, required this.wrapText, this.onOpenImage});
+  _SharedSwayzeCellDelegate({
+    required this.controller,
+    required this.onCopySelection,
+    required this.wrapText,
+    this.onOpenImage,
+    this.onOpenFile,
+  });
 
   final _SharedSwayzeController controller;
   final Future<void> Function() onCopySelection;
   final bool wrapText;
   final void Function(BuildContext context, Uint8List imageBytes)? onOpenImage;
+  final FutureOr<void> Function(String file)? onOpenFile;
 
   @override
   CellLayout getCellLayout(_SharedSwayzeCellData data) {
@@ -1681,18 +2023,27 @@ class _SharedSwayzeCellDelegate extends CellDelegate<_SharedSwayzeCellData> {
       onCopySelection: onCopySelection,
       wrapText: wrapText,
       onOpenImage: onOpenImage,
+      onOpenFile: onOpenFile,
     );
   }
 }
 
 class _SharedSwayzeCellLayout extends CellLayout {
-  _SharedSwayzeCellLayout(this.data, {required this.controller, required this.onCopySelection, required this.wrapText, this.onOpenImage});
+  _SharedSwayzeCellLayout(
+    this.data, {
+    required this.controller,
+    required this.onCopySelection,
+    required this.wrapText,
+    this.onOpenImage,
+    this.onOpenFile,
+  });
 
   final _SharedSwayzeCellData data;
   final _SharedSwayzeController controller;
   final Future<void> Function() onCopySelection;
   final bool wrapText;
   final void Function(BuildContext context, Uint8List imageBytes)? onOpenImage;
+  final FutureOr<void> Function(String file)? onOpenFile;
 
   @override
   Widget buildCell(BuildContext context, {bool isHover = false, bool isActive = false}) {
@@ -1731,6 +2082,7 @@ class _SharedSwayzeCellLayout extends CellLayout {
         data: data,
         controller: controller,
         onCopySelection: onCopySelection,
+        onOpenFile: onOpenFile,
         onDoubleTap: imageBytes == null || onOpenImage == null ? null : () => onOpenImage!(context, imageBytes),
         child: SizedBox.expand(child: child),
       );
@@ -1742,7 +2094,7 @@ class _SharedSwayzeCellLayout extends CellLayout {
             constraints.maxWidth.isFinite && constraints.maxWidth <= _kMinimumReadableCellWidth && data.preview.isNotEmpty;
         final displayText = shouldShowCompactIndicator ? '...' : data.preview;
         final shouldWrapText = wrapText && !shouldShowCompactIndicator && constraints.maxWidth.isFinite;
-        final textStyle = baseTextStyle.copyWith(color: textColor);
+        final textStyle = baseTextStyle.copyWith(color: textColor, fontFamily: 'SourceCodePro');
         final effectivePadding = _resolveGridCellPaddingForTextLayout(
           context,
           text: displayText,
@@ -1759,18 +2111,18 @@ class _SharedSwayzeCellLayout extends CellLayout {
           constraints: constraints,
           shouldWrapText: shouldWrapText,
         );
-        final text = Text(
-          displayText,
+        final text = Text.rich(
+          _cellTextSpan(context, data: data, displayText: displayText, textStyle: textStyle, syntaxHighlight: !shouldShowCompactIndicator),
           maxLines: wrappedTextLayout.maxLines,
           overflow: wrappedTextLayout.overflow,
           softWrap: shouldWrapText,
-          style: textStyle,
         );
 
         return _SharedSwayzeCellContextMenuRegion(
           data: data,
           controller: controller,
           onCopySelection: onCopySelection,
+          onOpenFile: onOpenFile,
           onDoubleTap: null,
           child: SizedBox.expand(
             child: Padding(
@@ -1900,6 +2252,7 @@ class _SharedSwayzeCellContextMenuRegion extends StatefulWidget {
     required this.controller,
     required this.onCopySelection,
     required this.child,
+    this.onOpenFile,
     this.onDoubleTap,
   });
 
@@ -1907,6 +2260,7 @@ class _SharedSwayzeCellContextMenuRegion extends StatefulWidget {
   final _SharedSwayzeController controller;
   final Future<void> Function() onCopySelection;
   final Widget child;
+  final FutureOr<void> Function(String file)? onOpenFile;
   final VoidCallback? onDoubleTap;
 
   @override
@@ -1976,18 +2330,37 @@ class _SharedSwayzeCellContextMenuRegionState extends State<_SharedSwayzeCellCon
     }
   }
 
+  Future<void> _waitForDismiss() async {
+    _hide();
+    await WidgetsBinding.instance.endOfFrame;
+  }
+
   @override
   Widget build(BuildContext context) {
     final longPressEnabled = defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS;
     final isWindows = defaultTargetPlatform == TargetPlatform.windows;
+    final canViewJson = widget.onOpenFile != null && widget.data.display == _ColumnDisplay.json;
 
     return CoordinatedShadContextMenu(
       anchor: _offset == null ? null : ShadGlobalAnchor(_offset!),
       controller: _controller,
       constraints: const BoxConstraints(minWidth: 160),
       estimatedMenuWidth: 160,
-      estimatedMenuHeight: 48,
+      estimatedMenuHeight: canViewJson ? 96 : 48,
       items: [
+        if (canViewJson)
+          ShadContextMenuItem(
+            leading: const Icon(Icons.visibility, size: 16),
+            onPressed: () async {
+              final file = _jsonDataUrlForCell(widget.controller, widget.data);
+              await _waitForDismiss();
+              if (!mounted) {
+                return;
+              }
+              await widget.onOpenFile!(file);
+            },
+            child: const Text('View JSON'),
+          ),
         ShadContextMenuItem(
           leading: const Icon(Icons.copy, size: 16),
           onPressed: () async {

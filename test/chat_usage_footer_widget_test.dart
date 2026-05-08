@@ -281,6 +281,15 @@ Map<String, Object?> _messageRow({
   return {'item_id': itemId, 'sequence': sequence, 'timestamp': timestamp, 'data': data};
 }
 
+Map<String, Object?> _agentPayloadRow({
+  required String itemId,
+  required int sequence,
+  required String timestamp,
+  required Map<String, Object?> data,
+}) {
+  return {'item_id': itemId, 'sequence': sequence, 'timestamp': timestamp, 'data': data};
+}
+
 ArrowRecordBatch _usageRowsBatch({
   String itemId = 'usage-1',
   int sequence = 0,
@@ -724,13 +733,20 @@ void main() {
 
     await tester.runAsync(() async {
       await harness.server.sendAgentMessage(harness.pair.serverProtocol, {
-        'type': 'meshagent.agent.turn.start.accepted',
+        'type': 'meshagent.agent.turn.start',
         'thread_id': 'dataset://threads/test',
-        'source_message_id': 'user-message-1',
+        'message_id': 'user-message-1',
         'sender_name': 'self',
         'content': [
           {'type': 'text', 'text': 'hello dataset'},
         ],
+      });
+    });
+    await tester.runAsync(() async {
+      await harness.server.sendAgentMessage(harness.pair.serverProtocol, {
+        'type': 'meshagent.agent.turn.start.accepted',
+        'thread_id': 'dataset://threads/test',
+        'source_message_id': 'user-message-1',
       });
     });
     await tester.pump(const Duration(milliseconds: 50));
@@ -772,6 +788,112 @@ void main() {
         return 'applied dataset pending input did not materialize into the message feed. Rendered text: $texts';
       },
     );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 500));
+  });
+
+  testWidgets('Dataset ChatBotView keeps steered messages stable when dataset rows catch up', (tester) async {
+    final harness = (await tester.runAsync<_MessagingHarness>(() async {
+      final harness = await _startMessagingHarness(
+        initialDatasetBatch: _threadRowsBatch([
+          _messageRow(itemId: 'assistant-before', sequence: 0, timestamp: '2026-05-07T16:00:00Z', role: 'assistant', text: 'before steer'),
+        ]),
+      );
+      await harness.room.messaging.enable();
+      await _waitUntil(() => harness.room.messaging.remoteParticipants.isNotEmpty);
+      return harness;
+    }))!;
+    addTearDown(harness.dispose);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox.expand(
+            child: ChatBotView(room: harness.room, agentName: 'assistant', documentPath: 'dataset://threads/test'),
+          ),
+        ),
+      ),
+    );
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    });
+    await _pumpUntil(tester, () => find.text('before steer').evaluate().isNotEmpty);
+
+    await tester.runAsync(() async {
+      await harness.server.sendAgentMessage(harness.pair.serverProtocol, {
+        'type': 'meshagent.agent.turn.steer',
+        'thread_id': 'dataset://threads/test',
+        'turn_id': 'turn-1',
+        'message_id': 'steer-message-1',
+        'sender_name': 'self',
+        'content': [
+          {'type': 'text', 'text': 'in spanish'},
+        ],
+      });
+      await harness.server.sendAgentMessage(harness.pair.serverProtocol, {
+        'type': 'meshagent.agent.turn.steered',
+        'thread_id': 'dataset://threads/test',
+        'turn_id': 'turn-1',
+        'source_message_id': 'steer-message-1',
+      });
+      await harness.server.sendAgentMessage(harness.pair.serverProtocol, {
+        'type': 'meshagent.agent.text_content.delta',
+        'thread_id': 'dataset://threads/test',
+        'turn_id': 'turn-1',
+        'item_id': 'assistant-after',
+        'text': 'after steer',
+      });
+    });
+    await _pumpUntil(
+      tester,
+      () => find.text('in spanish').evaluate().length == 1 && find.text('after steer').evaluate().length == 1,
+      describe: () {
+        final texts = tester.widgetList<Text>(find.byType(Text)).map((text) => text.data).whereType<String>().join(' | ');
+        return 'live steered message did not render once. Rendered text: $texts';
+      },
+    );
+
+    await tester.runAsync(() async {
+      await harness.server.sendDatasetRows(
+        harness.pair.serverProtocol,
+        _threadRowsBatch([
+          _agentPayloadRow(
+            itemId: 'steer-message-1',
+            sequence: 1,
+            timestamp: '2026-05-07T16:00:01Z',
+            data: {
+              'type': 'meshagent.agent.turn.steer',
+              'thread_id': 'dataset://threads/test',
+              'turn_id': 'turn-1',
+              'message_id': 'steer-message-1',
+              'sender_name': 'self',
+              'content': [
+                {'type': 'text', 'text': 'in spanish'},
+              ],
+            },
+          ),
+          _agentPayloadRow(
+            itemId: 'steered-row-1',
+            sequence: 2,
+            timestamp: '2026-05-07T16:00:02Z',
+            data: {
+              'type': 'meshagent.agent.turn.steered',
+              'thread_id': 'dataset://threads/test',
+              'turn_id': 'turn-1',
+              'message_id': 'steered-row-1',
+              'source_message_id': 'steer-message-1',
+            },
+          ),
+        ]),
+      );
+    });
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.text('in spanish'), findsOneWidget);
+    expect(find.text('after steer'), findsOneWidget);
+    expect(tester.getTopLeft(find.text('before steer')).dy, lessThan(tester.getTopLeft(find.text('in spanish')).dy));
+    expect(tester.getTopLeft(find.text('in spanish')).dy, lessThan(tester.getTopLeft(find.text('after steer')).dy));
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(milliseconds: 500));

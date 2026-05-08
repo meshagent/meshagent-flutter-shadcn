@@ -401,14 +401,18 @@ void main() {
     trackAgentThreadStatusPayload(
       room: harness.room,
       payload: {
-        'type': 'meshagent.agent.turn.start.accepted',
+        'type': 'meshagent.agent.turn.start',
         'thread_id': threadPath,
-        'source_message_id': 'message-1',
+        'message_id': 'message-1',
         'sender_name': 'sender',
         'content': [
           {'type': 'text', 'text': 'hello'},
         ],
       },
+    );
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {'type': 'meshagent.agent.turn.start.accepted', 'thread_id': threadPath, 'source_message_id': 'message-1'},
     );
 
     final pendingState = resolveChatThreadStatus(room: harness.room, path: threadPath, agentName: 'assistant');
@@ -442,14 +446,20 @@ void main() {
     addTearDown(controller.dispose);
 
     controller.handleAgentMessagePayload({
-      'type': 'meshagent.agent.turn.steer.accepted',
+      'type': 'meshagent.agent.turn.steer',
       'thread_id': threadPath,
       'turn_id': 'turn-1',
-      'source_message_id': 'message-1',
+      'message_id': 'message-1',
       'sender_name': 'sender',
       'content': [
         {'type': 'text', 'text': 'wait'},
       ],
+    });
+    controller.handleAgentMessagePayload({
+      'type': 'meshagent.agent.turn.steer.accepted',
+      'thread_id': threadPath,
+      'turn_id': 'turn-1',
+      'source_message_id': 'message-1',
     });
 
     expect(controller.pendingAgentMessagesForPath(threadPath), hasLength(1));
@@ -462,8 +472,7 @@ void main() {
       'source_message_id': 'message-1',
     });
 
-    expect(controller.pendingAgentMessagesForPath(threadPath), hasLength(1));
-    expect(controller.pendingAgentMessagesForPath(threadPath).single.awaitingApplication, isFalse);
+    expect(controller.pendingAgentMessagesForPath(threadPath), isEmpty);
   });
 
   test('resolveChatThreadStatus preserves active turn without visible status text', () async {

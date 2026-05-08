@@ -870,6 +870,28 @@ class PendingAgentMessage {
       awaitingOnline: false,
     );
   }
+
+  factory PendingAgentMessage.fromTurnInputPayload(Map<String, dynamic> payload) {
+    final parsedContent = _parseContent(payload["content"]);
+    final type = payload["type"];
+    final senderName = payload["sender_name"];
+    final messageId = payload["message_id"];
+    final threadPath = payload["thread_id"];
+    final createdAt = payload["created_at"];
+    return PendingAgentMessage(
+      messageId: messageId is String && messageId.trim().isNotEmpty ? messageId.trim() : const Uuid().v4(),
+      messageType: type is String ? type : _agentTurnStartType,
+      threadPath: threadPath is String ? threadPath : "",
+      text: parsedContent.text,
+      attachments: parsedContent.attachments,
+      senderName: senderName is String && senderName.trim().isNotEmpty ? senderName.trim() : null,
+      createdAt: createdAt is String ? DateTime.tryParse(createdAt) : null,
+      matchByContentOnly: false,
+      awaitingAcceptance: true,
+      awaitingApplication: true,
+      awaitingOnline: false,
+    );
+  }
 }
 
 class ChatSendCancelledException implements Exception {
@@ -973,6 +995,10 @@ class _AgentThreadMessageStatusStore {
       case _agentThreadStatusType:
         _touchedThreadPaths.add(normalizedThreadPath);
         return _applyStatus(normalizedThreadPath, payload);
+      case _agentTurnStartType:
+      case _agentTurnSteerType:
+        _touchedThreadPaths.add(normalizedThreadPath);
+        return _applyTurnInput(normalizedThreadPath, payload);
       case _agentTurnStartAcceptedType:
       case _agentTurnSteerAcceptedType:
         _touchedThreadPaths.add(normalizedThreadPath);
@@ -1057,6 +1083,14 @@ class _AgentThreadMessageStatusStore {
     return true;
   }
 
+  bool _applyTurnInput(String threadPath, Map<String, dynamic> payload) {
+    final parsedMessage = PendingAgentMessage.fromTurnInputPayload(payload);
+    if (parsedMessage.messageId.trim().isEmpty) {
+      return false;
+    }
+    return _upsertPendingMessage(threadPath, parsedMessage);
+  }
+
   bool _applyAccepted(String threadPath, Map<String, dynamic> payload) {
     final parsedMessage = PendingAgentMessage.fromAcceptedPayload(payload);
     if (parsedMessage.messageId.trim().isEmpty) {
@@ -1064,26 +1098,33 @@ class _AgentThreadMessageStatusStore {
     }
     final pendingMessages = _pendingMessagesByThreadPath.putIfAbsent(threadPath, LinkedHashMap<String, PendingAgentMessage>.new);
     final existing = pendingMessages[parsedMessage.messageId];
-    final message = existing != null && !existing.awaitingApplication
-        ? PendingAgentMessage(
-            messageId: parsedMessage.messageId,
-            messageType: parsedMessage.messageType,
-            threadPath: parsedMessage.threadPath,
-            text: parsedMessage.text,
-            attachments: parsedMessage.attachments,
-            senderName: parsedMessage.senderName,
-            createdAt: parsedMessage.createdAt,
-            matchByContentOnly: parsedMessage.matchByContentOnly,
-            awaitingAcceptance: parsedMessage.awaitingAcceptance,
-            awaitingApplication: false,
-            awaitingOnline: parsedMessage.awaitingOnline,
-          )
-        : parsedMessage;
+    final message = existing == null
+        ? parsedMessage
+        : PendingAgentMessage(
+            messageId: existing.messageId,
+            messageType: existing.messageType,
+            threadPath: existing.threadPath,
+            text: existing.text,
+            attachments: existing.attachments,
+            senderName: existing.senderName,
+            createdAt: existing.createdAt,
+            matchByContentOnly: existing.matchByContentOnly,
+            awaitingAcceptance: false,
+            awaitingApplication: existing.awaitingApplication,
+            awaitingOnline: existing.awaitingOnline,
+          );
+    return _upsertPendingMessage(threadPath, message);
+  }
+
+  bool _upsertPendingMessage(String threadPath, PendingAgentMessage message) {
+    final pendingMessages = _pendingMessagesByThreadPath.putIfAbsent(threadPath, LinkedHashMap<String, PendingAgentMessage>.new);
+    final existing = pendingMessages[message.messageId];
     if (existing != null &&
         existing.messageType == message.messageType &&
         existing.text == message.text &&
         const DeepCollectionEquality().equals(existing.attachments, message.attachments) &&
         existing.senderName == message.senderName &&
+        existing.awaitingAcceptance == message.awaitingAcceptance &&
         existing.awaitingApplication == message.awaitingApplication) {
       return false;
     }
@@ -1098,19 +1139,26 @@ class _AgentThreadMessageStatusStore {
     if (normalizedSourceMessageId.isNotEmpty) {
       final existing = pendingMessages?[normalizedSourceMessageId];
       if (existing != null && existing.awaitingApplication) {
-        pendingMessages![normalizedSourceMessageId] = PendingAgentMessage(
-          messageId: existing.messageId,
-          messageType: existing.messageType,
-          threadPath: existing.threadPath,
-          text: existing.text,
-          attachments: existing.attachments,
-          senderName: existing.senderName,
-          createdAt: existing.createdAt,
-          matchByContentOnly: existing.matchByContentOnly,
-          awaitingAcceptance: existing.awaitingAcceptance,
-          awaitingApplication: false,
-          awaitingOnline: existing.awaitingOnline,
-        );
+        if (existing.messageType == _agentTurnSteerType) {
+          pendingMessages!.remove(normalizedSourceMessageId);
+          if (pendingMessages.isEmpty) {
+            _pendingMessagesByThreadPath.remove(threadPath);
+          }
+        } else {
+          pendingMessages![normalizedSourceMessageId] = PendingAgentMessage(
+            messageId: existing.messageId,
+            messageType: existing.messageType,
+            threadPath: existing.threadPath,
+            text: existing.text,
+            attachments: existing.attachments,
+            senderName: existing.senderName,
+            createdAt: existing.createdAt,
+            matchByContentOnly: existing.matchByContentOnly,
+            awaitingAcceptance: existing.awaitingAcceptance,
+            awaitingApplication: false,
+            awaitingOnline: existing.awaitingOnline,
+          );
+        }
         changed = true;
       }
     }
@@ -1595,6 +1643,12 @@ class ChatThreadController extends ChangeNotifier {
       return;
     }
 
+    if (existing.messageType == _agentTurnSteerType) {
+      _pendingAgentMessages.remove(messageId);
+      notifyListeners();
+      return;
+    }
+
     _pendingAgentMessages[messageId] = PendingAgentMessage(
       messageId: existing.messageId,
       messageType: existing.messageType,
@@ -1674,6 +1728,14 @@ class ChatThreadController extends ChangeNotifier {
     final normalizedSourceMessageId = sourceMessageId is String ? sourceMessageId : null;
     final threadPath = payload["thread_id"];
     final normalizedThreadPath = threadPath is String ? threadPath.trim() : "";
+
+    if (type == _agentTurnStartType || type == _agentTurnSteerType) {
+      final pendingMessage = PendingAgentMessage.fromTurnInputPayload(payload);
+      if (pendingMessage.threadPath.trim().isNotEmpty) {
+        _markPendingAgentMessage(message: pendingMessage);
+      }
+      return;
+    }
 
     if (type == _agentTurnStartAcceptedType || type == _agentTurnSteerAcceptedType) {
       if (normalizedSourceMessageId != null && _pendingAgentMessages.containsKey(normalizedSourceMessageId)) {
@@ -7245,6 +7307,37 @@ class _ThreadImageRecord {
   final String mimeType;
 }
 
+_ThreadImageRecord? _threadImageRecordFromDataUri(String imageUri, {String? fallbackMimeType}) {
+  final trimmed = imageUri.trim();
+  if (!trimmed.startsWith("data:")) {
+    return null;
+  }
+
+  final commaIndex = trimmed.indexOf(",");
+  if (commaIndex == -1) {
+    return null;
+  }
+
+  final metadata = trimmed.substring(5, commaIndex);
+  final encodedData = trimmed.substring(commaIndex + 1).trim();
+  if (encodedData.isEmpty) {
+    return null;
+  }
+
+  final metadataParts = metadata.split(";");
+  final parsedMimeType = metadataParts.isNotEmpty ? metadataParts.first.trim() : "";
+  final fallback = fallbackMimeType?.trim() ?? "";
+  final mimeType = parsedMimeType.isNotEmpty ? parsedMimeType : (fallback.isNotEmpty ? fallback : "image/png");
+  final isBase64 = metadataParts.any((part) => part.trim().toLowerCase() == "base64");
+
+  try {
+    final data = isBase64 ? base64Decode(encodedData) : Uint8List.fromList(utf8.encode(Uri.decodeComponent(encodedData)));
+    return _ThreadImageRecord(data: data, mimeType: mimeType);
+  } catch (_) {
+    return null;
+  }
+}
+
 Future<_ThreadImageRecord?> _loadGeneratedThreadImageRecord(RoomClient room, {required String imageId, String? fallbackMimeType}) async {
   final trimmedImageId = imageId.trim();
   if (trimmedImageId.isEmpty) {
@@ -7289,6 +7382,11 @@ Future<_ThreadImageRecord?> _loadGeneratedThreadImageRecordFromUri(
   required String imageUri,
   String? fallbackMimeType,
 }) async {
+  final dataUriRecord = _threadImageRecordFromDataUri(imageUri, fallbackMimeType: fallbackMimeType);
+  if (dataUriRecord != null) {
+    return dataUriRecord;
+  }
+
   final parsed = Uri.tryParse(imageUri.trim());
   if (parsed == null || parsed.scheme != 'dataset') {
     return null;

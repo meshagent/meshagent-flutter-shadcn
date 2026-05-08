@@ -10,6 +10,8 @@ import 'dataset_chat_thread.dart';
 import 'multi_thread_view.dart';
 import 'thread_list_view.dart';
 
+typedef DatasetChatThreadWrapperBuilder = Widget Function(BuildContext context, String path, Widget thread);
+
 class ChatBotView extends StatefulWidget {
   const ChatBotView({
     super.key,
@@ -54,6 +56,7 @@ class ChatBotView extends StatefulWidget {
     this.initialShowCompletedToolCalls = false,
     this.shouldShowAuthorNames = true,
     this.showUsageFooter = false,
+    this.datasetThreadWrapperBuilder,
   });
 
   final RoomClient room;
@@ -97,6 +100,7 @@ class ChatBotView extends StatefulWidget {
   final bool initialShowCompletedToolCalls;
   final bool shouldShowAuthorNames;
   final bool showUsageFooter;
+  final DatasetChatThreadWrapperBuilder? datasetThreadWrapperBuilder;
 
   @override
   State<ChatBotView> createState() => _ChatBotViewState();
@@ -168,9 +172,9 @@ class _ChatBotViewState extends State<ChatBotView> {
     return builder(context, chatBox);
   }
 
-  Widget _buildThread(String path, ChatThreadController controller, {GlobalKey? composerKey}) {
+  Widget _buildThread(BuildContext context, String path, ChatThreadController controller, {GlobalKey? composerKey}) {
     if (path.startsWith('dataset://') || path.startsWith('tmp://')) {
-      return DatasetChatThread(
+      final thread = DatasetChatThread(
         key: ValueKey(path),
         path: path,
         room: widget.room,
@@ -188,6 +192,10 @@ class _ChatBotViewState extends State<ChatBotView> {
         initialShowCompletedToolCalls: widget.initialShowCompletedToolCalls,
         showUsageFooter: widget.showUsageFooter,
       );
+      if (path.startsWith('dataset://')) {
+        return widget.datasetThreadWrapperBuilder?.call(context, path, thread) ?? thread;
+      }
+      return thread;
     }
 
     return ChatThread(
@@ -246,7 +254,7 @@ class _ChatBotViewState extends State<ChatBotView> {
       inputContextMenuBuilder: widget.inputContextMenuBuilder,
       inputOnPressedOutside: widget.inputOnPressedOutside,
       toolsBuilder: widget.toolsBuilder,
-      builder: (context, path, controller, composerKey) => _buildThread(path, controller, composerKey: composerKey),
+      builder: (context, path, controller, composerKey) => _buildThread(context, path, controller, composerKey: composerKey),
     );
 
     final threadListPath = _resolvedThreadListPath();
@@ -298,6 +306,6 @@ class _ChatBotViewState extends State<ChatBotView> {
       return _buildMultiThreadView(context);
     }
 
-    return _buildThread(_resolvedSingleThreadPath(), _controller);
+    return _buildThread(context, _resolvedSingleThreadPath(), _controller);
   }
 }
