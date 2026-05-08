@@ -8,6 +8,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:uuid/uuid.dart';
 
 import 'chat.dart';
+import 'tool_call_summary.dart';
 import 'usage_footer_tooltip.dart';
 
 const String _agentRoomMessageType = 'agent-message';
@@ -34,6 +35,7 @@ const String _agentFileContentEndedType = 'meshagent.agent.file_content.ended';
 const String _agentToolCallPendingType = 'meshagent.agent.tool_call.pending';
 const String _agentToolCallInProgressType = 'meshagent.agent.tool_call.in_progress';
 const String _agentToolCallStartedType = 'meshagent.agent.tool_call.started';
+const String _agentToolCallLogDeltaType = 'meshagent.agent.tool_call.log_delta';
 const String _agentToolCallEndedType = 'meshagent.agent.tool_call.ended';
 const String _agentImageGenerationStartedType = 'meshagent.agent.image_generation.started';
 const String _agentImageGenerationPartialType = 'meshagent.agent.image_generation.partial';
@@ -95,7 +97,6 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   Object? _error;
   bool _fatalError = false;
   bool _ready = false;
-  late bool _showCompletedToolCalls;
   ChatThreadStatusState _status = const ChatThreadStatusState();
   AgentUsageSnapshot? _usage;
   int _nextAgentSequence = 0;
@@ -112,7 +113,6 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     _ownsController = widget.controller == null;
     _controller = widget.controller ?? ChatThreadController(room: widget.room);
     _composerInputKey = widget.composerKey ?? GlobalObjectKey(_controller);
-    _showCompletedToolCalls = widget.initialShowCompletedToolCalls;
     _roomSubscription = widget.room.listen(_onRoomEvent);
     widget.room.messaging.addListener(_onMessagingChanged);
     _refreshStatus();
@@ -701,14 +701,22 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       case _agentToolCallInProgressType:
       case _agentToolCallStartedType:
       case _agentToolCallEndedType:
+        final itemId = _payloadItemId(payload);
+        final existingData = _mapValue(_agentRowsByItemId[itemId]?['data']);
         final tool = payload['tool']?.toString() ?? payload['tool_name']?.toString() ?? payload['name']?.toString() ?? '';
+        final resolvedTool = tool.trim().isEmpty ? (existingData?['tool']?.toString() ?? '') : tool;
+        final toolkit = payload['toolkit']?.toString() ?? payload['toolkit_name']?.toString() ?? existingData?['toolkit']?.toString() ?? '';
+        final arguments = _mapValue(payload['arguments']) ?? _mapValue(existingData?['arguments']);
+        final errorMessage = _agentToolCallErrorMessage(payload['error']);
+        final errorData = errorMessage == null ? const <String, Object?>{} : <String, Object?>{'error_message': errorMessage};
+        final logs = _stringList(existingData?['logs']);
         final isImageGeneration = tool.trim().toLowerCase() == 'image_generation';
         if (isImageGeneration && type == _agentToolCallEndedType && payload['error'] == null) {
           break;
         }
         changed =
             _upsertAgentRow(
-              itemId: _payloadItemId(payload),
+              itemId: itemId,
               turnId: _payloadTurnId(payload),
               data: isImageGeneration
                   ? {
@@ -723,11 +731,32 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                   : {
                       'kind': 'tool_call',
                       'role': 'assistant',
-                      'toolkit': payload['toolkit']?.toString() ?? payload['toolkit_name']?.toString() ?? '',
-                      'tool': tool,
-                      'status': type == _agentToolCallEndedType ? 'completed' : 'running',
-                      'sender_name': _senderNameFromPayload(payload) ?? _agentRowSenderName(_payloadItemId(payload)),
+                      'toolkit': toolkit,
+                      'tool': resolvedTool,
+                      'status': type == _agentToolCallEndedType ? (errorMessage == null ? 'completed' : 'failed') : 'running',
+                      'arguments': arguments,
+                      'logs': logs,
+                      ...errorData,
+                      'text': formatToolCallEntryText(
+                        toolkit: toolkit,
+                        tool: resolvedTool,
+                        arguments: arguments,
+                        logs: logs,
+                        errorMessage: errorMessage,
+                        completed: type == _agentToolCallEndedType,
+                      ),
+                      'sender_name': _senderNameFromPayload(payload) ?? _agentRowSenderName(itemId),
                     },
+            ) ||
+            changed;
+        break;
+      case _agentToolCallLogDeltaType:
+        changed =
+            _appendAgentToolLogs(
+              itemId: _payloadItemId(payload),
+              turnId: _payloadTurnId(payload),
+              lines: _agentToolCallLogLines(payload['lines']),
+              senderName: _senderNameFromPayload(payload),
             ) ||
             changed;
         break;
@@ -923,6 +952,42 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     );
   }
 
+  bool _appendAgentToolLogs({required String itemId, required String? turnId, required List<String> lines, required String? senderName}) {
+    if (itemId.trim().isEmpty || lines.isEmpty) {
+      return false;
+    }
+    final existingData = _mapValue(_agentRowsByItemId[itemId]?['data']);
+    final logs = _stringList(existingData?['logs']).toList(growable: true)..addAll(lines);
+    final toolkit = existingData?['toolkit']?.toString() ?? '';
+    final tool = existingData?['tool']?.toString() ?? 'tool';
+    final arguments = _mapValue(existingData?['arguments']);
+    final status = existingData?['status']?.toString() ?? 'running';
+    final errorMessage = existingData?['error_message']?.toString();
+    return _upsertAgentRow(
+      itemId: itemId,
+      turnId: turnId,
+      data: {
+        'kind': 'tool_call',
+        'role': 'assistant',
+        'toolkit': toolkit,
+        'tool': tool,
+        'status': status,
+        'arguments': arguments,
+        'logs': logs,
+        if (errorMessage != null && errorMessage.trim().isNotEmpty) 'error_message': errorMessage,
+        'text': formatToolCallEntryText(
+          toolkit: toolkit,
+          tool: tool,
+          arguments: arguments,
+          logs: logs,
+          errorMessage: errorMessage,
+          completed: !_toolCallStatusIsRunning(status),
+        ),
+        'sender_name': senderName ?? existingData?['sender_name']?.toString(),
+      },
+    );
+  }
+
   String _agentRowText(String itemId) {
     return _mapValue(_agentRowsByItemId[itemId]?['data'])?['text']?.toString() ?? '';
   }
@@ -1004,8 +1069,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     final rows = mergedRowsByItemId.values.toList(growable: false)..sort(_compareDatasetThreadRows);
     final turnInputPayloadsById = _turnInputPayloadsById(rows);
     final messagesById = <String, _DatasetThreadMessage>{};
-    for (final row in rows) {
-      final message = _messageForRow(row, turnInputPayloadsById: turnInputPayloadsById);
+    for (final parsed in _messagesForRows(rows, turnInputPayloadsById: turnInputPayloadsById)) {
+      final row = parsed.row;
+      final message = parsed.message;
       if (message != null && _shouldRenderDatasetThreadMessage(message)) {
         final messageKey = _datasetThreadMessageDedupeKey(row: row, message: message);
         final existing = messagesById[messageKey];
@@ -1013,6 +1079,39 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       }
     }
     return messagesById.values.toList(growable: false);
+  }
+
+  List<({Map<String, Object?> row, _DatasetThreadMessage? message})> _messagesForRows(
+    List<Map<String, Object?>> rows, {
+    required Map<String, Map<String, Object?>> turnInputPayloadsById,
+  }) {
+    final messages = <({Map<String, Object?> row, _DatasetThreadMessage? message})>[];
+    final toolCallsByItemId = <String, _DatasetToolCallState>{};
+    for (final row in rows) {
+      final data = _rowData(row);
+      final type = data?['type']?.toString();
+      final itemId = row['item_id']?.toString() ?? (data == null ? '' : _payloadItemId(Map<String, dynamic>.from(data)));
+      if (_isDatasetToolCallStartType(type)) {
+        toolCallsByItemId[itemId] = _DatasetToolCallState.fromPayload(row: row, payload: data!);
+        continue;
+      }
+      if (type == _agentToolCallLogDeltaType) {
+        final state = toolCallsByItemId[itemId];
+        if (state != null) {
+          state.logs.addAll(_agentToolCallLogLines(data?['lines']));
+        }
+        continue;
+      }
+      if (type == _agentToolCallEndedType) {
+        final state = toolCallsByItemId.remove(itemId);
+        final message = _messageForToolCallEndRow(row: row, payload: data, state: state);
+        messages.add((row: row, message: message));
+        continue;
+      }
+      final message = _messageForRow(row, turnInputPayloadsById: turnInputPayloadsById);
+      messages.add((row: row, message: message));
+    }
+    return messages;
   }
 
   Map<String, Map<String, Object?>> _turnInputPayloadsById(Iterable<Map<String, Object?>> rows) {
@@ -1043,9 +1142,6 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   bool _shouldRenderDatasetThreadMessage(_DatasetThreadMessage message) {
-    if (message.kind == 'tool_call') {
-      return _showCompletedToolCalls;
-    }
     final image = message.image;
     if (image != null) {
       final hasImageReference = _stringValue(image.imageId) != null || _stringValue(image.uri) != null;
@@ -1419,12 +1515,33 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     );
   }
 
-  Widget _buildMessage(BuildContext context, _DatasetThreadMessage message, {required List<ChatThreadFeedImage> feedImages}) {
+  Widget _buildMessage(
+    BuildContext context,
+    _DatasetThreadMessage message, {
+    required List<ChatThreadFeedImage> feedImages,
+    required bool shouldShowParticipantHeader,
+  }) {
     final theme = ShadTheme.of(context);
     if (message.kind != 'message') {
+      if (message.kind == 'tool_call') {
+        return Padding(
+          padding: const EdgeInsets.only(left: 42, right: 18),
+          child: SizedBox(width: double.infinity, child: _buildToolCallSummaryText(context, message.text)),
+        );
+      }
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
-        child: Text(message.text, style: theme.textTheme.muted, textAlign: TextAlign.center),
+        child: SizedBox(
+          width: double.infinity,
+          child: Align(
+            alignment: Alignment.center,
+            child: Text(
+              message.text,
+              style: theme.textTheme.muted.copyWith(color: theme.colorScheme.mutedForeground),
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
       );
     }
 
@@ -1446,7 +1563,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       text: message.text,
       authorName: authorName ?? '',
       createdAt: message.createdAt,
-      shouldShowHeader: !isAgentMessage || authorName != null,
+      shouldShowHeader: shouldShowParticipantHeader,
       attachmentWidgets: [
         for (final attachment in message.attachments)
           GestureDetector(
@@ -1472,6 +1589,45 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     );
   }
 
+  bool _shouldShowParticipantHeaderForMessage(List<_DatasetThreadMessage> messages, int index) {
+    final message = messages[index];
+    if (message.kind != 'message') {
+      return false;
+    }
+    final authorName = message.authorName?.trim();
+    if (message.role == 'agent' && (authorName == null || authorName.isEmpty)) {
+      return false;
+    }
+    if (index == 0) {
+      return true;
+    }
+    for (final previous in messages.take(index).toList().reversed) {
+      final previousKey = _datasetMessageParticipantKey(previous);
+      if (previousKey == null) {
+        continue;
+      }
+      return previousKey != _datasetMessageParticipantKey(message);
+    }
+    return true;
+  }
+
+  String? _datasetMessageParticipantKey(_DatasetThreadMessage message) {
+    if (message.kind == 'compaction') {
+      return null;
+    }
+    final authorName = message.authorName?.trim();
+    if (authorName != null && authorName.isNotEmpty) {
+      return '${message.role}:$authorName';
+    }
+    if (message.role == 'agent') {
+      final agentName = widget.agentName?.trim();
+      if (agentName != null && agentName.isNotEmpty) {
+        return '${message.role}:$agentName';
+      }
+    }
+    return message.role;
+  }
+
   List<Widget> _buildMessageWidgets(
     BuildContext context,
     List<_DatasetThreadMessage> messages,
@@ -1481,13 +1637,18 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     final messageWidgets = <Widget>[];
     for (final message in messages.indexed) {
       if (messageWidgets.isNotEmpty) {
-        messageWidgets.insert(0, const SizedBox(height: ChatThreadMessageView.chatMessageStackSpacing));
+        messageWidgets.insert(0, SizedBox(height: _datasetThreadMessageSpacing(messages[message.$1 - 1], message.$2)));
       }
       messageWidgets.insert(
         0,
         Container(
           key: ValueKey(message.$2.id),
-          child: _buildMessage(context, message.$2, feedImages: feedImages),
+          child: _buildMessage(
+            context,
+            message.$2,
+            feedImages: feedImages,
+            shouldShowParticipantHeader: _shouldShowParticipantHeaderForMessage(messages, message.$1),
+          ),
         ),
       );
     }
@@ -1504,6 +1665,51 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       messageWidgets.insert(0, PendingChatThreadMessage(room: widget.room, message: pending));
     }
     return messageWidgets;
+  }
+
+  double _datasetThreadMessageSpacing(_DatasetThreadMessage previous, _DatasetThreadMessage next) {
+    if (previous.kind == 'tool_call' || next.kind == 'tool_call') {
+      return 10;
+    }
+    return ChatThreadMessageView.chatMessageStackSpacing;
+  }
+
+  Widget _buildToolCallSummaryText(BuildContext context, String text) {
+    final theme = ShadTheme.of(context);
+    final displayText = _indentToolCallSummaryContinuationLines(text);
+    final baseStyle = theme.textTheme.muted.copyWith(color: theme.colorScheme.mutedForeground);
+    final highlightStyle = baseStyle.copyWith(color: theme.colorScheme.foreground, fontWeight: FontWeight.w700);
+    final highlightEnd = _toolCallSummaryHighlightEnd(displayText);
+    if (highlightEnd <= 0) {
+      return Text(displayText, style: baseStyle, textAlign: TextAlign.left);
+    }
+    return Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(text: displayText.substring(0, highlightEnd), style: highlightStyle),
+          TextSpan(text: displayText.substring(highlightEnd)),
+        ],
+      ),
+      style: baseStyle,
+      textAlign: TextAlign.left,
+    );
+  }
+
+  int _toolCallSummaryHighlightEnd(String text) {
+    final colonIndex = text.indexOf(':');
+    if (colonIndex >= 0 && colonIndex + 1 < 30) {
+      return colonIndex + 1;
+    }
+    final firstWordMatch = RegExp(r'^\S+').firstMatch(text);
+    return firstWordMatch?.end ?? 0;
+  }
+
+  String _indentToolCallSummaryContinuationLines(String text) {
+    final lines = text.split('\n');
+    if (lines.length <= 1) {
+      return text;
+    }
+    return [lines.first, for (final line in lines.skip(1)) '  $line'].join('\n');
   }
 
   Widget? _buildQueuedPendingMessages(
@@ -1681,6 +1887,39 @@ class _DatasetThreadMessage {
   final DateTime createdAt;
   final _DatasetThreadImage? image;
   final String? authorName;
+}
+
+class _DatasetToolCallState {
+  _DatasetToolCallState({
+    required this.itemId,
+    required this.toolkit,
+    required this.tool,
+    required this.arguments,
+    required this.logs,
+    required this.authorName,
+    required this.createdAt,
+  });
+
+  factory _DatasetToolCallState.fromPayload({required Map<String, Object?> row, required Map<String, Object?> payload}) {
+    final tool = payload['tool']?.toString() ?? payload['tool_name']?.toString() ?? payload['name']?.toString() ?? 'tool';
+    return _DatasetToolCallState(
+      itemId: row['item_id']?.toString() ?? _payloadItemId(Map<String, dynamic>.from(payload)),
+      toolkit: payload['toolkit']?.toString() ?? payload['toolkit_name']?.toString() ?? '',
+      tool: tool.trim().isEmpty ? 'tool' : tool,
+      arguments: _mapValue(payload['arguments']),
+      logs: <String>[],
+      authorName: payload['sender_name']?.toString(),
+      createdAt: _rowTimestamp(row),
+    );
+  }
+
+  final String itemId;
+  String toolkit;
+  String tool;
+  Map<String, Object?>? arguments;
+  final List<String> logs;
+  String? authorName;
+  final DateTime createdAt;
 }
 
 _DatasetThreadMessage _mergeDuplicateDatasetThreadMessage(_DatasetThreadMessage existing, _DatasetThreadMessage next) {
@@ -1862,12 +2101,23 @@ _DatasetThreadMessage? _messageForRow(
     case 'tool_call':
       final toolkit = data['toolkit']?.toString() ?? '';
       final tool = data['tool']?.toString() ?? '';
-      final summary = [toolkit, tool].where((part) => part.trim().isNotEmpty).join('.');
+      final arguments = _mapValue(data['arguments']);
+      final logs = _stringList(data['logs']);
+      final errorMessage = data['error_message']?.toString();
+      final status = data['status']?.toString();
+      final summary = formatToolCallEntryText(
+        toolkit: toolkit,
+        tool: tool.trim().isEmpty ? 'tool' : tool,
+        arguments: arguments,
+        logs: logs,
+        errorMessage: errorMessage,
+        completed: !_toolCallStatusIsRunning(status),
+      );
       return _DatasetThreadMessage(
         id: itemId,
         kind: 'tool_call',
         role: 'agent',
-        text: summary.isEmpty ? 'Tool call' : summary,
+        text: summary.trim().isEmpty ? 'Tool call' : summary,
         authorName: data['sender_name']?.toString(),
         attachments: const [],
         createdAt: _rowTimestamp(row),
@@ -1994,19 +2244,10 @@ _DatasetThreadMessage? _messageForAgentPayload(
         ),
       );
     case _agentToolCallStartedType:
+    case _agentToolCallLogDeltaType:
+      return null;
     case _agentToolCallEndedType:
-      final toolkit = payload['toolkit']?.toString() ?? '';
-      final tool = payload['tool']?.toString() ?? '';
-      final summary = [toolkit, tool].where((part) => part.trim().isNotEmpty).join('.');
-      return _DatasetThreadMessage(
-        id: itemId,
-        kind: 'tool_call',
-        role: 'agent',
-        text: summary.isEmpty ? 'Tool call' : summary,
-        authorName: payload['sender_name']?.toString(),
-        attachments: const [],
-        createdAt: createdAt,
-      );
+      return _messageForToolCallEndRow(row: row, payload: payload, state: null);
     case _agentContextCompactedType:
       return _DatasetThreadMessage(
         id: itemId,
@@ -2019,6 +2260,88 @@ _DatasetThreadMessage? _messageForAgentPayload(
       );
   }
   return null;
+}
+
+bool _isDatasetToolCallStartType(String? type) {
+  return type == _agentToolCallPendingType || type == _agentToolCallInProgressType || type == _agentToolCallStartedType;
+}
+
+bool _toolCallStatusIsRunning(String? status) {
+  final normalized = status?.trim().toLowerCase();
+  return normalized == null || normalized.isEmpty || normalized == 'pending' || normalized == 'in_progress' || normalized == 'running';
+}
+
+_DatasetThreadMessage _messageForToolCallEndRow({
+  required Map<String, Object?> row,
+  required Map<String, Object?>? payload,
+  required _DatasetToolCallState? state,
+}) {
+  final itemId =
+      row['item_id']?.toString() ??
+      state?.itemId ??
+      (payload == null ? const Uuid().v4() : _payloadItemId(Map<String, dynamic>.from(payload)));
+  final toolkit = state?.toolkit ?? payload?['toolkit']?.toString() ?? payload?['toolkit_name']?.toString() ?? '';
+  final tool = state?.tool ?? payload?['tool']?.toString() ?? payload?['tool_name']?.toString() ?? payload?['name']?.toString() ?? 'tool';
+  final arguments = state?.arguments ?? _mapValue(payload?['arguments']);
+  final logs = state?.logs ?? const <String>[];
+  final errorMessage = _agentToolCallErrorMessage(payload?['error']);
+  return _DatasetThreadMessage(
+    id: itemId,
+    kind: 'tool_call',
+    role: 'agent',
+    text: formatToolCallEntryText(
+      toolkit: toolkit,
+      tool: tool.trim().isEmpty ? 'tool' : tool,
+      arguments: arguments,
+      logs: logs,
+      errorMessage: errorMessage,
+    ),
+    authorName: payload?['sender_name']?.toString() ?? state?.authorName,
+    attachments: const [],
+    createdAt: _rowTimestamp(row),
+  );
+}
+
+String? _agentToolCallErrorMessage(Object? error) {
+  if (error == null) {
+    return null;
+  }
+  if (error is String) {
+    final normalized = error.trim();
+    return normalized.isEmpty ? null : normalized;
+  }
+  if (error is Map) {
+    for (final key in const ['message', 'detail', 'error']) {
+      final value = error[key];
+      if (value is String && value.trim().isNotEmpty) {
+        return value.trim();
+      }
+    }
+    final encoded = jsonEncode(error);
+    return encoded.trim().isEmpty ? null : encoded;
+  }
+  final normalized = error.toString().trim();
+  return normalized.isEmpty ? null : normalized;
+}
+
+List<String> _agentToolCallLogLines(Object? lines) {
+  if (lines is! List) {
+    return const [];
+  }
+  final output = <String>[];
+  for (final line in lines) {
+    if (line is Map) {
+      final text = line['text'];
+      if (text is String && text.trim().isNotEmpty) {
+        output.add(text);
+      }
+      continue;
+    }
+    if (line is String && line.trim().isNotEmpty) {
+      output.add(line);
+    }
+  }
+  return output;
 }
 
 ({String text, List<String> attachments}) _agentInputContentParts(List<Object?> content) {
