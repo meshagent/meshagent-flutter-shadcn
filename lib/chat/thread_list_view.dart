@@ -416,6 +416,7 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
                           : ChatThreadStatusIndicator(
                               statusText: status.text,
                               startedAt: status.startedAt,
+                              totalBytes: status.totalBytes,
                               reserveSpace: true,
                               size: 14,
                               strokeWidth: 2,

@@ -76,8 +76,18 @@ String formatToolCallSummary({
   required Map<String, Object?>? arguments,
   bool failed = false,
   bool completed = true,
+  bool pending = false,
+  int argumentDeltaBytes = 0,
 }) {
-  return toolCallHeadline(toolkit: toolkit, tool: tool, arguments: arguments, failed: failed, completed: completed).text;
+  return toolCallHeadline(
+    toolkit: toolkit,
+    tool: tool,
+    arguments: arguments,
+    failed: failed,
+    completed: completed,
+    pending: pending,
+    argumentDeltaBytes: argumentDeltaBytes,
+  ).text;
 }
 
 ToolCallHeadline toolCallHeadline({
@@ -86,23 +96,46 @@ ToolCallHeadline toolCallHeadline({
   required Map<String, Object?>? arguments,
   bool failed = false,
   bool completed = true,
+  bool pending = false,
+  int argumentDeltaBytes = 0,
 }) {
   final label = toolCallLabel(toolkit: toolkit, tool: tool, arguments: arguments);
-  final friendly = _friendlyBuiltinHeadline(toolkit: toolkit, tool: tool, arguments: arguments, failed: failed, completed: completed);
-  if (friendly != null) return friendly;
+  final friendly = _friendlyBuiltinHeadline(
+    toolkit: toolkit,
+    tool: tool,
+    arguments: arguments,
+    failed: failed,
+    completed: completed,
+    pending: pending,
+  );
+  if (friendly != null) {
+    return _headlineWithArgumentDeltaBytes(friendly, completed: completed || failed, argumentDeltaBytes: argumentDeltaBytes);
+  }
 
   final normalizedTool = tool.trim().toLowerCase();
   final normalizedToolkit = toolkit.trim().toLowerCase();
   if (!completed && !failed && normalizedToolkit == 'openai' && _shellTools.contains(normalizedTool) && arguments == null) {
-    return const ToolCallHeadline(action: 'Running', rest: 'commands');
+    return _headlineWithArgumentDeltaBytes(
+      ToolCallHeadline(action: pending ? 'Preparing' : 'Running', rest: 'commands'),
+      completed: false,
+      argumentDeltaBytes: argumentDeltaBytes,
+    );
   }
   if (failed || !_commandTools.contains(normalizedTool) || arguments == null) {
-    return ToolCallHeadline(action: failed ? 'Failed' : (completed ? 'Ran' : 'Running'), rest: label);
+    return _headlineWithArgumentDeltaBytes(
+      ToolCallHeadline(action: failed ? 'Failed' : (completed ? 'Ran' : (pending ? 'Preparing' : 'Running')), rest: label),
+      completed: completed || failed,
+      argumentDeltaBytes: argumentDeltaBytes,
+    );
   }
 
   final commands = _commandArguments(tool: normalizedTool, arguments: arguments);
   if (commands.isEmpty) {
-    return ToolCallHeadline(action: failed ? 'Failed' : (completed ? 'Ran' : 'Running'), rest: label);
+    return _headlineWithArgumentDeltaBytes(
+      ToolCallHeadline(action: failed ? 'Failed' : (completed ? 'Ran' : (pending ? 'Preparing' : 'Running')), rest: label),
+      completed: completed || failed,
+      argumentDeltaBytes: argumentDeltaBytes,
+    );
   }
 
   final parsed = <ParsedCommand>[];
@@ -110,14 +143,22 @@ ToolCallHeadline toolCallHeadline({
     parsed.addAll(parseToolCommand(command));
   }
   if (parsed.isEmpty || parsed.any((item) => item.kind == 'unknown')) {
-    return ToolCallHeadline(action: completed ? 'Ran' : 'Running', rest: label);
+    return _headlineWithArgumentDeltaBytes(
+      ToolCallHeadline(action: completed ? 'Ran' : (pending ? 'Preparing' : 'Running'), rest: label),
+      completed: completed,
+      argumentDeltaBytes: argumentDeltaBytes,
+    );
   }
 
   final lines = ['Explored'];
   for (final line in _exploringDetailLines(parsed)) {
     lines.add('  $line');
   }
-  return ToolCallHeadline(action: lines.join('\n'));
+  return _headlineWithArgumentDeltaBytes(
+    ToolCallHeadline(action: lines.join('\n')),
+    completed: completed,
+    argumentDeltaBytes: argumentDeltaBytes,
+  );
 }
 
 String formatToolCallEntryText({
@@ -127,7 +168,9 @@ String formatToolCallEntryText({
   required List<String> logs,
   required String? errorMessage,
   bool completed = true,
+  bool pending = false,
   int? detailLineLimit = _toolLogRenderLimit,
+  int argumentDeltaBytes = 0,
 }) {
   return formatToolCallEntry(
     toolkit: toolkit,
@@ -136,7 +179,9 @@ String formatToolCallEntryText({
     logs: logs,
     errorMessage: errorMessage,
     completed: completed,
+    pending: pending,
     detailLineLimit: detailLineLimit,
+    argumentDeltaBytes: argumentDeltaBytes,
   ).text;
 }
 
@@ -147,10 +192,20 @@ ToolCallEntryDisplay formatToolCallEntry({
   required List<String> logs,
   required String? errorMessage,
   bool completed = true,
+  bool pending = false,
   int? detailLineLimit = _toolLogRenderLimit,
+  int argumentDeltaBytes = 0,
 }) {
   final failed = errorMessage != null;
-  var headline = toolCallHeadline(toolkit: toolkit, tool: tool, arguments: arguments, failed: failed, completed: completed);
+  var headline = toolCallHeadline(
+    toolkit: toolkit,
+    tool: tool,
+    arguments: arguments,
+    failed: failed,
+    completed: completed,
+    pending: pending,
+    argumentDeltaBytes: argumentDeltaBytes,
+  );
   final rawHeadline = '${failed ? "Failed" : "Ran"} ${toolCallRawLabel(toolkit: toolkit, tool: tool)}';
   final logLines = _toolLogLines(logs).toList(growable: true);
   if (failed && _logLinesLookLikeTraceback(logLines)) {
@@ -179,6 +234,30 @@ String toolCallRawLabel({required String toolkit, required String tool}) {
   return normalizedTool;
 }
 
+ToolCallHeadline _headlineWithArgumentDeltaBytes(ToolCallHeadline headline, {required bool completed, required int argumentDeltaBytes}) {
+  if (completed || argumentDeltaBytes <= 100) {
+    return headline;
+  }
+  final suffix = '(${_formatByteCount(argumentDeltaBytes)})';
+  final rest = headline.rest.trim().isEmpty ? suffix : '${headline.rest} $suffix';
+  return ToolCallHeadline(action: headline.action, rest: rest, detailLanguageOrFilename: headline.detailLanguageOrFilename);
+}
+
+String _formatByteCount(int value) {
+  if (value < 1024) {
+    return '$value B';
+  }
+  const units = ['KB', 'MB', 'GB'];
+  var scaled = value.toDouble();
+  for (final unit in units) {
+    scaled /= 1024;
+    if (scaled < 1024 || unit == units.last) {
+      return '${scaled.toStringAsFixed(1)} $unit';
+    }
+  }
+  return '$value B';
+}
+
 String toolCallLabel({required String toolkit, required String tool, required Map<String, Object?>? arguments}) {
   final normalizedTool = tool.trim();
   final normalizedToolkit = toolkit.trim();
@@ -200,13 +279,14 @@ ToolCallHeadline? _friendlyBuiltinHeadline({
   required Map<String, Object?>? arguments,
   required bool failed,
   required bool completed,
+  required bool pending,
 }) {
   final normalizedToolkit = toolkit.trim().toLowerCase();
   final normalizedTool = tool.trim().toLowerCase();
   final args = arguments ?? const <String, Object?>{};
   ToolCallHeadline? headline;
   if (normalizedToolkit == 'storage') {
-    headline = _storageHeadline(tool: normalizedTool, arguments: args, completed: completed);
+    headline = _storageHeadline(tool: normalizedTool, arguments: args, completed: completed, pending: pending);
   } else if (normalizedToolkit == 'dataset') {
     headline = _headlineFromText(_datasetSummary(tool: normalizedTool, arguments: args, completed: completed));
   } else if (normalizedToolkit == 'datetime' || normalizedToolkit == 'time') {
@@ -226,11 +306,17 @@ ToolCallHeadline? _friendlyBuiltinHeadline({
       : headline;
 }
 
-ToolCallHeadline? _storageHeadline({required String tool, required Map<String, Object?> arguments, required bool completed}) {
+ToolCallHeadline? _storageHeadline({
+  required String tool,
+  required Map<String, Object?> arguments,
+  required bool completed,
+  required bool pending,
+}) {
   final path = _stringArgument(arguments, ['path']);
   if (tool == 'read_file') {
+    final activeAction = pending ? 'Preparing to read file' : 'Reading file';
     return ToolCallHeadline(
-      action: path == null ? (completed ? 'Read file' : 'Reading file') : (completed ? 'Read file:' : 'Reading file:'),
+      action: path == null ? (completed ? 'Read file' : activeAction) : (completed ? 'Read file:' : '$activeAction:'),
       rest: path ?? '',
       detailLanguageOrFilename: path,
     );
@@ -246,8 +332,9 @@ ToolCallHeadline? _storageHeadline({required String tool, required Map<String, O
     );
   }
   if (tool == 'write_file') {
+    final activeAction = pending ? 'Preparing to write file' : 'Writing file';
     return ToolCallHeadline(
-      action: path == null ? (completed ? 'Wrote file' : 'Writing file') : (completed ? 'Wrote file:' : 'Writing file:'),
+      action: path == null ? (completed ? 'Wrote file' : activeAction) : (completed ? 'Wrote file:' : '$activeAction:'),
       rest: path ?? '',
       detailLanguageOrFilename: path,
     );

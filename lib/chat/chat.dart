@@ -82,6 +82,8 @@ const String _agentTurnSteeredType = "meshagent.agent.turn.steered";
 const String _agentTurnEndedType = "meshagent.agent.turn.ended";
 const String _agentThreadClearedType = "meshagent.agent.thread.cleared";
 const String _agentThreadStatusType = "meshagent.agent.thread.status";
+const String _agentToolCallArgumentsDeltaType = "meshagent.agent.tool_call.arguments_delta";
+const String _agentToolCallEndedType = "meshagent.agent.tool_call.ended";
 const String _agentUsageUpdatedType = "meshagent.agent.usage.updated";
 const double _mobileScreenWidthMax = 600;
 const double _mobileComposerPillCornerRadius = 999;
@@ -968,13 +970,34 @@ bool trackAgentThreadStatusPayload({required RoomClient room, required Map<Strin
   return _agentThreadMessageStatusStore(room).apply(payload);
 }
 
+int? _positiveIntValue(Object? value) {
+  final parsed = switch (value) {
+    int() => value,
+    BigInt() => value.toInt(),
+    num() when value.isFinite => value.toInt(),
+    _ => int.tryParse(value?.toString() ?? ""),
+  };
+  return parsed != null && parsed > 0 ? parsed : null;
+}
+
 class _AgentThreadMessageStatus {
-  const _AgentThreadMessageStatus({this.text, this.startedAt, this.mode, this.turnId});
+  const _AgentThreadMessageStatus({
+    this.text,
+    this.startedAt,
+    this.mode,
+    this.turnId,
+    this.pendingItemId,
+    this.totalBytes,
+    this.totalBytesFromStatus = false,
+  });
 
   final String? text;
   final DateTime? startedAt;
   final String? mode;
   final String? turnId;
+  final String? pendingItemId;
+  final int? totalBytes;
+  final bool totalBytesFromStatus;
 }
 
 class _AgentThreadMessageStatusStore {
@@ -1009,6 +1032,12 @@ class _AgentThreadMessageStatusStore {
       case _agentTurnSteeredType:
         _touchedThreadPaths.add(normalizedThreadPath);
         return _markPendingApplied(normalizedThreadPath, payload["source_message_id"]);
+      case _agentToolCallArgumentsDeltaType:
+        _touchedThreadPaths.add(normalizedThreadPath);
+        return _applyToolCallArgumentsDelta(normalizedThreadPath, payload);
+      case _agentToolCallEndedType:
+        _touchedThreadPaths.add(normalizedThreadPath);
+        return _clearStatusTotalBytes(normalizedThreadPath);
       case _agentTurnStartRejectedType:
       case _agentTurnSteerRejectedType:
         _touchedThreadPaths.add(normalizedThreadPath);
@@ -1048,6 +1077,8 @@ class _AgentThreadMessageStatusStore {
       mode: status?.text == null ? status?.mode : status?.mode ?? "busy",
       turnId: status?.turnId,
       pendingMessages: pendingMessages,
+      pendingItemId: status?.pendingItemId,
+      totalBytes: status?.totalBytes,
       supportsAgentMessages: true,
     );
   }
@@ -1057,6 +1088,9 @@ class _AgentThreadMessageStatusStore {
     final rawMode = payload["mode"];
     final rawStartedAt = payload["started_at"];
     final rawTurnId = payload["turn_id"];
+    final rawPendingItemId = payload["pending_item_id"];
+    final rawTotalBytes = payload["total_bytes"];
+    final previous = _statusByThreadPath[threadPath];
 
     final text = rawStatus is String && rawStatus.trim().isNotEmpty ? rawStatus.trim() : null;
     final mode = rawMode is String && (rawMode.trim().toLowerCase() == "busy" || rawMode.trim().toLowerCase() == "steerable")
@@ -1064,22 +1098,82 @@ class _AgentThreadMessageStatusStore {
         : null;
     final startedAt = rawStartedAt is String && rawStartedAt.trim().isNotEmpty ? DateTime.tryParse(rawStartedAt.trim()) : null;
     final turnId = rawTurnId is String && rawTurnId.trim().isNotEmpty ? rawTurnId.trim() : null;
+    final pendingItemId = rawPendingItemId is String && rawPendingItemId.trim().isNotEmpty ? rawPendingItemId.trim() : null;
+    final parsedTotalBytes = _positiveIntValue(rawTotalBytes);
+    final totalBytes = parsedTotalBytes ?? (!payload.containsKey("total_bytes") && previous?.text == text ? previous?.totalBytes : null);
+    final totalBytesFromStatus = parsedTotalBytes != null;
 
-    if (text == null && mode == null && startedAt == null && turnId == null) {
+    if (text == null && mode == null && startedAt == null && turnId == null && pendingItemId == null && totalBytes == null) {
       return _statusByThreadPath.remove(threadPath) != null;
     }
 
-    final next = _AgentThreadMessageStatus(text: text, startedAt: startedAt, mode: mode, turnId: turnId);
-    final previous = _statusByThreadPath[threadPath];
+    final next = _AgentThreadMessageStatus(
+      text: text,
+      startedAt: startedAt,
+      mode: mode,
+      turnId: turnId,
+      pendingItemId: pendingItemId,
+      totalBytes: totalBytes,
+      totalBytesFromStatus: totalBytesFromStatus,
+    );
     if (previous != null &&
         previous.text == next.text &&
         previous.mode == next.mode &&
         previous.turnId == next.turnId &&
+        previous.pendingItemId == next.pendingItemId &&
+        previous.totalBytes == next.totalBytes &&
+        previous.totalBytesFromStatus == next.totalBytesFromStatus &&
         previous.startedAt?.millisecondsSinceEpoch == next.startedAt?.millisecondsSinceEpoch) {
       return false;
     }
 
     _statusByThreadPath[threadPath] = next;
+    return true;
+  }
+
+  bool _applyToolCallArgumentsDelta(String threadPath, Map<String, dynamic> payload) {
+    final status = _statusByThreadPath[threadPath];
+    if (status == null || status.text == null || status.text!.trim().isEmpty) {
+      return false;
+    }
+    final itemId = payload["item_id"];
+    if (itemId is! String || itemId.trim().isEmpty || itemId.trim() != status.pendingItemId) {
+      return false;
+    }
+    if (status.totalBytesFromStatus) {
+      return false;
+    }
+
+    final delta = payload["delta"]?.toString() ?? "";
+    final deltaBytes = utf8.encode(delta).length;
+    if (deltaBytes <= 0) {
+      return false;
+    }
+
+    final nextTotalBytes = (status.totalBytes ?? 0) + deltaBytes;
+    _statusByThreadPath[threadPath] = _AgentThreadMessageStatus(
+      text: status.text,
+      startedAt: status.startedAt,
+      mode: status.mode,
+      turnId: status.turnId,
+      pendingItemId: status.pendingItemId,
+      totalBytes: nextTotalBytes,
+    );
+    return true;
+  }
+
+  bool _clearStatusTotalBytes(String threadPath) {
+    final status = _statusByThreadPath[threadPath];
+    if (status?.totalBytes == null) {
+      return false;
+    }
+    _statusByThreadPath[threadPath] = _AgentThreadMessageStatus(
+      text: status?.text,
+      startedAt: status?.startedAt,
+      mode: status?.mode,
+      turnId: status?.turnId,
+      pendingItemId: status?.pendingItemId,
+    );
     return true;
   }
 
@@ -1171,6 +1265,8 @@ class _AgentThreadMessageStatusStore {
           startedAt: previous?.startedAt,
           mode: previous?.mode,
           turnId: turnId.trim(),
+          pendingItemId: previous?.pendingItemId,
+          totalBytes: previous?.totalBytes,
         );
         changed = true;
       }
@@ -1195,6 +1291,8 @@ class _AgentThreadMessageStatusStore {
           startedAt: previous?.startedAt,
           mode: previous?.mode,
           turnId: turnId.trim(),
+          pendingItemId: previous?.pendingItemId,
+          totalBytes: previous?.totalBytes,
         );
         return true;
       }
@@ -1212,6 +1310,7 @@ class ChatThreadStatusState {
     this.turnId,
     this.pendingMessages = const [],
     this.pendingItemId,
+    this.totalBytes,
     this.supportsAgentMessages = false,
   });
 
@@ -1221,6 +1320,7 @@ class ChatThreadStatusState {
   final String? turnId;
   final List<PendingAgentMessage> pendingMessages;
   final String? pendingItemId;
+  final int? totalBytes;
   final bool supportsAgentMessages;
 
   bool get hasStatus => text != null && text!.trim().isNotEmpty;
@@ -1252,7 +1352,8 @@ ChatThreadStatusState resolveChatThreadStatus({
   DateTime? nextStartedAt = messageState.startedAt;
   String? nextTurnId = messageState.turnId;
   List<PendingAgentMessage> nextPendingMessages = messageState.pendingMessages;
-  String? nextPendingItemId;
+  String? nextPendingItemId = messageState.pendingItemId;
+  int? nextTotalBytes = messageState.totalBytes;
   bool nextSupportsAgentMessages = messageState.supportsAgentMessages;
 
   for (final participant in candidates) {
@@ -1338,6 +1439,7 @@ ChatThreadStatusState resolveChatThreadStatus({
     turnId: nextTurnId,
     pendingMessages: nextPendingMessages,
     pendingItemId: nextPendingItemId,
+    totalBytes: nextTotalBytes,
     supportsAgentMessages: nextSupportsAgentMessages,
   );
 }
@@ -1347,6 +1449,7 @@ class ChatThreadStatusIndicator extends StatelessWidget {
     super.key,
     required this.statusText,
     this.startedAt,
+    this.totalBytes,
     this.reserveSpace = false,
     this.size = 14,
     this.strokeWidth = 2,
@@ -1354,6 +1457,7 @@ class ChatThreadStatusIndicator extends StatelessWidget {
 
   final String? statusText;
   final DateTime? startedAt;
+  final int? totalBytes;
   final bool reserveSpace;
   final double size;
   final double strokeWidth;
@@ -1373,7 +1477,10 @@ class ChatThreadStatusIndicator extends StatelessWidget {
         waitDuration: const Duration(milliseconds: 300),
         builder: (context) => ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 320),
-          child: Text(formatChatThreadStatusText(normalizedStatusText, startedAt: startedAt), style: ShadTheme.of(context).textTheme.small),
+          child: Text(
+            formatChatThreadStatusText(normalizedStatusText, startedAt: startedAt, totalBytes: totalBytes),
+            style: ShadTheme.of(context).textTheme.small,
+          ),
         ),
         child: _CyclingProgressIndicator(strokeWidth: strokeWidth),
       ),
@@ -4489,6 +4596,7 @@ class _ChatThreadState extends State<ChatThread> {
       threadStatus: null,
       threadStatusStartedAt: null,
       threadStatusMode: null,
+      threadStatusTotalBytes: null,
       supportsAgentMessages: agent != null && _supportsAgentMessages(agent),
       supportsMcp: agent != null && _supportsMcp(agent),
       toolkits: const {},
@@ -4843,6 +4951,7 @@ class _ChatThreadState extends State<ChatThread> {
                       threadStatus: state.threadStatus,
                       threadStatusStartedAt: state.threadStatusStartedAt,
                       threadStatusMode: state.threadStatusMode,
+                      threadStatusTotalBytes: state.threadStatusTotalBytes,
                       pendingMessages: _combinedPendingMessages(state),
                       pendingItemId: state.pendingItemId,
                       onCancel: () {
@@ -5072,6 +5181,7 @@ class ChatThreadMessages extends StatefulWidget {
     this.threadStatus,
     this.threadStatusStartedAt,
     this.threadStatusMode,
+    this.threadStatusTotalBytes,
     this.pendingMessages = const [],
     this.pendingItemId,
     this.onCancel,
@@ -5103,6 +5213,7 @@ class ChatThreadMessages extends StatefulWidget {
   final String? threadStatus;
   final DateTime? threadStatusStartedAt;
   final String? threadStatusMode;
+  final int? threadStatusTotalBytes;
   final List<PendingAgentMessage> pendingMessages;
   final String? pendingItemId;
   final void Function()? onCancel;
@@ -5180,6 +5291,7 @@ class ChatThreadMessageView extends StatelessWidget {
     final hasText = messageText != null && messageText.trim().isNotEmpty;
     final headerLeftInset = mine ? chatBubbleHorizontalInset + chatBubbleActionRailWidth : chatBubbleHorizontalInset;
     final headerRightInset = mine || isAgentMessage ? chatBubbleHorizontalInset : chatBubbleHorizontalInset + chatBubbleActionRailWidth;
+    const attachmentInset = chatBubbleHorizontalInset + _chatBubbleContentHorizontalPadding;
 
     return Column(
       mainAxisAlignment: MainAxisAlignment.start,
@@ -5217,7 +5329,12 @@ class ChatThreadMessageView extends StatelessWidget {
         for (var i = 0; i < attachmentWidgets.length; i++) ...[
           if (hasText || i > 0) const SizedBox(height: chatBubbleSiblingSpacing),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: chatBubbleHorizontalInset),
+            padding: const EdgeInsets.only(
+              left: attachmentInset,
+              right: attachmentInset,
+              top: _chatBubbleContentTopPadding,
+              bottom: _chatBubbleContentBottomPadding,
+            ),
             child: Align(alignment: mine ? Alignment.centerRight : Alignment.centerLeft, child: attachmentWidgets[i]),
           ),
         ],
@@ -5368,6 +5485,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   String? get threadStatus => widget.threadStatus;
   DateTime? get threadStatusStartedAt => widget.threadStatusStartedAt;
   String? get threadStatusMode => widget.threadStatusMode;
+  int? get threadStatusTotalBytes => widget.threadStatusTotalBytes;
   String? get pendingItemId => widget.pendingItemId;
   void Function()? get onCancel => widget.onCancel;
   List<MeshElement> get messages => widget.messages;
@@ -5395,6 +5513,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   String? _lastThreadStatus;
   DateTime? _lastThreadStatusStartedAt;
   String? _lastThreadStatusMode;
+  int? _lastThreadStatusTotalBytes;
 
   @override
   void initState() {
@@ -5432,6 +5551,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     }
     _lastThreadStatusStartedAt = threadStatusStartedAt;
     _lastThreadStatusMode = threadStatusMode;
+    _lastThreadStatusTotalBytes = threadStatusTotalBytes;
   }
 
   void _syncStatusSlot() {
@@ -6649,6 +6769,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                       ? ChatThreadProcessingStatusRow(
                           text: displayStatus,
                           startedAt: showTyping ? threadStatusStartedAt : _lastThreadStatusStartedAt,
+                          totalBytes: showTyping ? threadStatusTotalBytes : _lastThreadStatusTotalBytes,
                           onCancel: showTyping ? onCancel : null,
                           showCancelButton: (showTyping ? threadStatusMode : _lastThreadStatusMode) != null,
                           cancelEnabled: showTyping && !cancelling,
@@ -8425,17 +8546,48 @@ class _CyclingProgressIndicatorState extends State<_CyclingProgressIndicator> wi
   }
 }
 
-String formatChatThreadStatusText(String text, {DateTime? startedAt}) {
+String formatChatThreadStatusText(String text, {DateTime? startedAt, int? totalBytes}) {
+  if (totalBytes != null && totalBytes > 100) {
+    return "$text ${_formatStatusByteCount(totalBytes)}";
+  }
   if (startedAt == null) {
     return text;
   }
 
   final elapsed = DateTime.now().difference(startedAt);
-  final seconds = elapsed.inSeconds < 0 ? 0 : elapsed.inSeconds;
+  final seconds = _clampedElapsedSeconds(elapsed);
   if (seconds == 0) {
     return text;
   }
-  return "$text (${seconds}s)";
+  return "$text ${_formatStatusSecondCount(seconds)}";
+}
+
+String _formatStatusByteCount(int value) {
+  return "${_formatGroupedStatusByteDigits(value)} bytes";
+}
+
+int _clampedElapsedSeconds(Duration elapsed) {
+  return elapsed.inSeconds < 0 ? 0 : elapsed.inSeconds;
+}
+
+String _formatStatusSecondCount(int value) {
+  return "$value ${_formatStatusSecondUnit(value)}";
+}
+
+String _formatStatusSecondUnit(int value) {
+  return value == 1 ? "second" : "seconds";
+}
+
+String _formatGroupedStatusByteDigits(int value) {
+  final text = value.toString();
+  final buffer = StringBuffer();
+  for (var index = 0; index < text.length; index++) {
+    if (index > 0 && (text.length - index) % 3 == 0) {
+      buffer.write(",");
+    }
+    buffer.write(text[index]);
+  }
+  return buffer.toString();
 }
 
 LinearGradient _processingSweepGradient(BuildContext context, {required double t}) {
@@ -8604,6 +8756,7 @@ class ChatThreadProcessingStatusRow extends StatefulWidget {
     super.key,
     required this.text,
     this.startedAt,
+    this.totalBytes,
     this.onCancel,
     this.showCancelButton = false,
     this.cancelEnabled = true,
@@ -8611,6 +8764,7 @@ class ChatThreadProcessingStatusRow extends StatefulWidget {
 
   final String text;
   final DateTime? startedAt;
+  final int? totalBytes;
   final VoidCallback? onCancel;
   final bool showCancelButton;
   final bool cancelEnabled;
@@ -8631,7 +8785,7 @@ class _ChatThreadProcessingStatusRowState extends State<ChatThreadProcessingStat
   @override
   void didUpdateWidget(covariant ChatThreadProcessingStatusRow oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.startedAt != widget.startedAt) {
+    if (oldWidget.startedAt != widget.startedAt || oldWidget.totalBytes != widget.totalBytes) {
       _syncTicker();
     }
   }
@@ -8643,7 +8797,7 @@ class _ChatThreadProcessingStatusRowState extends State<ChatThreadProcessingStat
   }
 
   void _syncTicker() {
-    final shouldTick = widget.startedAt != null;
+    final shouldTick = widget.startedAt != null && !_shouldDisplayBytes;
     if (!shouldTick) {
       _ticker?.cancel();
       _ticker = null;
@@ -8662,8 +8816,10 @@ class _ChatThreadProcessingStatusRowState extends State<ChatThreadProcessingStat
   }
 
   String _displayText() {
-    return formatChatThreadStatusText(widget.text, startedAt: widget.startedAt);
+    return formatChatThreadStatusText(widget.text, startedAt: widget.startedAt, totalBytes: widget.totalBytes);
   }
+
+  bool get _shouldDisplayBytes => widget.totalBytes != null && widget.totalBytes! > 100;
 
   @override
   Widget build(BuildContext context) {
@@ -8671,6 +8827,10 @@ class _ChatThreadProcessingStatusRowState extends State<ChatThreadProcessingStat
     final cancelButtonColor = widget.cancelEnabled ? theme.colorScheme.foreground : theme.colorScheme.muted;
     final cancelIconColor = widget.cancelEnabled ? theme.colorScheme.background : theme.colorScheme.mutedForeground;
     final displayText = _displayText();
+    final statusTextStyle = TextStyle(fontSize: 13, color: theme.colorScheme.mutedForeground);
+    final elapsedSeconds = widget.startedAt == null || _shouldDisplayBytes
+        ? 0
+        : _clampedElapsedSeconds(DateTime.now().difference(widget.startedAt!));
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.start,
@@ -8712,14 +8872,317 @@ class _ChatThreadProcessingStatusRowState extends State<ChatThreadProcessingStat
           const SizedBox(width: 13, height: 13, child: _CyclingProgressIndicator(strokeWidth: 2)),
         const SizedBox(width: 10),
         Expanded(
-          child: ChatThreadProcessingSweepText(
-            text: displayText,
-            style: TextStyle(fontSize: 13, color: theme.colorScheme.mutedForeground),
-          ),
+          child: _shouldDisplayBytes
+              ? Row(
+                  children: [
+                    Flexible(
+                      child: Text(widget.text, style: statusTextStyle, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ),
+                    _StatusCounterSeparator(style: statusTextStyle),
+                    _AnimatedStatusByteCounter(totalBytes: widget.totalBytes!, style: statusTextStyle),
+                  ],
+                )
+              : elapsedSeconds > 0
+              ? Row(
+                  children: [
+                    Flexible(
+                      child: Text(widget.text, style: statusTextStyle, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ),
+                    _StatusCounterSeparator(style: statusTextStyle),
+                    _AnimatedStatusSecondCounter(seconds: elapsedSeconds, style: statusTextStyle),
+                  ],
+                )
+              : Text(displayText, style: statusTextStyle, maxLines: 1, overflow: TextOverflow.ellipsis),
         ),
       ],
     );
   }
+}
+
+class _AnimatedStatusByteCounter extends StatefulWidget {
+  const _AnimatedStatusByteCounter({required this.totalBytes, required this.style});
+
+  final int totalBytes;
+  final TextStyle style;
+
+  @override
+  State<_AnimatedStatusByteCounter> createState() => _AnimatedStatusByteCounterState();
+}
+
+class _AnimatedStatusSecondCounter extends StatefulWidget {
+  const _AnimatedStatusSecondCounter({required this.seconds, required this.style});
+
+  final int seconds;
+  final TextStyle style;
+
+  @override
+  State<_AnimatedStatusSecondCounter> createState() => _AnimatedStatusSecondCounterState();
+}
+
+abstract class _AnimatedStatusValueCounterState<T extends StatefulWidget> extends State<T> with SingleTickerProviderStateMixin {
+  static const Duration _rollDuration = Duration(milliseconds: 360);
+  static const Duration _restDuration = Duration(milliseconds: 500);
+
+  int get value;
+  String suffixForValue(int value);
+  int get initialDisplayValue => value;
+
+  late int _displayValue;
+  late int _targetValue;
+  late double _transitionStartValue;
+  late double _transitionEndValue;
+  late DateTime _restStartedAt;
+  var _transitioning = false;
+  Timer? _restTimer;
+  Timer? _transitionTimer;
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    final startValue = initialDisplayValue;
+    _displayValue = startValue;
+    _targetValue = value;
+    _transitionStartValue = startValue.toDouble();
+    _transitionEndValue = startValue.toDouble();
+    _restStartedAt = DateTime.now().subtract(_restDuration);
+    _controller = AnimationController(vsync: this, duration: _rollDuration, value: 1);
+    if (_displayValue != _targetValue) {
+      _scheduleTransition();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant T oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_targetValue == value) {
+      return;
+    }
+
+    _targetValue = value;
+    _scheduleTransition();
+  }
+
+  void _scheduleTransition() {
+    if (_displayValue == _targetValue || _transitioning) {
+      return;
+    }
+
+    final elapsedRest = DateTime.now().difference(_restStartedAt);
+    if (elapsedRest < _restDuration) {
+      _restTimer?.cancel();
+      _restTimer = Timer(_restDuration - elapsedRest, _startTransition);
+      return;
+    }
+
+    _startTransition();
+  }
+
+  void _startTransition() {
+    _restTimer?.cancel();
+    _restTimer = null;
+    if (!mounted || _displayValue == _targetValue) {
+      return;
+    }
+
+    final nextValue = _targetValue;
+    setState(() {
+      _transitionStartValue = _currentAnimatedValue;
+      _transitionEndValue = nextValue.toDouble();
+      _displayValue = nextValue;
+      _transitioning = true;
+    });
+    _controller.forward(from: 0);
+    _transitionTimer?.cancel();
+    _transitionTimer = Timer(_rollDuration, () {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _transitioning = false;
+        _transitionStartValue = _displayValue.toDouble();
+        _transitionEndValue = _displayValue.toDouble();
+        _restStartedAt = DateTime.now();
+      });
+      _scheduleTransition();
+    });
+  }
+
+  double get _currentAnimatedValue {
+    if (!_transitioning) {
+      return _displayValue.toDouble();
+    }
+    final progress = Curves.easeOutCubic.transform(_controller.value);
+    return _transitionStartValue + ((_transitionEndValue - _transitionStartValue) * progress);
+  }
+
+  @override
+  void dispose() {
+    _restTimer?.cancel();
+    _transitionTimer?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Widget buildCounter(BuildContext context, TextStyle style) {
+    final counterStyle = style.copyWith(fontFeatures: const [FontFeature.tabularFigures()]);
+    final numberStyle = counterStyle.copyWith(color: ShadTheme.of(context).colorScheme.foreground, fontWeight: FontWeight.w700);
+    final digitSize = _measureStatusCounterText(context, counterStyle, "8");
+    final wheelHeight = digitSize.height + 6;
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) {
+        final progress = _transitioning ? Curves.easeOutCubic.transform(_controller.value) : 1.0;
+        final digitCount = _transitioning
+            ? math.max(_transitionStartValue.floor().toString().length, _transitionEndValue.floor().toString().length)
+            : _displayValue.toString().length;
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (var index = 0; index < digitCount; index++) ...[
+              if (index > 0 && (digitCount - index) % 3 == 0) Text(",", style: numberStyle, maxLines: 1, overflow: TextOverflow.clip),
+              _StatusCounterWheelDigit(
+                startValue: _transitioning ? _transitionStartValue : _displayValue.toDouble(),
+                endValue: _transitioning ? _transitionEndValue : _displayValue.toDouble(),
+                progress: progress,
+                digitIndex: index,
+                digitCount: digitCount,
+                style: numberStyle,
+                width: digitSize.width,
+                height: wheelHeight,
+              ),
+            ],
+            Text(suffixForValue(_displayValue), style: counterStyle, maxLines: 1, overflow: TextOverflow.clip),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _AnimatedStatusByteCounterState extends _AnimatedStatusValueCounterState<_AnimatedStatusByteCounter> {
+  @override
+  int get value => widget.totalBytes;
+
+  @override
+  int get initialDisplayValue => widget.totalBytes > 100 ? 100 : widget.totalBytes;
+
+  @override
+  String suffixForValue(int value) => " bytes";
+
+  @override
+  Widget build(BuildContext context) => buildCounter(context, widget.style);
+}
+
+class _AnimatedStatusSecondCounterState extends _AnimatedStatusValueCounterState<_AnimatedStatusSecondCounter> {
+  @override
+  int get value => widget.seconds;
+
+  @override
+  String suffixForValue(int value) => " ${_formatStatusSecondUnit(value)}";
+
+  @override
+  Widget build(BuildContext context) => buildCounter(context, widget.style);
+}
+
+class _StatusCounterSeparator extends StatelessWidget {
+  const _StatusCounterSeparator({required this.style});
+
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(" • ", style: style, maxLines: 1, overflow: TextOverflow.clip);
+  }
+}
+
+class StatusByteCounter extends StatelessWidget {
+  const StatusByteCounter({super.key, required this.totalBytes, required this.style});
+
+  final int totalBytes;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    return _AnimatedStatusByteCounter(totalBytes: totalBytes, style: style);
+  }
+}
+
+class _StatusCounterWheelDigit extends StatelessWidget {
+  const _StatusCounterWheelDigit({
+    required this.startValue,
+    required this.endValue,
+    required this.progress,
+    required this.digitIndex,
+    required this.digitCount,
+    required this.style,
+    required this.width,
+    required this.height,
+  });
+
+  final double startValue;
+  final double endValue;
+  final double progress;
+  final int digitIndex;
+  final int digitCount;
+  final TextStyle style;
+  final double width;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    final place = math.pow(10, digitCount - digitIndex - 1).toDouble();
+    final startPlaceValue = (startValue / place).floor();
+    final endPlaceValue = (endValue / place).floor();
+    final startDigit = _positiveModulo(startPlaceValue, 10);
+    final wheelDelta = endPlaceValue - startPlaceValue;
+    final virtualDigit = startDigit + (wheelDelta * progress);
+    final firstStripValue = math.min(startDigit, startDigit + wheelDelta) - 10;
+    final lastStripValue = math.max(startDigit, startDigit + wheelDelta) + 10;
+    final stripOffset = -((virtualDigit - firstStripValue) * height);
+    return SizedBox(
+      width: width,
+      height: height,
+      child: ShaderMask(
+        blendMode: BlendMode.dstIn,
+        shaderCallback: (bounds) => const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Colors.transparent, Colors.black, Colors.black, Colors.transparent],
+          stops: [0, 0.12, 0.88, 1],
+        ).createShader(bounds),
+        child: ClipRect(
+          child: Transform.translate(
+            offset: Offset(0, stripOffset),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (var value = firstStripValue; value <= lastStripValue; value++)
+                  SizedBox(
+                    width: width,
+                    height: height,
+                    child: Center(
+                      child: Text("${_positiveModulo(value, 10)}", style: style, maxLines: 1, overflow: TextOverflow.clip),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+int _positiveModulo(int value, int modulus) => ((value % modulus) + modulus) % modulus;
+
+Size _measureStatusCounterText(BuildContext context, TextStyle style, String text) {
+  final painter = TextPainter(
+    text: TextSpan(text: text, style: style),
+    textDirection: Directionality.of(context),
+    maxLines: 1,
+  )..layout();
+  return painter.size;
 }
 
 class _PreviewSweepOverlay extends StatefulWidget {
@@ -8843,6 +9306,7 @@ class ChatThreadSnapshot {
     required this.threadStatus,
     required this.threadStatusStartedAt,
     required this.threadStatusMode,
+    required this.threadStatusTotalBytes,
     required this.supportsAgentMessages,
     required this.supportsMcp,
     required this.toolkits,
@@ -8861,6 +9325,7 @@ class ChatThreadSnapshot {
   final String? threadStatus;
   final DateTime? threadStatusStartedAt;
   final String? threadStatusMode;
+  final int? threadStatusTotalBytes;
   final bool supportsAgentMessages;
   final bool supportsMcp;
   final Map<String, AgentToolkitCapabilities> toolkits;
@@ -8903,6 +9368,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
   String? threadStatus;
   DateTime? threadStatusStartedAt;
   String? threadStatusMode;
+  int? threadStatusTotalBytes;
   bool supportsAgentMessages = false;
   Map<String, AgentToolkitCapabilities> toolkits = const {};
   String? threadTurnId;
@@ -9266,6 +9732,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         turnId: threadTurnId,
         pendingMessages: pendingMessages,
         pendingItemId: pendingItemId,
+        totalBytes: threadStatusTotalBytes,
         supportsAgentMessages: supportsAgentMessages,
       ),
     );
@@ -9307,6 +9774,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         );
     if (nextState.text == threadStatus &&
         nextState.mode == threadStatusMode &&
+        nextState.totalBytes == threadStatusTotalBytes &&
         sameStartedAt &&
         nextState.turnId == threadTurnId &&
         nextState.pendingItemId == pendingItemId &&
@@ -9319,6 +9787,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
       threadStatus = nextState.text;
       threadStatusStartedAt = nextState.startedAt;
       threadStatusMode = nextState.mode;
+      threadStatusTotalBytes = nextState.totalBytes;
       threadTurnId = nextState.turnId;
       supportsAgentMessages = nextState.supportsAgentMessages;
       pendingMessages = nextState.pendingMessages;
@@ -9330,6 +9799,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
       threadStatus = nextState.text;
       threadStatusStartedAt = nextState.startedAt;
       threadStatusMode = nextState.mode;
+      threadStatusTotalBytes = nextState.totalBytes;
       threadTurnId = nextState.turnId;
       supportsAgentMessages = nextState.supportsAgentMessages;
       pendingMessages = nextState.pendingMessages;
@@ -9356,6 +9826,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         threadStatus: threadStatus,
         threadStatusStartedAt: threadStatusStartedAt,
         threadStatusMode: threadStatusMode,
+        threadStatusTotalBytes: threadStatusTotalBytes,
         supportsAgentMessages: supportsAgentMessages,
         supportsMcp: supportsMcp,
         toolkits: toolkits,

@@ -351,6 +351,7 @@ void main() {
     expect(state.text, 'Generating image');
     expect(state.mode, 'busy');
     expect(state.pendingItemId, 'image-1');
+    expect(state.totalBytes, isNull);
     expect(state.startedAt, DateTime.parse('2026-05-04T12:00:00Z'));
   });
 
@@ -380,6 +381,8 @@ void main() {
         'mode': 'steerable',
         'started_at': '2026-05-04T12:00:00Z',
         'turn_id': 'turn-1',
+        'pending_item_id': 'image-1',
+        'total_bytes': 240,
       },
     );
 
@@ -388,9 +391,43 @@ void main() {
     expect(state.text, 'Generating image');
     expect(state.mode, 'steerable');
     expect(state.turnId, 'turn-1');
-    expect(state.pendingItemId, isNull);
+    expect(state.totalBytes, 240);
+    expect(state.pendingItemId, 'image-1');
     expect(state.startedAt, DateTime.parse('2026-05-04T12:00:00Z'));
     expect(state.supportsAgentMessages, isTrue);
+  });
+
+  test('resolveChatThreadStatus computes status bytes from tool argument deltas', () async {
+    final harness = await _startMessagingHarness();
+    addTearDown(harness.dispose);
+
+    const threadPath = 'dataset://agents/dataset/threads/thread-1';
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.thread.status',
+        'thread_id': threadPath,
+        'status': 'Preparing Command',
+        'mode': 'busy',
+        'started_at': '2026-05-04T12:00:00Z',
+        'pending_item_id': 'shell-1',
+      },
+    );
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.tool_call.arguments_delta',
+        'thread_id': threadPath,
+        'item_id': 'shell-1',
+        'delta': List.filled(120, 'x').join(),
+      },
+    );
+
+    final state = resolveChatThreadStatus(room: harness.room, path: threadPath, agentName: 'assistant');
+
+    expect(state.text, 'Preparing Command');
+    expect(state.totalBytes, 120);
+    expect(formatChatThreadStatusText(state.text!, startedAt: state.startedAt, totalBytes: state.totalBytes), 'Preparing Command 120 B');
   });
 
   test('resolveChatThreadStatus tracks accepted pending messages until applied', () async {

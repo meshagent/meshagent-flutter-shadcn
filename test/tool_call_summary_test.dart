@@ -70,6 +70,41 @@ void main() {
     );
     expect(formatToolCallSummary(toolkit: '', tool: 'shell', arguments: null, completed: false), 'Running shell');
     expect(formatToolCallSummary(toolkit: 'openai', tool: 'shell', arguments: null, completed: false), 'Running commands');
+    expect(formatToolCallSummary(toolkit: '', tool: 'shell', arguments: null, completed: false, pending: true), 'Preparing shell');
+    expect(formatToolCallSummary(toolkit: 'openai', tool: 'shell', arguments: null, completed: false, pending: true), 'Preparing commands');
+    expect(
+      formatToolCallSummary(
+        toolkit: 'storage',
+        tool: 'write_file',
+        arguments: {'path': '/src/report.html'},
+        completed: false,
+        pending: true,
+      ),
+      'Preparing to write file: /src/report.html',
+    );
+  });
+
+  test('formatToolCallSummary shows streamed argument size after threshold', () {
+    expect(
+      formatToolCallSummary(
+        toolkit: 'storage',
+        tool: 'write_file',
+        arguments: {'path': '/src/report.html'},
+        completed: false,
+        argumentDeltaBytes: 100,
+      ),
+      'Writing file: /src/report.html',
+    );
+    expect(
+      formatToolCallSummary(
+        toolkit: 'storage',
+        tool: 'write_file',
+        arguments: {'path': '/src/report.html'},
+        completed: false,
+        argumentDeltaBytes: 120,
+      ),
+      'Writing file: /src/report.html (120 B)',
+    );
   });
 
   test('formatToolCallEntryText keeps header and shows trailing details', () {

@@ -37,6 +37,7 @@ const String _agentFileContentEndedType = 'meshagent.agent.file_content.ended';
 const String _agentToolCallPendingType = 'meshagent.agent.tool_call.pending';
 const String _agentToolCallInProgressType = 'meshagent.agent.tool_call.in_progress';
 const String _agentToolCallStartedType = 'meshagent.agent.tool_call.started';
+const String _agentToolCallArgumentsDeltaType = 'meshagent.agent.tool_call.arguments_delta';
 const String _agentToolCallLogDeltaType = 'meshagent.agent.tool_call.log_delta';
 const String _agentToolCallEndedType = 'meshagent.agent.tool_call.ended';
 const String _agentImageGenerationStartedType = 'meshagent.agent.image_generation.started';
@@ -715,6 +716,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         final errorData = errorMessage == null ? const <String, Object?>{} : <String, Object?>{'error_message': errorMessage};
         final logs = _stringList(existingData?['logs']);
         final isImageGeneration = tool.trim().toLowerCase() == 'image_generation';
+        final status = type == _agentToolCallEndedType
+            ? (errorMessage == null ? 'completed' : 'failed')
+            : (type == _agentToolCallPendingType ? 'pending' : 'running');
         if (isImageGeneration && type == _agentToolCallEndedType && payload['error'] == null) {
           break;
         }
@@ -737,9 +741,11 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                       'role': 'assistant',
                       'toolkit': toolkit,
                       'tool': resolvedTool,
-                      'status': type == _agentToolCallEndedType ? (errorMessage == null ? 'completed' : 'failed') : 'running',
+                      'status': status,
                       'arguments': arguments,
                       'logs': logs,
+                      if (_intValue(existingData?['argument_delta_bytes']) > 0)
+                        'argument_delta_bytes': _intValue(existingData?['argument_delta_bytes']),
                       ...errorData,
                       'text': formatToolCallEntryText(
                         toolkit: toolkit,
@@ -748,9 +754,21 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                         logs: logs,
                         errorMessage: errorMessage,
                         completed: type == _agentToolCallEndedType,
+                        pending: _toolCallStatusIsPending(status),
+                        argumentDeltaBytes: _intValue(existingData?['argument_delta_bytes']),
                       ),
                       'sender_name': _senderNameFromPayload(payload) ?? _agentRowSenderName(itemId),
                     },
+            ) ||
+            changed;
+        break;
+      case _agentToolCallArgumentsDeltaType:
+        changed =
+            _appendAgentToolArgumentDelta(
+              itemId: _payloadItemId(payload),
+              turnId: _payloadTurnId(payload),
+              delta: payload['delta']?.toString() ?? '',
+              senderName: _senderNameFromPayload(payload),
             ) ||
             changed;
         break;
@@ -967,6 +985,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     final arguments = _mapValue(existingData?['arguments']);
     final status = existingData?['status']?.toString() ?? 'running';
     final errorMessage = existingData?['error_message']?.toString();
+    final argumentDeltaBytes = _intValue(existingData?['argument_delta_bytes']);
     return _upsertAgentRow(
       itemId: itemId,
       turnId: turnId,
@@ -978,6 +997,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         'status': status,
         'arguments': arguments,
         'logs': logs,
+        if (argumentDeltaBytes > 0) 'argument_delta_bytes': argumentDeltaBytes,
         if (errorMessage != null && errorMessage.trim().isNotEmpty) 'error_message': errorMessage,
         'text': formatToolCallEntryText(
           toolkit: toolkit,
@@ -986,6 +1006,53 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
           logs: logs,
           errorMessage: errorMessage,
           completed: !_toolCallStatusIsRunning(status),
+          pending: _toolCallStatusIsPending(status),
+          argumentDeltaBytes: argumentDeltaBytes,
+        ),
+        'sender_name': senderName ?? existingData?['sender_name']?.toString(),
+      },
+    );
+  }
+
+  bool _appendAgentToolArgumentDelta({
+    required String itemId,
+    required String? turnId,
+    required String delta,
+    required String? senderName,
+  }) {
+    if (itemId.trim().isEmpty || delta.isEmpty) {
+      return false;
+    }
+    final existingData = _mapValue(_agentRowsByItemId[itemId]?['data']);
+    final totalDeltaBytes = _intValue(existingData?['argument_delta_bytes']) + utf8.encode(delta).length;
+    final toolkit = existingData?['toolkit']?.toString() ?? '';
+    final tool = existingData?['tool']?.toString() ?? 'tool';
+    final arguments = _mapValue(existingData?['arguments']);
+    final logs = _stringList(existingData?['logs']);
+    final status = existingData?['status']?.toString() ?? 'running';
+    final errorMessage = existingData?['error_message']?.toString();
+    return _upsertAgentRow(
+      itemId: itemId,
+      turnId: turnId,
+      data: {
+        'kind': 'tool_call',
+        'role': 'assistant',
+        'toolkit': toolkit,
+        'tool': tool,
+        'status': status,
+        'arguments': arguments,
+        'logs': logs,
+        'argument_delta_bytes': totalDeltaBytes,
+        if (errorMessage != null && errorMessage.trim().isNotEmpty) 'error_message': errorMessage,
+        'text': formatToolCallEntryText(
+          toolkit: toolkit,
+          tool: tool,
+          arguments: arguments,
+          logs: logs,
+          errorMessage: errorMessage,
+          completed: !_toolCallStatusIsRunning(status),
+          pending: _toolCallStatusIsPending(status),
+          argumentDeltaBytes: totalDeltaBytes,
         ),
         'sender_name': senderName ?? existingData?['sender_name']?.toString(),
       },
@@ -1091,18 +1158,33 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }) {
     final messages = <({Map<String, Object?> row, _DatasetThreadMessage? message})>[];
     final toolCallsByItemId = <String, _DatasetToolCallState>{};
+    final toolArgumentDeltaBytesByItemId = <String, int>{};
     for (final row in rows) {
       final data = _rowData(row);
       final type = data?['type']?.toString();
       final itemId = row['item_id']?.toString() ?? (data == null ? '' : _payloadItemId(Map<String, dynamic>.from(data)));
       if (_isDatasetToolCallStartType(type)) {
         toolCallsByItemId[itemId] = _DatasetToolCallState.fromPayload(row: row, payload: data!);
+        final pendingArgumentDeltaBytes = toolArgumentDeltaBytesByItemId[itemId];
+        if (pendingArgumentDeltaBytes != null) {
+          toolCallsByItemId[itemId]!.argumentDeltaBytes += pendingArgumentDeltaBytes;
+        }
         continue;
       }
       if (type == _agentToolCallLogDeltaType) {
         final state = toolCallsByItemId[itemId];
         if (state != null) {
           state.logs.addAll(_agentToolCallLogLines(data?['lines']));
+        }
+        continue;
+      }
+      if (type == _agentToolCallArgumentsDeltaType) {
+        final deltaBytes = utf8.encode(data?['delta']?.toString() ?? '').length;
+        final state = toolCallsByItemId[itemId];
+        if (state != null) {
+          state.argumentDeltaBytes += deltaBytes;
+        } else {
+          toolArgumentDeltaBytesByItemId[itemId] = (toolArgumentDeltaBytesByItemId[itemId] ?? 0) + deltaBytes;
         }
         continue;
       }
@@ -1314,6 +1396,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       threadStatus: _status.text,
       threadStatusStartedAt: _status.startedAt,
       threadStatusMode: _status.mode,
+      threadStatusTotalBytes: _status.totalBytes,
       supportsAgentMessages: agent != null,
       supportsMcp: agent?.getAttribute('supports_mcp') == true,
       toolkits: const <String, AgentToolkitCapabilities>{},
@@ -1971,7 +2054,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                 child: _buildToolCallDetailGutter(display, entry.$1, baseStyle, canExpand: canExpand, onTapDetails: onTapDetails),
               ),
               Expanded(
-                child: _buildToolCallDetailContent(
+                child: _buildToolCallDetailText(
                   context,
                   entry.$2,
                   style: baseStyle,
@@ -1982,15 +2065,13 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
           ),
       ],
     );
-    return SelectionArea(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text.rich(headerText, style: baseStyle, textAlign: TextAlign.left),
-          if (detailLines.isNotEmpty) details,
-        ],
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SelectableText.rich(headerText, style: baseStyle, textAlign: TextAlign.left),
+        if (detailLines.isNotEmpty) details,
+      ],
     );
   }
 
@@ -2002,7 +2083,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     required VoidCallback onTapDetails,
   }) {
     if (display.detailsTruncated && index == 0) {
-      final marker = Text('...', style: style);
+      final marker = Text('…', style: style);
       if (!canExpand) {
         return marker;
       }
@@ -2019,16 +2100,12 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return null;
   }
 
-  Widget _buildToolCallDetailContent(BuildContext context, String text, {required TextStyle style, required String? languageOrFilename}) {
-    return _buildToolCallDetailText(context, text, style: style, languageOrFilename: languageOrFilename);
-  }
-
   Widget _buildToolCallDetailText(BuildContext context, String text, {required TextStyle style, required String? languageOrFilename}) {
     if (languageOrFilename == null) {
-      return Text(text, style: style, textAlign: TextAlign.left);
+      return SelectableText(text, style: style, textAlign: TextAlign.left);
     }
     final codeStyle = GoogleFonts.sourceCodePro(textStyle: style);
-    return Text.rich(
+    return SelectableText.rich(
       highlightCodeSpanWithReHighlight(context: context, code: text, languageOrFilename: languageOrFilename, textStyle: codeStyle),
       textAlign: TextAlign.left,
     );
@@ -2123,6 +2200,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                 child: ChatThreadProcessingStatusRow(
                   text: statusText,
                   startedAt: _status.startedAt,
+                  totalBytes: _status.totalBytes,
                   onCancel: _canInterruptActiveTurn(pendingMessages) ? _cancelTurn : null,
                   showCancelButton: _status.mode != null,
                   cancelEnabled: true,
@@ -2294,6 +2372,7 @@ class _DatasetToolCallState {
     required this.tool,
     required this.arguments,
     required this.logs,
+    required this.argumentDeltaBytes,
     required this.authorName,
     required this.createdAt,
   });
@@ -2306,6 +2385,7 @@ class _DatasetToolCallState {
       tool: tool.trim().isEmpty ? 'tool' : tool,
       arguments: _mapValue(payload['arguments']),
       logs: <String>[],
+      argumentDeltaBytes: _intValue(payload['argument_delta_bytes']),
       authorName: payload['sender_name']?.toString(),
       createdAt: _rowTimestamp(row),
     );
@@ -2316,6 +2396,7 @@ class _DatasetToolCallState {
   String tool;
   Map<String, Object?>? arguments;
   final List<String> logs;
+  int argumentDeltaBytes;
   String? authorName;
   final DateTime createdAt;
 }
@@ -2515,6 +2596,7 @@ _DatasetThreadMessage? _messageForRow(
       final logs = _stringList(data['logs']);
       final errorMessage = data['error_message']?.toString();
       final status = data['status']?.toString();
+      final argumentDeltaBytes = _intValue(data['argument_delta_bytes']);
       final summary = formatToolCallEntry(
         toolkit: toolkit,
         tool: tool.trim().isEmpty ? 'tool' : tool,
@@ -2522,6 +2604,8 @@ _DatasetThreadMessage? _messageForRow(
         logs: logs,
         errorMessage: errorMessage,
         completed: !_toolCallStatusIsRunning(status),
+        pending: _toolCallStatusIsPending(status),
+        argumentDeltaBytes: argumentDeltaBytes,
       );
       final expandedSummary = formatToolCallEntry(
         toolkit: toolkit,
@@ -2530,7 +2614,9 @@ _DatasetThreadMessage? _messageForRow(
         logs: logs,
         errorMessage: errorMessage,
         completed: !_toolCallStatusIsRunning(status),
+        pending: _toolCallStatusIsPending(status),
         detailLineLimit: null,
+        argumentDeltaBytes: argumentDeltaBytes,
       );
       return _DatasetThreadMessage(
         id: itemId,
@@ -2677,6 +2763,7 @@ _DatasetThreadMessage? _messageForAgentPayload(
         ),
       );
     case _agentToolCallStartedType:
+    case _agentToolCallArgumentsDeltaType:
     case _agentToolCallLogDeltaType:
       return null;
     case _agentToolCallEndedType:
@@ -2705,6 +2792,10 @@ bool _toolCallStatusIsRunning(String? status) {
   return normalized == null || normalized.isEmpty || normalized == 'pending' || normalized == 'in_progress' || normalized == 'running';
 }
 
+bool _toolCallStatusIsPending(String? status) {
+  return status?.trim().toLowerCase() == 'pending';
+}
+
 _DatasetThreadMessage _messageForToolCallEndRow({
   required Map<String, Object?> row,
   required Map<String, Object?>? payload,
@@ -2718,6 +2809,7 @@ _DatasetThreadMessage _messageForToolCallEndRow({
   final tool = state?.tool ?? payload?['tool']?.toString() ?? payload?['tool_name']?.toString() ?? payload?['name']?.toString() ?? 'tool';
   final arguments = state?.arguments ?? _mapValue(payload?['arguments']);
   final logs = state?.logs ?? const <String>[];
+  final argumentDeltaBytes = state?.argumentDeltaBytes ?? _intValue(payload?['argument_delta_bytes']);
   final errorMessage = _agentToolCallErrorMessage(payload?['error']);
   final entry = formatToolCallEntry(
     toolkit: toolkit,
@@ -2725,6 +2817,7 @@ _DatasetThreadMessage _messageForToolCallEndRow({
     arguments: arguments,
     logs: logs,
     errorMessage: errorMessage,
+    argumentDeltaBytes: argumentDeltaBytes,
   );
   final expandedEntry = formatToolCallEntry(
     toolkit: toolkit,
@@ -2733,6 +2826,7 @@ _DatasetThreadMessage _messageForToolCallEndRow({
     logs: logs,
     errorMessage: errorMessage,
     detailLineLimit: null,
+    argumentDeltaBytes: argumentDeltaBytes,
   );
   return _DatasetThreadMessage(
     id: itemId,
