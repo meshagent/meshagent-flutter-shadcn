@@ -621,6 +621,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
               kind: 'message',
               role: 'assistant',
               delta: payload['text']?.toString() ?? '',
+              senderName: _senderNameFromPayload(payload),
+              phase: _agentMessagePhase(payload),
             ) ||
             changed;
         break;
@@ -629,7 +631,13 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             _upsertAgentRow(
               itemId: _payloadItemId(payload),
               turnId: _payloadTurnId(payload),
-              data: {'kind': 'message', 'role': 'assistant', 'text': payload['text']?.toString() ?? _agentRowText(_payloadItemId(payload))},
+              data: {
+                'kind': 'message',
+                'role': 'assistant',
+                'text': payload['text']?.toString() ?? _agentRowText(_payloadItemId(payload)),
+                'sender_name': _senderNameFromPayload(payload) ?? _agentRowSenderName(_payloadItemId(payload)),
+                if (_agentMessagePhase(payload) != null) 'phase': _agentMessagePhase(payload),
+              },
             ) ||
             changed;
         break;
@@ -650,6 +658,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
               kind: 'reasoning',
               role: 'assistant',
               delta: payload['text']?.toString() ?? '',
+              phase: null,
+              senderName: _senderNameFromPayload(payload),
             ) ||
             changed;
         break;
@@ -662,6 +672,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                 'kind': 'reasoning',
                 'role': 'assistant',
                 'text': payload['text']?.toString() ?? _agentRowText(_payloadItemId(payload)),
+                'sender_name': _senderNameFromPayload(payload) ?? _agentRowSenderName(_payloadItemId(payload)),
               },
             ) ||
             changed;
@@ -678,7 +689,12 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       case _agentFileContentDeltaType:
       case _agentFileContentEndedType:
         changed =
-            _appendAgentRowUrl(itemId: _payloadItemId(payload), turnId: _payloadTurnId(payload), url: payload['url']?.toString()) ||
+            _appendAgentRowUrl(
+              itemId: _payloadItemId(payload),
+              turnId: _payloadTurnId(payload),
+              url: payload['url']?.toString(),
+              senderName: _senderNameFromPayload(payload),
+            ) ||
             changed;
         break;
       case _agentToolCallPendingType:
@@ -702,6 +718,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                       'status_detail': payload['error'] == null ? 'Generating image' : payload['error']?.toString(),
                       'call_id': payload['call_id']?.toString(),
                       'arguments': _mapValue(payload['arguments']),
+                      'sender_name': _senderNameFromPayload(payload) ?? _agentRowSenderName(_payloadItemId(payload)),
                     }
                   : {
                       'kind': 'tool_call',
@@ -709,6 +726,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                       'toolkit': payload['toolkit']?.toString() ?? payload['toolkit_name']?.toString() ?? '',
                       'tool': tool,
                       'status': type == _agentToolCallEndedType ? 'completed' : 'running',
+                      'sender_name': _senderNameFromPayload(payload) ?? _agentRowSenderName(_payloadItemId(payload)),
                     },
             ) ||
             changed;
@@ -730,6 +748,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                 'call_id': payload['call_id']?.toString(),
                 'arguments': _mapValue(payload['arguments']),
                 'message': payload,
+                'sender_name': _senderNameFromPayload(payload) ?? _agentRowSenderName(_payloadItemId(payload)),
               },
             ) ||
             changed;
@@ -740,7 +759,13 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
               itemId: _payloadItemId(payload),
               turnId: _payloadTurnId(payload),
               timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
-              data: {'kind': 'compaction', 'role': 'assistant', 'status': 'completed', 'message': payload},
+              data: {
+                'kind': 'compaction',
+                'role': 'assistant',
+                'status': 'completed',
+                'message': payload,
+                'sender_name': _senderNameFromPayload(payload) ?? _agentRowSenderName(_payloadItemId(payload)),
+              },
             ) ||
             changed;
         break;
@@ -860,16 +885,28 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     required String kind,
     required String role,
     required String delta,
+    required String? senderName,
+    required String? phase,
   }) {
     if (delta.isEmpty) {
       return false;
     }
     final existingData = _mapValue(_agentRowsByItemId[itemId]?['data']);
     final nextText = '${existingData?['text']?.toString() ?? ''}$delta';
-    return _upsertAgentRow(itemId: itemId, turnId: turnId, data: {'kind': kind, 'role': role, 'text': nextText});
+    return _upsertAgentRow(
+      itemId: itemId,
+      turnId: turnId,
+      data: {
+        'kind': kind,
+        'role': role,
+        'text': nextText,
+        'sender_name': senderName ?? existingData?['sender_name']?.toString(),
+        if (phase != null) 'phase': phase else if (existingData?['phase'] != null) 'phase': existingData?['phase'],
+      },
+    );
   }
 
-  bool _appendAgentRowUrl({required String itemId, required String? turnId, required String? url}) {
+  bool _appendAgentRowUrl({required String itemId, required String? turnId, required String? url, required String? senderName}) {
     final normalizedUrl = url?.trim();
     if (normalizedUrl == null || normalizedUrl.isEmpty) {
       return false;
@@ -879,11 +916,20 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (!urls.contains(normalizedUrl)) {
       urls.add(normalizedUrl);
     }
-    return _upsertAgentRow(itemId: itemId, turnId: turnId, data: {'kind': 'file', 'role': 'assistant', 'urls': urls});
+    return _upsertAgentRow(
+      itemId: itemId,
+      turnId: turnId,
+      data: {'kind': 'file', 'role': 'assistant', 'urls': urls, 'sender_name': senderName ?? existingData?['sender_name']?.toString()},
+    );
   }
 
   String _agentRowText(String itemId) {
     return _mapValue(_agentRowsByItemId[itemId]?['data'])?['text']?.toString() ?? '';
+  }
+
+  String? _agentRowSenderName(String itemId) {
+    final senderName = _mapValue(_agentRowsByItemId[itemId]?['data'])?['sender_name'];
+    return senderName is String && senderName.trim().isNotEmpty ? senderName.trim() : null;
   }
 
   void _refreshStatus({bool notify = false}) {
@@ -1385,10 +1431,10 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     final localParticipantName = widget.room.localParticipant?.getAttribute('name');
     final isAgentMessage = message.role == 'agent';
     final rawAuthorName = message.authorName;
+    final authorName = rawAuthorName == null || rawAuthorName.trim().isEmpty ? null : rawAuthorName;
     final mine =
         !isAgentMessage &&
         (rawAuthorName == localParticipantName || ((rawAuthorName == null || rawAuthorName.trim().isEmpty) && message.role == 'user'));
-    final authorName = rawAuthorName ?? (isAgentMessage ? _displayAgentName(widget.agentName ?? 'agent') : '');
     final imageAttachmentId = message.id;
     final imageInitialIndex = feedImages.indexWhere((entry) => entry.attachmentElementId == imageAttachmentId);
 
@@ -1398,8 +1444,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       mine: mine,
       isAgentMessage: isAgentMessage,
       text: message.text,
-      authorName: authorName,
+      authorName: authorName ?? '',
       createdAt: message.createdAt,
+      shouldShowHeader: !isAgentMessage || authorName != null,
       attachmentWidgets: [
         for (final attachment in message.attachments)
           GestureDetector(
@@ -1782,7 +1829,7 @@ _DatasetThreadMessage? _messageForRow(
         kind: 'message',
         role: 'agent',
         text: '',
-        authorName: _stringValue(image?['created_by']),
+        authorName: _stringValue(data['sender_name']) ?? _stringValue(image?['created_by']),
         attachments: const [],
         createdAt: _rowTimestamp(row),
         image: _DatasetThreadImage(
@@ -1808,6 +1855,7 @@ _DatasetThreadMessage? _messageForRow(
               kind: 'reasoning',
               role: 'agent',
               text: text,
+              authorName: data['sender_name']?.toString(),
               attachments: const [],
               createdAt: _rowTimestamp(row),
             );
@@ -1820,6 +1868,7 @@ _DatasetThreadMessage? _messageForRow(
         kind: 'tool_call',
         role: 'agent',
         text: summary.isEmpty ? 'Tool call' : summary,
+        authorName: data['sender_name']?.toString(),
         attachments: const [],
         createdAt: _rowTimestamp(row),
       );
@@ -1829,6 +1878,7 @@ _DatasetThreadMessage? _messageForRow(
         kind: 'compaction',
         role: 'agent',
         text: 'Context compacted',
+        authorName: data['sender_name']?.toString(),
         attachments: const [],
         createdAt: _rowTimestamp(row),
       );
@@ -1896,12 +1946,28 @@ _DatasetThreadMessage? _messageForAgentPayload(
       final text = payload['text']?.toString() ?? '';
       return text.trim().isEmpty
           ? null
-          : _DatasetThreadMessage(id: itemId, kind: 'reasoning', role: 'agent', text: text, attachments: const [], createdAt: createdAt);
+          : _DatasetThreadMessage(
+              id: itemId,
+              kind: 'reasoning',
+              role: 'agent',
+              text: text,
+              authorName: payload['sender_name']?.toString(),
+              attachments: const [],
+              createdAt: createdAt,
+            );
     case _agentFileContentDeltaType:
       final url = payload['url']?.toString();
       return url == null || url.trim().isEmpty
           ? null
-          : _DatasetThreadMessage(id: itemId, kind: 'message', role: 'agent', text: '', attachments: [url.trim()], createdAt: createdAt);
+          : _DatasetThreadMessage(
+              id: itemId,
+              kind: 'message',
+              role: 'agent',
+              text: '',
+              authorName: payload['sender_name']?.toString(),
+              attachments: [url.trim()],
+              createdAt: createdAt,
+            );
     case _agentImageGenerationStartedType:
     case _agentImageGenerationPartialType:
     case _agentImageGenerationCompletedType:
@@ -1914,7 +1980,7 @@ _DatasetThreadMessage? _messageForAgentPayload(
         kind: 'message',
         role: 'agent',
         text: '',
-        authorName: _stringValue(image?['created_by']),
+        authorName: payload['sender_name']?.toString() ?? _stringValue(image?['created_by']),
         attachments: const [],
         createdAt: createdAt,
         image: _DatasetThreadImage(
@@ -1937,6 +2003,7 @@ _DatasetThreadMessage? _messageForAgentPayload(
         kind: 'tool_call',
         role: 'agent',
         text: summary.isEmpty ? 'Tool call' : summary,
+        authorName: payload['sender_name']?.toString(),
         attachments: const [],
         createdAt: createdAt,
       );
@@ -1946,6 +2013,7 @@ _DatasetThreadMessage? _messageForAgentPayload(
         kind: 'compaction',
         role: 'agent',
         text: 'Context compacted',
+        authorName: payload['sender_name']?.toString(),
         attachments: const [],
         createdAt: createdAt,
       );
@@ -2097,6 +2165,24 @@ String? _payloadTurnId(Map<String, dynamic> payload) {
   }
   final trimmed = turnId.trim();
   return trimmed.isEmpty ? null : trimmed;
+}
+
+String? _senderNameFromPayload(Map<String, dynamic> payload) {
+  final senderName = payload['sender_name'];
+  if (senderName is! String) {
+    return null;
+  }
+  final trimmed = senderName.trim();
+  return trimmed.isEmpty ? null : trimmed;
+}
+
+String? _agentMessagePhase(Map<String, dynamic> payload) {
+  final phase = payload['phase'];
+  if (phase is! String) {
+    return null;
+  }
+  final normalized = phase.trim();
+  return normalized == 'commentary' || normalized == 'final_answer' ? normalized : null;
 }
 
 DateTime? _timestampFromPayload(Map<String, dynamic> payload) {

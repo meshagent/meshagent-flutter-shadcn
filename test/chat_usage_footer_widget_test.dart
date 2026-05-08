@@ -793,6 +793,60 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
   });
 
+  testWidgets('Dataset ChatBotView does not use the configured agent name as a placeholder author', (tester) async {
+    final harness = (await tester.runAsync<_MessagingHarness>(() async {
+      final harness = await _startMessagingHarness(initialDatasetBatch: _threadRowsBatch(const []));
+      await harness.room.messaging.enable();
+      await _waitUntil(() => harness.room.messaging.remoteParticipants.isNotEmpty);
+      return harness;
+    }))!;
+    addTearDown(harness.dispose);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox.expand(
+            child: ChatBotView(room: harness.room, agentName: 'assistant', documentPath: 'dataset://threads/test'),
+          ),
+        ),
+      ),
+    );
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    });
+    await tester.pump();
+
+    await tester.runAsync(() async {
+      await harness.server.sendAgentMessage(harness.pair.serverProtocol, {
+        'type': 'meshagent.agent.text_content.delta',
+        'thread_id': 'dataset://threads/test',
+        'turn_id': 'turn-1',
+        'item_id': 'assistant-message-1',
+        'text': 'hello',
+      });
+    });
+    await _pumpUntil(tester, () => find.text('hello').evaluate().isNotEmpty);
+
+    expect(find.text('assistant'), findsNothing);
+
+    await tester.runAsync(() async {
+      await harness.server.sendAgentMessage(harness.pair.serverProtocol, {
+        'type': 'meshagent.agent.text_content.delta',
+        'thread_id': 'dataset://threads/test',
+        'turn_id': 'turn-1',
+        'item_id': 'assistant-message-1',
+        'sender_name': 'chatbot',
+        'text': ' there',
+      });
+    });
+    await _pumpUntil(tester, () => find.text('chatbot').evaluate().isNotEmpty && find.text('hello there').evaluate().isNotEmpty);
+
+    expect(find.text('assistant'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 500));
+  });
+
   testWidgets('Dataset ChatBotView keeps steered messages stable when dataset rows catch up', (tester) async {
     final harness = (await tester.runAsync<_MessagingHarness>(() async {
       final harness = await _startMessagingHarness(
