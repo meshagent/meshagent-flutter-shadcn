@@ -3,7 +3,9 @@ import 'dart:convert';
 
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:meshagent/meshagent.dart';
+import 'package:meshagent_flutter_shadcn/chat_bubble_markdown_config.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:uuid/uuid.dart';
 
@@ -107,6 +109,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   List<ChatThreadFeedImage> _overlayImages = const <ChatThreadFeedImage>[];
   int _overlayInitialIndex = 0;
   final Set<String> _expandedDetailGroupIds = <String>{};
+  final Set<String> _expandedToolCallIds = <String>{};
 
   @override
   void initState() {
@@ -1525,9 +1528,29 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     final theme = ShadTheme.of(context);
     if (message.kind != 'message') {
       if (message.kind == 'tool_call') {
+        final expanded = _expandedToolCallIds.contains(message.id);
+        final toolCallEntry = message.toolCallEntry ?? _toolCallEntryFromText(message.text);
+        final expandedToolCallEntry = message.expandedToolCallEntry;
         return Padding(
           padding: const EdgeInsets.only(left: 42, right: 18),
-          child: SizedBox(width: double.infinity, child: _buildToolCallSummaryText(context, message.text)),
+          child: SizedBox(
+            width: double.infinity,
+            child: _buildToolCallSummaryText(
+              context,
+              expanded && expandedToolCallEntry != null ? expandedToolCallEntry : toolCallEntry,
+              canExpand: expandedToolCallEntry != null && expandedToolCallEntry.text != toolCallEntry.text,
+              onTapDetails: () {
+                if (expandedToolCallEntry == null || expandedToolCallEntry.text == toolCallEntry.text) {
+                  return;
+                }
+                setState(() {
+                  if (!_expandedToolCallIds.add(message.id)) {
+                    _expandedToolCallIds.remove(message.id);
+                  }
+                });
+              },
+            ),
+          ),
         );
       }
       return Padding(
@@ -1918,42 +1941,105 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return _datasetThreadMessageSpacing(previousMessage, nextMessage);
   }
 
-  Widget _buildToolCallSummaryText(BuildContext context, String text) {
+  Widget _buildToolCallSummaryText(
+    BuildContext context,
+    ToolCallEntryDisplay display, {
+    required bool canExpand,
+    required VoidCallback onTapDetails,
+  }) {
     final theme = ShadTheme.of(context);
-    final displayText = _indentToolCallSummaryContinuationLines(text);
     final baseStyle = theme.textTheme.muted.copyWith(color: theme.colorScheme.mutedForeground);
     final highlightStyle = baseStyle.copyWith(color: theme.colorScheme.foreground, fontWeight: FontWeight.w700);
-    final highlightEnd = _toolCallSummaryHighlightEnd(displayText);
-    if (highlightEnd <= 0) {
-      return Text(displayText, style: baseStyle, textAlign: TextAlign.left);
-    }
-    return Text.rich(
-      TextSpan(
+    final detailLines = display.detailLines;
+    final headlineRest = display.headline.rest;
+    final headerText = TextSpan(
+      children: [
+        TextSpan(text: display.headline.action, style: highlightStyle),
+        if (headlineRest.trim().isNotEmpty) TextSpan(text: ' $headlineRest'),
+      ],
+    );
+    final details = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final entry in detailLines.indexed)
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 18,
+                child: _buildToolCallDetailGutter(display, entry.$1, baseStyle, canExpand: canExpand, onTapDetails: onTapDetails),
+              ),
+              Expanded(
+                child: _buildToolCallDetailContent(
+                  context,
+                  entry.$2,
+                  style: baseStyle,
+                  languageOrFilename: display.headline.detailLanguageOrFilename,
+                ),
+              ),
+            ],
+          ),
+      ],
+    );
+    return SelectionArea(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          TextSpan(text: displayText.substring(0, highlightEnd), style: highlightStyle),
-          TextSpan(text: displayText.substring(highlightEnd)),
+          Text.rich(headerText, style: baseStyle, textAlign: TextAlign.left),
+          if (detailLines.isNotEmpty) details,
         ],
       ),
-      style: baseStyle,
+    );
+  }
+
+  Widget? _buildToolCallDetailGutter(
+    ToolCallEntryDisplay display,
+    int index,
+    TextStyle style, {
+    required bool canExpand,
+    required VoidCallback onTapDetails,
+  }) {
+    if (display.detailsTruncated && index == 0) {
+      final marker = Text('...', style: style);
+      if (!canExpand) {
+        return marker;
+      }
+      return MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: SelectionContainer.disabled(
+          child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: onTapDetails, child: marker),
+        ),
+      );
+    }
+    if (index == 0) {
+      return Text('└', style: style);
+    }
+    return null;
+  }
+
+  Widget _buildToolCallDetailContent(BuildContext context, String text, {required TextStyle style, required String? languageOrFilename}) {
+    return _buildToolCallDetailText(context, text, style: style, languageOrFilename: languageOrFilename);
+  }
+
+  Widget _buildToolCallDetailText(BuildContext context, String text, {required TextStyle style, required String? languageOrFilename}) {
+    if (languageOrFilename == null) {
+      return Text(text, style: style, textAlign: TextAlign.left);
+    }
+    final codeStyle = GoogleFonts.sourceCodePro(textStyle: style);
+    return Text.rich(
+      highlightCodeSpanWithReHighlight(context: context, code: text, languageOrFilename: languageOrFilename, textStyle: codeStyle),
       textAlign: TextAlign.left,
     );
   }
 
-  int _toolCallSummaryHighlightEnd(String text) {
-    final colonIndex = text.indexOf(':');
-    if (colonIndex >= 0 && colonIndex + 1 < 30) {
-      return colonIndex + 1;
-    }
-    final firstWordMatch = RegExp(r'^\S+').firstMatch(text);
-    return firstWordMatch?.end ?? 0;
-  }
-
-  String _indentToolCallSummaryContinuationLines(String text) {
+  ToolCallEntryDisplay _toolCallEntryFromText(String text) {
     final lines = text.split('\n');
-    if (lines.length <= 1) {
-      return text;
-    }
-    return [lines.first, for (final line in lines.skip(1)) '  $line'].join('\n');
+    return ToolCallEntryDisplay(
+      headline: ToolCallHeadline(action: lines.first),
+      detailLines: lines.skip(1).toList(growable: false),
+    );
   }
 
   Widget? _buildQueuedPendingMessages(
@@ -2120,6 +2206,8 @@ class _DatasetThreadMessage {
     required this.attachments,
     required this.createdAt,
     this.image,
+    this.toolCallEntry,
+    this.expandedToolCallEntry,
     this.authorName,
     this.phase,
     this.turnId,
@@ -2132,6 +2220,8 @@ class _DatasetThreadMessage {
   final List<String> attachments;
   final DateTime createdAt;
   final _DatasetThreadImage? image;
+  final ToolCallEntryDisplay? toolCallEntry;
+  final ToolCallEntryDisplay? expandedToolCallEntry;
   final String? authorName;
   final String? phase;
   final String? turnId;
@@ -2425,7 +2515,7 @@ _DatasetThreadMessage? _messageForRow(
       final logs = _stringList(data['logs']);
       final errorMessage = data['error_message']?.toString();
       final status = data['status']?.toString();
-      final summary = formatToolCallEntryText(
+      final summary = formatToolCallEntry(
         toolkit: toolkit,
         tool: tool.trim().isEmpty ? 'tool' : tool,
         arguments: arguments,
@@ -2433,11 +2523,22 @@ _DatasetThreadMessage? _messageForRow(
         errorMessage: errorMessage,
         completed: !_toolCallStatusIsRunning(status),
       );
+      final expandedSummary = formatToolCallEntry(
+        toolkit: toolkit,
+        tool: tool.trim().isEmpty ? 'tool' : tool,
+        arguments: arguments,
+        logs: logs,
+        errorMessage: errorMessage,
+        completed: !_toolCallStatusIsRunning(status),
+        detailLineLimit: null,
+      );
       return _DatasetThreadMessage(
         id: itemId,
         kind: 'tool_call',
         role: 'agent',
-        text: summary.trim().isEmpty ? 'Tool call' : summary,
+        text: summary.text.trim().isEmpty ? 'Tool call' : summary.text,
+        toolCallEntry: summary,
+        expandedToolCallEntry: expandedSummary.text.trim().isEmpty ? null : expandedSummary,
         authorName: data['sender_name']?.toString(),
         attachments: const [],
         createdAt: _rowTimestamp(row),
@@ -2618,17 +2719,28 @@ _DatasetThreadMessage _messageForToolCallEndRow({
   final arguments = state?.arguments ?? _mapValue(payload?['arguments']);
   final logs = state?.logs ?? const <String>[];
   final errorMessage = _agentToolCallErrorMessage(payload?['error']);
+  final entry = formatToolCallEntry(
+    toolkit: toolkit,
+    tool: tool.trim().isEmpty ? 'tool' : tool,
+    arguments: arguments,
+    logs: logs,
+    errorMessage: errorMessage,
+  );
+  final expandedEntry = formatToolCallEntry(
+    toolkit: toolkit,
+    tool: tool.trim().isEmpty ? 'tool' : tool,
+    arguments: arguments,
+    logs: logs,
+    errorMessage: errorMessage,
+    detailLineLimit: null,
+  );
   return _DatasetThreadMessage(
     id: itemId,
     kind: 'tool_call',
     role: 'agent',
-    text: formatToolCallEntryText(
-      toolkit: toolkit,
-      tool: tool.trim().isEmpty ? 'tool' : tool,
-      arguments: arguments,
-      logs: logs,
-      errorMessage: errorMessage,
-    ),
+    text: entry.text,
+    toolCallEntry: entry,
+    expandedToolCallEntry: expandedEntry.text.trim().isEmpty ? null : expandedEntry,
     authorName: payload?['sender_name']?.toString() ?? state?.authorName,
     attachments: const [],
     createdAt: _rowTimestamp(row),

@@ -39,6 +39,8 @@ const highlightIdByKey = <String, String>{
   'ts': 'typescript',
   'yml': 'yaml',
   'html': 'xml',
+  'svg': 'xml',
+  'svgz': 'xml',
   'sh': 'bash',
   'zsh': 'bash',
   'ksh': 'bash',

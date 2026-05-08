@@ -72,7 +72,7 @@ void main() {
     expect(formatToolCallSummary(toolkit: 'openai', tool: 'shell', arguments: null, completed: false), 'Running commands');
   });
 
-  test('formatToolCallEntryText caps logs and extracts errors', () {
+  test('formatToolCallEntryText keeps header and shows trailing details', () {
     final text = formatToolCallEntryText(
       toolkit: 'openai',
       tool: 'web_search',
@@ -81,7 +81,61 @@ void main() {
       errorMessage: null,
     );
 
-    expect(text, 'line 1\nline 2\nline 3\nline 4');
+    expect(text, 'line 1\nline 2\nline 3\nline 4\nline 5');
+  });
+
+  test('formatToolCallEntryText keeps summary and shows trailing details', () {
+    final text = formatToolCallEntryText(
+      toolkit: 'storage',
+      tool: 'read_file',
+      arguments: {'path': '/tmp/report.txt'},
+      logs: ['line 1\nline 2\nline 3\nline 4\nline 5'],
+      errorMessage: null,
+    );
+
+    expect(text, 'Read file: /tmp/report.txt\nline 2\nline 3\nline 4\nline 5');
+  });
+
+  test('formatToolCallEntry returns headline and filename metadata', () {
+    final display = formatToolCallEntry(
+      toolkit: 'storage',
+      tool: 'write_file',
+      arguments: {'path': '/tmp/report.dart'},
+      logs: ['void main() {}\nprint("done");'],
+      errorMessage: null,
+    );
+
+    expect(display.headline.action, 'Wrote file:');
+    expect(display.headline.rest, '/tmp/report.dart');
+    expect(display.headline.detailLanguageOrFilename, '/tmp/report.dart');
+    expect(display.detailLines, ['void main() {}', 'print("done");']);
+    expect(display.detailsTruncated, isFalse);
+  });
+
+  test('formatToolCallEntry marks tail details as truncated', () {
+    final display = formatToolCallEntry(
+      toolkit: 'storage',
+      tool: 'read_file',
+      arguments: {'path': '/tmp/report.txt'},
+      logs: ['line 1\nline 2\nline 3\nline 4\nline 5'],
+      errorMessage: null,
+    );
+
+    expect(display.detailLines, ['line 2', 'line 3', 'line 4', 'line 5']);
+    expect(display.detailsTruncated, isTrue);
+  });
+
+  test('formatToolCallEntryText can include all details', () {
+    final text = formatToolCallEntryText(
+      toolkit: 'storage',
+      tool: 'read_file',
+      arguments: {'path': '/tmp/report.txt'},
+      logs: ['line 1\nline 2\nline 3\nline 4\nline 5'],
+      errorMessage: null,
+      detailLineLimit: null,
+    );
+
+    expect(text, 'Read file: /tmp/report.txt\nline 1\nline 2\nline 3\nline 4\nline 5');
   });
 
   test('formatToolCallEntryText prefixes path-only log headlines', () {
@@ -94,5 +148,19 @@ void main() {
     );
 
     expect(text.split('\n').first, 'Output: /tmp/pie_chart.svg');
+  });
+
+  test('formatToolCallEntry extracts filename metadata from log headlines', () {
+    final display = formatToolCallEntry(
+      toolkit: 'openai',
+      tool: 'shell',
+      arguments: null,
+      logs: ['Saved pie chart to /tmp/pie_chart_matplotlib.svg\n<svg>\n</svg>'],
+      errorMessage: null,
+    );
+
+    expect(display.headline.action, 'Saved pie chart to');
+    expect(display.headline.rest, '/tmp/pie_chart_matplotlib.svg');
+    expect(display.headline.detailLanguageOrFilename, '/tmp/pie_chart_matplotlib.svg');
   });
 }

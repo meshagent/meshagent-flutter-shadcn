@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:meshagent_flutter_shadcn/code_language_resolver.dart';
 import 'package:path/path.dart' as p;
 
 const Set<String> _connectors = {'&&', '||', '|', ';'};
@@ -33,6 +34,26 @@ class ParsedCommand {
   int get hashCode => Object.hash(kind, cmd, name, path, query);
 }
 
+class ToolCallHeadline {
+  const ToolCallHeadline({required this.action, this.rest = '', this.detailLanguageOrFilename});
+
+  final String action;
+  final String rest;
+  final String? detailLanguageOrFilename;
+
+  String get text => rest.trim().isEmpty ? action : '$action $rest';
+}
+
+class ToolCallEntryDisplay {
+  const ToolCallEntryDisplay({required this.headline, required this.detailLines, this.detailsTruncated = false});
+
+  final ToolCallHeadline headline;
+  final List<String> detailLines;
+  final bool detailsTruncated;
+
+  String get text => [headline.text, ...detailLines].join('\n');
+}
+
 List<ParsedCommand> parseToolCommand(Object command) {
   final tokens = _coerceCommandTokens(command);
   final parsed = _parseCommandImpl(tokens);
@@ -56,24 +77,32 @@ String formatToolCallSummary({
   bool failed = false,
   bool completed = true,
 }) {
+  return toolCallHeadline(toolkit: toolkit, tool: tool, arguments: arguments, failed: failed, completed: completed).text;
+}
+
+ToolCallHeadline toolCallHeadline({
+  required String toolkit,
+  required String tool,
+  required Map<String, Object?>? arguments,
+  bool failed = false,
+  bool completed = true,
+}) {
   final label = toolCallLabel(toolkit: toolkit, tool: tool, arguments: arguments);
-  final friendly = _friendlyBuiltinSummary(toolkit: toolkit, tool: tool, arguments: arguments, failed: failed, completed: completed);
-  if (friendly != null) {
-    return friendly;
-  }
+  final friendly = _friendlyBuiltinHeadline(toolkit: toolkit, tool: tool, arguments: arguments, failed: failed, completed: completed);
+  if (friendly != null) return friendly;
 
   final normalizedTool = tool.trim().toLowerCase();
   final normalizedToolkit = toolkit.trim().toLowerCase();
   if (!completed && !failed && normalizedToolkit == 'openai' && _shellTools.contains(normalizedTool) && arguments == null) {
-    return 'Running commands';
+    return const ToolCallHeadline(action: 'Running', rest: 'commands');
   }
   if (failed || !_commandTools.contains(normalizedTool) || arguments == null) {
-    return '${failed ? "Failed" : (completed ? "Ran" : "Running")} $label';
+    return ToolCallHeadline(action: failed ? 'Failed' : (completed ? 'Ran' : 'Running'), rest: label);
   }
 
   final commands = _commandArguments(tool: normalizedTool, arguments: arguments);
   if (commands.isEmpty) {
-    return '${failed ? "Failed" : (completed ? "Ran" : "Running")} $label';
+    return ToolCallHeadline(action: failed ? 'Failed' : (completed ? 'Ran' : 'Running'), rest: label);
   }
 
   final parsed = <ParsedCommand>[];
@@ -81,14 +110,14 @@ String formatToolCallSummary({
     parsed.addAll(parseToolCommand(command));
   }
   if (parsed.isEmpty || parsed.any((item) => item.kind == 'unknown')) {
-    return '${completed ? "Ran" : "Running"} $label';
+    return ToolCallHeadline(action: completed ? 'Ran' : 'Running', rest: label);
   }
 
   final lines = ['Explored'];
   for (final line in _exploringDetailLines(parsed)) {
     lines.add('  $line');
   }
-  return lines.join('\n');
+  return ToolCallHeadline(action: lines.join('\n'));
 }
 
 String formatToolCallEntryText({
@@ -98,26 +127,47 @@ String formatToolCallEntryText({
   required List<String> logs,
   required String? errorMessage,
   bool completed = true,
+  int? detailLineLimit = _toolLogRenderLimit,
+}) {
+  return formatToolCallEntry(
+    toolkit: toolkit,
+    tool: tool,
+    arguments: arguments,
+    logs: logs,
+    errorMessage: errorMessage,
+    completed: completed,
+    detailLineLimit: detailLineLimit,
+  ).text;
+}
+
+ToolCallEntryDisplay formatToolCallEntry({
+  required String toolkit,
+  required String tool,
+  required Map<String, Object?>? arguments,
+  required List<String> logs,
+  required String? errorMessage,
+  bool completed = true,
+  int? detailLineLimit = _toolLogRenderLimit,
 }) {
   final failed = errorMessage != null;
-  var headline = formatToolCallSummary(toolkit: toolkit, tool: tool, arguments: arguments, failed: failed, completed: completed);
+  var headline = toolCallHeadline(toolkit: toolkit, tool: tool, arguments: arguments, failed: failed, completed: completed);
   final rawHeadline = '${failed ? "Failed" : "Ran"} ${toolCallRawLabel(toolkit: toolkit, tool: tool)}';
   final logLines = _toolLogLines(logs).toList(growable: true);
   if (failed && _logLinesLookLikeTraceback(logLines)) {
     logLines.clear();
   }
-  var logLimit = _toolLogRenderLimit;
-  if (headline == rawHeadline && logLines.isNotEmpty) {
+  if (headline.text == rawHeadline && logLines.isNotEmpty) {
     headline = _logHeadline(logLines.removeAt(0));
-    logLimit -= 1;
   }
 
-  final detailLines = <String>[headline, ...logLines.take(logLimit)];
+  final detailsTruncated = detailLineLimit != null && logLines.length > detailLineLimit;
+  final displayedLogLines = detailLineLimit == null ? logLines : _trailingLogLines(logLines, detailLineLimit);
+  final detailLines = <String>[...displayedLogLines];
   final errorLine = _toolErrorLine(errorMessage);
   if (errorLine != null) {
     detailLines.add(errorLine);
   }
-  return detailLines.join('\n');
+  return ToolCallEntryDisplay(headline: headline, detailLines: detailLines, detailsTruncated: detailsTruncated);
 }
 
 String toolCallRawLabel({required String toolkit, required String tool}) {
@@ -144,7 +194,7 @@ String toolCallLabel({required String toolkit, required String tool, required Ma
   return normalizedTool.isEmpty ? 'tool' : normalizedTool;
 }
 
-String? _friendlyBuiltinSummary({
+ToolCallHeadline? _friendlyBuiltinHeadline({
   required String toolkit,
   required String tool,
   required Map<String, Object?>? arguments,
@@ -154,45 +204,89 @@ String? _friendlyBuiltinSummary({
   final normalizedToolkit = toolkit.trim().toLowerCase();
   final normalizedTool = tool.trim().toLowerCase();
   final args = arguments ?? const <String, Object?>{};
-  String? summary;
+  ToolCallHeadline? headline;
   if (normalizedToolkit == 'storage') {
-    summary = _storageSummary(tool: normalizedTool, arguments: args, completed: completed);
+    headline = _storageHeadline(tool: normalizedTool, arguments: args, completed: completed);
   } else if (normalizedToolkit == 'dataset') {
-    summary = _datasetSummary(tool: normalizedTool, arguments: args, completed: completed);
+    headline = _headlineFromText(_datasetSummary(tool: normalizedTool, arguments: args, completed: completed));
   } else if (normalizedToolkit == 'datetime' || normalizedToolkit == 'time') {
-    summary = _datetimeSummary(tool: normalizedTool, arguments: args, completed: completed);
+    headline = _headlineFromText(_datetimeSummary(tool: normalizedTool, arguments: args, completed: completed));
   } else if (normalizedToolkit == 'web_fetch') {
-    summary = _webFetchSummary(tool: normalizedTool, arguments: args, completed: completed);
+    headline = _headlineFromText(_webFetchSummary(tool: normalizedTool, arguments: args, completed: completed));
   } else if (normalizedToolkit == 'container') {
-    summary = _containerSummary(tool: normalizedTool, completed: completed);
+    headline = _headlineFromText(_containerSummary(tool: normalizedTool, completed: completed));
   } else if (normalizedToolkit == 'chat') {
-    summary = _chatSummary(tool: normalizedTool, arguments: args, completed: completed);
+    headline = _headlineFromText(_chatSummary(tool: normalizedTool, arguments: args, completed: completed));
   } else if (normalizedToolkit == 'mail' || normalizedToolkit == 'email' || normalizedToolkit == 'emails') {
-    summary = _mailSummary(tool: normalizedTool, arguments: args, completed: completed);
+    headline = _headlineFromText(_mailSummary(tool: normalizedTool, arguments: args, completed: completed));
   }
-  if (summary == null) {
-    return null;
-  }
-  return failed ? 'Failed: $summary' : summary;
+  if (headline == null) return null;
+  return failed
+      ? ToolCallHeadline(action: 'Failed:', rest: headline.text, detailLanguageOrFilename: headline.detailLanguageOrFilename)
+      : headline;
 }
 
-String? _storageSummary({required String tool, required Map<String, Object?> arguments, required bool completed}) {
+ToolCallHeadline? _storageHeadline({required String tool, required Map<String, Object?> arguments, required bool completed}) {
   final path = _stringArgument(arguments, ['path']);
-  if (tool == 'read_file') return _withOptionalSuffix(completed ? 'Read file' : 'Reading file', path);
+  if (tool == 'read_file') {
+    return ToolCallHeadline(
+      action: path == null ? (completed ? 'Read file' : 'Reading file') : (completed ? 'Read file:' : 'Reading file:'),
+      rest: path ?? '',
+      detailLanguageOrFilename: path,
+    );
+  }
   if (tool == 'grep_file') {
     final pattern = _stringArgument(arguments, ['pattern']);
-    if (pattern != null && path != null) return '${completed ? "Searched" : "Searching"} $path for $pattern';
-    return _withOptionalSuffix(completed ? 'Searched file' : 'Searching file', path);
+    if (pattern != null && path != null) {
+      return ToolCallHeadline(action: completed ? 'Searched' : 'Searching', rest: '$path for $pattern');
+    }
+    return ToolCallHeadline(
+      action: path == null ? (completed ? 'Searched file' : 'Searching file') : (completed ? 'Searched file:' : 'Searching file:'),
+      rest: path ?? '',
+    );
   }
-  if (tool == 'write_file') return _withOptionalSuffix(completed ? 'Wrote file' : 'Writing file', path);
-  if (tool == 'get_file_download_url') return _withOptionalSuffix(completed ? 'Prepared download' : 'Preparing download', path);
-  if (tool == 'list_files_in_room') return _withOptionalSuffix(completed ? 'Listed files' : 'Listing files', path);
+  if (tool == 'write_file') {
+    return ToolCallHeadline(
+      action: path == null ? (completed ? 'Wrote file' : 'Writing file') : (completed ? 'Wrote file:' : 'Writing file:'),
+      rest: path ?? '',
+      detailLanguageOrFilename: path,
+    );
+  }
+  if (tool == 'get_file_download_url') {
+    return ToolCallHeadline(
+      action: path == null
+          ? (completed ? 'Prepared download' : 'Preparing download')
+          : (completed ? 'Prepared download:' : 'Preparing download:'),
+      rest: path ?? '',
+    );
+  }
+  if (tool == 'list_files_in_room') {
+    return ToolCallHeadline(
+      action: path == null ? (completed ? 'Listed files' : 'Listing files') : (completed ? 'Listed files:' : 'Listing files:'),
+      rest: path ?? '',
+    );
+  }
   if (tool == 'save_file_from_url') {
     final url = _stringArgument(arguments, ['url']);
-    if (path != null) return '${completed ? "Saved" : "Saving"} file to $path';
-    return _withOptionalSuffix(completed ? 'Saved file from URL' : 'Saving file from URL', url);
+    if (path != null) {
+      return ToolCallHeadline(action: completed ? 'Saved file to' : 'Saving file to', rest: path, detailLanguageOrFilename: path);
+    }
+    return ToolCallHeadline(action: completed ? 'Saved file from URL:' : 'Saving file from URL:', rest: url ?? '');
   }
   return null;
+}
+
+ToolCallHeadline? _headlineFromText(String? text) {
+  if (text == null) return null;
+  final trimmed = text.trim();
+  if (trimmed.isEmpty) return null;
+  final colonIndex = trimmed.indexOf(':');
+  if (colonIndex >= 0 && colonIndex + 1 < 30) {
+    return ToolCallHeadline(action: trimmed.substring(0, colonIndex + 1), rest: trimmed.substring(colonIndex + 1).trim());
+  }
+  final firstWordMatch = RegExp(r'^\S+').firstMatch(trimmed);
+  if (firstWordMatch == null) return ToolCallHeadline(action: trimmed);
+  return ToolCallHeadline(action: trimmed.substring(0, firstWordMatch.end), rest: trimmed.substring(firstWordMatch.end).trim());
 }
 
 String? _datasetSummary({required String tool, required Map<String, Object?> arguments, required bool completed}) {
@@ -1105,12 +1199,35 @@ List<String> _toolLogLines(List<String> logs) {
   return lines;
 }
 
-String _logHeadline(String line) {
+List<String> _trailingLogLines(List<String> lines, int limit) {
+  if (limit <= 0) return <String>[];
+  if (lines.length <= limit) return lines.toList();
+  return lines.sublist(lines.length - limit);
+}
+
+ToolCallHeadline _logHeadline(String line) {
   final normalized = line.trim();
   if (_looksLikePathOnlyLogLine(normalized)) {
-    return 'Output: $normalized';
+    return ToolCallHeadline(action: 'Output:', rest: normalized, detailLanguageOrFilename: normalized);
   }
-  return normalized;
+  final trailingFilename = _trailingResolvedFilename(normalized);
+  if (trailingFilename != null) {
+    final action = normalized.substring(0, normalized.length - trailingFilename.length).trimRight();
+    if (action.isNotEmpty) {
+      return ToolCallHeadline(action: action, rest: trailingFilename, detailLanguageOrFilename: trailingFilename);
+    }
+  }
+  return ToolCallHeadline(action: normalized);
+}
+
+String? _trailingResolvedFilename(String line) {
+  final match = RegExp(r'(\S+)$').firstMatch(line);
+  if (match == null) return null;
+  final value = match.group(1);
+  if (value == null || value.trim().isEmpty) return null;
+  final filename = value.replaceFirst(RegExp(r'[,.;:]+$'), '');
+  if (filename.isEmpty || resolveLanguageIdForFilename(filename) == null) return null;
+  return filename;
 }
 
 bool _looksLikePathOnlyLogLine(String line) {
