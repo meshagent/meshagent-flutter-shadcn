@@ -106,6 +106,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   LocalHistoryEntry? _imageViewerHistoryEntry;
   List<ChatThreadFeedImage> _overlayImages = const <ChatThreadFeedImage>[];
   int _overlayInitialIndex = 0;
+  final Set<String> _expandedDetailGroupIds = <String>{};
 
   @override
   void initState() {
@@ -1589,28 +1590,6 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     );
   }
 
-  bool _shouldShowParticipantHeaderForMessage(List<_DatasetThreadMessage> messages, int index) {
-    final message = messages[index];
-    if (message.kind != 'message') {
-      return false;
-    }
-    final authorName = message.authorName?.trim();
-    if (message.role == 'agent' && (authorName == null || authorName.isEmpty)) {
-      return false;
-    }
-    if (index == 0) {
-      return true;
-    }
-    for (final previous in messages.take(index).toList().reversed) {
-      final previousKey = _datasetMessageParticipantKey(previous);
-      if (previousKey == null) {
-        continue;
-      }
-      return previousKey != _datasetMessageParticipantKey(message);
-    }
-    return true;
-  }
-
   String? _datasetMessageParticipantKey(_DatasetThreadMessage message) {
     if (message.kind == 'compaction') {
       return null;
@@ -1635,22 +1614,42 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     required List<ChatThreadFeedImage> feedImages,
   }) {
     final messageWidgets = <Widget>[];
-    for (final message in messages.indexed) {
+    final feedItems = _buildFeedItems(messages);
+    for (final item in feedItems.indexed) {
       if (messageWidgets.isNotEmpty) {
-        messageWidgets.insert(0, SizedBox(height: _datasetThreadMessageSpacing(messages[message.$1 - 1], message.$2)));
+        messageWidgets.insert(0, SizedBox(height: _datasetThreadFeedItemSpacing(feedItems[item.$1 - 1], item.$2)));
       }
-      messageWidgets.insert(
-        0,
-        Container(
-          key: ValueKey(message.$2.id),
-          child: _buildMessage(
-            context,
-            message.$2,
-            feedImages: feedImages,
-            shouldShowParticipantHeader: _shouldShowParticipantHeaderForMessage(messages, message.$1),
-          ),
-        ),
-      );
+      final feedItem = item.$2;
+      switch (feedItem) {
+        case _DatasetThreadMessageFeedItem():
+          messageWidgets.insert(
+            0,
+            Container(
+              key: ValueKey(feedItem.message.id),
+              child: _buildMessage(
+                context,
+                feedItem.message,
+                feedImages: feedImages,
+                shouldShowParticipantHeader: _shouldShowParticipantHeaderForFeedItem(feedItems, item.$1),
+              ),
+            ),
+          );
+        case _DatasetThreadDetailGroupFeedItem():
+          messageWidgets.insert(
+            0,
+            _DatasetDetailLine(
+              key: ValueKey(feedItem.id),
+              text: feedItem.collapsedText,
+              authorName: feedItem.authorName,
+              createdAt: feedItem.createdAt,
+              onTap: () {
+                setState(() {
+                  _expandedDetailGroupIds.add(feedItem.id);
+                });
+              },
+            ),
+          );
+      }
     }
     final pendingFeedMessages = pendingMessages.where((pending) {
       if (pending.messageType == _agentTurnSteerType || pending.matchByContentOnly) {
@@ -1667,11 +1666,256 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return messageWidgets;
   }
 
+  List<_DatasetThreadFeedItem> _buildFeedItems(List<_DatasetThreadMessage> messages) {
+    final items = <_DatasetThreadFeedItem>[];
+    var index = 0;
+    while (index < messages.length) {
+      final segmentEnd = _nextUserMessageIndex(messages, index + 1) ?? messages.length;
+      final detailIndexes = <int>{};
+      _addDatasetThreadDetailIndexesForSegment(messages, index, segmentEnd, detailIndexes);
+      final detailMessages = detailIndexes.toList(growable: false)..sort();
+      final groupedMessages = detailMessages.map((detailIndex) => messages[detailIndex]).toList(growable: false);
+      var insertedDetailGroup = false;
+      for (var segmentIndex = index; segmentIndex < segmentEnd; segmentIndex += 1) {
+        if (!detailIndexes.contains(segmentIndex)) {
+          items.add(_DatasetThreadMessageFeedItem(messages[segmentIndex]));
+          continue;
+        }
+        if (insertedDetailGroup || groupedMessages.isEmpty) {
+          continue;
+        }
+        final group = _detailGroupForMessages(
+          groupedMessages,
+          nextMessage: _nextNonDetailMessage(messages, detailIndexes, segmentIndex + 1, segmentEnd),
+        );
+        if (_expandedDetailGroupIds.contains(group.id)) {
+          items.addAll(group.messages.map(_DatasetThreadMessageFeedItem.new));
+        } else {
+          items.add(group);
+        }
+        insertedDetailGroup = true;
+      }
+      index = segmentEnd;
+    }
+    return items;
+  }
+
+  _DatasetThreadMessage? _nextNonDetailMessage(List<_DatasetThreadMessage> messages, Set<int> detailIndexes, int start, int end) {
+    for (var index = start; index < end; index += 1) {
+      if (!detailIndexes.contains(index)) {
+        return messages[index];
+      }
+    }
+    return null;
+  }
+
+  int? _nextUserMessageIndex(List<_DatasetThreadMessage> messages, int start) {
+    for (var index = start; index < messages.length; index += 1) {
+      final message = messages[index];
+      if (message.kind == 'message' && message.role == 'user') {
+        return index;
+      }
+    }
+    return null;
+  }
+
+  void _addDatasetThreadDetailIndexesForSegment(List<_DatasetThreadMessage> messages, int start, int end, Set<int> detailIndexes) {
+    final finalAgentMessageIndex = _finalAgentMessageIndexForSegment(messages, start, end);
+    for (var index = start; index < end; index += 1) {
+      final message = messages[index];
+      if (_datasetThreadMessageIsIntrinsicDetail(message)) {
+        detailIndexes.add(index);
+        continue;
+      }
+      if (index != finalAgentMessageIndex && _datasetThreadMessageCanCollapseAsCommentary(message)) {
+        detailIndexes.add(index);
+      }
+    }
+  }
+
+  int _finalAgentMessageIndexForSegment(List<_DatasetThreadMessage> messages, int start, int end) {
+    var explicitFinalIndex = -1;
+    for (var index = start; index < end; index += 1) {
+      final message = messages[index];
+      if (_datasetThreadMessageCanRenderAsFinalAnswer(message) && message.phase == 'final_answer') {
+        explicitFinalIndex = index;
+      }
+    }
+    if (explicitFinalIndex != -1) {
+      return explicitFinalIndex;
+    }
+
+    final activeTurnId = _status.turnId?.trim();
+    if (activeTurnId != null && activeTurnId.isNotEmpty) {
+      for (var index = start; index < end; index += 1) {
+        final messageTurnId = messages[index].turnId?.trim();
+        if (messageTurnId == null || messageTurnId.isEmpty || messageTurnId == activeTurnId) {
+          return -1;
+        }
+      }
+    }
+
+    var inferredFinalIndex = -1;
+    for (var index = start; index < end; index += 1) {
+      if (_datasetThreadMessageCanRenderAsFinalAnswer(messages[index])) {
+        inferredFinalIndex = index;
+      }
+    }
+    return inferredFinalIndex;
+  }
+
+  _DatasetThreadDetailGroupFeedItem _detailGroupForMessages(List<_DatasetThreadMessage> messages, {_DatasetThreadMessage? nextMessage}) {
+    final first = messages.first;
+    final collapsedMessage = _detailGroupCollapsedMessage(messages);
+    final id = ['details', first.turnId ?? '', first.id, first.createdAt.microsecondsSinceEpoch].join(':');
+    return _DatasetThreadDetailGroupFeedItem(
+      id: id,
+      messages: List<_DatasetThreadMessage>.unmodifiable(messages),
+      collapsedText: _detailGroupCollapsedText(messages, nextMessage: nextMessage),
+      authorName: _detailGroupAuthorName(collapsedMessage ?? first),
+      createdAt: collapsedMessage?.createdAt ?? first.createdAt,
+    );
+  }
+
+  String _detailGroupCollapsedText(List<_DatasetThreadMessage> messages, {_DatasetThreadMessage? nextMessage}) {
+    final first = messages.first;
+    if (_detailGroupHasFinalResponse(messages, nextMessage: nextMessage)) {
+      final finalMessage = nextMessage!;
+      final end = _status.turnId != null && first.turnId == _status.turnId ? DateTime.now() : finalMessage.createdAt;
+      return 'Worked for ${_formatDetailGroupDuration(end.difference(first.createdAt))}';
+    }
+    return _firstNonEmptyLine(_detailGroupCollapsedMessage(messages)?.text ?? '') ?? 'Working';
+  }
+
+  _DatasetThreadMessage? _detailGroupCollapsedMessage(List<_DatasetThreadMessage> messages) {
+    for (final message in messages.reversed) {
+      if (_datasetThreadMessageCanCollapseAsCommentary(message) && message.text.trim().isNotEmpty) {
+        return message;
+      }
+    }
+    for (final message in messages.reversed) {
+      if (message.kind == 'reasoning' && message.text.trim().isNotEmpty) {
+        return message;
+      }
+    }
+    return null;
+  }
+
+  String _detailGroupAuthorName(_DatasetThreadMessage message) {
+    final authorName = message.authorName?.trim();
+    if (authorName != null && authorName.isNotEmpty) {
+      return authorName;
+    }
+    if (message.role == 'agent') {
+      final agentName = widget.agentName?.trim();
+      if (agentName != null && agentName.isNotEmpty) {
+        return agentName;
+      }
+    }
+    return '';
+  }
+
+  bool _detailGroupHasFinalResponse(List<_DatasetThreadMessage> messages, {_DatasetThreadMessage? nextMessage}) {
+    return _datasetThreadMessageIsFinalAgentMessage(nextMessage) && _messagesShareTurn(messages.first, nextMessage!);
+  }
+
+  bool _datasetThreadMessageIsIntrinsicDetail(_DatasetThreadMessage message) {
+    if (message.kind == 'tool_call' || message.kind == 'reasoning') {
+      return true;
+    }
+    return _datasetThreadMessageCanCollapseAsCommentary(message) && message.phase == 'commentary';
+  }
+
+  bool _datasetThreadMessageCanCollapseAsCommentary(_DatasetThreadMessage message) {
+    return message.kind == 'message' && message.role == 'agent' && message.attachments.isEmpty && message.image == null;
+  }
+
+  bool _datasetThreadMessageCanRenderAsFinalAnswer(_DatasetThreadMessage message) {
+    if (message.kind != 'message' || message.role != 'agent' || message.phase == 'commentary') {
+      return false;
+    }
+    return message.text.trim().isNotEmpty || message.attachments.isNotEmpty || message.image != null;
+  }
+
+  bool _datasetThreadMessageIsFinalAgentMessage(_DatasetThreadMessage? message) {
+    return message != null && _datasetThreadMessageCanRenderAsFinalAnswer(message);
+  }
+
+  bool _messagesShareTurn(_DatasetThreadMessage left, _DatasetThreadMessage right) {
+    if (left.turnId == null || left.turnId!.trim().isEmpty || right.turnId == null || right.turnId!.trim().isEmpty) {
+      return true;
+    }
+    return left.turnId == right.turnId;
+  }
+
+  String? _firstNonEmptyLine(String text) {
+    for (final line in text.split('\n')) {
+      final trimmed = line.trim();
+      if (trimmed.isNotEmpty) {
+        return trimmed;
+      }
+    }
+    return null;
+  }
+
+  String _formatDetailGroupDuration(Duration duration) {
+    final seconds = duration.inSeconds < 0 ? 0 : duration.inSeconds;
+    if (seconds < 60) {
+      return '${seconds}s';
+    }
+    final minutes = seconds ~/ 60;
+    final remainingSeconds = seconds % 60;
+    if (minutes < 60) {
+      return remainingSeconds == 0 ? '${minutes}m' : '${minutes}m ${remainingSeconds}s';
+    }
+    final hours = minutes ~/ 60;
+    final remainingMinutes = minutes % 60;
+    return remainingMinutes == 0 ? '${hours}h' : '${hours}h ${remainingMinutes}m';
+  }
+
+  bool _shouldShowParticipantHeaderForFeedItem(List<_DatasetThreadFeedItem> items, int index) {
+    final item = items[index];
+    if (item is! _DatasetThreadMessageFeedItem) {
+      return false;
+    }
+    final message = item.message;
+    if (message.kind != 'message') {
+      return false;
+    }
+    final authorName = message.authorName?.trim();
+    if (message.role == 'agent' && (authorName == null || authorName.isEmpty)) {
+      return false;
+    }
+    if (index == 0) {
+      return true;
+    }
+    for (final previous in items.take(index).toList().reversed) {
+      if (previous is! _DatasetThreadMessageFeedItem) {
+        continue;
+      }
+      final previousKey = _datasetMessageParticipantKey(previous.message);
+      if (previousKey == null) {
+        continue;
+      }
+      return previousKey != _datasetMessageParticipantKey(message);
+    }
+    return true;
+  }
+
   double _datasetThreadMessageSpacing(_DatasetThreadMessage previous, _DatasetThreadMessage next) {
     if (previous.kind == 'tool_call' || next.kind == 'tool_call') {
       return 10;
     }
     return ChatThreadMessageView.chatMessageStackSpacing;
+  }
+
+  double _datasetThreadFeedItemSpacing(_DatasetThreadFeedItem previous, _DatasetThreadFeedItem next) {
+    final previousMessage = previous is _DatasetThreadMessageFeedItem ? previous.message : null;
+    final nextMessage = next is _DatasetThreadMessageFeedItem ? next.message : null;
+    if (previousMessage == null || nextMessage == null) {
+      return 10;
+    }
+    return _datasetThreadMessageSpacing(previousMessage, nextMessage);
   }
 
   Widget _buildToolCallSummaryText(BuildContext context, String text) {
@@ -1877,6 +2121,8 @@ class _DatasetThreadMessage {
     required this.createdAt,
     this.image,
     this.authorName,
+    this.phase,
+    this.turnId,
   });
 
   final String id;
@@ -1887,6 +2133,68 @@ class _DatasetThreadMessage {
   final DateTime createdAt;
   final _DatasetThreadImage? image;
   final String? authorName;
+  final String? phase;
+  final String? turnId;
+}
+
+sealed class _DatasetThreadFeedItem {
+  const _DatasetThreadFeedItem();
+}
+
+class _DatasetThreadMessageFeedItem extends _DatasetThreadFeedItem {
+  const _DatasetThreadMessageFeedItem(this.message);
+
+  final _DatasetThreadMessage message;
+}
+
+class _DatasetThreadDetailGroupFeedItem extends _DatasetThreadFeedItem {
+  const _DatasetThreadDetailGroupFeedItem({
+    required this.id,
+    required this.messages,
+    required this.collapsedText,
+    required this.authorName,
+    required this.createdAt,
+  });
+
+  final String id;
+  final List<_DatasetThreadMessage> messages;
+  final String collapsedText;
+  final String authorName;
+  final DateTime createdAt;
+}
+
+class _DatasetDetailLine extends StatelessWidget {
+  const _DatasetDetailLine({super.key, required this.text, required this.authorName, required this.createdAt, required this.onTap});
+
+  final String text;
+  final String authorName;
+  final DateTime createdAt;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: ChatThreadMessageView(
+          mine: false,
+          isAgentMessage: true,
+          text: text,
+          authorName: authorName,
+          createdAt: createdAt,
+          bubbleColor: Colors.transparent,
+          textColor: theme.colorScheme.mutedForeground,
+          selectable: false,
+          showBubbleActions: false,
+          onTap: onTap,
+          header: ChatThreadAuthorHeader(authorName: authorName, createdAt: createdAt, text: text),
+        ),
+      ),
+    );
+  }
 }
 
 class _DatasetToolCallState {
@@ -1935,6 +2243,8 @@ _DatasetThreadMessage _mergeDuplicateDatasetThreadMessage(_DatasetThreadMessage 
     createdAt: existing.createdAt.isBefore(next.createdAt) ? existing.createdAt : next.createdAt,
     image: existing.image ?? next.image,
     authorName: existing.authorName ?? next.authorName,
+    phase: existing.phase ?? next.phase,
+    turnId: existing.turnId ?? next.turnId,
   );
 }
 
@@ -2027,6 +2337,8 @@ _DatasetThreadMessage? _messageForRow(
   final kind = data['kind']?.toString();
   final itemId = row['item_id']?.toString() ?? const Uuid().v4();
   final role = data['role']?.toString();
+  final turnId = row['turn_id']?.toString();
+  final phase = data['phase']?.toString();
   switch (kind) {
     case 'message':
       final text = data['text']?.toString() ?? '';
@@ -2042,6 +2354,8 @@ _DatasetThreadMessage? _messageForRow(
         authorName: data['sender_name']?.toString(),
         attachments: attachments,
         createdAt: _rowTimestamp(row),
+        phase: phase,
+        turnId: turnId,
       );
     case 'file':
       final urls = _stringList(data['urls']);
@@ -2056,6 +2370,8 @@ _DatasetThreadMessage? _messageForRow(
         authorName: data['sender_name']?.toString(),
         attachments: urls,
         createdAt: _rowTimestamp(row),
+        phase: phase,
+        turnId: turnId,
       );
     case 'image_generation':
       final message = _mapValue(data['message']);
@@ -2071,6 +2387,8 @@ _DatasetThreadMessage? _messageForRow(
         authorName: _stringValue(data['sender_name']) ?? _stringValue(image?['created_by']),
         attachments: const [],
         createdAt: _rowTimestamp(row),
+        phase: phase,
+        turnId: turnId,
         image: _DatasetThreadImage(
           uri: imageUri,
           imageId: imageId,
@@ -2097,6 +2415,8 @@ _DatasetThreadMessage? _messageForRow(
               authorName: data['sender_name']?.toString(),
               attachments: const [],
               createdAt: _rowTimestamp(row),
+              phase: phase,
+              turnId: turnId,
             );
     case 'tool_call':
       final toolkit = data['toolkit']?.toString() ?? '';
@@ -2121,6 +2441,8 @@ _DatasetThreadMessage? _messageForRow(
         authorName: data['sender_name']?.toString(),
         attachments: const [],
         createdAt: _rowTimestamp(row),
+        phase: phase,
+        turnId: turnId,
       );
     case 'compaction':
       return _DatasetThreadMessage(
@@ -2131,6 +2453,8 @@ _DatasetThreadMessage? _messageForRow(
         authorName: data['sender_name']?.toString(),
         attachments: const [],
         createdAt: _rowTimestamp(row),
+        phase: phase,
+        turnId: turnId,
       );
   }
   return null;
@@ -2148,6 +2472,8 @@ _DatasetThreadMessage? _messageForAgentPayload(
 
   final itemId = row['item_id']?.toString() ?? _payloadItemId(Map<String, dynamic>.from(payload));
   final createdAt = _rowTimestamp(row);
+  final turnId = row['turn_id']?.toString() ?? payload['turn_id']?.toString();
+  final phase = _agentMessagePhase(payload);
   switch (type) {
     case _agentTurnStartType:
     case _agentTurnSteerType:
@@ -2175,6 +2501,7 @@ _DatasetThreadMessage? _messageForAgentPayload(
         authorName: inputPayload['sender_name']?.toString(),
         attachments: extracted.attachments,
         createdAt: createdAt,
+        turnId: turnId,
       );
     case _agentTurnStartAcceptedType:
     case _agentTurnSteerAcceptedType:
@@ -2191,6 +2518,8 @@ _DatasetThreadMessage? _messageForAgentPayload(
               authorName: payload['sender_name']?.toString(),
               attachments: const [],
               createdAt: createdAt,
+              phase: phase,
+              turnId: turnId,
             );
     case _agentReasoningContentDeltaType:
       final text = payload['text']?.toString() ?? '';
@@ -2204,6 +2533,7 @@ _DatasetThreadMessage? _messageForAgentPayload(
               authorName: payload['sender_name']?.toString(),
               attachments: const [],
               createdAt: createdAt,
+              turnId: turnId,
             );
     case _agentFileContentDeltaType:
       final url = payload['url']?.toString();
@@ -2217,6 +2547,7 @@ _DatasetThreadMessage? _messageForAgentPayload(
               authorName: payload['sender_name']?.toString(),
               attachments: [url.trim()],
               createdAt: createdAt,
+              turnId: turnId,
             );
     case _agentImageGenerationStartedType:
     case _agentImageGenerationPartialType:
@@ -2233,6 +2564,7 @@ _DatasetThreadMessage? _messageForAgentPayload(
         authorName: payload['sender_name']?.toString() ?? _stringValue(image?['created_by']),
         attachments: const [],
         createdAt: createdAt,
+        turnId: turnId,
         image: _DatasetThreadImage(
           uri: imageUri,
           imageId: _imageIdFromDatasetUri(imageUri),
@@ -2257,6 +2589,7 @@ _DatasetThreadMessage? _messageForAgentPayload(
         authorName: payload['sender_name']?.toString(),
         attachments: const [],
         createdAt: createdAt,
+        turnId: turnId,
       );
   }
   return null;
@@ -2299,6 +2632,7 @@ _DatasetThreadMessage _messageForToolCallEndRow({
     authorName: payload?['sender_name']?.toString() ?? state?.authorName,
     attachments: const [],
     createdAt: _rowTimestamp(row),
+    turnId: row['turn_id']?.toString() ?? payload?['turn_id']?.toString(),
   );
 }
 

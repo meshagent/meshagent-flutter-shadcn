@@ -3767,6 +3767,11 @@ class ChatBubble extends StatefulWidget {
     this.mobileStorageSaveSurfacePresenter,
     this.fullWidth = false,
     this.accented = false,
+    this.backgroundColor,
+    this.textColor,
+    this.selectable = true,
+    this.showActionRail = true,
+    this.onTap,
   });
 
   final RoomClient? room;
@@ -3779,6 +3784,11 @@ class ChatBubble extends StatefulWidget {
   final ThreadStorageSaveSurfacePresenter? mobileStorageSaveSurfacePresenter;
   final bool fullWidth;
   final bool accented;
+  final Color? backgroundColor;
+  final Color? textColor;
+  final bool selectable;
+  final bool showActionRail;
+  final VoidCallback? onTap;
 
   @override
   State createState() => _ChatBubble();
@@ -3941,8 +3951,9 @@ class _ChatBubble extends State<ChatBubble> {
     final cs = theme.colorScheme;
     final text = widget.text;
     final mine = widget.mine;
-    final bubbleColor = widget.accented || mine ? cs.accent : cs.background;
-    final showActions = hovering || optionsController.isOpen || reactionController.isOpen || _keepingActionsVisible;
+    final bubbleColor = widget.backgroundColor ?? (widget.accented || mine ? cs.accent : cs.background);
+    final showActions =
+        widget.showActionRail && (hovering || optionsController.isOpen || reactionController.isOpen || _keepingActionsVisible);
     final canLongPressReact =
         (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS) && widget.onReactFromMenu != null;
     final optionItemCount = 1 + (canLongPressReact ? 1 : 0) + (widget.room != null ? 1 : 0) + (widget.onDelete != null ? 1 : 0);
@@ -4029,36 +4040,44 @@ class _ChatBubble extends State<ChatBubble> {
           padding: const EdgeInsets.all(0),
           threadTypography: true,
           shrinkWrap: true,
-          selectable: kIsWeb,
+          selectable: widget.selectable && kIsWeb,
+          color: widget.textColor,
         ),
       ),
     );
 
     final content = widget.fullWidth
-        ? Stack(
-            clipBehavior: Clip.none,
-            children: [
-              SizedBox(width: double.infinity, child: bubble),
-              Positioned(bottom: 0, right: 0, child: actions),
-            ],
-          )
+        ? widget.showActionRail
+              ? Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    SizedBox(width: double.infinity, child: bubble),
+                    Positioned(bottom: 0, right: 0, child: actions),
+                  ],
+                )
+              : SizedBox(width: double.infinity, child: bubble)
         : Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              if (mine) actions,
+              if (mine && widget.showActionRail) actions,
               Expanded(child: bubble),
-              if (!mine) actions,
+              if (!mine && widget.showActionRail) actions,
             ],
           );
 
     return TapRegion(
       groupId: _contextMenuGroupId,
       onTapOutside: (_) {
-        optionsController.hide();
-        reactionController.hide();
+        if (widget.showActionRail) {
+          optionsController.hide();
+          reactionController.hide();
+        }
       },
       child: ShadGestureDetector(
         onHoverChange: (h) {
+          if (!widget.showActionRail) {
+            return;
+          }
           _actionVisibilityTimer?.cancel();
           setState(() {
             hovering = h;
@@ -4071,7 +4090,9 @@ class _ChatBubble extends State<ChatBubble> {
             _scheduleActionVisibilityHide();
           }
         },
-        onLongPress: optionsController.show,
+        onLongPress: widget.showActionRail ? optionsController.show : null,
+        onTap: widget.onTap,
+        cursor: widget.onTap == null ? MouseCursor.defer : SystemMouseCursors.click,
         child: Container(
           padding: EdgeInsets.symmetric(horizontal: 5),
           color: Colors.transparent,
@@ -5120,6 +5141,11 @@ class ChatThreadMessageView extends StatelessWidget {
     this.showReactionAction = false,
     this.onReactFromMenu,
     this.mobileStorageSaveSurfacePresenter,
+    this.bubbleColor,
+    this.textColor,
+    this.selectable = true,
+    this.showBubbleActions = true,
+    this.onTap,
   });
 
   static const double chatBubbleHorizontalInset = 5;
@@ -5142,6 +5168,11 @@ class ChatThreadMessageView extends StatelessWidget {
   final bool showReactionAction;
   final VoidCallback? onReactFromMenu;
   final ThreadStorageSaveSurfacePresenter? mobileStorageSaveSurfacePresenter;
+  final Color? bubbleColor;
+  final Color? textColor;
+  final bool selectable;
+  final bool showBubbleActions;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -5176,6 +5207,11 @@ class ChatThreadMessageView extends StatelessWidget {
               reactionActionBuilder: reactionActionBuilder,
               showReactionAction: showReactionAction,
               onReactFromMenu: onReactFromMenu,
+              backgroundColor: bubbleColor,
+              textColor: textColor,
+              selectable: selectable,
+              showActionRail: showBubbleActions,
+              onTap: onTap,
             ),
           ),
         for (var i = 0; i < attachmentWidgets.length; i++) ...[

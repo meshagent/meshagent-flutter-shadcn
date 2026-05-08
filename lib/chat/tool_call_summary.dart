@@ -63,6 +63,10 @@ String formatToolCallSummary({
   }
 
   final normalizedTool = tool.trim().toLowerCase();
+  final normalizedToolkit = toolkit.trim().toLowerCase();
+  if (!completed && !failed && normalizedToolkit == 'openai' && _shellTools.contains(normalizedTool) && arguments == null) {
+    return 'Running commands';
+  }
   if (failed || !_commandTools.contains(normalizedTool) || arguments == null) {
     return '${failed ? "Failed" : (completed ? "Ran" : "Running")} $label';
   }

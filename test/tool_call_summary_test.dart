@@ -69,6 +69,7 @@ void main() {
       'Writing file: /src/report.html',
     );
     expect(formatToolCallSummary(toolkit: '', tool: 'shell', arguments: null, completed: false), 'Running shell');
+    expect(formatToolCallSummary(toolkit: 'openai', tool: 'shell', arguments: null, completed: false), 'Running commands');
   });
 
   test('formatToolCallEntryText caps logs and extracts errors', () {
