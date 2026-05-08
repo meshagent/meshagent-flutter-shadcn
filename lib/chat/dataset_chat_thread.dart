@@ -1891,7 +1891,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     }
     for (final previous in items.take(index).toList().reversed) {
       if (previous is! _DatasetThreadMessageFeedItem) {
-        continue;
+        return true;
       }
       final previousKey = _datasetMessageParticipantKey(previous.message);
       if (previousKey == null) {
