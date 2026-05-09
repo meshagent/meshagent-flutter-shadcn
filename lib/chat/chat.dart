@@ -919,40 +919,6 @@ class _PendingSendWait {
   }
 }
 
-String? _threadStatusAttributeName(String path, String prefix) {
-  final normalizedPath = path.trim();
-  if (normalizedPath.isEmpty) {
-    return null;
-  }
-  return "$prefix.$normalizedPath";
-}
-
-Map<String, dynamic>? _parsePendingMessagesStatus(Participant participant, String path) {
-  final key = _threadStatusAttributeName(path, "thread.status.pending_messages");
-  if (key == null) {
-    return null;
-  }
-
-  final value = participant.getAttribute(key);
-  if (value is! String || value.trim().isEmpty) {
-    return null;
-  }
-
-  try {
-    final decoded = jsonDecode(value.trim());
-    if (decoded is Map<String, dynamic>) {
-      return decoded;
-    }
-    if (decoded is Map) {
-      return Map<String, dynamic>.from(decoded);
-    }
-  } catch (_) {
-    return null;
-  }
-
-  return null;
-}
-
 final Expando<_AgentThreadMessageStatusStore> _agentThreadMessageStatusStores = Expando<_AgentThreadMessageStatusStore>();
 
 _AgentThreadMessageStatusStore _agentThreadMessageStatusStore(RoomClient room) {
@@ -1109,7 +1075,8 @@ class _AgentThreadMessageStatusStore {
     final totalBytesFromStatus = parsedTotalBytes != null;
 
     if (text == null && mode == null && startedAt == null && turnId == null && pendingItemId == null && totalBytes == null) {
-      return _statusByThreadPath.remove(threadPath) != null;
+      _statusByThreadPath.remove(threadPath);
+      return true;
     }
 
     final next = _AgentThreadMessageStatus(
@@ -1355,17 +1322,16 @@ class ChatThreadStatusState {
   bool get hasStatus => text != null && text!.trim().isNotEmpty;
 }
 
+bool shouldShowChatThreadStatus(ChatThreadStatusState status) {
+  return status.hasStatus;
+}
+
 ChatThreadStatusState resolveChatThreadStatus({
   required RoomClient room,
   required String path,
   String? agentName,
   ChatThreadStatusState? previous,
 }) {
-  final key = _threadStatusAttributeName(path, "thread.status");
-  final textKey = _threadStatusAttributeName(path, "thread.status.text");
-  final modeKey = _threadStatusAttributeName(path, "thread.status.mode");
-  final startedAtKey = _threadStatusAttributeName(path, "thread.status.started_at");
-  final pendingItemIdKey = _threadStatusAttributeName(path, "thread.status.pending_item_id");
   final candidates = <Participant>[
     if (agentName != null)
       ...room.messaging.remoteParticipants.where((participant) => participant.getAttribute("name") == agentName)
@@ -1388,71 +1354,6 @@ ChatThreadStatusState resolveChatThreadStatus({
   for (final participant in candidates) {
     if (_supportsAgentMessages(participant)) {
       nextSupportsAgentMessages = true;
-    }
-
-    if (!hasMessageStatus && nextStatus == null && textKey != null) {
-      final value = participant.getAttribute(textKey);
-      if (value is String && value.trim().isNotEmpty) {
-        nextStatus = value.trim();
-      }
-    }
-    if (!hasMessageStatus && nextStatus == null && key != null) {
-      final value = participant.getAttribute(key);
-      if (value is String && value.trim().isNotEmpty) {
-        nextStatus = value.trim();
-      }
-    }
-
-    final pendingStatus = hasMessageStatus ? null : _parsePendingMessagesStatus(participant, path);
-    if (pendingStatus != null) {
-      if (nextTurnId == null) {
-        final turnId = pendingStatus["turn_id"];
-        if (turnId is String && turnId.trim().isNotEmpty) {
-          nextTurnId = turnId.trim();
-        }
-      }
-
-      if (nextPendingMessages.isEmpty) {
-        final messages = pendingStatus["messages"];
-        if (messages is List) {
-          nextPendingMessages = [
-            for (final item in messages)
-              if (item is Map<String, dynamic>)
-                PendingAgentMessage.fromQueueJson(item)
-              else if (item is Map)
-                PendingAgentMessage.fromQueueJson(Map<String, dynamic>.from(item)),
-          ];
-        }
-      }
-    }
-
-    if (!hasMessageStatus && nextMode == null && modeKey != null) {
-      final value = participant.getAttribute(modeKey);
-      if (value is String) {
-        final normalized = value.trim().toLowerCase();
-        if (normalized == "busy" || normalized == "steerable") {
-          nextMode = normalized;
-        }
-      }
-    }
-
-    if (!hasMessageStatus && nextStartedAt == null && startedAtKey != null) {
-      final value = participant.getAttribute(startedAtKey);
-      if (value is String) {
-        final normalized = value.trim();
-        nextStartedAt = normalized.isEmpty ? null : DateTime.tryParse(normalized);
-      }
-    }
-
-    if (!hasMessageStatus && nextPendingItemId == null && pendingItemIdKey != null) {
-      final value = participant.getAttribute(pendingItemIdKey);
-      if (value is String && value.trim().isNotEmpty) {
-        nextPendingItemId = value.trim();
-      }
-    }
-
-    if (nextStatus != null && nextMode != null && nextStartedAt != null && nextTurnId != null && nextPendingItemId != null) {
-      break;
     }
   }
 
@@ -4975,7 +4876,16 @@ class _ChatThreadState extends State<ChatThread> {
                       startChatCentered: widget.startChatCentered,
                       messages: state.messages,
                       online: state.online,
-                      showTyping: (state.threadStatusMode != null) && state.listening.isEmpty,
+                      showTyping:
+                          shouldShowChatThreadStatus(
+                            ChatThreadStatusState(
+                              text: state.threadStatus,
+                              startedAt: state.threadStatusStartedAt,
+                              mode: state.threadStatusMode,
+                              totalBytes: state.threadStatusTotalBytes,
+                            ),
+                          ) &&
+                          state.listening.isEmpty,
                       showListening: state.listening.isNotEmpty,
                       threadStatus: state.threadStatus,
                       threadStatusStartedAt: state.threadStatusStartedAt,
@@ -9181,20 +9091,25 @@ class _StatusCounterWheelDigit extends StatelessWidget {
           stops: [0, 0.12, 0.88, 1],
         ).createShader(bounds),
         child: ClipRect(
-          child: Transform.translate(
-            offset: Offset(0, stripOffset),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                for (var value = firstStripValue; value <= lastStripValue; value++)
-                  SizedBox(
-                    width: width,
-                    height: height,
-                    child: Center(
-                      child: Text("${_positiveModulo(value, 10)}", style: style, maxLines: 1, overflow: TextOverflow.clip),
+          child: OverflowBox(
+            minHeight: 0,
+            maxHeight: double.infinity,
+            alignment: Alignment.topCenter,
+            child: Transform.translate(
+              offset: Offset(0, stripOffset),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (var value = firstStripValue; value <= lastStripValue; value++)
+                    SizedBox(
+                      width: width,
+                      height: height,
+                      child: Center(
+                        child: Text("${_positiveModulo(value, 10)}", style: style, maxLines: 1, overflow: TextOverflow.clip),
+                      ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -10492,18 +10407,7 @@ class _EventLineState extends State<EventLine> {
     final useAgentMessages = recipients.any(_supportsAgentMessages);
     String? turnId;
     if (useAgentMessages) {
-      for (final participant in recipients) {
-        final pendingStatus = _parsePendingMessagesStatus(participant, widget.path);
-        if (pendingStatus == null) {
-          continue;
-        }
-
-        final value = pendingStatus["turn_id"];
-        if (value is String && value.trim().isNotEmpty) {
-          turnId = value.trim();
-          break;
-        }
-      }
+      turnId = resolveChatThreadStatus(room: widget.room, path: widget.path, agentName: widget.agentName).turnId;
 
       if (turnId == null) {
         return;

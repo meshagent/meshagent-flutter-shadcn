@@ -88,15 +88,16 @@ class DatasetChatThread extends StatefulWidget {
 }
 
 class _DatasetChatThreadState extends State<DatasetChatThread> {
-  StreamSubscription<DatasetTableWatchEvent>? _watchSubscription;
+  StreamSubscription<ArrowRecordBatch>? _tableLoadSubscription;
   StreamSubscription<RoomEvent>? _roomSubscription;
-  Timer? _watchRetryTimer;
+  Timer? _tableLoadRetryTimer;
   final Map<String, Map<String, Object?>> _rowsByItemId = {};
-  final Map<String, Map<String, Object?>> _initialRowsByItemId = {};
   final Map<String, Map<String, Object?>> _agentRowsByItemId = {};
+  final List<Map<String, dynamic>> _bufferedAgentPayloads = <Map<String, dynamic>>[];
   late ChatThreadController _controller;
   late bool _ownsController;
   late Key _composerInputKey;
+  int _tableLoadGeneration = 0;
   Object? _error;
   bool _fatalError = false;
   bool _ready = false;
@@ -155,8 +156,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
 
   @override
   void dispose() {
-    _watchRetryTimer?.cancel();
-    _watchSubscription?.cancel();
+    _tableLoadRetryTimer?.cancel();
+    _tableLoadSubscription?.cancel();
     _closeOpenSubscription();
     _roomSubscription?.cancel();
     final historyEntry = _imageViewerHistoryEntry;
@@ -170,11 +171,12 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   void _startWatch() {
-    _watchRetryTimer?.cancel();
-    _watchSubscription?.cancel();
+    _tableLoadGeneration += 1;
+    _tableLoadRetryTimer?.cancel();
+    _tableLoadSubscription?.cancel();
     _rowsByItemId.clear();
-    _initialRowsByItemId.clear();
     _agentRowsByItemId.clear();
+    _bufferedAgentPayloads.clear();
     _nextAgentSequence = 0;
     _error = null;
     _fatalError = false;
@@ -187,17 +189,31 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       return;
     }
 
-    _connectDatasetWatch();
+    _loadDatasetRows(generation: _tableLoadGeneration);
   }
 
-  void _connectDatasetWatch() {
-    _watchRetryTimer?.cancel();
-    _watchSubscription?.cancel();
+  void _loadDatasetRows({required int generation}) {
+    _tableLoadRetryTimer?.cancel();
+    _tableLoadSubscription?.cancel();
+    final loadedRowsByItemId = <String, Map<String, Object?>>{};
     try {
       final ref = _DatasetThreadRef.parse(widget.path);
-      _watchSubscription = widget.room.datasets
-          .watchTable(table: ref.table, namespace: ref.namespace)
-          .listen(_handleWatchEvent, onError: _handleWatchError);
+      _tableLoadSubscription = widget.room.datasets
+          .searchStream(table: ref.table, namespace: ref.namespace)
+          .listen(
+            (batch) {
+              if (!mounted || generation != _tableLoadGeneration) {
+                return;
+              }
+              _applyRowsToMap(batch.toRows(), loadedRowsByItemId);
+            },
+            onError: (Object error, StackTrace stackTrace) {
+              _handleTableLoadError(error, stackTrace, generation: generation);
+            },
+            onDone: () {
+              _finishDatasetRowsLoad(loadedRowsByItemId, generation: generation);
+            },
+          );
     } catch (error) {
       _error = error;
       _fatalError = true;
@@ -205,124 +221,57 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     }
   }
 
-  void _handleWatchError(Object error, StackTrace stackTrace) {
-    if (!mounted) {
+  void _handleTableLoadError(Object error, StackTrace stackTrace, {required int generation}) {
+    if (!mounted || generation != _tableLoadGeneration) {
       return;
     }
     setState(() {
       if (_isDatasetTableNotFoundError(error)) {
         _error = null;
         _fatalError = false;
-        _scheduleDatasetWatchRetry();
+        _ready = false;
+        _scheduleDatasetLoadRetry(generation: generation);
       } else {
         _error = error;
         _fatalError = true;
-      }
-      _ready = true;
-    });
-  }
-
-  void _scheduleDatasetWatchRetry() {
-    _watchRetryTimer?.cancel();
-    _watchRetryTimer = Timer(const Duration(milliseconds: 500), () {
-      if (!mounted) {
-        return;
-      }
-      _connectDatasetWatch();
-    });
-  }
-
-  void _handleWatchEvent(DatasetTableWatchEvent event) {
-    if (!_ready) {
-      _handlePreReadyWatchEvent(event);
-      return;
-    }
-
-    var changed = false;
-    if (event.kind == 'delete' && event.deletePredicate != null) {
-      changed = _applyDeletePredicate(event.deletePredicate!, _rowsByItemId) || changed;
-    }
-
-    final batch = event.batch;
-    if (batch != null) {
-      if (event.kind == 'delete' || event.changeType == 'delete') {
-        for (final row in batch.toRows()) {
-          final predicate = row['predicate']?.toString();
-          if (predicate != null && predicate.trim().isNotEmpty) {
-            changed = _applyDeletePredicate(predicate, _rowsByItemId) || changed;
-          }
-        }
-        _finishWatchEvent(event, changed);
-        return;
-      }
-      if (event.kind == 'transactions' || event.changeType == 'transactions') {
-        _finishWatchEvent(event, changed);
-        return;
-      }
-      changed = _applyRowsToMap(batch.toRows(), _rowsByItemId) || changed;
-    }
-
-    _finishWatchEvent(event, changed);
-  }
-
-  void _handlePreReadyWatchEvent(DatasetTableWatchEvent event) {
-    var changed = false;
-    if (event.kind == 'delete' && event.deletePredicate != null) {
-      changed = _applyDeletePredicate(event.deletePredicate!, _initialRowsByItemId) || changed;
-    }
-
-    final batch = event.batch;
-    if (batch != null) {
-      if (event.kind == 'delete' || event.changeType == 'delete') {
-        for (final row in batch.toRows()) {
-          final predicate = row['predicate']?.toString();
-          if (predicate != null && predicate.trim().isNotEmpty) {
-            changed = _applyDeletePredicate(predicate, _initialRowsByItemId) || changed;
-          }
-        }
-      } else if (event.kind != 'transactions' && event.changeType != 'transactions') {
-        changed = _applyRowsToMap(batch.toRows(), _initialRowsByItemId) || changed;
-      }
-    }
-
-    if (event.kind != 'ready') {
-      if (changed && mounted) {
-        setState(() {});
-      }
-      return;
-    }
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _rowsByItemId
-        ..clear()
-        ..addAll(_initialRowsByItemId);
-      _initialRowsByItemId.clear();
-      _advanceNextAgentSequencePastDatasetRows();
-      _rebaseAgentRowsAfterDatasetRows();
-      _usage = _latestUsageFromRows();
-      _ready = true;
-    });
-    _controller.scrollThreadToBottom(animated: false);
-  }
-
-  void _finishWatchEvent(DatasetTableWatchEvent event, bool changed) {
-    final initialReady = event.kind == 'ready' && event.phase == DatasetTableWatchPhase.initial && !_ready;
-    if (initialReady || changed) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        if (changed) {
-          _refreshUsageFromRows();
-        }
         _ready = true;
-      });
-      if (changed) {
-        _controller.scrollThreadToBottom(animated: false);
+      }
+    });
+  }
+
+  void _scheduleDatasetLoadRetry({required int generation}) {
+    _tableLoadRetryTimer?.cancel();
+    _tableLoadRetryTimer = Timer(const Duration(milliseconds: 500), () {
+      if (!mounted || generation != _tableLoadGeneration) {
+        return;
+      }
+      _loadDatasetRows(generation: generation);
+    });
+  }
+
+  void _finishDatasetRowsLoad(Map<String, Map<String, Object?>> loadedRowsByItemId, {required int generation}) {
+    if (!mounted || generation != _tableLoadGeneration) {
+      return;
+    }
+    _rowsByItemId
+      ..clear()
+      ..addAll(loadedRowsByItemId);
+    _advanceNextAgentSequencePastDatasetRows();
+
+    // Mark the load as ready before draining so any agent events delivered while
+    // buffered events are being reconciled apply normally instead of being left
+    // behind in the buffer.
+    _ready = true;
+    while (_bufferedAgentPayloads.isNotEmpty) {
+      final bufferedPayloads = List<Map<String, dynamic>>.from(_bufferedAgentPayloads);
+      _bufferedAgentPayloads.clear();
+      for (final payload in bufferedPayloads) {
+        _handleAgentMessagePayload(payload, notify: false, scroll: false);
       }
     }
+    _usage = _latestUsageFromRows();
+    setState(() {});
+    _controller.scrollThreadToBottom(animated: false);
   }
 
   bool _applyRowsToMap(Iterable<Map<String, Object?>> rows, Map<String, Map<String, Object?>> target) {
@@ -348,17 +297,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return changed;
   }
 
-  bool _refreshUsageFromRows() {
-    final latestUsage = _latestUsageFromRows();
-    if (latestUsage == null || _sameUsage(_usage, latestUsage)) {
-      return false;
-    }
-    _usage = latestUsage;
-    return true;
-  }
-
   AgentUsageSnapshot? _latestUsageFromRows() {
-    final rows = [..._rowsByItemId.values, ..._initialRowsByItemId.values, ..._agentRowsByItemId.values]..sort(_compareDatasetThreadRows);
+    final rows = [..._rowsByItemId.values, ..._agentRowsByItemId.values]..sort(_compareDatasetThreadRows);
     AgentUsageSnapshot? latestUsage;
     for (final row in rows) {
       final data = _rowData(row);
@@ -383,22 +323,6 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       }
     }
     return latestUsage;
-  }
-
-  bool _sameUsage(AgentUsageSnapshot? left, AgentUsageSnapshot? right) {
-    if (identical(left, right)) {
-      return true;
-    }
-    if (left == null || right == null) {
-      return false;
-    }
-    return left.threadPath == right.threadPath &&
-        left.turnId == right.turnId &&
-        left.contextUsedTokens == right.contextUsedTokens &&
-        left.contextTotalTokens == right.contextTotalTokens &&
-        left.compactionMode == right.compactionMode &&
-        left.compactionThreshold == right.compactionThreshold &&
-        const MapEquality<String, double>().equals(left.usage, right.usage);
   }
 
   void _removeReconciledAgentRowsForDatasetRow(Map<String, Object?> datasetRow) {
@@ -454,7 +378,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
 
   int _maxDatasetSequence() {
     var maxSequence = -1;
-    for (final row in [..._rowsByItemId.values, ..._initialRowsByItemId.values]) {
+    for (final row in _rowsByItemId.values) {
       final sequence = _intValue(row['sequence']);
       if (sequence > maxSequence) {
         maxSequence = sequence;
@@ -465,7 +389,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
 
   int _maxVisibleDatasetSequence() {
     var maxSequence = -1;
-    final rows = [..._rowsByItemId.values, ..._initialRowsByItemId.values];
+    final rows = _rowsByItemId.values.toList(growable: false);
     final turnInputPayloadsById = _turnInputPayloadsById(rows);
     for (final row in rows) {
       final message = _messageForRow(row, turnInputPayloadsById: turnInputPayloadsById);
@@ -485,23 +409,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (normalized.isEmpty) {
       return false;
     }
-    return _rowsByItemId.values.any((row) => row['item_id']?.toString() == normalized) ||
-        _initialRowsByItemId.values.any((row) => row['item_id']?.toString() == normalized);
-  }
-
-  bool _applyDeletePredicate(String predicate, Map<String, Map<String, Object?>> target) {
-    final itemIds = _itemIdsForDeletePredicate(predicate);
-    if (itemIds.isEmpty) {
-      return false;
-    }
-    var changed = false;
-    target.removeWhere((key, row) {
-      final rowItemId = row['item_id']?.toString();
-      final remove = itemIds.contains(key) || (rowItemId != null && itemIds.contains(rowItemId));
-      changed = changed || remove;
-      return remove;
-    });
-    return changed;
+    return _rowsByItemId.values.any((row) => row['item_id']?.toString() == normalized);
   }
 
   void _onMessagingChanged() {
@@ -523,29 +431,52 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       final payload = event.message.message['payload'];
       if (payload is Map<String, dynamic>) {
         trackAgentThreadStatusPayload(room: widget.room, payload: payload);
-        _handleAgentMessagePayload(payload);
+        if (_shouldBufferAgentPayload(payload)) {
+          _bufferedAgentPayloads.add(Map<String, dynamic>.from(payload));
+        } else {
+          _handleAgentMessagePayload(payload);
+        }
       } else if (payload is Map) {
         final normalized = Map<String, dynamic>.from(payload);
         trackAgentThreadStatusPayload(room: widget.room, payload: normalized);
-        _handleAgentMessagePayload(normalized);
+        if (_shouldBufferAgentPayload(normalized)) {
+          _bufferedAgentPayloads.add(normalized);
+        } else {
+          _handleAgentMessagePayload(normalized);
+        }
       }
     }
     _refreshStatus(notify: true);
   }
 
-  void _handleAgentMessagePayload(Map<String, dynamic> payload) {
-    if (_handleUsagePayload(payload)) {
+  bool _shouldBufferAgentPayload(Map<String, dynamic> payload) {
+    return !_ready && _agentPayloadBelongsToThread(payload);
+  }
+
+  bool _agentPayloadBelongsToThread(Map<String, dynamic> payload) {
+    final threadId = payload['thread_id'];
+    if (threadId is String && threadId.trim() == widget.path) {
+      return true;
+    }
+    final usage = AgentUsageSnapshot.fromPayload(payload);
+    return usage != null && usage.threadPath == widget.path;
+  }
+
+  void _handleAgentMessagePayload(Map<String, dynamic> payload, {bool notify = true, bool scroll = true}) {
+    if (_handleUsagePayload(payload, notify: notify)) {
       return;
     }
     final changed = _applyAgentMessagePayload(payload);
     _controller.handleAgentMessagePayload(payload);
-    if (changed && mounted) {
+    if (changed && notify && mounted) {
       setState(() {});
-      _controller.scrollThreadToBottom(animated: false);
+      if (scroll) {
+        _controller.scrollThreadToBottom(animated: false);
+      }
     }
   }
 
-  bool _handleUsagePayload(Map<String, dynamic> payload) {
+  bool _handleUsagePayload(Map<String, dynamic> payload, {bool notify = true}) {
     final usage = AgentUsageSnapshot.fromPayload(payload);
     if (usage == null) {
       return false;
@@ -564,7 +495,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       return true;
     }
     _usage = usage;
-    if (mounted) {
+    if (notify && mounted) {
       setState(() {});
     } else if (changed) {
       return true;
@@ -900,7 +831,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   bool _isReconciledByDatasetRows(Map<String, Object?> liveRow) {
-    for (final datasetRow in [..._rowsByItemId.values, ..._initialRowsByItemId.values]) {
+    for (final datasetRow in _rowsByItemId.values) {
       if (_datasetRowReconcilesLiveRow(datasetRow: datasetRow, liveRow: liveRow)) {
         return true;
       }
@@ -922,7 +853,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     }
 
     final liveMessage = _messageForRow(liveRow);
-    final turnInputPayloadsById = _turnInputPayloadsById([..._initialRowsByItemId.values, ..._rowsByItemId.values, datasetRow]);
+    final turnInputPayloadsById = _turnInputPayloadsById([..._rowsByItemId.values, datasetRow]);
     final datasetMessage = _messageForRow(datasetRow, turnInputPayloadsById: turnInputPayloadsById);
     if (liveMessage == null || datasetMessage == null) {
       return false;
@@ -1257,7 +1188,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
 
   List<PendingAgentMessage> _pendingSteeringMessagesFromDatasetRows() {
     final pendingByMessageId = <String, PendingAgentMessage>{};
-    final rows = [..._initialRowsByItemId.values, ..._rowsByItemId.values, ..._agentRowsByItemId.values]..sort(_compareDatasetThreadRows);
+    final rows = [..._rowsByItemId.values, ..._agentRowsByItemId.values]..sort(_compareDatasetThreadRows);
     for (final row in rows) {
       final data = _rowData(row);
       final type = data?['type']?.toString();
@@ -2178,7 +2109,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
 
   Widget _buildThreadViewport(BuildContext context, List<_DatasetThreadMessage> messages, List<PendingAgentMessage> pendingMessages) {
     final statusText = _status.text?.trim();
-    final showStatus = statusText != null && statusText.isNotEmpty;
+    final showStatus = shouldShowChatThreadStatus(_status);
     final feedImages = _collectThreadImages(messages);
     final threadView = ChatThreadViewportBody(
       scrollController: _controller.threadScrollController,
@@ -2198,7 +2129,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
               builder: (context, constraints) => Padding(
                 padding: EdgeInsets.symmetric(horizontal: chatThreadStatusHorizontalPadding(constraints.maxWidth)),
                 child: ChatThreadProcessingStatusRow(
-                  text: statusText,
+                  text: statusText ?? '',
                   startedAt: _status.startedAt,
                   totalBytes: _status.totalBytes,
                   onCancel: _canInterruptActiveTurn(pendingMessages) ? _cancelTurn : null,
@@ -2239,7 +2170,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         child: Text(error.toString(), style: ShadTheme.of(context).textTheme.muted, textAlign: TextAlign.center),
       );
     }
-    if (!_ready && !hasWireBackedContent) {
+    if (!_ready) {
       return const Center(child: CircularProgressIndicator());
     }
 
@@ -3379,20 +3310,6 @@ List<String> _stringList(Object? value) {
     return const [];
   }
   return value.map((item) => item.toString().trim()).where((item) => item.isNotEmpty).toList(growable: false);
-}
-
-List<String> _itemIdsForDeletePredicate(String predicate) {
-  final normalized = predicate.trim();
-  final equality = RegExp(r'''^"?item_id"?\s*=\s*['"]([^'"]+)['"]$''', caseSensitive: false).firstMatch(normalized);
-  if (equality != null) {
-    return [equality.group(1)!];
-  }
-
-  final inList = RegExp(r'''^"?item_id"?\s+in\s*\((.*)\)$''', caseSensitive: false).firstMatch(normalized);
-  if (inList == null) {
-    return const [];
-  }
-  return RegExp(r'''['"]([^'"]+)['"]''').allMatches(inList.group(1)!).map((match) => match.group(1)!).toList(growable: false);
 }
 
 int _intValue(Object? value) {

@@ -95,16 +95,16 @@ class _FakeMessagingServer {
 
     if (request['toolkit'] == 'dataset') {
       final tool = request['tool']?.toString();
-      if (tool != 'watch_table') {
+      if (tool != 'watch_table' && tool != 'search') {
         throw StateError('unsupported dataset operation: $tool');
       }
       final input = _decodeInput(message: message, request: request);
       if (input is! ControlContent) {
-        throw StateError('dataset.watch_table expected stream control input');
+        throw StateError('dataset.$tool expected stream control input');
       }
       final toolCallId = request['tool_call_id']?.toString();
       if (toolCallId == null || toolCallId.isEmpty) {
-        throw StateError('dataset.watch_table missing tool_call_id');
+        throw StateError('dataset.$tool missing tool_call_id');
       }
       _streamToolsByCallId[toolCallId] = tool!;
       await protocol.send('__response__', ControlContent(method: 'open').pack(), id: messageId);
@@ -115,11 +115,16 @@ class _FakeMessagingServer {
           await _sendResponseChunk(
             protocol,
             toolCallId,
-            BinaryContent(data: _initialDatasetBatch.ipcBytes, headers: const {'kind': 'data', 'watch_event': 'data', 'phase': 'initial'}),
+            BinaryContent(
+              data: _initialDatasetBatch.ipcBytes,
+              headers: tool == 'watch_table' ? const {'kind': 'data', 'watch_event': 'data', 'phase': 'initial'} : const {'kind': 'data'},
+            ),
           );
           await _initialReadyGate?.future;
           watchReadyEvents += 1;
-          await _sendResponseChunk(protocol, toolCallId, JsonContent(json: const {'kind': 'ready', 'phase': 'initial'}));
+          if (tool == 'watch_table') {
+            await _sendResponseChunk(protocol, toolCallId, JsonContent(json: const {'kind': 'ready', 'phase': 'initial'}));
+          }
           await _sendResponseChunk(protocol, toolCallId, ControlContent(method: 'close'));
         } catch (_) {}
       }());
@@ -177,7 +182,10 @@ class _FakeMessagingServer {
       }
     }
     if (toolCallId == null) {
-      throw StateError('dataset watch has not started');
+      return;
+    }
+    if (_streamToolsByCallId[toolCallId] != 'watch_table') {
+      return;
     }
     await _sendResponseChunk(
       protocol,
@@ -194,13 +202,13 @@ class _FakeMessagingServer {
       return;
     }
     final tool = _streamToolsByCallId[toolCallId];
-    if (tool != 'watch_table') {
+    if (tool != 'watch_table' && tool != 'search') {
       return;
     }
 
     final chunk = _decodeChunk(message: message, request: request);
     if (chunk is! BinaryContent) {
-      throw StateError('dataset.watch_table expected binary stream input');
+      throw StateError('dataset.$tool expected binary stream input');
     }
     if (chunk.headers['kind'] == 'start') {
       _watchPullCount = 0;
@@ -208,16 +216,23 @@ class _FakeMessagingServer {
       await _sendResponseChunk(
         protocol,
         toolCallId,
-        BinaryContent(data: _initialDatasetBatch.ipcBytes, headers: const {'kind': 'data', 'watch_event': 'data', 'phase': 'initial'}),
+        BinaryContent(
+          data: _initialDatasetBatch.ipcBytes,
+          headers: tool == 'watch_table' ? const {'kind': 'data', 'watch_event': 'data', 'phase': 'initial'} : const {'kind': 'data'},
+        ),
       );
       return;
     }
     if (chunk.headers['kind'] == 'pull') {
       _watchPullCount += 1;
-      if (_watchPullCount == 1) {
+      if (_watchPullCount == 1 && tool == 'watch_table') {
         await _initialReadyGate?.future;
         watchReadyEvents += 1;
         await _sendResponseChunk(protocol, toolCallId, JsonContent(json: const {'kind': 'ready', 'phase': 'initial'}));
+      } else if (_watchPullCount == 1 && tool == 'search') {
+        await _initialReadyGate?.future;
+        watchReadyEvents += 1;
+        await _sendResponseChunk(protocol, toolCallId, ControlContent(method: 'close'));
       }
     }
   }
@@ -974,6 +989,7 @@ void main() {
     await tester.pump();
 
     await tester.runAsync(() async {
+      await _waitUntil(() => harness.server.watchReadyEvents == 1);
       await harness.server.sendAgentMessage(harness.pair.serverProtocol, {
         'type': 'meshagent.agent.context.compacted',
         'thread_id': 'dataset://threads/test',
@@ -996,9 +1012,15 @@ void main() {
       },
     );
     expect(find.text('Context compacted'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    });
   });
 
-  testWidgets('ChatBotView rebases live compaction events after the initial dataset watch is ready', (tester) async {
+  testWidgets('ChatBotView buffers live compaction events until the initial dataset load is ready', (tester) async {
     final initialReadyGate = Completer<void>();
     final initialRows = _threadRowsBatch([
       _messageRow(
@@ -1044,7 +1066,8 @@ void main() {
         ],
       });
     });
-    await _pumpUntil(tester, () => find.text('Context compacted').evaluate().isNotEmpty);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Context compacted'), findsNothing);
 
     await tester.runAsync(() async {
       initialReadyGate.complete();

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -328,22 +327,21 @@ void main() {
     expect(harness.server.requests.last.input['to_participant_id'], 'remote-1');
   });
 
-  test('resolveChatThreadStatus reads the exact dataset thread path', () async {
+  test('resolveChatThreadStatus reads status messages for the exact dataset thread path', () async {
     final harness = await _startMessagingHarness();
     addTearDown(harness.dispose);
 
-    await harness.room.messaging.enable();
-    await _waitUntil(() => harness.room.messaging.remoteParticipants.isNotEmpty);
-
     const threadPath = 'dataset://agents/dataset/threads/thread-1';
-    await harness.server.sendParticipantAttributes(harness.pair.serverProtocol, {
-      'thread.status.text.$threadPath': 'Generating image',
-      'thread.status.mode.$threadPath': 'busy',
-      'thread.status.started_at.$threadPath': '2026-05-04T12:00:00Z',
-      'thread.status.pending_item_id.$threadPath': 'image-1',
-    });
-    await _waitUntil(
-      () => harness.room.messaging.remoteParticipants.first.getAttribute('thread.status.text.$threadPath') == 'Generating image',
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.thread.status',
+        'thread_id': threadPath,
+        'status': 'Generating image',
+        'mode': 'busy',
+        'started_at': '2026-05-04T12:00:00Z',
+        'pending_item_id': 'image-1',
+      },
     );
 
     final state = resolveChatThreadStatus(room: harness.room, path: threadPath, agentName: 'assistant');
@@ -355,7 +353,7 @@ void main() {
     expect(state.startedAt, DateTime.parse('2026-05-04T12:00:00Z'));
   });
 
-  test('resolveChatThreadStatus reads status from agent messages before attributes', () async {
+  test('resolveChatThreadStatus ignores stale participant status attributes', () async {
     final harness = await _startMessagingHarness();
     addTearDown(harness.dispose);
 
@@ -394,6 +392,45 @@ void main() {
     expect(state.totalBytes, 240);
     expect(state.pendingItemId, 'image-1');
     expect(state.startedAt, DateTime.parse('2026-05-04T12:00:00Z'));
+    expect(state.supportsAgentMessages, isTrue);
+  });
+
+  test('resolveChatThreadStatus stays clear when only stale attributes remain', () async {
+    final harness = await _startMessagingHarness();
+    addTearDown(harness.dispose);
+
+    await harness.room.messaging.enable();
+    await _waitUntil(() => harness.room.messaging.remoteParticipants.isNotEmpty);
+
+    const threadPath = 'dataset://agents/dataset/threads/thread-1';
+    await harness.server.sendParticipantAttributes(harness.pair.serverProtocol, {
+      'thread.status.text.$threadPath': 'Generating image',
+      'thread.status.mode.$threadPath': 'busy',
+    });
+    await _waitUntil(
+      () => harness.room.messaging.remoteParticipants.first.getAttribute('thread.status.text.$threadPath') == 'Generating image',
+    );
+
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {'type': 'meshagent.agent.thread.status', 'thread_id': threadPath, 'status': 'Generating image', 'mode': 'busy'},
+    );
+    final changed = trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.thread.status',
+        'thread_id': threadPath,
+        'status': null,
+        'mode': null,
+        'started_at': null,
+        'turn_id': null,
+      },
+    );
+    final state = resolveChatThreadStatus(room: harness.room, path: threadPath, agentName: 'assistant');
+
+    expect(changed, isTrue);
+    expect(state.text, isNull);
+    expect(state.hasStatus, isFalse);
     expect(state.supportsAgentMessages, isTrue);
   });
 
@@ -555,29 +592,24 @@ void main() {
     final harness = await _startMessagingHarness();
     addTearDown(harness.dispose);
 
-    await harness.room.messaging.enable();
-    await _waitUntil(() => harness.room.messaging.remoteParticipants.isNotEmpty);
-
     const threadPath = 'dataset://agents/dataset/threads/thread-1';
-    await harness.server.sendParticipantAttributes(harness.pair.serverProtocol, {
-      'supports_agent_messages': true,
-      'thread.status.pending_messages.$threadPath': jsonEncode({
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.turn.steer',
+        'thread_id': threadPath,
         'turn_id': 'turn-1',
-        'messages': [
-          {
-            'message_id': 'message-1',
-            'message_type': 'meshagent.agent.turn.steer',
-            'sender_name': 'self',
-            'created_at': '2026-05-04T12:00:00Z',
-            'content': [
-              {'type': 'text', 'text': 'hello'},
-            ],
-          },
+        'message_id': 'message-1',
+        'sender_name': 'self',
+        'created_at': '2026-05-04T12:00:00Z',
+        'content': [
+          {'type': 'text', 'text': 'hello'},
         ],
-      }),
-    });
-    await _waitUntil(
-      () => harness.room.messaging.remoteParticipants.first.getAttribute('thread.status.pending_messages.$threadPath') != null,
+      },
+    );
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {'type': 'meshagent.agent.thread.status', 'thread_id': threadPath, 'turn_id': 'turn-1', 'status': null},
     );
 
     final state = resolveChatThreadStatus(room: harness.room, path: threadPath, agentName: 'assistant');
@@ -593,16 +625,10 @@ void main() {
     final harness = await _startMessagingHarness();
     addTearDown(harness.dispose);
 
-    await harness.room.messaging.enable();
-    await _waitUntil(() => harness.room.messaging.remoteParticipants.isNotEmpty);
-
     const threadPath = 'dataset://agents/dataset/threads/thread-1';
-    await harness.server.sendParticipantAttributes(harness.pair.serverProtocol, {
-      'thread.status.text.$threadPath': 'Generating image',
-      'thread.status.mode.$threadPath': 'busy',
-    });
-    await _waitUntil(
-      () => harness.room.messaging.remoteParticipants.first.getAttribute('thread.status.text.$threadPath') == 'Generating image',
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {'type': 'meshagent.agent.thread.status', 'thread_id': threadPath, 'status': 'Generating image', 'mode': 'busy'},
     );
 
     final state = resolveChatThreadStatus(room: harness.room, path: threadPath);

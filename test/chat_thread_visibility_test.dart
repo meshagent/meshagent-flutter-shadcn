@@ -908,6 +908,32 @@ void main() {
     expect(find.byType(ChatThreadProcessingStatusRow), findsNothing);
   });
 
+  testWidgets('does not render a processing status row for mode-only thread status', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
+    final document = _createThreadDocument();
+    addTearDown(room.dispose);
+    addTearDown(controller.dispose);
+    addTearDown(document.dispose);
+
+    final status = ChatThreadStatusState(mode: 'busy', turnId: 'turn-1');
+
+    await tester.pumpWidget(
+      _buildThreadHarness(
+        room: room,
+        controller: controller,
+        document: document,
+        showTyping: shouldShowChatThreadStatus(status),
+        threadStatus: status.text,
+        threadStatusMode: status.mode,
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(ChatThreadProcessingStatusRow), findsNothing);
+    expect(find.text('Thinking'), findsNothing);
+  });
+
   testWidgets('cancels delayed processing status collapse when status returns', (tester) async {
     final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     final controller = ChatThreadController(room: room);
