@@ -1005,6 +1005,7 @@ class _AgentThreadMessageStatusStore {
   final Map<String, _AgentThreadMessageStatus> _statusByThreadPath = <String, _AgentThreadMessageStatus>{};
   final Map<String, LinkedHashMap<String, PendingAgentMessage>> _pendingMessagesByThreadPath =
       <String, LinkedHashMap<String, PendingAgentMessage>>{};
+  final Map<String, Map<String, int>> _toolArgumentBytesByThreadPath = <String, Map<String, int>>{};
 
   bool apply(Map<String, dynamic> payload) {
     final type = payload["type"];
@@ -1037,7 +1038,7 @@ class _AgentThreadMessageStatusStore {
         return _applyToolCallArgumentsDelta(normalizedThreadPath, payload);
       case _agentToolCallEndedType:
         _touchedThreadPaths.add(normalizedThreadPath);
-        return _clearStatusTotalBytes(normalizedThreadPath);
+        return _clearToolCallBytes(normalizedThreadPath, payload);
       case _agentTurnStartRejectedType:
       case _agentTurnSteerRejectedType:
         _touchedThreadPaths.add(normalizedThreadPath);
@@ -1047,7 +1048,8 @@ class _AgentThreadMessageStatusStore {
         _touchedThreadPaths.add(normalizedThreadPath);
         final hadPending = _pendingMessagesByThreadPath.remove(normalizedThreadPath)?.isNotEmpty == true;
         final hadStatus = _statusByThreadPath.remove(normalizedThreadPath) != null;
-        return hadPending || hadStatus;
+        final hadBytes = _toolArgumentBytesByThreadPath.remove(normalizedThreadPath)?.isNotEmpty == true;
+        return hadPending || hadStatus || hadBytes;
     }
 
     return false;
@@ -1100,7 +1102,10 @@ class _AgentThreadMessageStatusStore {
     final turnId = rawTurnId is String && rawTurnId.trim().isNotEmpty ? rawTurnId.trim() : null;
     final pendingItemId = rawPendingItemId is String && rawPendingItemId.trim().isNotEmpty ? rawPendingItemId.trim() : null;
     final parsedTotalBytes = _positiveIntValue(rawTotalBytes);
-    final totalBytes = parsedTotalBytes ?? (!payload.containsKey("total_bytes") && previous?.text == text ? previous?.totalBytes : null);
+    final totalBytes =
+        parsedTotalBytes ??
+        _toolArgumentBytes(threadPath, pendingItemId) ??
+        (!payload.containsKey("total_bytes") && previous?.text == text ? previous?.totalBytes : null);
     final totalBytesFromStatus = parsedTotalBytes != null;
 
     if (text == null && mode == null && startedAt == null && turnId == null && pendingItemId == null && totalBytes == null) {
@@ -1132,17 +1137,11 @@ class _AgentThreadMessageStatusStore {
   }
 
   bool _applyToolCallArgumentsDelta(String threadPath, Map<String, dynamic> payload) {
-    final status = _statusByThreadPath[threadPath];
-    if (status == null || status.text == null || status.text!.trim().isEmpty) {
-      return false;
-    }
     final itemId = payload["item_id"];
-    if (itemId is! String || itemId.trim().isEmpty || itemId.trim() != status.pendingItemId) {
+    if (itemId is! String || itemId.trim().isEmpty) {
       return false;
     }
-    if (status.totalBytesFromStatus) {
-      return false;
-    }
+    final normalizedItemId = itemId.trim();
 
     final delta = payload["delta"]?.toString() ?? "";
     final deltaBytes = utf8.encode(delta).length;
@@ -1150,7 +1149,18 @@ class _AgentThreadMessageStatusStore {
       return false;
     }
 
-    final nextTotalBytes = (status.totalBytes ?? 0) + deltaBytes;
+    final threadBytes = _toolArgumentBytesByThreadPath.putIfAbsent(threadPath, () => <String, int>{});
+    final nextTotalBytes = (threadBytes[normalizedItemId] ?? 0) + deltaBytes;
+    threadBytes[normalizedItemId] = nextTotalBytes;
+
+    final status = _statusByThreadPath[threadPath];
+    if (status == null || status.text == null || status.text!.trim().isEmpty) {
+      return false;
+    }
+    if (normalizedItemId != status.pendingItemId || status.totalBytesFromStatus || status.totalBytes == nextTotalBytes) {
+      return false;
+    }
+
     _statusByThreadPath[threadPath] = _AgentThreadMessageStatus(
       text: status.text,
       startedAt: status.startedAt,
@@ -1162,10 +1172,29 @@ class _AgentThreadMessageStatusStore {
     return true;
   }
 
-  bool _clearStatusTotalBytes(String threadPath) {
+  int? _toolArgumentBytes(String threadPath, String? itemId) {
+    if (itemId == null || itemId.trim().isEmpty) {
+      return null;
+    }
+    final bytes = _toolArgumentBytesByThreadPath[threadPath]?[itemId.trim()];
+    return bytes != null && bytes > 0 ? bytes : null;
+  }
+
+  bool _clearToolCallBytes(String threadPath, Map<String, dynamic> payload) {
+    final rawItemId = payload["item_id"];
+    final itemId = rawItemId is String && rawItemId.trim().isNotEmpty ? rawItemId.trim() : null;
+    var hadBytes = false;
+    if (itemId != null) {
+      final threadBytes = _toolArgumentBytesByThreadPath[threadPath];
+      hadBytes = threadBytes?.remove(itemId) != null;
+      if (threadBytes != null && threadBytes.isEmpty) {
+        _toolArgumentBytesByThreadPath.remove(threadPath);
+      }
+    }
+
     final status = _statusByThreadPath[threadPath];
-    if (status?.totalBytes == null) {
-      return false;
+    if (status?.totalBytes == null || (itemId != null && status?.pendingItemId != itemId)) {
+      return hadBytes;
     }
     _statusByThreadPath[threadPath] = _AgentThreadMessageStatus(
       text: status?.text,

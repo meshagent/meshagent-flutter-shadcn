@@ -427,7 +427,46 @@ void main() {
 
     expect(state.text, 'Preparing Command');
     expect(state.totalBytes, 120);
-    expect(formatChatThreadStatusText(state.text!, startedAt: state.startedAt, totalBytes: state.totalBytes), 'Preparing Command 120 B');
+    expect(
+      formatChatThreadStatusText(state.text!, startedAt: state.startedAt, totalBytes: state.totalBytes),
+      'Preparing Command 120 bytes',
+    );
+  });
+
+  test('resolveChatThreadStatus computes status bytes from deltas before status', () async {
+    final harness = await _startMessagingHarness();
+    addTearDown(harness.dispose);
+
+    const threadPath = 'dataset://agents/dataset/threads/thread-1';
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.tool_call.arguments_delta',
+        'thread_id': threadPath,
+        'item_id': 'shell-1',
+        'delta': List.filled(120, 'x').join(),
+      },
+    );
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.thread.status',
+        'thread_id': threadPath,
+        'status': 'Preparing Command',
+        'mode': 'busy',
+        'started_at': '2026-05-04T12:00:00Z',
+        'pending_item_id': 'shell-1',
+      },
+    );
+
+    final state = resolveChatThreadStatus(room: harness.room, path: threadPath, agentName: 'assistant');
+
+    expect(state.text, 'Preparing Command');
+    expect(state.totalBytes, 120);
+    expect(
+      formatChatThreadStatusText(state.text!, startedAt: state.startedAt, totalBytes: state.totalBytes),
+      'Preparing Command 120 bytes',
+    );
   });
 
   test('resolveChatThreadStatus tracks accepted pending messages until applied', () async {
