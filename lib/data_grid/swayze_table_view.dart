@@ -48,6 +48,7 @@ class SwayzeTableView extends StatefulWidget {
     this.onStatusChanged,
     this.onOpenFile,
     this.tableWatchEvents,
+    this.statusBarTrailing,
   });
 
   final RoomClient room;
@@ -74,6 +75,7 @@ class SwayzeTableView extends StatefulWidget {
   final ValueChanged<SwayzeTableStatus>? onStatusChanged;
   final FutureOr<void> Function(String file)? onOpenFile;
   final Stream<DatasetTableWatchEvent>? tableWatchEvents;
+  final Widget? statusBarTrailing;
 
   @override
   State<SwayzeTableView> createState() => _SwayzeTableViewState();
@@ -825,14 +827,25 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
             decoration: BoxDecoration(
               border: Border(bottom: BorderSide(color: borderColor)),
             ),
-            child: Wrap(
+            child: Row(
               spacing: 12,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                Text(_status.primaryText),
-                if (_status.secondaryText != null) Text(_status.secondaryText!, style: theme.textTheme.muted),
-                if (_isLoadingRows) const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+                Expanded(
+                  child: Wrap(
+                    spacing: 12,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Text(_status.primaryText),
+                      if (_status.secondaryText != null) Text(_status.secondaryText!, style: theme.textTheme.muted),
+                      if (_isLoadingRows) const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+                    ],
+                  ),
+                ),
+                if (widget.statusBarTrailing != null)
+                  Expanded(
+                    child: Align(alignment: Alignment.centerRight, child: widget.statusBarTrailing!),
+                  ),
               ],
             ),
           ),

@@ -35,13 +35,21 @@ class ParsedCommand {
 }
 
 class ToolCallHeadline {
-  const ToolCallHeadline({required this.action, this.rest = '', this.detailLanguageOrFilename});
+  const ToolCallHeadline({required this.action, this.rest = '', this.detailLanguageOrFilename, this.linesAdded, this.linesRemoved});
 
   final String action;
   final String rest;
   final String? detailLanguageOrFilename;
+  final int? linesAdded;
+  final int? linesRemoved;
 
-  String get text => rest.trim().isEmpty ? action : '$action $rest';
+  String get text {
+    final base = rest.trim().isEmpty ? action : '$action $rest';
+    final added = linesAdded == null ? null : '+$linesAdded';
+    final removed = linesRemoved == null ? null : '-$linesRemoved';
+    final counts = [?added, ?removed].join(' ');
+    return counts.isEmpty ? base : '$base ($counts)';
+  }
 }
 
 class ToolCallEntryDisplay {
@@ -240,7 +248,13 @@ ToolCallHeadline _headlineWithArgumentDeltaBytes(ToolCallHeadline headline, {req
   }
   final suffix = '(${_formatByteCount(argumentDeltaBytes)})';
   final rest = headline.rest.trim().isEmpty ? suffix : '${headline.rest} $suffix';
-  return ToolCallHeadline(action: headline.action, rest: rest, detailLanguageOrFilename: headline.detailLanguageOrFilename);
+  return ToolCallHeadline(
+    action: headline.action,
+    rest: rest,
+    detailLanguageOrFilename: headline.detailLanguageOrFilename,
+    linesAdded: headline.linesAdded,
+    linesRemoved: headline.linesRemoved,
+  );
 }
 
 String _formatByteCount(int value) {
@@ -285,7 +299,9 @@ ToolCallHeadline? _friendlyBuiltinHeadline({
   final normalizedTool = tool.trim().toLowerCase();
   final args = arguments ?? const <String, Object?>{};
   ToolCallHeadline? headline;
-  if (normalizedToolkit == 'storage') {
+  if (normalizedTool == 'apply_patch') {
+    headline = _applyPatchHeadline(arguments: args, completed: completed, pending: pending);
+  } else if (normalizedToolkit == 'storage') {
     headline = _storageHeadline(tool: normalizedTool, arguments: args, completed: completed, pending: pending);
   } else if (normalizedToolkit == 'dataset') {
     headline = _headlineFromText(_datasetSummary(tool: normalizedTool, arguments: args, completed: completed));
@@ -304,6 +320,102 @@ ToolCallHeadline? _friendlyBuiltinHeadline({
   return failed
       ? ToolCallHeadline(action: 'Failed:', rest: headline.text, detailLanguageOrFilename: headline.detailLanguageOrFilename)
       : headline;
+}
+
+ToolCallHeadline? _applyPatchHeadline({required Map<String, Object?> arguments, required bool completed, required bool pending}) {
+  final stats = _applyPatchStatsFromArguments(arguments);
+  if (stats == null) {
+    return null;
+  }
+  final action = completed ? 'Edited' : (pending ? 'Preparing' : 'Editing');
+  final target = stats.paths.length == 1 ? stats.paths.single : '${stats.paths.length} files';
+  return ToolCallHeadline(
+    action: action,
+    rest: target,
+    detailLanguageOrFilename: stats.paths.length == 1 ? stats.paths.single : null,
+    linesAdded: stats.linesAdded,
+    linesRemoved: stats.linesRemoved,
+  );
+}
+
+class _ApplyPatchStats {
+  const _ApplyPatchStats({required this.paths, required this.linesAdded, required this.linesRemoved});
+
+  final List<String> paths;
+  final int linesAdded;
+  final int linesRemoved;
+}
+
+_ApplyPatchStats? _applyPatchStatsFromArguments(Map<String, Object?> arguments) {
+  final operation = arguments['operation'];
+  if (operation is Map) {
+    final path = _nestedStringArgument(operation, const {'path'});
+    final diff = _nestedStringArgument(operation, const {'diff'});
+    if (path != null && diff != null) {
+      final counts = _diffLineCounts(diff);
+      return _ApplyPatchStats(paths: [path], linesAdded: counts.$1, linesRemoved: counts.$2);
+    }
+  }
+
+  final patch = _nestedStringArgument(arguments, const {'patch', 'input'});
+  if (patch != null) {
+    return _applyPatchStats(patch);
+  }
+
+  final path = _nestedStringArgument(arguments, const {'path'});
+  final diff = _nestedStringArgument(arguments, const {'diff'});
+  if (path != null && diff != null) {
+    final counts = _diffLineCounts(diff);
+    return _ApplyPatchStats(paths: [path], linesAdded: counts.$1, linesRemoved: counts.$2);
+  }
+
+  return null;
+}
+
+_ApplyPatchStats? _applyPatchStats(String patch) {
+  final normalized = patch.replaceAll('\r\n', '\n');
+  if (!normalized.contains('*** Begin Patch') &&
+      !normalized.contains('*** Update File:') &&
+      !normalized.contains('*** Add File:') &&
+      !normalized.contains('*** Delete File:')) {
+    return null;
+  }
+  final paths = <String>[];
+  var linesAdded = 0;
+  var linesRemoved = 0;
+  final filePattern = RegExp(r'^\*\*\* (?:Update|Add|Delete) File: (.+)$');
+  for (final line in normalized.split('\n')) {
+    final fileMatch = filePattern.firstMatch(line);
+    if (fileMatch != null) {
+      final path = fileMatch.group(1)?.trim();
+      if (path != null && path.isNotEmpty) {
+        paths.add(path);
+      }
+      continue;
+    }
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      linesAdded++;
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      linesRemoved++;
+    }
+  }
+  if (paths.isEmpty) {
+    return null;
+  }
+  return _ApplyPatchStats(paths: paths, linesAdded: linesAdded, linesRemoved: linesRemoved);
+}
+
+(int, int) _diffLineCounts(String diff) {
+  var linesAdded = 0;
+  var linesRemoved = 0;
+  for (final line in diff.replaceAll('\r\n', '\n').split('\n')) {
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      linesAdded++;
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      linesRemoved++;
+    }
+  }
+  return (linesAdded, linesRemoved);
 }
 
 ToolCallHeadline? _storageHeadline({
@@ -539,6 +651,39 @@ String? _stringArgument(Map<String, Object?> arguments, List<String> names) {
   for (final name in names) {
     final value = arguments[name];
     if (value is String && value.trim().isNotEmpty) return _singleLine(value.trim());
+  }
+  return null;
+}
+
+String? _nestedStringArgument(Object? value, Set<String> names) {
+  if (value is String) {
+    final trimmed = value.trim();
+    return trimmed.isEmpty ? null : value;
+  }
+  if (value is Map) {
+    for (final entry in value.entries) {
+      final key = entry.key?.toString().trim().toLowerCase();
+      if (key != null && names.contains(key)) {
+        final nested = _nestedStringArgument(entry.value, names);
+        if (nested != null) {
+          return nested;
+        }
+      }
+    }
+    for (final entry in value.entries) {
+      final nested = _nestedStringArgument(entry.value, names);
+      if (nested != null) {
+        return nested;
+      }
+    }
+  }
+  if (value is Iterable) {
+    for (final item in value) {
+      final nested = _nestedStringArgument(item, names);
+      if (nested != null) {
+        return nested;
+      }
+    }
   }
   return null;
 }

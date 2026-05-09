@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_flutter_shadcn/chat/chat.dart';
+import 'package:meshagent_flutter_shadcn/chat/agent_stream_accumulator.dart';
+import 'package:meshagent_flutter_shadcn/chat/tool_call_status_accumulator.dart';
 import 'package:meshagent/runtime.dart';
 
 class _ProtocolPair {
@@ -504,6 +506,189 @@ void main() {
       formatChatThreadStatusText(state.text!, startedAt: state.startedAt, totalBytes: state.totalBytes),
       'Preparing Command 120 bytes',
     );
+  });
+
+  test('resolveChatThreadStatus reads patch line counters from status messages', () async {
+    final harness = await _startMessagingHarness();
+    addTearDown(harness.dispose);
+
+    const threadPath = 'dataset://agents/dataset/threads/thread-1';
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.thread.status',
+        'thread_id': threadPath,
+        'status': 'Editing app.ts',
+        'mode': 'busy',
+        'started_at': '2026-05-04T12:00:00Z',
+        'pending_item_id': 'patch-1',
+        'lines_added': 100,
+        'lines_removed': 10,
+      },
+    );
+
+    final state = resolveChatThreadStatus(room: harness.room, path: threadPath, agentName: 'assistant');
+
+    expect(state.text, 'Editing app.ts');
+    expect(state.linesAdded, 100);
+    expect(state.linesRemoved, 10);
+    expect(
+      formatChatThreadStatusText(state.text!, startedAt: state.startedAt, linesAdded: state.linesAdded, linesRemoved: state.linesRemoved),
+      'Editing app.ts +100 -10',
+    );
+  });
+
+  test('resolveChatThreadStatus derives patch line counters from live argument deltas', () async {
+    final harness = await _startMessagingHarness();
+    addTearDown(harness.dispose);
+
+    const threadPath = 'dataset://agents/dataset/threads/thread-1';
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.thread.status',
+        'thread_id': threadPath,
+        'status': 'Preparing',
+        'mode': 'busy',
+        'started_at': '2026-05-04T12:00:00Z',
+        'pending_item_id': 'pending-placeholder',
+        'total_bytes': 270,
+      },
+    );
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.tool_call.arguments_delta',
+        'thread_id': threadPath,
+        'item_id': 'patch-1',
+        'delta': '*** Begin Patch\n*** Update File: app.ts\n@@\n-old\n+new\n',
+      },
+    );
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.tool_call.arguments_delta',
+        'thread_id': threadPath,
+        'item_id': 'patch-1',
+        'delta': '${List.filled(260, '+x\n').join()}*** End Patch\n',
+      },
+    );
+
+    final state = resolveChatThreadStatus(room: harness.room, path: threadPath, agentName: 'assistant');
+
+    expect(state.text, 'Editing app.ts');
+    expect(state.totalBytes, greaterThan(270));
+    expect(state.linesAdded, 261);
+    expect(state.linesRemoved, 1);
+    expect(
+      formatChatThreadStatusText(state.text!, startedAt: state.startedAt, linesAdded: state.linesAdded, linesRemoved: state.linesRemoved),
+      'Editing app.ts +261 -1',
+    );
+  });
+
+  test('resolveChatThreadStatus joins OpenAI apply patch operation args with lean deltas', () async {
+    final harness = await _startMessagingHarness();
+    addTearDown(harness.dispose);
+
+    const threadPath = 'dataset://agents/dataset/threads/thread-1';
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.thread.status',
+        'thread_id': threadPath,
+        'status': 'Preparing',
+        'mode': 'busy',
+        'started_at': '2026-05-04T12:00:00Z',
+        'pending_item_id': 'pending-placeholder',
+      },
+    );
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.tool_call.arguments_delta',
+        'thread_id': threadPath,
+        'item_id': 'patch-1',
+        'delta': '@@\n-old\n+new\n+extra\n',
+      },
+    );
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.tool_call.started',
+        'thread_id': threadPath,
+        'item_id': 'patch-1',
+        'toolkit': 'openai',
+        'tool': 'apply_patch',
+        'arguments': {
+          'operation': {'type': 'update_file', 'path': 'report.py', 'diff': '@@\n-old\n+new\n+extra\n'},
+        },
+      },
+    );
+
+    final state = resolveChatThreadStatus(room: harness.room, path: threadPath, agentName: 'assistant');
+
+    expect(state.text, 'Editing report.py');
+    expect(state.linesAdded, 2);
+    expect(state.linesRemoved, 1);
+    expect(state.pendingItemId, 'patch-1');
+  });
+
+  test('LiveToolCallAccumulator joins lean apply patch deltas with lifecycle arguments', () {
+    final accumulator = LiveToolCallAccumulator();
+
+    final deltaSnapshot = accumulator.appendDelta(itemId: 'patch-1', fallbackText: 'Preparing', delta: '@@\n-old\n+new\n+extra\n');
+    expect(deltaSnapshot.text, 'Applying patch');
+    expect(deltaSnapshot.linesAdded, 2);
+    expect(deltaSnapshot.linesRemoved, 1);
+    expect(deltaSnapshot.totalBytes, greaterThan(0));
+
+    final lifecycleSnapshot = accumulator.upsert(
+      itemId: 'patch-1',
+      tool: 'apply_patch',
+      fallbackText: 'Preparing',
+      arguments: {
+        'operation': {'type': 'update_file', 'path': 'report.py', 'diff': '@@\n-old\n+new\n+extra\n'},
+      },
+    );
+
+    expect(lifecycleSnapshot.text, 'Editing report.py');
+    expect(lifecycleSnapshot.linesAdded, 2);
+    expect(lifecycleSnapshot.linesRemoved, 1);
+    expect(lifecycleSnapshot.totalBytes, deltaSnapshot.totalBytes);
+    final completed = accumulator.complete(itemId: 'patch-1');
+    expect(completed?.status, 'completed');
+  });
+
+  test('LiveToolCallAccumulator keeps apply patch text stable before path arrives', () {
+    final accumulator = LiveToolCallAccumulator();
+
+    final started = accumulator.upsert(itemId: 'patch-1', tool: 'apply_patch', arguments: {}, fallbackText: 'Preparing');
+    expect(started.text, 'Applying patch');
+
+    final partialPatch = accumulator.appendDelta(itemId: 'patch-1', fallbackText: 'Preparing report', delta: '@@\n-old\n+new\n');
+    expect(partialPatch.text, 'Applying patch');
+    expect(partialPatch.linesAdded, 1);
+    expect(partialPatch.linesRemoved, 1);
+
+    final withPath = accumulator.appendDelta(itemId: 'patch-1', fallbackText: 'Preparing report', delta: '*** Update File: report.py\n');
+    expect(withPath.text, 'Editing report.py');
+  });
+
+  test('stream accumulators expose in progress and completed status', () {
+    final text = TextStreamAccumulator();
+    final firstText = text.appendDelta(itemId: 'msg-1', delta: 'hello');
+    expect(firstText.status, 'in_progress');
+    expect(firstText.text, 'hello');
+    final completedText = text.complete('msg-1');
+    expect(completedText?.status, 'completed');
+
+    final file = FileStreamAccumulator();
+    final firstFile = file.appendUrl(itemId: 'file-1', url: 'mesh://one');
+    expect(firstFile.status, 'in_progress');
+    expect(firstFile.latestUrl, 'mesh://one');
+    final completedFile = file.complete('file-1');
+    expect(completedFile?.status, 'completed');
+    expect(completedFile?.urls, <String>['mesh://one']);
   });
 
   test('resolveChatThreadStatus tracks accepted pending messages until applied', () async {

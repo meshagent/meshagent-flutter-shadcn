@@ -21,6 +21,7 @@ import 'package:meshagent_flutter_shadcn/ui/coordinated_context_menu.dart';
 import 'package:meshagent_flutter_shadcn/ui/ui.dart';
 import 'package:meshagent_flutter_shadcn/src/web_context_menu_manager/enable_web_context_menu.dart';
 import 'package:meshagent_flutter_shadcn/chat/thread_attachment_share.dart';
+import 'package:meshagent_flutter_shadcn/chat/tool_call_status_accumulator.dart';
 import 'package:re_highlight/styles/monokai-sublime.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:super_clipboard/super_clipboard.dart';
@@ -82,6 +83,9 @@ const String _agentTurnSteeredType = "meshagent.agent.turn.steered";
 const String _agentTurnEndedType = "meshagent.agent.turn.ended";
 const String _agentThreadClearedType = "meshagent.agent.thread.cleared";
 const String _agentThreadStatusType = "meshagent.agent.thread.status";
+const String _agentToolCallPendingType = "meshagent.agent.tool_call.pending";
+const String _agentToolCallInProgressType = "meshagent.agent.tool_call.in_progress";
+const String _agentToolCallStartedType = "meshagent.agent.tool_call.started";
 const String _agentToolCallArgumentsDeltaType = "meshagent.agent.tool_call.arguments_delta";
 const String _agentToolCallEndedType = "meshagent.agent.tool_call.ended";
 const String _agentUsageUpdatedType = "meshagent.agent.usage.updated";
@@ -946,6 +950,16 @@ int? _positiveIntValue(Object? value) {
   return parsed != null && parsed > 0 ? parsed : null;
 }
 
+int? _nonNegativeIntValue(Object? value) {
+  final parsed = switch (value) {
+    int() => value,
+    BigInt() => value.toInt(),
+    num() when value.isFinite => value.toInt(),
+    _ => int.tryParse(value?.toString() ?? ""),
+  };
+  return parsed != null && parsed >= 0 ? parsed : null;
+}
+
 class _AgentThreadMessageStatus {
   const _AgentThreadMessageStatus({
     this.text,
@@ -955,6 +969,8 @@ class _AgentThreadMessageStatus {
     this.pendingItemId,
     this.totalBytes,
     this.totalBytesFromStatus = false,
+    this.linesAdded,
+    this.linesRemoved,
   });
 
   final String? text;
@@ -964,6 +980,8 @@ class _AgentThreadMessageStatus {
   final String? pendingItemId;
   final int? totalBytes;
   final bool totalBytesFromStatus;
+  final int? linesAdded;
+  final int? linesRemoved;
 }
 
 class _AgentThreadMessageStatusStore {
@@ -971,7 +989,7 @@ class _AgentThreadMessageStatusStore {
   final Map<String, _AgentThreadMessageStatus> _statusByThreadPath = <String, _AgentThreadMessageStatus>{};
   final Map<String, LinkedHashMap<String, PendingAgentMessage>> _pendingMessagesByThreadPath =
       <String, LinkedHashMap<String, PendingAgentMessage>>{};
-  final Map<String, Map<String, int>> _toolArgumentBytesByThreadPath = <String, Map<String, int>>{};
+  final Map<String, LiveToolCallAccumulator> _toolCallAccumulatorsByThreadPath = <String, LiveToolCallAccumulator>{};
 
   bool apply(Map<String, dynamic> payload) {
     final type = payload["type"];
@@ -1002,6 +1020,11 @@ class _AgentThreadMessageStatusStore {
       case _agentToolCallArgumentsDeltaType:
         _touchedThreadPaths.add(normalizedThreadPath);
         return _applyToolCallArgumentsDelta(normalizedThreadPath, payload);
+      case _agentToolCallPendingType:
+      case _agentToolCallInProgressType:
+      case _agentToolCallStartedType:
+        _touchedThreadPaths.add(normalizedThreadPath);
+        return _applyToolCallLifecycle(normalizedThreadPath, payload);
       case _agentToolCallEndedType:
         _touchedThreadPaths.add(normalizedThreadPath);
         return _clearToolCallBytes(normalizedThreadPath, payload);
@@ -1014,8 +1037,8 @@ class _AgentThreadMessageStatusStore {
         _touchedThreadPaths.add(normalizedThreadPath);
         final hadPending = _pendingMessagesByThreadPath.remove(normalizedThreadPath)?.isNotEmpty == true;
         final hadStatus = _statusByThreadPath.remove(normalizedThreadPath) != null;
-        final hadBytes = _toolArgumentBytesByThreadPath.remove(normalizedThreadPath)?.isNotEmpty == true;
-        return hadPending || hadStatus || hadBytes;
+        final hadTools = _toolCallAccumulatorsByThreadPath.remove(normalizedThreadPath)?.isEmpty == false;
+        return hadPending || hadStatus || hadTools;
     }
 
     return false;
@@ -1047,6 +1070,8 @@ class _AgentThreadMessageStatusStore {
       pendingMessages: pendingMessages,
       pendingItemId: status?.pendingItemId,
       totalBytes: status?.totalBytes,
+      linesAdded: status?.linesAdded,
+      linesRemoved: status?.linesRemoved,
       supportsAgentMessages: true,
     );
   }
@@ -1058,6 +1083,8 @@ class _AgentThreadMessageStatusStore {
     final rawTurnId = payload["turn_id"];
     final rawPendingItemId = payload["pending_item_id"];
     final rawTotalBytes = payload["total_bytes"];
+    final rawLinesAdded = payload["lines_added"];
+    final rawLinesRemoved = payload["lines_removed"];
     final previous = _statusByThreadPath[threadPath];
 
     final text = rawStatus is String && rawStatus.trim().isNotEmpty ? rawStatus.trim() : null;
@@ -1068,13 +1095,26 @@ class _AgentThreadMessageStatusStore {
     final turnId = rawTurnId is String && rawTurnId.trim().isNotEmpty ? rawTurnId.trim() : null;
     final pendingItemId = rawPendingItemId is String && rawPendingItemId.trim().isNotEmpty ? rawPendingItemId.trim() : null;
     final parsedTotalBytes = _positiveIntValue(rawTotalBytes);
+    final linesAdded =
+        _nonNegativeIntValue(rawLinesAdded) ??
+        (!payload.containsKey("lines_added") && previous?.text == text ? previous?.linesAdded : null);
+    final linesRemoved =
+        _nonNegativeIntValue(rawLinesRemoved) ??
+        (!payload.containsKey("lines_removed") && previous?.text == text ? previous?.linesRemoved : null);
     final totalBytes =
         parsedTotalBytes ??
         _toolArgumentBytes(threadPath, pendingItemId) ??
         (!payload.containsKey("total_bytes") && previous?.text == text ? previous?.totalBytes : null);
     final totalBytesFromStatus = parsedTotalBytes != null;
 
-    if (text == null && mode == null && startedAt == null && turnId == null && pendingItemId == null && totalBytes == null) {
+    if (text == null &&
+        mode == null &&
+        startedAt == null &&
+        turnId == null &&
+        pendingItemId == null &&
+        totalBytes == null &&
+        linesAdded == null &&
+        linesRemoved == null) {
       _statusByThreadPath.remove(threadPath);
       return true;
     }
@@ -1087,6 +1127,8 @@ class _AgentThreadMessageStatusStore {
       pendingItemId: pendingItemId,
       totalBytes: totalBytes,
       totalBytesFromStatus: totalBytesFromStatus,
+      linesAdded: linesAdded,
+      linesRemoved: linesRemoved,
     );
     if (previous != null &&
         previous.text == next.text &&
@@ -1095,6 +1137,8 @@ class _AgentThreadMessageStatusStore {
         previous.pendingItemId == next.pendingItemId &&
         previous.totalBytes == next.totalBytes &&
         previous.totalBytesFromStatus == next.totalBytesFromStatus &&
+        previous.linesAdded == next.linesAdded &&
+        previous.linesRemoved == next.linesRemoved &&
         previous.startedAt?.millisecondsSinceEpoch == next.startedAt?.millisecondsSinceEpoch) {
       return false;
     }
@@ -1116,25 +1160,82 @@ class _AgentThreadMessageStatusStore {
       return false;
     }
 
-    final threadBytes = _toolArgumentBytesByThreadPath.putIfAbsent(threadPath, () => <String, int>{});
-    final nextTotalBytes = (threadBytes[normalizedItemId] ?? 0) + deltaBytes;
-    threadBytes[normalizedItemId] = nextTotalBytes;
-
+    final accumulator = _toolCallAccumulatorsByThreadPath.putIfAbsent(threadPath, () => LiveToolCallAccumulator());
     final status = _statusByThreadPath[threadPath];
+    final snapshot = accumulator.appendDelta(itemId: normalizedItemId, delta: delta, fallbackText: status?.text);
+
     if (status == null || status.text == null || status.text!.trim().isEmpty) {
       return false;
     }
-    if (normalizedItemId != status.pendingItemId || status.totalBytesFromStatus || status.totalBytes == nextTotalBytes) {
+
+    final isStatusItem =
+        status.pendingItemId == null || status.pendingItemId == normalizedItemId || accumulator.hasSingleItem(normalizedItemId);
+    if (!isStatusItem) {
+      return false;
+    }
+
+    final nextStatusText = snapshot.text ?? status.text;
+    final nextTotalBytesForStatus = snapshot.totalBytes == null
+        ? status.totalBytes
+        : math.max(status.totalBytes ?? 0, snapshot.totalBytes!);
+    if (status.text == nextStatusText &&
+        status.totalBytes == nextTotalBytesForStatus &&
+        status.linesAdded == (snapshot.linesAdded ?? status.linesAdded) &&
+        status.linesRemoved == (snapshot.linesRemoved ?? status.linesRemoved)) {
       return false;
     }
 
     _statusByThreadPath[threadPath] = _AgentThreadMessageStatus(
-      text: status.text,
+      text: nextStatusText,
       startedAt: status.startedAt,
       mode: status.mode,
       turnId: status.turnId,
-      pendingItemId: status.pendingItemId,
-      totalBytes: nextTotalBytes,
+      pendingItemId: status.pendingItemId ?? normalizedItemId,
+      totalBytes: nextTotalBytesForStatus,
+      totalBytesFromStatus: false,
+      linesAdded: snapshot.linesAdded ?? status.linesAdded,
+      linesRemoved: snapshot.linesRemoved ?? status.linesRemoved,
+    );
+    return true;
+  }
+
+  bool _applyToolCallLifecycle(String threadPath, Map<String, dynamic> payload) {
+    final rawItemId = payload["item_id"];
+    final itemId = rawItemId is String && rawItemId.trim().isNotEmpty ? rawItemId.trim() : null;
+    if (itemId == null) {
+      return false;
+    }
+    final rawTool = payload["tool"] ?? payload["tool_name"] ?? payload["name"];
+    final accumulator = _toolCallAccumulatorsByThreadPath.putIfAbsent(threadPath, () => LiveToolCallAccumulator());
+    final existing = accumulator[itemId];
+    final tool = rawTool is String && rawTool.trim().isNotEmpty ? rawTool.trim() : existing?.tool ?? "";
+    final rawArguments = payload["arguments"];
+    final arguments = rawArguments is Map ? Map<String, dynamic>.from(rawArguments) : existing?.arguments;
+
+    final status = _statusByThreadPath[threadPath];
+    final snapshot = accumulator.upsert(itemId: itemId, tool: tool, arguments: arguments, fallbackText: status?.text);
+    if (status == null || status.text == null || status.text!.trim().isEmpty) {
+      return false;
+    }
+    final nextTotalBytesForStatus = snapshot.totalBytes == null
+        ? status.totalBytes
+        : math.max(status.totalBytes ?? 0, snapshot.totalBytes!);
+    if (snapshot.text == status.text &&
+        snapshot.linesAdded == null &&
+        snapshot.linesRemoved == null &&
+        nextTotalBytesForStatus == status.totalBytes) {
+      return false;
+    }
+    _statusByThreadPath[threadPath] = _AgentThreadMessageStatus(
+      text: snapshot.text ?? status.text,
+      startedAt: status.startedAt,
+      mode: status.mode,
+      turnId: status.turnId,
+      pendingItemId: status.pendingItemId ?? itemId,
+      totalBytes: nextTotalBytesForStatus,
+      totalBytesFromStatus: false,
+      linesAdded: snapshot.linesAdded ?? status.linesAdded,
+      linesRemoved: snapshot.linesRemoved ?? status.linesRemoved,
     );
     return true;
   }
@@ -1143,7 +1244,7 @@ class _AgentThreadMessageStatusStore {
     if (itemId == null || itemId.trim().isEmpty) {
       return null;
     }
-    final bytes = _toolArgumentBytesByThreadPath[threadPath]?[itemId.trim()];
+    final bytes = _toolCallAccumulatorsByThreadPath[threadPath]?.totalBytes(itemId.trim());
     return bytes != null && bytes > 0 ? bytes : null;
   }
 
@@ -1152,10 +1253,10 @@ class _AgentThreadMessageStatusStore {
     final itemId = rawItemId is String && rawItemId.trim().isNotEmpty ? rawItemId.trim() : null;
     var hadBytes = false;
     if (itemId != null) {
-      final threadBytes = _toolArgumentBytesByThreadPath[threadPath];
-      hadBytes = threadBytes?.remove(itemId) != null;
-      if (threadBytes != null && threadBytes.isEmpty) {
-        _toolArgumentBytesByThreadPath.remove(threadPath);
+      final accumulator = _toolCallAccumulatorsByThreadPath[threadPath];
+      hadBytes = accumulator?.remove(itemId) == true;
+      if (accumulator != null && accumulator.isEmpty) {
+        _toolCallAccumulatorsByThreadPath.remove(threadPath);
       }
     }
 
@@ -1263,6 +1364,8 @@ class _AgentThreadMessageStatusStore {
           turnId: turnId.trim(),
           pendingItemId: previous?.pendingItemId,
           totalBytes: previous?.totalBytes,
+          linesAdded: previous?.linesAdded,
+          linesRemoved: previous?.linesRemoved,
         );
         changed = true;
       }
@@ -1289,6 +1392,8 @@ class _AgentThreadMessageStatusStore {
           turnId: turnId.trim(),
           pendingItemId: previous?.pendingItemId,
           totalBytes: previous?.totalBytes,
+          linesAdded: previous?.linesAdded,
+          linesRemoved: previous?.linesRemoved,
         );
         return true;
       }
@@ -1307,6 +1412,8 @@ class ChatThreadStatusState {
     this.pendingMessages = const [],
     this.pendingItemId,
     this.totalBytes,
+    this.linesAdded,
+    this.linesRemoved,
     this.supportsAgentMessages = false,
   });
 
@@ -1317,6 +1424,8 @@ class ChatThreadStatusState {
   final List<PendingAgentMessage> pendingMessages;
   final String? pendingItemId;
   final int? totalBytes;
+  final int? linesAdded;
+  final int? linesRemoved;
   final bool supportsAgentMessages;
 
   bool get hasStatus => text != null && text!.trim().isNotEmpty;
@@ -1349,6 +1458,8 @@ ChatThreadStatusState resolveChatThreadStatus({
   List<PendingAgentMessage> nextPendingMessages = messageState.pendingMessages;
   String? nextPendingItemId = messageState.pendingItemId;
   int? nextTotalBytes = messageState.totalBytes;
+  int? nextLinesAdded = messageState.linesAdded;
+  int? nextLinesRemoved = messageState.linesRemoved;
   bool nextSupportsAgentMessages = messageState.supportsAgentMessages;
 
   for (final participant in candidates) {
@@ -1370,6 +1481,8 @@ ChatThreadStatusState resolveChatThreadStatus({
     pendingMessages: nextPendingMessages,
     pendingItemId: nextPendingItemId,
     totalBytes: nextTotalBytes,
+    linesAdded: nextLinesAdded,
+    linesRemoved: nextLinesRemoved,
     supportsAgentMessages: nextSupportsAgentMessages,
   );
 }
@@ -1380,6 +1493,8 @@ class ChatThreadStatusIndicator extends StatelessWidget {
     required this.statusText,
     this.startedAt,
     this.totalBytes,
+    this.linesAdded,
+    this.linesRemoved,
     this.reserveSpace = false,
     this.size = 14,
     this.strokeWidth = 2,
@@ -1388,6 +1503,8 @@ class ChatThreadStatusIndicator extends StatelessWidget {
   final String? statusText;
   final DateTime? startedAt;
   final int? totalBytes;
+  final int? linesAdded;
+  final int? linesRemoved;
   final bool reserveSpace;
   final double size;
   final double strokeWidth;
@@ -1408,7 +1525,13 @@ class ChatThreadStatusIndicator extends StatelessWidget {
         builder: (context) => ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 320),
           child: Text(
-            formatChatThreadStatusText(normalizedStatusText, startedAt: startedAt, totalBytes: totalBytes),
+            formatChatThreadStatusText(
+              normalizedStatusText,
+              startedAt: startedAt,
+              totalBytes: totalBytes,
+              linesAdded: linesAdded,
+              linesRemoved: linesRemoved,
+            ),
             style: ShadTheme.of(context).textTheme.small,
           ),
         ),
@@ -4527,6 +4650,8 @@ class _ChatThreadState extends State<ChatThread> {
       threadStatusStartedAt: null,
       threadStatusMode: null,
       threadStatusTotalBytes: null,
+      threadStatusLinesAdded: null,
+      threadStatusLinesRemoved: null,
       supportsAgentMessages: agent != null && _supportsAgentMessages(agent),
       supportsMcp: agent != null && _supportsMcp(agent),
       toolkits: const {},
@@ -4883,6 +5008,8 @@ class _ChatThreadState extends State<ChatThread> {
                               startedAt: state.threadStatusStartedAt,
                               mode: state.threadStatusMode,
                               totalBytes: state.threadStatusTotalBytes,
+                              linesAdded: state.threadStatusLinesAdded,
+                              linesRemoved: state.threadStatusLinesRemoved,
                             ),
                           ) &&
                           state.listening.isEmpty,
@@ -4891,6 +5018,8 @@ class _ChatThreadState extends State<ChatThread> {
                       threadStatusStartedAt: state.threadStatusStartedAt,
                       threadStatusMode: state.threadStatusMode,
                       threadStatusTotalBytes: state.threadStatusTotalBytes,
+                      threadStatusLinesAdded: state.threadStatusLinesAdded,
+                      threadStatusLinesRemoved: state.threadStatusLinesRemoved,
                       pendingMessages: _combinedPendingMessages(state),
                       pendingItemId: state.pendingItemId,
                       onCancel: () {
@@ -5121,6 +5250,8 @@ class ChatThreadMessages extends StatefulWidget {
     this.threadStatusStartedAt,
     this.threadStatusMode,
     this.threadStatusTotalBytes,
+    this.threadStatusLinesAdded,
+    this.threadStatusLinesRemoved,
     this.pendingMessages = const [],
     this.pendingItemId,
     this.onCancel,
@@ -5153,6 +5284,8 @@ class ChatThreadMessages extends StatefulWidget {
   final DateTime? threadStatusStartedAt;
   final String? threadStatusMode;
   final int? threadStatusTotalBytes;
+  final int? threadStatusLinesAdded;
+  final int? threadStatusLinesRemoved;
   final List<PendingAgentMessage> pendingMessages;
   final String? pendingItemId;
   final void Function()? onCancel;
@@ -5425,6 +5558,8 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   DateTime? get threadStatusStartedAt => widget.threadStatusStartedAt;
   String? get threadStatusMode => widget.threadStatusMode;
   int? get threadStatusTotalBytes => widget.threadStatusTotalBytes;
+  int? get threadStatusLinesAdded => widget.threadStatusLinesAdded;
+  int? get threadStatusLinesRemoved => widget.threadStatusLinesRemoved;
   String? get pendingItemId => widget.pendingItemId;
   void Function()? get onCancel => widget.onCancel;
   List<MeshElement> get messages => widget.messages;
@@ -5453,6 +5588,8 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   DateTime? _lastThreadStatusStartedAt;
   String? _lastThreadStatusMode;
   int? _lastThreadStatusTotalBytes;
+  int? _lastThreadStatusLinesAdded;
+  int? _lastThreadStatusLinesRemoved;
 
   @override
   void initState() {
@@ -5491,6 +5628,8 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     _lastThreadStatusStartedAt = threadStatusStartedAt;
     _lastThreadStatusMode = threadStatusMode;
     _lastThreadStatusTotalBytes = threadStatusTotalBytes;
+    _lastThreadStatusLinesAdded = threadStatusLinesAdded;
+    _lastThreadStatusLinesRemoved = threadStatusLinesRemoved;
   }
 
   void _syncStatusSlot() {
@@ -6709,6 +6848,8 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                           text: displayStatus,
                           startedAt: showTyping ? threadStatusStartedAt : _lastThreadStatusStartedAt,
                           totalBytes: showTyping ? threadStatusTotalBytes : _lastThreadStatusTotalBytes,
+                          linesAdded: showTyping ? threadStatusLinesAdded : _lastThreadStatusLinesAdded,
+                          linesRemoved: showTyping ? threadStatusLinesRemoved : _lastThreadStatusLinesRemoved,
                           onCancel: showTyping ? onCancel : null,
                           showCancelButton: (showTyping ? threadStatusMode : _lastThreadStatusMode) != null,
                           cancelEnabled: showTyping && !cancelling,
@@ -8485,7 +8626,12 @@ class _CyclingProgressIndicatorState extends State<_CyclingProgressIndicator> wi
   }
 }
 
-String formatChatThreadStatusText(String text, {DateTime? startedAt, int? totalBytes}) {
+String formatChatThreadStatusText(String text, {DateTime? startedAt, int? totalBytes, int? linesAdded, int? linesRemoved}) {
+  if (linesAdded != null || linesRemoved != null) {
+    final added = linesAdded != null ? "+${_formatGroupedStatusByteDigits(linesAdded)}" : null;
+    final removed = linesRemoved != null ? "-${_formatGroupedStatusByteDigits(linesRemoved)}" : null;
+    return [text, ?added, ?removed].join(" ");
+  }
   if (totalBytes != null && totalBytes > 100) {
     return "$text ${_formatStatusByteCount(totalBytes)}";
   }
@@ -8696,6 +8842,8 @@ class ChatThreadProcessingStatusRow extends StatefulWidget {
     required this.text,
     this.startedAt,
     this.totalBytes,
+    this.linesAdded,
+    this.linesRemoved,
     this.onCancel,
     this.showCancelButton = false,
     this.cancelEnabled = true,
@@ -8704,6 +8852,8 @@ class ChatThreadProcessingStatusRow extends StatefulWidget {
   final String text;
   final DateTime? startedAt;
   final int? totalBytes;
+  final int? linesAdded;
+  final int? linesRemoved;
   final VoidCallback? onCancel;
   final bool showCancelButton;
   final bool cancelEnabled;
@@ -8724,7 +8874,10 @@ class _ChatThreadProcessingStatusRowState extends State<ChatThreadProcessingStat
   @override
   void didUpdateWidget(covariant ChatThreadProcessingStatusRow oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.startedAt != widget.startedAt || oldWidget.totalBytes != widget.totalBytes) {
+    if (oldWidget.startedAt != widget.startedAt ||
+        oldWidget.totalBytes != widget.totalBytes ||
+        oldWidget.linesAdded != widget.linesAdded ||
+        oldWidget.linesRemoved != widget.linesRemoved) {
       _syncTicker();
     }
   }
@@ -8736,7 +8889,7 @@ class _ChatThreadProcessingStatusRowState extends State<ChatThreadProcessingStat
   }
 
   void _syncTicker() {
-    final shouldTick = widget.startedAt != null && !_shouldDisplayBytes;
+    final shouldTick = widget.startedAt != null && !_shouldDisplayBytes && !_shouldDisplayLineCounts;
     if (!shouldTick) {
       _ticker?.cancel();
       _ticker = null;
@@ -8755,10 +8908,17 @@ class _ChatThreadProcessingStatusRowState extends State<ChatThreadProcessingStat
   }
 
   String _displayText() {
-    return formatChatThreadStatusText(widget.text, startedAt: widget.startedAt, totalBytes: widget.totalBytes);
+    return formatChatThreadStatusText(
+      widget.text,
+      startedAt: widget.startedAt,
+      totalBytes: widget.totalBytes,
+      linesAdded: widget.linesAdded,
+      linesRemoved: widget.linesRemoved,
+    );
   }
 
   bool get _shouldDisplayBytes => widget.totalBytes != null && widget.totalBytes! > 100;
+  bool get _shouldDisplayLineCounts => widget.linesAdded != null || widget.linesRemoved != null;
 
   @override
   Widget build(BuildContext context) {
@@ -8767,9 +8927,11 @@ class _ChatThreadProcessingStatusRowState extends State<ChatThreadProcessingStat
     final cancelIconColor = widget.cancelEnabled ? theme.colorScheme.background : theme.colorScheme.mutedForeground;
     final displayText = _displayText();
     final statusTextStyle = TextStyle(fontSize: 13, color: theme.colorScheme.mutedForeground);
-    final elapsedSeconds = widget.startedAt == null || _shouldDisplayBytes
+    final elapsedSeconds = widget.startedAt == null || _shouldDisplayBytes || _shouldDisplayLineCounts
         ? 0
         : _clampedElapsedSeconds(DateTime.now().difference(widget.startedAt!));
+    final addedColor = Colors.green.shade500;
+    final removedColor = Colors.red.shade500;
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.start,
@@ -8811,7 +8973,21 @@ class _ChatThreadProcessingStatusRowState extends State<ChatThreadProcessingStat
           const SizedBox(width: 13, height: 13, child: _CyclingProgressIndicator(strokeWidth: 2)),
         const SizedBox(width: 10),
         Expanded(
-          child: _shouldDisplayBytes
+          child: _shouldDisplayLineCounts
+              ? Row(
+                  children: [
+                    Flexible(
+                      child: Text(widget.text, style: statusTextStyle, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ),
+                    const SizedBox(width: 8),
+                    if (widget.linesAdded != null)
+                      _AnimatedSignedStatusCounter(value: widget.linesAdded!, prefix: "+", style: statusTextStyle, color: addedColor),
+                    if (widget.linesAdded != null && widget.linesRemoved != null) const SizedBox(width: 6),
+                    if (widget.linesRemoved != null)
+                      _AnimatedSignedStatusCounter(value: widget.linesRemoved!, prefix: "-", style: statusTextStyle, color: removedColor),
+                  ],
+                )
+              : _shouldDisplayBytes
               ? Row(
                   children: [
                     Flexible(
@@ -8858,12 +9034,26 @@ class _AnimatedStatusSecondCounter extends StatefulWidget {
   State<_AnimatedStatusSecondCounter> createState() => _AnimatedStatusSecondCounterState();
 }
 
+class _AnimatedSignedStatusCounter extends StatefulWidget {
+  const _AnimatedSignedStatusCounter({required this.value, required this.prefix, required this.style, required this.color});
+
+  final int value;
+  final String prefix;
+  final TextStyle style;
+  final Color color;
+
+  @override
+  State<_AnimatedSignedStatusCounter> createState() => _AnimatedSignedStatusCounterState();
+}
+
 abstract class _AnimatedStatusValueCounterState<T extends StatefulWidget> extends State<T> with SingleTickerProviderStateMixin {
   static const Duration _rollDuration = Duration(milliseconds: 360);
   static const Duration _restDuration = Duration(milliseconds: 500);
 
   int get value;
+  String prefixForValue(int value) => "";
   String suffixForValue(int value);
+  Color? numberColor(BuildContext context) => null;
   int get initialDisplayValue => value;
 
   late int _displayValue;
@@ -8965,8 +9155,11 @@ abstract class _AnimatedStatusValueCounterState<T extends StatefulWidget> extend
 
   Widget buildCounter(BuildContext context, TextStyle style) {
     final counterStyle = style.copyWith(fontFeatures: const [FontFeature.tabularFigures()]);
-    final numberStyle = counterStyle.copyWith(color: ShadTheme.of(context).colorScheme.foreground, fontWeight: FontWeight.w700);
-    final digitSize = _measureStatusCounterText(context, counterStyle, "8");
+    final numberStyle = counterStyle.copyWith(
+      color: numberColor(context) ?? ShadTheme.of(context).colorScheme.foreground,
+      fontWeight: FontWeight.w700,
+    );
+    final digitSize = _measureStatusCounterDigit(context, numberStyle);
     final wheelHeight = digitSize.height + 6;
     return AnimatedBuilder(
       animation: _controller,
@@ -8978,6 +9171,7 @@ abstract class _AnimatedStatusValueCounterState<T extends StatefulWidget> extend
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            Text(prefixForValue(_displayValue), style: numberStyle, maxLines: 1, overflow: TextOverflow.clip),
             for (var index = 0; index < digitCount; index++) ...[
               if (index > 0 && (digitCount - index) % 3 == 0) Text(",", style: numberStyle, maxLines: 1, overflow: TextOverflow.clip),
               _StatusCounterWheelDigit(
@@ -9024,6 +9218,23 @@ class _AnimatedStatusSecondCounterState extends _AnimatedStatusValueCounterState
   Widget build(BuildContext context) => buildCounter(context, widget.style);
 }
 
+class _AnimatedSignedStatusCounterState extends _AnimatedStatusValueCounterState<_AnimatedSignedStatusCounter> {
+  @override
+  int get value => widget.value;
+
+  @override
+  String prefixForValue(int value) => widget.prefix;
+
+  @override
+  String suffixForValue(int value) => "";
+
+  @override
+  Color? numberColor(BuildContext context) => widget.color;
+
+  @override
+  Widget build(BuildContext context) => buildCounter(context, widget.style);
+}
+
 class _StatusCounterSeparator extends StatelessWidget {
   const _StatusCounterSeparator({required this.style});
 
@@ -9044,6 +9255,20 @@ class StatusByteCounter extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _AnimatedStatusByteCounter(totalBytes: totalBytes, style: style);
+  }
+}
+
+class StatusSignedCounter extends StatelessWidget {
+  const StatusSignedCounter({super.key, required this.value, required this.prefix, required this.style, required this.color});
+
+  final int value;
+  final String prefix;
+  final TextStyle style;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return _AnimatedSignedStatusCounter(value: value, prefix: prefix, style: style, color: color);
   }
 }
 
@@ -9127,6 +9352,18 @@ Size _measureStatusCounterText(BuildContext context, TextStyle style, String tex
     maxLines: 1,
   )..layout();
   return painter.size;
+}
+
+Size _measureStatusCounterDigit(BuildContext context, TextStyle style) {
+  var width = 0.0;
+  var height = 0.0;
+  for (var digit = 0; digit <= 9; digit++) {
+    final size = _measureStatusCounterText(context, style, digit.toString());
+    width = math.max(width, size.width);
+    height = math.max(height, size.height);
+  }
+
+  return Size(width.ceilToDouble() + 2, height.ceilToDouble());
 }
 
 class _PreviewSweepOverlay extends StatefulWidget {
@@ -9251,6 +9488,8 @@ class ChatThreadSnapshot {
     required this.threadStatusStartedAt,
     required this.threadStatusMode,
     required this.threadStatusTotalBytes,
+    required this.threadStatusLinesAdded,
+    required this.threadStatusLinesRemoved,
     required this.supportsAgentMessages,
     required this.supportsMcp,
     required this.toolkits,
@@ -9270,6 +9509,8 @@ class ChatThreadSnapshot {
   final DateTime? threadStatusStartedAt;
   final String? threadStatusMode;
   final int? threadStatusTotalBytes;
+  final int? threadStatusLinesAdded;
+  final int? threadStatusLinesRemoved;
   final bool supportsAgentMessages;
   final bool supportsMcp;
   final Map<String, AgentToolkitCapabilities> toolkits;
@@ -9313,6 +9554,8 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
   DateTime? threadStatusStartedAt;
   String? threadStatusMode;
   int? threadStatusTotalBytes;
+  int? threadStatusLinesAdded;
+  int? threadStatusLinesRemoved;
   bool supportsAgentMessages = false;
   Map<String, AgentToolkitCapabilities> toolkits = const {};
   String? threadTurnId;
@@ -9677,6 +9920,8 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         pendingMessages: pendingMessages,
         pendingItemId: pendingItemId,
         totalBytes: threadStatusTotalBytes,
+        linesAdded: threadStatusLinesAdded,
+        linesRemoved: threadStatusLinesRemoved,
         supportsAgentMessages: supportsAgentMessages,
       ),
     );
@@ -9719,6 +9964,8 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
     if (nextState.text == threadStatus &&
         nextState.mode == threadStatusMode &&
         nextState.totalBytes == threadStatusTotalBytes &&
+        nextState.linesAdded == threadStatusLinesAdded &&
+        nextState.linesRemoved == threadStatusLinesRemoved &&
         sameStartedAt &&
         nextState.turnId == threadTurnId &&
         nextState.pendingItemId == pendingItemId &&
@@ -9732,6 +9979,8 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
       threadStatusStartedAt = nextState.startedAt;
       threadStatusMode = nextState.mode;
       threadStatusTotalBytes = nextState.totalBytes;
+      threadStatusLinesAdded = nextState.linesAdded;
+      threadStatusLinesRemoved = nextState.linesRemoved;
       threadTurnId = nextState.turnId;
       supportsAgentMessages = nextState.supportsAgentMessages;
       pendingMessages = nextState.pendingMessages;
@@ -9744,6 +9993,8 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
       threadStatusStartedAt = nextState.startedAt;
       threadStatusMode = nextState.mode;
       threadStatusTotalBytes = nextState.totalBytes;
+      threadStatusLinesAdded = nextState.linesAdded;
+      threadStatusLinesRemoved = nextState.linesRemoved;
       threadTurnId = nextState.turnId;
       supportsAgentMessages = nextState.supportsAgentMessages;
       pendingMessages = nextState.pendingMessages;
@@ -9771,6 +10022,8 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         threadStatusStartedAt: threadStatusStartedAt,
         threadStatusMode: threadStatusMode,
         threadStatusTotalBytes: threadStatusTotalBytes,
+        threadStatusLinesAdded: threadStatusLinesAdded,
+        threadStatusLinesRemoved: threadStatusLinesRemoved,
         supportsAgentMessages: supportsAgentMessages,
         supportsMcp: supportsMcp,
         toolkits: toolkits,
@@ -10134,6 +10387,78 @@ class _EventLineState extends State<EventLine> {
     return null;
   }
 
+  String _diffPreviewHeader({required String path, required int linesAdded, required int linesRemoved}) {
+    if (linesAdded == 0 && linesRemoved == 0) {
+      return path;
+    }
+    return "$path (+$linesAdded -$linesRemoved)";
+  }
+
+  List<Map<String, String>> _extractApplyPatchPreviewBlocks({required String encoded, required String headline, String? fallbackPath}) {
+    final normalized = encoded.replaceAll("\r\n", "\n").trimRight();
+    if (!normalized.contains("*** Begin Patch") &&
+        !normalized.contains("*** Update File:") &&
+        !normalized.contains("*** Add File:") &&
+        !normalized.contains("*** Delete File:")) {
+      return const [];
+    }
+
+    final previews = <Map<String, String>>[];
+    var currentPath = "";
+    var lines = <String>[];
+    var linesAdded = 0;
+    var linesRemoved = 0;
+
+    void flush() {
+      if (currentPath.isEmpty || lines.isEmpty) {
+        lines = <String>[];
+        linesAdded = 0;
+        linesRemoved = 0;
+        return;
+      }
+      previews.add({
+        "path": _diffPreviewHeader(path: currentPath, linesAdded: linesAdded, linesRemoved: linesRemoved),
+        "diff": lines.join("\n").trimRight(),
+      });
+      lines = <String>[];
+      linesAdded = 0;
+      linesRemoved = 0;
+    }
+
+    for (final rawLine in normalized.split("\n")) {
+      final fileMatch = RegExp(r"^\*\*\* (?:Update|Add|Delete) File: (.+)$").firstMatch(rawLine);
+      if (fileMatch != null) {
+        flush();
+        currentPath = fileMatch.group(1)?.trim() ?? "";
+        continue;
+      }
+
+      if (currentPath.isEmpty) {
+        continue;
+      }
+      if (rawLine.startsWith("*** ")) {
+        continue;
+      }
+
+      lines.add(rawLine);
+      if (rawLine.startsWith("+") && !rawLine.startsWith("+++")) {
+        linesAdded++;
+      } else if (rawLine.startsWith("-") && !rawLine.startsWith("---")) {
+        linesRemoved++;
+      }
+    }
+    flush();
+
+    if (previews.isNotEmpty) {
+      return previews;
+    }
+
+    final fallback = fallbackPath ?? headline;
+    return [
+      {"path": fallback, "diff": normalized},
+    ];
+  }
+
   List<Map<String, String>> _extractDiffPreviewBlocksFromEncoded({
     required String encoded,
     required String headline,
@@ -10141,6 +10466,11 @@ class _EventLineState extends State<EventLine> {
   }) {
     if (encoded.trim().isEmpty) {
       return const [];
+    }
+
+    final applyPatchPreviews = _extractApplyPatchPreviewBlocks(encoded: encoded, headline: headline, fallbackPath: fallbackPath);
+    if (applyPatchPreviews.isNotEmpty) {
+      return applyPatchPreviews;
     }
 
     try {
@@ -10241,19 +10571,20 @@ class _EventLineState extends State<EventLine> {
     final headerTextStyle = GoogleFonts.sourceCodePro(fontSize: usesMobileTypography ? 13 : 11, color: theme.colorScheme.mutedForeground);
     final resolvedLanguageId = resolveLanguageIdForFilename(languageOrFilename) ?? fallbackLanguageId;
     final body = resolvedLanguageId == "diff"
-        ? SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
+        ? Container(
+            width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: _chatBubbleContentHorizontalPadding, vertical: 8),
             child: Builder(
               builder: (context) {
                 final lines = normalizedCode.split("\n");
                 return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     for (final line in lines.indexed)
                       Padding(
                         padding: EdgeInsets.only(bottom: line.$1 < lines.length - 1 ? 2 : 0),
                         child: Container(
+                          width: double.infinity,
                           decoration: BoxDecoration(
                             color: diffLineBackgroundColor(context, line.$2),
                             borderRadius: BorderRadius.circular(4),

@@ -107,6 +107,61 @@ void main() {
     );
   });
 
+  test('formatToolCallSummary renders apply patch edits with line counts', () {
+    const patch = '''
+*** Begin Patch
+*** Update File: report.py
+@@
+-old
++new
++extra
+*** End Patch
+''';
+
+    expect(formatToolCallSummary(toolkit: 'openai', tool: 'apply_patch', arguments: {'patch': patch}), 'Edited report.py (+2 -1)');
+    expect(
+      formatToolCallSummary(toolkit: 'openai', tool: 'apply_patch', arguments: {'patch': patch}, completed: false),
+      'Editing report.py (+2 -1)',
+    );
+  });
+
+  test('formatToolCallSummary renders multi-file apply patch edits', () {
+    const patch = '''
+*** Begin Patch
+*** Update File: app.ts
+@@
+-old
++new
+*** Update File: test.ts
+@@
++test
+*** End Patch
+''';
+
+    expect(formatToolCallSummary(toolkit: 'openai', tool: 'apply_patch', arguments: {'patch': patch}), 'Edited 2 files (+2 -1)');
+  });
+
+  test('formatToolCallSummary renders OpenAI apply patch operation diffs', () {
+    const diff = '''
+@@
+ context
++added one
++added two
+-removed
+''';
+
+    expect(
+      formatToolCallSummary(
+        toolkit: 'openai',
+        tool: 'apply_patch',
+        arguments: {
+          'operation': {'type': 'update_file', 'path': 'report.py', 'diff': diff},
+        },
+      ),
+      'Edited report.py (+2 -1)',
+    );
+  });
+
   test('formatToolCallEntryText keeps header and shows trailing details', () {
     final text = formatToolCallEntryText(
       toolkit: 'openai',

@@ -480,6 +480,8 @@ class _NewChatThreadState extends State<NewChatThread> {
       threadStatusStartedAt: null,
       threadStatusMode: null,
       threadStatusTotalBytes: null,
+      threadStatusLinesAdded: null,
+      threadStatusLinesRemoved: null,
       supportsAgentMessages: _agent?.getAttribute("supports_agent_messages") == true,
       supportsMcp: _agent?.getAttribute("supports_mcp") == true,
       toolkits: const {},

@@ -1,15 +1,18 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_flutter_shadcn/chat_bubble_markdown_config.dart';
+import 'package:re_highlight/styles/monokai-sublime.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:uuid/uuid.dart';
 
 import 'chat.dart';
+import 'agent_stream_accumulator.dart';
 import 'tool_call_summary.dart';
 import 'usage_footer_tooltip.dart';
 
@@ -46,6 +49,7 @@ const String _agentImageGenerationCompletedType = 'meshagent.agent.image_generat
 const String _agentImageGenerationFailedType = 'meshagent.agent.image_generation.failed';
 const String _agentContextCompactedType = 'meshagent.agent.context.compacted';
 const String _agentUsageUpdatedType = 'meshagent.agent.usage.updated';
+const double _datasetDiffPreviewHorizontalPadding = 16;
 
 class DatasetChatThread extends StatefulWidget {
   const DatasetChatThread({
@@ -94,6 +98,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   final Map<String, Map<String, Object?>> _rowsByItemId = {};
   final Map<String, Map<String, Object?>> _agentRowsByItemId = {};
   final List<Map<String, dynamic>> _bufferedAgentPayloads = <Map<String, dynamic>>[];
+  final TextStreamAccumulator _liveTextContent = TextStreamAccumulator();
+  final TextStreamAccumulator _liveReasoningContent = TextStreamAccumulator();
+  final FileStreamAccumulator _liveFileContent = FileStreamAccumulator();
   late ChatThreadController _controller;
   late bool _ownsController;
   late Key _composerInputKey;
@@ -177,6 +184,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     _rowsByItemId.clear();
     _agentRowsByItemId.clear();
     _bufferedAgentPayloads.clear();
+    _liveTextContent.clear();
+    _liveReasoningContent.clear();
+    _liveFileContent.clear();
     _nextAgentSequence = 0;
     _error = null;
     _fatalError = false;
@@ -548,6 +558,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         changed = _materializePendingMessage(payload['source_message_id']?.toString()) || changed;
         break;
       case _agentTextContentStartedType:
+        _liveTextContent.upsert(itemId: _payloadItemId(payload), turnId: _payloadTurnId(payload), phase: _agentMessagePhase(payload));
         break;
       case _agentTextContentDeltaType:
         changed =
@@ -563,6 +574,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             changed;
         break;
       case _agentTextContentEndedType:
+        final accumulatedText = _liveTextContent.complete(_payloadItemId(payload));
+        _liveTextContent.remove(_payloadItemId(payload));
         changed =
             _upsertAgentRow(
               itemId: _payloadItemId(payload),
@@ -570,19 +583,22 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
               data: {
                 'kind': 'message',
                 'role': 'assistant',
-                'text': payload['text']?.toString() ?? _agentRowText(_payloadItemId(payload)),
-                'sender_name': _senderNameFromPayload(payload) ?? _agentRowSenderName(_payloadItemId(payload)),
+                'status': accumulatedText?.status ?? 'completed',
+                'text': payload['text']?.toString() ?? accumulatedText?.text ?? _agentRowText(_payloadItemId(payload)),
+                'sender_name':
+                    _senderNameFromPayload(payload) ?? accumulatedText?.senderName ?? _agentRowSenderName(_payloadItemId(payload)),
                 if (_agentMessagePhase(payload) != null) 'phase': _agentMessagePhase(payload),
               },
             ) ||
             changed;
         break;
       case _agentReasoningContentStartedType:
+        _liveReasoningContent.upsert(itemId: _payloadItemId(payload), turnId: _payloadTurnId(payload));
         changed =
             _upsertAgentRow(
               itemId: _payloadItemId(payload),
               turnId: _payloadTurnId(payload),
-              data: const {'kind': 'reasoning', 'role': 'assistant', 'text': ''},
+              data: const {'kind': 'reasoning', 'role': 'assistant', 'status': 'in_progress', 'text': ''},
             ) ||
             changed;
         break;
@@ -600,6 +616,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             changed;
         break;
       case _agentReasoningContentEndedType:
+        final accumulatedReasoning = _liveReasoningContent.complete(_payloadItemId(payload));
+        _liveReasoningContent.remove(_payloadItemId(payload));
         changed =
             _upsertAgentRow(
               itemId: _payloadItemId(payload),
@@ -607,29 +625,58 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
               data: {
                 'kind': 'reasoning',
                 'role': 'assistant',
-                'text': payload['text']?.toString() ?? _agentRowText(_payloadItemId(payload)),
-                'sender_name': _senderNameFromPayload(payload) ?? _agentRowSenderName(_payloadItemId(payload)),
+                'status': accumulatedReasoning?.status ?? 'completed',
+                'text': payload['text']?.toString() ?? accumulatedReasoning?.text ?? _agentRowText(_payloadItemId(payload)),
+                'sender_name':
+                    _senderNameFromPayload(payload) ?? accumulatedReasoning?.senderName ?? _agentRowSenderName(_payloadItemId(payload)),
               },
             ) ||
             changed;
         break;
       case _agentFileContentStartedType:
+        _liveFileContent.upsert(itemId: _payloadItemId(payload), turnId: _payloadTurnId(payload));
         changed =
             _upsertAgentRow(
               itemId: _payloadItemId(payload),
               turnId: _payloadTurnId(payload),
-              data: const {'kind': 'file', 'role': 'assistant', 'urls': <String>[]},
+              data: const {'kind': 'file', 'role': 'assistant', 'status': 'in_progress', 'urls': <String>[]},
             ) ||
             changed;
         break;
       case _agentFileContentDeltaType:
-      case _agentFileContentEndedType:
         changed =
             _appendAgentRowUrl(
               itemId: _payloadItemId(payload),
               turnId: _payloadTurnId(payload),
               url: payload['url']?.toString(),
               senderName: _senderNameFromPayload(payload),
+            ) ||
+            changed;
+        break;
+      case _agentFileContentEndedType:
+        final endUrl = payload['url']?.toString();
+        if (endUrl != null && endUrl.trim().isNotEmpty) {
+          _liveFileContent.appendUrl(
+            itemId: _payloadItemId(payload),
+            turnId: _payloadTurnId(payload),
+            url: endUrl,
+            senderName: _senderNameFromPayload(payload),
+          );
+        }
+        final accumulatedFile = _liveFileContent.complete(_payloadItemId(payload));
+        _liveFileContent.remove(_payloadItemId(payload));
+        final existingData = _mapValue(_agentRowsByItemId[_payloadItemId(payload)]?['data']);
+        changed =
+            _upsertAgentRow(
+              itemId: _payloadItemId(payload),
+              turnId: _payloadTurnId(payload),
+              data: {
+                'kind': 'file',
+                'role': 'assistant',
+                'status': accumulatedFile?.status ?? 'completed',
+                'urls': accumulatedFile?.urls ?? _stringList(existingData?['urls']),
+                'sender_name': _senderNameFromPayload(payload) ?? accumulatedFile?.senderName ?? existingData?['sender_name']?.toString(),
+              },
             ) ||
             changed;
         break;
@@ -642,7 +689,16 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         final tool = payload['tool']?.toString() ?? payload['tool_name']?.toString() ?? payload['name']?.toString() ?? '';
         final resolvedTool = tool.trim().isEmpty ? (existingData?['tool']?.toString() ?? '') : tool;
         final toolkit = payload['toolkit']?.toString() ?? payload['toolkit_name']?.toString() ?? existingData?['toolkit']?.toString() ?? '';
-        final arguments = _mapValue(payload['arguments']) ?? _mapValue(existingData?['arguments']);
+        final payloadArguments = _mapValue(payload['arguments']);
+        final existingArgumentDeltaText = existingData?['argument_delta_text']?.toString() ?? '';
+        final arguments =
+            _toolArgumentsFromDeltaText(
+              tool: resolvedTool,
+              current: payloadArguments ?? _mapValue(existingData?['arguments']),
+              text: existingArgumentDeltaText,
+            ) ??
+            payloadArguments ??
+            _mapValue(existingData?['arguments']);
         final errorMessage = _agentToolCallErrorMessage(payload['error']);
         final errorData = errorMessage == null ? const <String, Object?>{} : <String, Object?>{'error_message': errorMessage};
         final logs = _stringList(existingData?['logs']);
@@ -677,6 +733,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                       'logs': logs,
                       if (_intValue(existingData?['argument_delta_bytes']) > 0)
                         'argument_delta_bytes': _intValue(existingData?['argument_delta_bytes']),
+                      if (existingArgumentDeltaText.isNotEmpty) 'argument_delta_text': existingArgumentDeltaText,
                       ...errorData,
                       'text': formatToolCallEntryText(
                         toolkit: toolkit,
@@ -873,17 +930,20 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (delta.isEmpty) {
       return false;
     }
+    final accumulated = kind == 'reasoning'
+        ? _liveReasoningContent.appendDelta(itemId: itemId, delta: delta, turnId: turnId, senderName: senderName)
+        : _liveTextContent.appendDelta(itemId: itemId, delta: delta, turnId: turnId, senderName: senderName, phase: phase);
     final existingData = _mapValue(_agentRowsByItemId[itemId]?['data']);
-    final nextText = '${existingData?['text']?.toString() ?? ''}$delta';
     return _upsertAgentRow(
       itemId: itemId,
       turnId: turnId,
       data: {
         'kind': kind,
         'role': role,
-        'text': nextText,
-        'sender_name': senderName ?? existingData?['sender_name']?.toString(),
-        if (phase != null) 'phase': phase else if (existingData?['phase'] != null) 'phase': existingData?['phase'],
+        'status': accumulated.status,
+        'text': accumulated.text,
+        'sender_name': accumulated.senderName ?? existingData?['sender_name']?.toString(),
+        if (accumulated.phase != null) 'phase': accumulated.phase else if (existingData?['phase'] != null) 'phase': existingData?['phase'],
       },
     );
   }
@@ -893,15 +953,18 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (normalizedUrl == null || normalizedUrl.isEmpty) {
       return false;
     }
+    final accumulated = _liveFileContent.appendUrl(itemId: itemId, url: normalizedUrl, turnId: turnId, senderName: senderName);
     final existingData = _mapValue(_agentRowsByItemId[itemId]?['data']);
-    final urls = _stringList(existingData?['urls']).toList(growable: true);
-    if (!urls.contains(normalizedUrl)) {
-      urls.add(normalizedUrl);
-    }
     return _upsertAgentRow(
       itemId: itemId,
       turnId: turnId,
-      data: {'kind': 'file', 'role': 'assistant', 'urls': urls, 'sender_name': senderName ?? existingData?['sender_name']?.toString()},
+      data: {
+        'kind': 'file',
+        'role': 'assistant',
+        'status': accumulated.status,
+        'urls': accumulated.urls,
+        'sender_name': accumulated.senderName ?? existingData?['sender_name']?.toString(),
+      },
     );
   }
 
@@ -958,7 +1021,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     final totalDeltaBytes = _intValue(existingData?['argument_delta_bytes']) + utf8.encode(delta).length;
     final toolkit = existingData?['toolkit']?.toString() ?? '';
     final tool = existingData?['tool']?.toString() ?? 'tool';
-    final arguments = _mapValue(existingData?['arguments']);
+    final existingArguments = _mapValue(existingData?['arguments']);
+    final argumentDeltaText = '${existingData?['argument_delta_text']?.toString() ?? ''}$delta';
+    final arguments = _toolArgumentsFromDeltaText(tool: tool, current: existingArguments, text: argumentDeltaText) ?? existingArguments;
     final logs = _stringList(existingData?['logs']);
     final status = existingData?['status']?.toString() ?? 'running';
     final errorMessage = existingData?['error_message']?.toString();
@@ -974,6 +1039,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         'arguments': arguments,
         'logs': logs,
         'argument_delta_bytes': totalDeltaBytes,
+        'argument_delta_text': argumentDeltaText,
         if (errorMessage != null && errorMessage.trim().isNotEmpty) 'error_message': errorMessage,
         'text': formatToolCallEntryText(
           toolkit: toolkit,
@@ -1067,7 +1133,10 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   List<_DatasetThreadMessage> _messages() {
     final mergedRowsByItemId = <String, Map<String, Object?>>{};
     mergedRowsByItemId.addAll(_agentRowsByItemId);
-    mergedRowsByItemId.addAll(_rowsByItemId);
+    for (final entry in _rowsByItemId.entries) {
+      final liveRow = mergedRowsByItemId[entry.key];
+      mergedRowsByItemId[entry.key] = liveRow == null ? entry.value : _mergeDatasetAndLiveRow(datasetRow: entry.value, liveRow: liveRow);
+    }
     final rows = mergedRowsByItemId.values.toList(growable: false)..sort(_compareDatasetThreadRows);
     final turnInputPayloadsById = _turnInputPayloadsById(rows);
     final messagesById = <String, _DatasetThreadMessage>{};
@@ -1090,6 +1159,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     final messages = <({Map<String, Object?> row, _DatasetThreadMessage? message})>[];
     final toolCallsByItemId = <String, _DatasetToolCallState>{};
     final toolArgumentDeltaBytesByItemId = <String, int>{};
+    final toolArgumentDeltaTextByItemId = <String, String>{};
     for (final row in rows) {
       final data = _rowData(row);
       final type = data?['type']?.toString();
@@ -1099,6 +1169,10 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         final pendingArgumentDeltaBytes = toolArgumentDeltaBytesByItemId[itemId];
         if (pendingArgumentDeltaBytes != null) {
           toolCallsByItemId[itemId]!.argumentDeltaBytes += pendingArgumentDeltaBytes;
+        }
+        final pendingArgumentDeltaText = toolArgumentDeltaTextByItemId[itemId];
+        if (pendingArgumentDeltaText != null && pendingArgumentDeltaText.isNotEmpty) {
+          toolCallsByItemId[itemId]!.appendArgumentDelta(pendingArgumentDeltaText);
         }
         continue;
       }
@@ -1110,12 +1184,15 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         continue;
       }
       if (type == _agentToolCallArgumentsDeltaType) {
-        final deltaBytes = utf8.encode(data?['delta']?.toString() ?? '').length;
+        final delta = data?['delta']?.toString() ?? '';
+        final deltaBytes = utf8.encode(delta).length;
         final state = toolCallsByItemId[itemId];
         if (state != null) {
           state.argumentDeltaBytes += deltaBytes;
+          state.appendArgumentDelta(delta);
         } else {
           toolArgumentDeltaBytesByItemId[itemId] = (toolArgumentDeltaBytesByItemId[itemId] ?? 0) + deltaBytes;
+          toolArgumentDeltaTextByItemId[itemId] = '${toolArgumentDeltaTextByItemId[itemId] ?? ''}$delta';
         }
         continue;
       }
@@ -1247,8 +1324,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return pendingByMessageId.values.toList(growable: false);
   }
 
-  bool _canInterruptActiveTurn(List<PendingAgentMessage> pendingMessages) {
-    return _status.supportsAgentMessages && _status.turnId != null && pendingMessages.isNotEmpty;
+  bool _canInterruptActiveTurn() {
+    final turnId = _status.turnId;
+    return _status.supportsAgentMessages && turnId != null && turnId.trim().isNotEmpty;
   }
 
   Future<void> _cancelTurn() async {
@@ -1328,6 +1406,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       threadStatusStartedAt: _status.startedAt,
       threadStatusMode: _status.mode,
       threadStatusTotalBytes: _status.totalBytes,
+      threadStatusLinesAdded: _status.linesAdded,
+      threadStatusLinesRemoved: _status.linesRemoved,
       supportsAgentMessages: agent != null,
       supportsMcp: agent?.getAttribute('supports_mcp') == true,
       toolkits: const <String, AgentToolkitCapabilities>{},
@@ -1516,7 +1596,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       focusTrigger: _controller,
       sendEnabled: snapshot.supportsAgentMessages,
       sendDisabledReason: !snapshot.supportsAgentMessages ? 'This thread requires an online agent that supports agent messages.' : null,
-      onInterrupt: _canInterruptActiveTurn(pendingMessages) ? _cancelTurn : null,
+      onInterrupt: _canInterruptActiveTurn() ? _cancelTurn : null,
       sendPendingText: waitingForOnlineMessage == null
           ? null
           : 'Waiting for ${_displayAgentName(widget.agentName ?? "agent")} to come online.',
@@ -1545,24 +1625,33 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         final expanded = _expandedToolCallIds.contains(message.id);
         final toolCallEntry = message.toolCallEntry ?? _toolCallEntryFromText(message.text);
         final expandedToolCallEntry = message.expandedToolCallEntry;
+        final diffPreviewBlocks = message.diffPreviewBlocks;
+        final canExpand = expandedToolCallEntry != null && expandedToolCallEntry.text != toolCallEntry.text;
         return Padding(
           padding: const EdgeInsets.only(left: 42, right: 18),
           child: SizedBox(
             width: double.infinity,
-            child: _buildToolCallSummaryText(
-              context,
-              expanded && expandedToolCallEntry != null ? expandedToolCallEntry : toolCallEntry,
-              canExpand: expandedToolCallEntry != null && expandedToolCallEntry.text != toolCallEntry.text,
-              onTapDetails: () {
-                if (expandedToolCallEntry == null || expandedToolCallEntry.text == toolCallEntry.text) {
-                  return;
-                }
-                setState(() {
-                  if (!_expandedToolCallIds.add(message.id)) {
-                    _expandedToolCallIds.remove(message.id);
-                  }
-                });
-              },
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildToolCallSummaryText(
+                  context,
+                  expanded && expandedToolCallEntry != null ? expandedToolCallEntry : toolCallEntry,
+                  canExpand: canExpand,
+                  onTapDetails: () {
+                    if (!canExpand) {
+                      return;
+                    }
+                    setState(() {
+                      if (!_expandedToolCallIds.add(message.id)) {
+                        _expandedToolCallIds.remove(message.id);
+                      }
+                    });
+                  },
+                ),
+                if (diffPreviewBlocks.isNotEmpty || expanded)
+                  for (final block in diffPreviewBlocks) _buildDatasetDiffPreviewBlock(context, block: block),
+              ],
             ),
           ),
         );
@@ -1966,12 +2055,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     final highlightStyle = baseStyle.copyWith(color: theme.colorScheme.foreground, fontWeight: FontWeight.w700);
     final detailLines = display.detailLines;
     final headlineRest = display.headline.rest;
-    final headerText = TextSpan(
-      children: [
-        TextSpan(text: display.headline.action, style: highlightStyle),
-        if (headlineRest.trim().isNotEmpty) TextSpan(text: ' $headlineRest'),
-      ],
-    );
+    final lineCountStyle = baseStyle.copyWith(fontWeight: FontWeight.w700);
     final details = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -1996,13 +2080,41 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
           ),
       ],
     );
+    final header = SelectionArea(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: SelectableText.rich(
+              TextSpan(
+                children: [
+                  TextSpan(text: display.headline.action, style: highlightStyle),
+                  if (headlineRest.trim().isNotEmpty) TextSpan(text: ' $headlineRest'),
+                ],
+              ),
+              style: baseStyle,
+              textAlign: TextAlign.left,
+            ),
+          ),
+          if (display.headline.linesAdded != null || display.headline.linesRemoved != null) const SizedBox(width: 8),
+          if (display.headline.linesAdded != null)
+            StatusSignedCounter(value: display.headline.linesAdded!, prefix: '+', style: lineCountStyle, color: Colors.green.shade500),
+          if (display.headline.linesAdded != null && display.headline.linesRemoved != null) const SizedBox(width: 6),
+          if (display.headline.linesRemoved != null)
+            StatusSignedCounter(value: display.headline.linesRemoved!, prefix: '-', style: lineCountStyle, color: Colors.red.shade500),
+        ],
+      ),
+    );
+    final headerWidget = canExpand
+        ? MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: onTapDetails, child: header),
+          )
+        : header;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
-      children: [
-        SelectableText.rich(headerText, style: baseStyle, textAlign: TextAlign.left),
-        if (detailLines.isNotEmpty) details,
-      ],
+      children: [headerWidget, if (detailLines.isNotEmpty) details],
     );
   }
 
@@ -2039,6 +2151,84 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return SelectableText.rich(
       highlightCodeSpanWithReHighlight(context: context, code: text, languageOrFilename: languageOrFilename, textStyle: codeStyle),
       textAlign: TextAlign.left,
+    );
+  }
+
+  Widget _buildDatasetDiffPreviewBlock(BuildContext context, {required _DatasetDiffPreviewBlock block}) {
+    final normalizedCode = block.code.replaceAll('\r\n', '\n').trimRight();
+    if (normalizedCode.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final theme = ShadTheme.of(context);
+    final codeTextStyle = GoogleFonts.sourceCodePro(fontSize: 12, color: const Color(0xFFE5E7EB), height: 1.3);
+    final headerTextStyle = GoogleFonts.sourceCodePro(fontSize: 11, color: theme.colorScheme.mutedForeground);
+    final headerCounterStyle = headerTextStyle.copyWith(fontWeight: FontWeight.w700);
+    final lines = normalizedCode.split('\n');
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFF050505),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: theme.colorScheme.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: _datasetDiffPreviewHorizontalPadding, vertical: 6),
+            decoration: const BoxDecoration(
+              color: Color(0xFF111111),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
+            ),
+            child: SelectionArea(
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(block.header, style: headerTextStyle, overflow: TextOverflow.ellipsis),
+                  ),
+                  if (block.linesAdded != null || block.linesRemoved != null) const SizedBox(width: 8),
+                  if (block.linesAdded != null)
+                    StatusSignedCounter(value: block.linesAdded!, prefix: '+', style: headerCounterStyle, color: Colors.green.shade500),
+                  if (block.linesAdded != null && block.linesRemoved != null) const SizedBox(width: 6),
+                  if (block.linesRemoved != null)
+                    StatusSignedCounter(value: block.linesRemoved!, prefix: '-', style: headerCounterStyle, color: Colors.red.shade500),
+                ],
+              ),
+            ),
+          ),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: _datasetDiffPreviewHorizontalPadding, vertical: 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (final line in lines.indexed)
+                  Padding(
+                    padding: EdgeInsets.only(bottom: line.$1 < lines.length - 1 ? 2 : 0),
+                    child: Container(
+                      width: double.infinity,
+                      decoration: BoxDecoration(color: diffLineBackgroundColor(context, line.$2), borderRadius: BorderRadius.circular(4)),
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                      child: SelectableText.rich(
+                        highlightCodeSpanWithReHighlight(
+                          context: context,
+                          code: line.$2,
+                          languageOrFilename: 'diff',
+                          textStyle: codeTextStyle,
+                          theme: monokaiSublimeTheme,
+                          fallbackLanguageId: 'diff',
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -2094,7 +2284,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                       style: textStyle,
                     ),
                   ),
-                if (_canInterruptActiveTurn(pendingMessages))
+                if (_canInterruptActiveTurn())
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
                     child: Text('Messages will be processed shortly. Press Esc to interrupt and send now.', style: textStyle),
@@ -2132,9 +2322,11 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                   text: statusText ?? '',
                   startedAt: _status.startedAt,
                   totalBytes: _status.totalBytes,
-                  onCancel: _canInterruptActiveTurn(pendingMessages) ? _cancelTurn : null,
+                  linesAdded: _status.linesAdded,
+                  linesRemoved: _status.linesRemoved,
+                  onCancel: _canInterruptActiveTurn() ? _cancelTurn : null,
                   showCancelButton: _status.mode != null,
-                  cancelEnabled: true,
+                  cancelEnabled: _canInterruptActiveTurn(),
                 ),
               ),
             ),
@@ -2217,6 +2409,7 @@ class _DatasetThreadMessage {
     this.image,
     this.toolCallEntry,
     this.expandedToolCallEntry,
+    this.diffPreviewBlocks = const <_DatasetDiffPreviewBlock>[],
     this.authorName,
     this.phase,
     this.turnId,
@@ -2231,9 +2424,19 @@ class _DatasetThreadMessage {
   final _DatasetThreadImage? image;
   final ToolCallEntryDisplay? toolCallEntry;
   final ToolCallEntryDisplay? expandedToolCallEntry;
+  final List<_DatasetDiffPreviewBlock> diffPreviewBlocks;
   final String? authorName;
   final String? phase;
   final String? turnId;
+}
+
+class _DatasetDiffPreviewBlock {
+  const _DatasetDiffPreviewBlock({required this.header, required this.code, this.linesAdded, this.linesRemoved});
+
+  final String header;
+  final String code;
+  final int? linesAdded;
+  final int? linesRemoved;
 }
 
 sealed class _DatasetThreadFeedItem {
@@ -2304,6 +2507,7 @@ class _DatasetToolCallState {
     required this.arguments,
     required this.logs,
     required this.argumentDeltaBytes,
+    required this.argumentDeltaText,
     required this.authorName,
     required this.createdAt,
   });
@@ -2317,6 +2521,7 @@ class _DatasetToolCallState {
       arguments: _mapValue(payload['arguments']),
       logs: <String>[],
       argumentDeltaBytes: _intValue(payload['argument_delta_bytes']),
+      argumentDeltaText: payload['argument_delta_text']?.toString() ?? '',
       authorName: payload['sender_name']?.toString(),
       createdAt: _rowTimestamp(row),
     );
@@ -2328,8 +2533,62 @@ class _DatasetToolCallState {
   Map<String, Object?>? arguments;
   final List<String> logs;
   int argumentDeltaBytes;
+  String argumentDeltaText;
   String? authorName;
   final DateTime createdAt;
+
+  void appendArgumentDelta(String delta) {
+    if (delta.isEmpty) {
+      return;
+    }
+    argumentDeltaText = '$argumentDeltaText$delta';
+    arguments = _toolArgumentsFromDeltaText(tool: tool, current: arguments, text: argumentDeltaText) ?? arguments;
+  }
+}
+
+Map<String, Object?> _mergeDatasetAndLiveRow({required Map<String, Object?> datasetRow, required Map<String, Object?> liveRow}) {
+  final datasetData = _rowData(datasetRow);
+  final liveData = _rowData(liveRow);
+  if (datasetData == null || liveData == null) {
+    return datasetRow;
+  }
+
+  final datasetKind = datasetData['kind']?.toString();
+  final liveKind = liveData['kind']?.toString();
+  final datasetType = datasetData['type']?.toString();
+  final liveType = liveData['type']?.toString();
+  final isToolCall =
+      datasetKind == 'tool_call' ||
+      liveKind == 'tool_call' ||
+      datasetType?.startsWith('meshagent.agent.tool_call.') == true ||
+      liveType?.startsWith('meshagent.agent.tool_call.') == true;
+  if (!isToolCall) {
+    return datasetRow;
+  }
+
+  final datasetArguments = _mapValue(datasetData['arguments']);
+  final liveArguments = _mapValue(liveData['arguments']);
+  final mergedData = <String, Object?>{...liveData, ...datasetData};
+  if ((datasetArguments == null || datasetArguments.isEmpty) && liveArguments != null && liveArguments.isNotEmpty) {
+    mergedData['arguments'] = liveArguments;
+  }
+
+  final liveArgumentDeltaText = liveData['argument_delta_text']?.toString() ?? '';
+  final datasetArgumentDeltaText = datasetData['argument_delta_text']?.toString() ?? '';
+  if (datasetArgumentDeltaText.isEmpty && liveArgumentDeltaText.isNotEmpty) {
+    mergedData['argument_delta_text'] = liveArgumentDeltaText;
+    final tool = mergedData['tool']?.toString() ?? mergedData['tool_name']?.toString() ?? mergedData['name']?.toString() ?? '';
+    mergedData['arguments'] =
+        _toolArgumentsFromDeltaText(tool: tool, current: _mapValue(mergedData['arguments']), text: liveArgumentDeltaText) ??
+        _mapValue(mergedData['arguments']);
+  }
+
+  final mergedArgumentDeltaBytes = math.max(_intValue(datasetData['argument_delta_bytes']), _intValue(liveData['argument_delta_bytes']));
+  if (mergedArgumentDeltaBytes > 0) {
+    mergedData['argument_delta_bytes'] = mergedArgumentDeltaBytes;
+  }
+
+  return <String, Object?>{...liveRow, ...datasetRow, 'data': mergedData};
 }
 
 _DatasetThreadMessage _mergeDuplicateDatasetThreadMessage(_DatasetThreadMessage existing, _DatasetThreadMessage next) {
@@ -2344,6 +2603,9 @@ _DatasetThreadMessage _mergeDuplicateDatasetThreadMessage(_DatasetThreadMessage 
     attachments: existing.attachments.isEmpty ? next.attachments : existing.attachments,
     createdAt: existing.createdAt.isBefore(next.createdAt) ? existing.createdAt : next.createdAt,
     image: existing.image ?? next.image,
+    toolCallEntry: existing.toolCallEntry ?? next.toolCallEntry,
+    expandedToolCallEntry: existing.expandedToolCallEntry ?? next.expandedToolCallEntry,
+    diffPreviewBlocks: existing.diffPreviewBlocks.isNotEmpty ? existing.diffPreviewBlocks : next.diffPreviewBlocks,
     authorName: existing.authorName ?? next.authorName,
     phase: existing.phase ?? next.phase,
     turnId: existing.turnId ?? next.turnId,
@@ -2421,6 +2683,166 @@ int _compareDatasetThreadRows(Map<String, Object?> left, Map<String, Object?> ri
   }
 
   return (left['item_id']?.toString() ?? '').compareTo(right['item_id']?.toString() ?? '');
+}
+
+String? _firstNestedStringValue(Object? value, Set<String> keys) {
+  if (value is String) {
+    final normalized = value.trim();
+    return normalized.isEmpty ? null : value;
+  }
+  if (value is Map) {
+    for (final entry in value.entries) {
+      final key = entry.key?.toString().trim().toLowerCase();
+      if (key != null && keys.contains(key)) {
+        final nested = _firstNestedStringValue(entry.value, keys);
+        if (nested != null) {
+          return nested;
+        }
+      }
+    }
+    for (final entry in value.entries) {
+      final nested = _firstNestedStringValue(entry.value, keys);
+      if (nested != null) {
+        return nested;
+      }
+    }
+  }
+  if (value is List) {
+    for (final item in value) {
+      final nested = _firstNestedStringValue(item, keys);
+      if (nested != null) {
+        return nested;
+      }
+    }
+  }
+  return null;
+}
+
+Map<String, Object?>? _toolArgumentsFromDeltaText({required String tool, required Map<String, Object?>? current, required String text}) {
+  final trimmedText = text.trim();
+  if (trimmedText.isEmpty) {
+    return current;
+  }
+
+  if (tool.trim().toLowerCase() == 'apply_patch' ||
+      trimmedText.contains('*** Begin Patch') ||
+      trimmedText.contains('*** Update File:') ||
+      trimmedText.contains('*** Add File:') ||
+      trimmedText.contains('*** Delete File:')) {
+    return <String, Object?>{...?current, 'patch': trimmedText};
+  }
+
+  try {
+    final decoded = jsonDecode(trimmedText);
+    if (decoded is Map) {
+      return <String, Object?>{...?current, ...decoded.map((key, value) => MapEntry(key.toString(), value))};
+    }
+  } on FormatException {
+    return current;
+  }
+  return current;
+}
+
+_DatasetDiffPreviewBlock? _openAiPatchOperationPreviewBlock(Map<String, Object?> arguments) {
+  final operation = arguments['operation'];
+  if (operation is! Map) {
+    return null;
+  }
+  final path = _firstNestedStringValue(operation, const {'path'});
+  final diff = _firstNestedStringValue(operation, const {'diff'});
+  if (path == null || diff == null) {
+    return null;
+  }
+  final counts = _diffLineCounts(diff);
+  return _DatasetDiffPreviewBlock(header: path, code: diff, linesAdded: counts.$1, linesRemoved: counts.$2);
+}
+
+List<_DatasetDiffPreviewBlock> _applyPatchDiffPreviewBlocks(String patch) {
+  final normalized = patch.replaceAll('\r\n', '\n').trimRight();
+  if (!normalized.contains('*** Begin Patch') &&
+      !normalized.contains('*** Update File:') &&
+      !normalized.contains('*** Add File:') &&
+      !normalized.contains('*** Delete File:')) {
+    return const <_DatasetDiffPreviewBlock>[];
+  }
+
+  final previews = <_DatasetDiffPreviewBlock>[];
+  var currentPath = '';
+  var lines = <String>[];
+  var linesAdded = 0;
+  var linesRemoved = 0;
+  final filePattern = RegExp(r'^\*\*\* (?:Update|Add|Delete) File: (.+)$');
+
+  void flush() {
+    if (currentPath.isNotEmpty && lines.isNotEmpty) {
+      previews.add(
+        _DatasetDiffPreviewBlock(
+          header: currentPath,
+          code: lines.join('\n').trimRight(),
+          linesAdded: linesAdded,
+          linesRemoved: linesRemoved,
+        ),
+      );
+    }
+    lines = <String>[];
+    linesAdded = 0;
+    linesRemoved = 0;
+  }
+
+  for (final line in normalized.split('\n')) {
+    final fileMatch = filePattern.firstMatch(line);
+    if (fileMatch != null) {
+      flush();
+      currentPath = fileMatch.group(1)?.trim() ?? '';
+      continue;
+    }
+    if (currentPath.isEmpty || line.startsWith('*** ')) {
+      continue;
+    }
+    lines.add(line);
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      linesAdded++;
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      linesRemoved++;
+    }
+  }
+  flush();
+  return previews;
+}
+
+(int, int) _diffLineCounts(String diff) {
+  var linesAdded = 0;
+  var linesRemoved = 0;
+  for (final line in diff.replaceAll('\r\n', '\n').split('\n')) {
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      linesAdded++;
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      linesRemoved++;
+    }
+  }
+  return (linesAdded, linesRemoved);
+}
+
+List<_DatasetDiffPreviewBlock> _toolCallDiffPreviewBlocks({required String tool, required Map<String, Object?>? arguments}) {
+  if (arguments == null) {
+    return const <_DatasetDiffPreviewBlock>[];
+  }
+  final operationBlock = _openAiPatchOperationPreviewBlock(arguments);
+  if (operationBlock != null && tool.trim().toLowerCase() == 'apply_patch') {
+    return <_DatasetDiffPreviewBlock>[operationBlock];
+  }
+  final patch = _firstNestedStringValue(arguments, const {'patch', 'input', 'diff'});
+  if (patch == null) {
+    return const <_DatasetDiffPreviewBlock>[];
+  }
+  if (tool.trim().toLowerCase() != 'apply_patch' &&
+      !patch.contains('*** Begin Patch') &&
+      !patch.contains('*** Update File:') &&
+      !patch.contains('*** Add File:') &&
+      !patch.contains('*** Delete File:')) {
+    return const <_DatasetDiffPreviewBlock>[];
+  }
+  return _applyPatchDiffPreviewBlocks(patch);
 }
 
 _DatasetThreadMessage? _messageForRow(
@@ -2528,6 +2950,7 @@ _DatasetThreadMessage? _messageForRow(
       final errorMessage = data['error_message']?.toString();
       final status = data['status']?.toString();
       final argumentDeltaBytes = _intValue(data['argument_delta_bytes']);
+      final diffPreviewBlocks = _toolCallDiffPreviewBlocks(tool: tool, arguments: arguments);
       final summary = formatToolCallEntry(
         toolkit: toolkit,
         tool: tool.trim().isEmpty ? 'tool' : tool,
@@ -2556,6 +2979,7 @@ _DatasetThreadMessage? _messageForRow(
         text: summary.text.trim().isEmpty ? 'Tool call' : summary.text,
         toolCallEntry: summary,
         expandedToolCallEntry: expandedSummary.text.trim().isEmpty ? null : expandedSummary,
+        diffPreviewBlocks: diffPreviewBlocks,
         authorName: data['sender_name']?.toString(),
         attachments: const [],
         createdAt: _rowTimestamp(row),
@@ -2742,6 +3166,7 @@ _DatasetThreadMessage _messageForToolCallEndRow({
   final logs = state?.logs ?? const <String>[];
   final argumentDeltaBytes = state?.argumentDeltaBytes ?? _intValue(payload?['argument_delta_bytes']);
   final errorMessage = _agentToolCallErrorMessage(payload?['error']);
+  final diffPreviewBlocks = _toolCallDiffPreviewBlocks(tool: tool, arguments: arguments);
   final entry = formatToolCallEntry(
     toolkit: toolkit,
     tool: tool.trim().isEmpty ? 'tool' : tool,
@@ -2766,6 +3191,7 @@ _DatasetThreadMessage _messageForToolCallEndRow({
     text: entry.text,
     toolCallEntry: entry,
     expandedToolCallEntry: expandedEntry.text.trim().isEmpty ? null : expandedEntry,
+    diffPreviewBlocks: diffPreviewBlocks,
     authorName: payload?['sender_name']?.toString() ?? state?.authorName,
     attachments: const [],
     createdAt: _rowTimestamp(row),
