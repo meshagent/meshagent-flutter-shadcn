@@ -1648,7 +1648,14 @@ int _skippedBinaryColumnCount(Object schema, {ArrowSchema? displaySchema}) {
     return 0;
   }
 
-  return schema.fields.where((field) => _isBinaryColumn(field.type) && !_isImageContentField(field, displaySchema: displaySchema)).length;
+  return schema.fields
+      .where(
+        (field) =>
+            _isBinaryColumn(field.type) &&
+            !_isImageContentField(field, displaySchema: displaySchema) &&
+            !_isJsonContentField(field, displaySchema: displaySchema),
+      )
+      .length;
 }
 
 bool _isBinaryColumn(ArrowDataType type) {
@@ -1664,7 +1671,9 @@ const _contentTypeMetadataKey = 'content-type';
 enum _ColumnDisplay { text, image, json }
 
 bool _isSelectableField(ArrowField field, {ArrowSchema? displaySchema}) {
-  return !_isBinaryColumn(field.type) || _isImageContentField(field, displaySchema: displaySchema);
+  return !_isBinaryColumn(field.type) ||
+      _isImageContentField(field, displaySchema: displaySchema) ||
+      _isJsonContentField(field, displaySchema: displaySchema);
 }
 
 bool _isImageContentField(ArrowField field, {ArrowSchema? displaySchema}) {

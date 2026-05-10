@@ -16,6 +16,19 @@ class AccumulatedTextStream {
   final String? phase;
 }
 
+String accumulateTextStreamDelta(String current, String delta) {
+  if (delta.isEmpty) {
+    return current;
+  }
+  if (current.isEmpty || delta.startsWith(current)) {
+    return delta;
+  }
+  if (current.endsWith(delta)) {
+    return current;
+  }
+  return '$current$delta';
+}
+
 class TextStreamAccumulator {
   final Map<String, AccumulatedTextStream> _items = <String, AccumulatedTextStream>{};
 
@@ -40,7 +53,7 @@ class TextStreamAccumulator {
       itemId: current.itemId,
       turnId: current.turnId,
       status: 'in_progress',
-      text: '${current.text}$delta',
+      text: accumulateTextStreamDelta(current.text, delta),
       senderName: current.senderName,
       phase: current.phase,
     );

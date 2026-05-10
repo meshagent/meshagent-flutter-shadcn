@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:meshagent/meshagent.dart';
 
 import 'chat.dart';
+import 'dataset_chat_thread.dart';
 import 'new_chat_thread.dart';
 
 typedef MultiThreadContentBuilder =
@@ -26,6 +27,8 @@ class MultiThreadView extends StatefulWidget {
     this.emptyState,
     this.inputContextMenuBuilder,
     this.inputOnPressedOutside,
+    this.modelController,
+    this.newThreadWrapperBuilder,
   });
 
   final RoomClient room;
@@ -44,6 +47,8 @@ class MultiThreadView extends StatefulWidget {
   final Widget? emptyState;
   final EditableTextContextMenuBuilder? inputContextMenuBuilder;
   final TapRegionCallback? inputOnPressedOutside;
+  final DatasetChatModelController? modelController;
+  final NewChatThreadWrapperBuilder? newThreadWrapperBuilder;
 
   @override
   State<MultiThreadView> createState() => _MultiThreadViewState();
@@ -114,6 +119,8 @@ class _MultiThreadViewState extends State<MultiThreadView> {
       emptyState: widget.emptyState,
       inputContextMenuBuilder: widget.inputContextMenuBuilder,
       inputOnPressedOutside: widget.inputOnPressedOutside,
+      modelController: widget.modelController,
+      newThreadWrapperBuilder: widget.newThreadWrapperBuilder,
       builder: (context, threadPath) => widget.builder(context, threadPath, _controller, _composerKey),
     );
   }

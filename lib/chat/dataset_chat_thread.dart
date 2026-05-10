@@ -28,6 +28,7 @@ const String _agentTurnSteerAcceptedType = 'meshagent.agent.turn.steer.accepted'
 const String _agentTurnSteerRejectedType = 'meshagent.agent.turn.steer.rejected';
 const String _agentTurnStartedType = 'meshagent.agent.turn.started';
 const String _agentTurnSteeredType = 'meshagent.agent.turn.steered';
+const String _agentTurnEndedType = 'meshagent.agent.turn.ended';
 const String _agentTextContentStartedType = 'meshagent.agent.text_content.started';
 const String _agentTextContentDeltaType = 'meshagent.agent.text_content.delta';
 const String _agentTextContentEndedType = 'meshagent.agent.text_content.ended';
@@ -49,7 +50,185 @@ const String _agentImageGenerationCompletedType = 'meshagent.agent.image_generat
 const String _agentImageGenerationFailedType = 'meshagent.agent.image_generation.failed';
 const String _agentContextCompactedType = 'meshagent.agent.context.compacted';
 const String _agentUsageUpdatedType = 'meshagent.agent.usage.updated';
+const String _agentModelsRequestType = 'meshagent.agent.models.request';
+const String _agentModelsResponseType = 'meshagent.agent.models.response';
+const String _agentModelChangeType = 'meshagent.agent.model.change';
+const String _agentModelChangedType = 'meshagent.agent.model.changed';
 const double _datasetDiffPreviewHorizontalPadding = 16;
+
+class DatasetChatModelOption {
+  const DatasetChatModelOption({
+    required this.provider,
+    required this.providerFriendlyName,
+    required this.model,
+    this.modelFriendlyName,
+    this.modelDescription,
+    this.active = false,
+  });
+
+  final String provider;
+  final String providerFriendlyName;
+  final String model;
+  final String? modelFriendlyName;
+  final String? modelDescription;
+  final bool active;
+
+  String get key => '$provider/$model';
+
+  String get label {
+    final displayModel = modelFriendlyName == null || modelFriendlyName!.trim().isEmpty ? model : modelFriendlyName!.trim();
+    final displayProvider = providerFriendlyName.trim().isEmpty ? provider : providerFriendlyName.trim();
+    return '$displayProvider / $displayModel';
+  }
+
+  DatasetChatModelOption copyWith({bool? active}) {
+    return DatasetChatModelOption(
+      provider: provider,
+      providerFriendlyName: providerFriendlyName,
+      model: model,
+      modelFriendlyName: modelFriendlyName,
+      modelDescription: modelDescription,
+      active: active ?? this.active,
+    );
+  }
+}
+
+class DatasetChatModelController extends ChangeNotifier {
+  List<DatasetChatModelOption> _models = const <DatasetChatModelOption>[];
+  DatasetChatModelOption? _activeModel;
+  Future<void> Function(DatasetChatModelOption option)? _changeHandler;
+  bool _locked = false;
+  bool _changing = false;
+
+  List<DatasetChatModelOption> get models => _models;
+  DatasetChatModelOption? get activeModel => _activeModel;
+  bool get isChanging => _changing;
+  bool get isLocked => _locked;
+  bool get canChange => !_locked && !_changing;
+
+  void bindChangeHandler(Future<void> Function(DatasetChatModelOption option) handler) {
+    _changeHandler = handler;
+  }
+
+  void unbindChangeHandler() {
+    _changeHandler = null;
+  }
+
+  void setLocked(bool locked) {
+    if (_locked == locked) {
+      return;
+    }
+    _locked = locked;
+    notifyListeners();
+  }
+
+  void replaceModelsFrom(DatasetChatModelController other) {
+    _models = [for (final model in other.models) model.copyWith()];
+    _activeModel = other.activeModel?.copyWith();
+    notifyListeners();
+  }
+
+  Future<void> changeModel(DatasetChatModelOption option) async {
+    if (!canChange || _changeHandler == null || option.key == _activeModel?.key) {
+      return;
+    }
+    _changing = true;
+    notifyListeners();
+    try {
+      await _changeHandler!(option);
+    } finally {
+      _changing = false;
+      notifyListeners();
+    }
+  }
+
+  void selectModelLocally(DatasetChatModelOption option) {
+    if (_locked || option.key == _activeModel?.key) {
+      return;
+    }
+    _models = _models.any((model) => model.key == option.key)
+        ? [for (final model in _models) model.copyWith(active: model.key == option.key)]
+        : [for (final model in _models) model.copyWith(active: false), option.copyWith(active: true)];
+    _activeModel = option.copyWith(active: true);
+    notifyListeners();
+  }
+
+  void applyModelsResponse(Map<String, dynamic> payload) {
+    final providers = payload['providers'];
+    if (providers is! List) {
+      return;
+    }
+    final nextModels = <DatasetChatModelOption>[];
+    DatasetChatModelOption? active;
+    for (final providerValue in providers) {
+      if (providerValue is! Map) {
+        continue;
+      }
+      final provider = providerValue['name']?.toString().trim();
+      if (provider == null || provider.isEmpty) {
+        continue;
+      }
+      final providerFriendlyName = providerValue['friendly_name']?.toString() ?? provider;
+      final models = providerValue['models'];
+      if (models is! List) {
+        continue;
+      }
+      for (final modelValue in models) {
+        if (modelValue is! Map) {
+          continue;
+        }
+        final model = modelValue['name']?.toString().trim();
+        if (model == null || model.isEmpty) {
+          continue;
+        }
+        final option = DatasetChatModelOption(
+          provider: provider,
+          providerFriendlyName: providerFriendlyName,
+          model: model,
+          modelFriendlyName: modelValue['friendly_name']?.toString(),
+          modelDescription: modelValue['description']?.toString(),
+          active: modelValue['active'] == true,
+        );
+        nextModels.add(option);
+        if (option.active) {
+          active = option;
+        }
+      }
+    }
+    final priorActive = _activeModel;
+    active = priorActive == null ? active : nextModels.firstWhereOrNull((option) => option.key == priorActive.key) ?? active;
+    active ??= nextModels.isEmpty ? null : nextModels.first;
+    _models = [for (final option in nextModels) option.copyWith(active: option.key == active?.key)];
+    _activeModel = active?.copyWith(active: true);
+    notifyListeners();
+  }
+
+  void applyModelChanged(Map<String, dynamic> payload) {
+    final provider = payload['provider']?.toString().trim();
+    final model = payload['model']?.toString().trim();
+    if (provider == null || provider.isEmpty || model == null || model.isEmpty) {
+      return;
+    }
+    final existing = _models.firstWhereOrNull((option) => option.provider == provider && option.model == model);
+    final active =
+        existing?.copyWith(active: true) ??
+        DatasetChatModelOption(
+          provider: provider,
+          providerFriendlyName: payload['provider_friendly_name']?.toString() ?? provider,
+          model: model,
+          modelFriendlyName: payload['model_friendly_name']?.toString(),
+          modelDescription: payload['model_description']?.toString(),
+          active: true,
+        );
+    if (existing == null) {
+      _models = [for (final option in _models) option.copyWith(active: false), active];
+    } else {
+      _models = [for (final option in _models) option.copyWith(active: option.key == active.key)];
+    }
+    _activeModel = active;
+    notifyListeners();
+  }
+}
 
 class DatasetChatThread extends StatefulWidget {
   const DatasetChatThread({
@@ -67,6 +246,7 @@ class DatasetChatThread extends StatefulWidget {
     this.attachmentBuilder,
     this.inputContextMenuBuilder,
     this.inputOnPressedOutside,
+    this.modelController,
     this.initialShowCompletedToolCalls = false,
     this.showUsageFooter = false,
   });
@@ -84,6 +264,7 @@ class DatasetChatThread extends StatefulWidget {
   final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
   final EditableTextContextMenuBuilder? inputContextMenuBuilder;
   final TapRegionCallback? inputOnPressedOutside;
+  final DatasetChatModelController? modelController;
   final bool initialShowCompletedToolCalls;
   final bool showUsageFooter;
 
@@ -103,6 +284,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   final FileStreamAccumulator _liveFileContent = FileStreamAccumulator();
   late ChatThreadController _controller;
   late bool _ownsController;
+  late DatasetChatModelController _modelController;
+  late bool _ownsModelController;
   late Key _composerInputKey;
   int _tableLoadGeneration = 0;
   Object? _error;
@@ -125,6 +308,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     super.initState();
     _ownsController = widget.controller == null;
     _controller = widget.controller ?? ChatThreadController(room: widget.room);
+    _ownsModelController = widget.modelController == null;
+    _modelController = widget.modelController ?? DatasetChatModelController();
+    _modelController.bindChangeHandler(_changeModel);
     _composerInputKey = widget.composerKey ?? GlobalObjectKey(_controller);
     _roomSubscription = widget.room.listen(_onRoomEvent);
     widget.room.messaging.addListener(_onMessagingChanged);
@@ -151,6 +337,15 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       _controller = widget.controller ?? ChatThreadController(room: widget.room);
       _composerInputKey = widget.composerKey ?? GlobalObjectKey(_controller);
     }
+    if (oldWidget.modelController != widget.modelController) {
+      _modelController.unbindChangeHandler();
+      if (_ownsModelController) {
+        _modelController.dispose();
+      }
+      _ownsModelController = widget.modelController == null;
+      _modelController = widget.modelController ?? DatasetChatModelController();
+      _modelController.bindChangeHandler(_changeModel);
+    }
     if (oldWidget.path != widget.path || oldWidget.agentName != widget.agentName || oldWidget.room != widget.room) {
       _usage = null;
       _refreshStatus();
@@ -173,6 +368,10 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     widget.room.messaging.removeListener(_onMessagingChanged);
     if (_ownsController) {
       _controller.dispose();
+    }
+    _modelController.unbindChangeHandler();
+    if (_ownsModelController) {
+      _modelController.dispose();
     }
     super.dispose();
   }
@@ -460,7 +659,18 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   bool _shouldBufferAgentPayload(Map<String, dynamic> payload) {
+    if (_isModelPayload(payload)) {
+      return false;
+    }
     return !_ready && _agentPayloadBelongsToThread(payload);
+  }
+
+  bool _isModelPayload(Map<String, dynamic> payload) {
+    final type = payload['type'];
+    return type == _agentModelsRequestType ||
+        type == _agentModelsResponseType ||
+        type == _agentModelChangeType ||
+        type == _agentModelChangedType;
   }
 
   bool _agentPayloadBelongsToThread(Map<String, dynamic> payload) {
@@ -474,6 +684,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
 
   void _handleAgentMessagePayload(Map<String, dynamic> payload, {bool notify = true, bool scroll = true}) {
     if (_handleUsagePayload(payload, notify: notify)) {
+      return;
+    }
+    if (_handleModelPayload(payload)) {
       return;
     }
     final changed = _applyAgentMessagePayload(payload);
@@ -531,6 +744,10 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     switch (type) {
       case _agentTurnStartType:
       case _agentTurnSteerType:
+      case _agentModelsRequestType:
+      case _agentModelsResponseType:
+      case _agentModelChangeType:
+      case _agentModelChangedType:
         break;
       case _agentTurnStartAcceptedType:
       case _agentTurnSteerAcceptedType:
@@ -576,6 +793,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       case _agentTextContentEndedType:
         final accumulatedText = _liveTextContent.complete(_payloadItemId(payload));
         _liveTextContent.remove(_payloadItemId(payload));
+        final phase = _agentMessagePhase(payload) ?? accumulatedText?.phase;
         changed =
             _upsertAgentRow(
               itemId: _payloadItemId(payload),
@@ -587,7 +805,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                 'text': payload['text']?.toString() ?? accumulatedText?.text ?? _agentRowText(_payloadItemId(payload)),
                 'sender_name':
                     _senderNameFromPayload(payload) ?? accumulatedText?.senderName ?? _agentRowSenderName(_payloadItemId(payload)),
-                if (_agentMessagePhase(payload) != null) 'phase': _agentMessagePhase(payload),
+                'phase': ?phase,
               },
             ) ||
             changed;
@@ -802,6 +1020,27 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                 'kind': 'compaction',
                 'role': 'assistant',
                 'status': 'completed',
+                'message': payload,
+                'sender_name': _senderNameFromPayload(payload) ?? _agentRowSenderName(_payloadItemId(payload)),
+              },
+            ) ||
+            changed;
+        break;
+      case _agentTurnEndedType:
+        final errorMessage = agentTurnEndedErrorMessage(payload);
+        if (errorMessage == null) {
+          break;
+        }
+        changed =
+            _upsertAgentRow(
+              itemId: _turnApplicationItemId(payload, 'error'),
+              turnId: _payloadTurnId(payload),
+              timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
+              data: {
+                'kind': 'error',
+                'role': 'assistant',
+                'status': 'failed',
+                'text': errorMessage,
                 'message': payload,
                 'sender_name': _senderNameFromPayload(payload) ?? _agentRowSenderName(_payloadItemId(payload)),
               },
@@ -1068,6 +1307,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   void _refreshStatus({bool notify = false}) {
     final next = resolveChatThreadStatus(room: widget.room, path: widget.path, agentName: widget.agentName, previous: _status);
     _status = next;
+    _modelController.setLocked(next.turnId != null);
     if (notify && mounted) {
       setState(() {});
     }
@@ -1098,6 +1338,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     _openedPath = widget.path;
     _openedAgentParticipantId = agent.id;
     _sendThreadSubscriptionMessageNowait(agent: agent, messageType: _agentThreadOpenType, path: widget.path);
+    _sendModelsRequestNowait(agent: agent);
   }
 
   void _closeOpenSubscription() {
@@ -1130,6 +1371,59 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     }());
   }
 
+  void _sendModelsRequestNowait({required RemoteParticipant agent}) {
+    unawaited(() async {
+      try {
+        await widget.room.messaging.sendMessage(
+          to: agent,
+          type: _agentRoomMessageType,
+          ignoreOffline: true,
+          message: {
+            'payload': {'type': _agentModelsRequestType, 'message_id': const Uuid().v4()},
+          },
+        );
+      } catch (_) {}
+    }());
+  }
+
+  Future<void> _changeModel(DatasetChatModelOption option) async {
+    final agent = _agentParticipant();
+    if (agent == null) {
+      throw StateError('No online agent supports agent messages for this thread.');
+    }
+    await widget.room.messaging.sendMessage(
+      to: agent,
+      type: _agentRoomMessageType,
+      message: {
+        'payload': {
+          'type': _agentModelChangeType,
+          'thread_id': widget.path,
+          'message_id': const Uuid().v4(),
+          'provider': option.provider,
+          'model': option.model,
+        },
+      },
+    );
+  }
+
+  bool _handleModelPayload(Map<String, dynamic> payload) {
+    final type = payload['type'];
+    if (type == _agentModelsResponseType) {
+      _modelController.applyModelsResponse(payload);
+      return true;
+    }
+    if (payload['thread_id'] != widget.path) {
+      return false;
+    }
+    if (type == _agentModelChangedType) {
+      _modelController.applyModelChanged(payload);
+      return true;
+    } else if (type == _agentModelsRequestType || type == _agentModelChangeType) {
+      return true;
+    }
+    return false;
+  }
+
   List<_DatasetThreadMessage> _messages() {
     final mergedRowsByItemId = <String, Map<String, Object?>>{};
     mergedRowsByItemId.addAll(_agentRowsByItemId);
@@ -1160,10 +1454,45 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     final toolCallsByItemId = <String, _DatasetToolCallState>{};
     final toolArgumentDeltaBytesByItemId = <String, int>{};
     final toolArgumentDeltaTextByItemId = <String, String>{};
+    final textContentByItemId = <String, _DatasetTextContentState>{};
+    final reasoningContentByItemId = <String, _DatasetTextContentState>{};
     for (final row in rows) {
       final data = _rowData(row);
       final type = data?['type']?.toString();
       final itemId = row['item_id']?.toString() ?? (data == null ? '' : _payloadItemId(Map<String, dynamic>.from(data)));
+      if (type == _agentTextContentStartedType || type == _agentReasoningContentStartedType) {
+        if (data != null) {
+          final statesByItemId = type == _agentReasoningContentStartedType ? reasoningContentByItemId : textContentByItemId;
+          statesByItemId[itemId] = _DatasetTextContentState.fromPayload(
+            row: row,
+            payload: data,
+            kind: type == _agentReasoningContentStartedType ? 'reasoning' : 'message',
+            role: 'assistant',
+          );
+        }
+        continue;
+      }
+      if (type == _agentTextContentDeltaType || type == _agentReasoningContentDeltaType) {
+        final statesByItemId = type == _agentReasoningContentDeltaType ? reasoningContentByItemId : textContentByItemId;
+        final state = statesByItemId.putIfAbsent(
+          itemId,
+          () => _DatasetTextContentState.fromPayload(
+            row: row,
+            payload: data ?? const <String, Object?>{},
+            kind: type == _agentReasoningContentDeltaType ? 'reasoning' : 'message',
+            role: 'assistant',
+          ),
+        );
+        state.appendDelta(row: row, payload: data ?? const <String, Object?>{});
+        continue;
+      }
+      if (type == _agentTextContentEndedType || type == _agentReasoningContentEndedType) {
+        final statesByItemId = type == _agentReasoningContentEndedType ? reasoningContentByItemId : textContentByItemId;
+        final state = statesByItemId.remove(itemId);
+        final message = state?.complete(row: row, payload: data ?? const <String, Object?>{});
+        messages.add((row: row, message: message));
+        continue;
+      }
       if (_isDatasetToolCallStartType(type)) {
         toolCallsByItemId[itemId] = _DatasetToolCallState.fromPayload(row: row, payload: data!);
         final pendingArgumentDeltaBytes = toolArgumentDeltaBytesByItemId[itemId];
@@ -1204,6 +1533,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       }
       final message = _messageForRow(row, turnInputPayloadsById: turnInputPayloadsById);
       messages.add((row: row, message: message));
+    }
+    for (final state in [...textContentByItemId.values, ...reasoningContentByItemId.values]) {
+      messages.add((row: state.latestRow, message: state.toMessage(row: state.latestRow)));
     }
     return messages;
   }
@@ -1380,6 +1712,11 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       };
       if (isSteer && _status.turnId != null) {
         payload['turn_id'] = _status.turnId;
+      }
+      final activeModel = _modelController.activeModel;
+      if (!isSteer && activeModel != null) {
+        payload['provider'] = activeModel.provider;
+        payload['model'] = activeModel.model;
       }
       await widget.room.messaging.sendMessage(to: agent, type: _agentRoomMessageType, message: {'payload': payload});
       _controller.outboundStatus.markDelivered(messageId);
@@ -1652,6 +1989,22 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                 if (diffPreviewBlocks.isNotEmpty || expanded)
                   for (final block in diffPreviewBlocks) _buildDatasetDiffPreviewBlock(context, block: block),
               ],
+            ),
+          ),
+        );
+      }
+      if (message.kind == 'error') {
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
+          child: SizedBox(
+            width: double.infinity,
+            child: Align(
+              alignment: Alignment.center,
+              child: SelectableText(
+                message.text,
+                style: theme.textTheme.muted.copyWith(color: theme.colorScheme.destructive),
+                textAlign: TextAlign.center,
+              ),
             ),
           ),
         );
@@ -2546,6 +2899,87 @@ class _DatasetToolCallState {
   }
 }
 
+class _DatasetTextContentState {
+  _DatasetTextContentState({
+    required this.itemId,
+    required this.kind,
+    required this.role,
+    required this.createdAt,
+    required this.latestRow,
+    this.text = '',
+    this.authorName,
+    this.phase,
+    this.turnId,
+  });
+
+  factory _DatasetTextContentState.fromPayload({
+    required Map<String, Object?> row,
+    required Map<String, Object?> payload,
+    required String kind,
+    required String role,
+  }) {
+    final itemId = row['item_id']?.toString() ?? _payloadItemId(Map<String, dynamic>.from(payload));
+    return _DatasetTextContentState(
+      itemId: itemId,
+      kind: kind,
+      role: role,
+      text: payload['text']?.toString() ?? '',
+      authorName: payload['sender_name']?.toString(),
+      phase: _agentMessagePhase(payload),
+      turnId: row['turn_id']?.toString() ?? payload['turn_id']?.toString(),
+      createdAt: _rowTimestamp(row),
+      latestRow: row,
+    );
+  }
+
+  final String itemId;
+  final String kind;
+  final String role;
+  final DateTime createdAt;
+  String text;
+  String? authorName;
+  String? phase;
+  String? turnId;
+  Map<String, Object?> latestRow;
+
+  void appendDelta({required Map<String, Object?> row, required Map<String, Object?> payload}) {
+    text = accumulateTextStreamDelta(text, payload['text']?.toString() ?? '');
+    authorName ??= payload['sender_name']?.toString();
+    phase ??= _agentMessagePhase(payload);
+    turnId ??= row['turn_id']?.toString() ?? payload['turn_id']?.toString();
+    latestRow = row;
+  }
+
+  _DatasetThreadMessage? complete({required Map<String, Object?> row, required Map<String, Object?> payload}) {
+    final endedText = payload['text']?.toString() ?? '';
+    if (endedText.isNotEmpty) {
+      text = accumulateTextStreamDelta(text, endedText);
+    }
+    authorName ??= payload['sender_name']?.toString();
+    phase ??= _agentMessagePhase(payload);
+    turnId ??= row['turn_id']?.toString() ?? payload['turn_id']?.toString();
+    latestRow = row;
+    return toMessage(row: row);
+  }
+
+  _DatasetThreadMessage? toMessage({required Map<String, Object?> row}) {
+    if (text.trim().isEmpty) {
+      return null;
+    }
+    return _DatasetThreadMessage(
+      id: itemId,
+      kind: kind,
+      role: role == 'assistant' ? 'agent' : role,
+      text: text,
+      authorName: authorName,
+      attachments: const [],
+      createdAt: createdAt,
+      phase: phase,
+      turnId: turnId,
+    );
+  }
+}
+
 Map<String, Object?> _mergeDatasetAndLiveRow({required Map<String, Object?> datasetRow, required Map<String, Object?> liveRow}) {
   final datasetData = _rowData(datasetRow);
   final liveData = _rowData(liveRow);
@@ -2998,6 +3432,21 @@ _DatasetThreadMessage? _messageForRow(
         phase: phase,
         turnId: turnId,
       );
+    case 'error':
+      final text = data['text']?.toString() ?? data['error_message']?.toString() ?? '';
+      return text.trim().isEmpty
+          ? null
+          : _DatasetThreadMessage(
+              id: itemId,
+              kind: 'error',
+              role: 'agent',
+              text: text,
+              authorName: data['sender_name']?.toString(),
+              attachments: const [],
+              createdAt: _rowTimestamp(row),
+              phase: phase,
+              turnId: turnId,
+            );
   }
   return null;
 }
@@ -3019,6 +3468,10 @@ _DatasetThreadMessage? _messageForAgentPayload(
   switch (type) {
     case _agentTurnStartType:
     case _agentTurnSteerType:
+    case _agentModelsRequestType:
+    case _agentModelsResponseType:
+    case _agentModelChangeType:
+    case _agentModelChangedType:
       return null;
     case _agentTurnStartedType:
     case _agentTurnSteeredType:
@@ -3134,6 +3587,21 @@ _DatasetThreadMessage? _messageForAgentPayload(
         createdAt: createdAt,
         turnId: turnId,
       );
+    case _agentTurnEndedType:
+      final errorMessage = agentTurnEndedErrorMessage(payload);
+      return errorMessage == null
+          ? null
+          : _DatasetThreadMessage(
+              id: itemId,
+              kind: 'error',
+              role: 'agent',
+              text: errorMessage,
+              authorName: payload['sender_name']?.toString(),
+              attachments: const [],
+              createdAt: createdAt,
+              phase: phase,
+              turnId: turnId,
+            );
   }
   return null;
 }
@@ -3199,7 +3667,19 @@ _DatasetThreadMessage _messageForToolCallEndRow({
   );
 }
 
+@visibleForTesting
+String? agentTurnEndedErrorMessage(Map<String, Object?> payload) {
+  if (payload['type'] != _agentTurnEndedType) {
+    return null;
+  }
+  return _agentErrorMessage(payload['error']);
+}
+
 String? _agentToolCallErrorMessage(Object? error) {
+  return _agentErrorMessage(error);
+}
+
+String? _agentErrorMessage(Object? error) {
   if (error == null) {
     return null;
   }

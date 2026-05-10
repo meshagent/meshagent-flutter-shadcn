@@ -10,7 +10,10 @@ import 'dataset_chat_thread.dart';
 import 'multi_thread_view.dart';
 import 'thread_list_view.dart';
 
-typedef DatasetChatThreadWrapperBuilder = Widget Function(BuildContext context, String path, Widget thread);
+typedef DatasetChatThreadWrapperBuilder =
+    Widget Function(BuildContext context, String path, Widget thread, DatasetChatModelController modelController);
+typedef DatasetChatNewThreadWrapperBuilder =
+    Widget Function(BuildContext context, Widget newThread, DatasetChatModelController modelController);
 
 class ChatBotView extends StatefulWidget {
   const ChatBotView({
@@ -57,6 +60,7 @@ class ChatBotView extends StatefulWidget {
     this.shouldShowAuthorNames = true,
     this.showUsageFooter = false,
     this.datasetThreadWrapperBuilder,
+    this.datasetNewThreadWrapperBuilder,
   });
 
   final RoomClient room;
@@ -101,6 +105,7 @@ class ChatBotView extends StatefulWidget {
   final bool shouldShowAuthorNames;
   final bool showUsageFooter;
   final DatasetChatThreadWrapperBuilder? datasetThreadWrapperBuilder;
+  final DatasetChatNewThreadWrapperBuilder? datasetNewThreadWrapperBuilder;
 
   @override
   State<ChatBotView> createState() => _ChatBotViewState();
@@ -109,12 +114,15 @@ class ChatBotView extends StatefulWidget {
 class _ChatBotViewState extends State<ChatBotView> {
   late ChatThreadController _controller;
   late bool _ownsController;
+  final Map<String, DatasetChatModelController> _datasetModelControllers = <String, DatasetChatModelController>{};
+  late final DatasetChatModelController _newThreadModelController;
 
   @override
   void initState() {
     super.initState();
     _ownsController = widget.controller == null;
     _controller = widget.controller ?? ChatThreadController(room: widget.room);
+    _newThreadModelController = DatasetChatModelController();
   }
 
   @override
@@ -136,6 +144,11 @@ class _ChatBotViewState extends State<ChatBotView> {
     if (_ownsController) {
       _controller.dispose();
     }
+    for (final controller in _datasetModelControllers.values) {
+      controller.dispose();
+    }
+    _datasetModelControllers.clear();
+    _newThreadModelController.dispose();
     super.dispose();
   }
 
@@ -172,8 +185,23 @@ class _ChatBotViewState extends State<ChatBotView> {
     return builder(context, chatBox);
   }
 
+  DatasetChatModelController _datasetModelControllerFor(String path) {
+    return _datasetModelControllers.putIfAbsent(path, DatasetChatModelController.new);
+  }
+
+  void _seedResolvedThreadModelController(String? path) {
+    final normalizedPath = path?.trim();
+    if (normalizedPath == null ||
+        normalizedPath.isEmpty ||
+        (!normalizedPath.startsWith('dataset://') && !normalizedPath.startsWith('tmp://'))) {
+      return;
+    }
+    _datasetModelControllerFor(normalizedPath).replaceModelsFrom(_newThreadModelController);
+  }
+
   Widget _buildThread(BuildContext context, String path, ChatThreadController controller, {GlobalKey? composerKey}) {
     if (path.startsWith('dataset://') || path.startsWith('tmp://')) {
+      final modelController = _datasetModelControllerFor(path);
       final thread = DatasetChatThread(
         key: ValueKey(path),
         path: path,
@@ -189,13 +217,11 @@ class _ChatBotViewState extends State<ChatBotView> {
         attachmentBuilder: widget.attachmentBuilder,
         inputContextMenuBuilder: widget.inputContextMenuBuilder,
         inputOnPressedOutside: widget.inputOnPressedOutside,
+        modelController: modelController,
         initialShowCompletedToolCalls: widget.initialShowCompletedToolCalls,
         showUsageFooter: widget.showUsageFooter,
       );
-      if (path.startsWith('dataset://')) {
-        return widget.datasetThreadWrapperBuilder?.call(context, path, thread) ?? thread;
-      }
-      return thread;
+      return widget.datasetThreadWrapperBuilder?.call(context, path, thread, modelController) ?? thread;
     }
 
     return ChatThread(
@@ -246,7 +272,10 @@ class _ChatBotViewState extends State<ChatBotView> {
       controller: _controller,
       selectedThreadPath: _normalizeSelectedThreadPath(widget.selectedThreadPath),
       onSelectedThreadPathChanged: widget.onSelectedThreadPathChanged,
-      onSelectedThreadResolved: widget.onSelectedThreadResolved,
+      onSelectedThreadResolved: (path, displayName) {
+        _seedResolvedThreadModelController(path);
+        widget.onSelectedThreadResolved?.call(path, displayName);
+      },
       newThreadResetVersion: widget.newThreadResetVersion,
       centerComposer: widget.centerComposer,
       showUsageFooter: widget.showUsageFooter,
@@ -254,6 +283,8 @@ class _ChatBotViewState extends State<ChatBotView> {
       inputContextMenuBuilder: widget.inputContextMenuBuilder,
       inputOnPressedOutside: widget.inputOnPressedOutside,
       toolsBuilder: widget.toolsBuilder,
+      modelController: _newThreadModelController,
+      newThreadWrapperBuilder: widget.datasetNewThreadWrapperBuilder,
       builder: (context, path, controller, composerKey) => _buildThread(context, path, controller, composerKey: composerKey),
     );
 

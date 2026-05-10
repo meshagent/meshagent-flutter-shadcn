@@ -8,13 +8,20 @@ import 'package:meshagent_flutter_shadcn/chat/chat.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:uuid/uuid.dart';
 
+import 'dataset_chat_thread.dart';
+
 const String _agentRoomMessageType = "agent-message";
 const String _agentThreadStartType = "meshagent.agent.thread.start";
 const String _agentThreadStartedType = "meshagent.agent.thread.started";
+const String _agentTurnStartRejectedType = "meshagent.agent.turn.start.rejected";
 const String _agentTurnStartType = "meshagent.agent.turn.start";
+const String _agentModelsRequestType = "meshagent.agent.models.request";
+const String _agentModelsResponseType = "meshagent.agent.models.response";
+const String _agentModelChangedType = "meshagent.agent.model.changed";
 
 typedef NewChatThreadBuilder = Widget Function(BuildContext context, String threadPath);
 typedef NewChatThreadToolsBuilder = Widget Function(BuildContext context, ChatThreadController controller, ChatThreadSnapshot state);
+typedef NewChatThreadWrapperBuilder = Widget Function(BuildContext context, Widget newThread, DatasetChatModelController modelController);
 
 class NewChatThread extends StatefulWidget {
   const NewChatThread({
@@ -35,6 +42,8 @@ class NewChatThread extends StatefulWidget {
     this.emptyState,
     this.inputContextMenuBuilder,
     this.inputOnPressedOutside,
+    this.modelController,
+    this.newThreadWrapperBuilder,
   });
 
   final RoomClient room;
@@ -53,6 +62,8 @@ class NewChatThread extends StatefulWidget {
   final Widget? emptyState;
   final EditableTextContextMenuBuilder? inputContextMenuBuilder;
   final TapRegionCallback? inputOnPressedOutside;
+  final DatasetChatModelController? modelController;
+  final NewChatThreadWrapperBuilder? newThreadWrapperBuilder;
 
   @override
   State<NewChatThread> createState() => _NewChatThreadState();
@@ -62,6 +73,8 @@ class _NewChatThreadState extends State<NewChatThread> {
   late ChatThreadController _controller;
   late Key _composerInputKey;
   late bool _ownsController;
+  late DatasetChatModelController _modelController;
+  late bool _ownsModelController;
   StreamSubscription<RoomEvent>? _roomSubscription;
   RemoteParticipant? _agent;
   bool _creatingNewThread = false;
@@ -138,6 +151,9 @@ class _NewChatThreadState extends State<NewChatThread> {
     super.initState();
     _ownsController = widget.controller == null;
     _controller = widget.controller ?? ChatThreadController(room: widget.room);
+    _ownsModelController = widget.modelController == null;
+    _modelController = widget.modelController ?? DatasetChatModelController();
+    _modelController.bindChangeHandler(_selectModelForNewThread);
     _composerInputKey = widget.composerKey ?? GlobalObjectKey(_controller);
     _roomSubscription = widget.room.listen(_onRoomEvent);
     widget.room.messaging.addListener(_onMessagingChanged);
@@ -173,6 +189,17 @@ class _NewChatThreadState extends State<NewChatThread> {
       _onMessagingChanged();
     }
 
+    if (oldWidget.modelController != widget.modelController) {
+      _modelController.unbindChangeHandler();
+      if (_ownsModelController) {
+        _modelController.dispose();
+      }
+      _ownsModelController = widget.modelController == null;
+      _modelController = widget.modelController ?? DatasetChatModelController();
+      _modelController.bindChangeHandler(_selectModelForNewThread);
+      _requestModels();
+    }
+
     if (oldWidget.agentName != widget.agentName) {
       _newThreadOperationId++;
       _composerInputKey = widget.composerKey ?? GlobalObjectKey(_controller);
@@ -195,12 +222,31 @@ class _NewChatThreadState extends State<NewChatThread> {
     if (_ownsController) {
       _controller.dispose();
     }
+    _modelController.unbindChangeHandler();
+    if (_ownsModelController) {
+      _modelController.dispose();
+    }
     super.dispose();
   }
 
   void _onRoomEvent(RoomEvent event) {
     if (event is! RoomMessageEvent) {
       return;
+    }
+    if (event.message.type == _agentRoomMessageType && event.message.fromParticipantId == _agent?.id) {
+      final rawPayload = event.message.message["payload"];
+      final payload = rawPayload is Map<String, dynamic>
+          ? rawPayload
+          : rawPayload is Map
+          ? Map<String, dynamic>.from(rawPayload)
+          : null;
+      if (payload != null) {
+        if (payload["type"] == _agentModelsResponseType) {
+          _modelController.applyModelsResponse(payload);
+        } else if (payload["type"] == _agentModelChangedType && payload["thread_id"] == null) {
+          _modelController.applyModelChanged(payload);
+        }
+      }
     }
     _signalWaitingForAgentReady();
   }
@@ -221,6 +267,7 @@ class _NewChatThreadState extends State<NewChatThread> {
     setState(() {
       _agent = nextAgent;
     });
+    _requestModels();
 
     final waitCompleter = _waitForAgentCompleter;
     if (nextAgent != null && waitCompleter != null && !waitCompleter.isCompleted) {
@@ -268,6 +315,29 @@ class _NewChatThreadState extends State<NewChatThread> {
     }
   }
 
+  Future<void> _selectModelForNewThread(DatasetChatModelOption option) async {
+    _modelController.selectModelLocally(option);
+  }
+
+  void _requestModels() {
+    final agent = _agent;
+    if (agent == null) {
+      return;
+    }
+    unawaited(() async {
+      try {
+        await widget.room.messaging.sendMessage(
+          to: agent,
+          type: _agentRoomMessageType,
+          ignoreOffline: true,
+          message: {
+            "payload": {"type": _agentModelsRequestType, "message_id": const Uuid().v4()},
+          },
+        );
+      } catch (_) {}
+    }());
+  }
+
   List<Map<String, Object?>> _agentInputContent({required String text, required List<String> attachments}) {
     return [
       if (text.trim().isNotEmpty) {"type": "text", "text": text},
@@ -294,12 +364,20 @@ class _NewChatThreadState extends State<NewChatThread> {
       if (rawPayload is! Map) {
         return;
       }
-      if (rawPayload["type"] != _agentThreadStartedType || rawPayload["source_message_id"] != messageId) {
+      if (rawPayload["source_message_id"] != messageId) {
         return;
       }
-      final threadId = rawPayload["thread_id"];
-      if (threadId is String && threadId.trim().isNotEmpty && !completer.isCompleted) {
-        completer.complete(threadId.trim());
+      if (rawPayload["type"] == _agentThreadStartedType) {
+        final threadId = rawPayload["thread_id"];
+        if (threadId is String && threadId.trim().isNotEmpty && !completer.isCompleted) {
+          completer.complete(threadId.trim());
+        }
+      } else if (rawPayload["type"] == _agentTurnStartRejectedType && !completer.isCompleted) {
+        final error = rawPayload["error"];
+        final message = error is Map ? error["message"] : null;
+        completer.completeError(
+          RoomServerException(message is String && message.trim().isNotEmpty ? message.trim() : "Thread start rejected."),
+        );
       }
     });
 
@@ -309,6 +387,11 @@ class _NewChatThreadState extends State<NewChatThread> {
         "message_id": messageId,
         "content": _agentInputContent(text: text, attachments: attachmentPaths),
       };
+      final activeModel = _modelController.activeModel;
+      if (activeModel != null) {
+        payload["provider"] = activeModel.provider;
+        payload["model"] = activeModel.model;
+      }
       if (senderName != null && senderName.trim().isNotEmpty) {
         payload["sender_name"] = senderName.trim();
       }
@@ -356,6 +439,7 @@ class _NewChatThreadState extends State<NewChatThread> {
       _newThreadError = null;
       _pendingFirstMessage = pendingFirstMessage;
     });
+    _modelController.setLocked(true);
     _controller.scrollThreadToBottom(animated: false);
 
     try {
@@ -406,6 +490,7 @@ class _NewChatThreadState extends State<NewChatThread> {
         _waitingForAgent = false;
         _pendingFirstMessage = defersToParent ? resolvedPendingMessage : null;
       });
+      _modelController.setLocked(false);
       _notifyThreadResolved(path, threadName);
       _notifyThreadPathChanged(path);
       _controller.clear();
@@ -419,6 +504,7 @@ class _NewChatThreadState extends State<NewChatThread> {
         _newThreadError = null;
         _pendingFirstMessage = null;
       });
+      _modelController.setLocked(false);
     } catch (e) {
       if (!mounted || operationId != _newThreadOperationId) {
         return;
@@ -429,6 +515,7 @@ class _NewChatThreadState extends State<NewChatThread> {
         _newThreadError = "$e";
         _pendingFirstMessage = null;
       });
+      _modelController.setLocked(false);
     }
   }
 
@@ -446,6 +533,7 @@ class _NewChatThreadState extends State<NewChatThread> {
       _newThreadError = null;
       _pendingFirstMessage = null;
     });
+    _modelController.setLocked(false);
   }
 
   void _goToNewMessageScreen() {
@@ -494,10 +582,14 @@ class _NewChatThreadState extends State<NewChatThread> {
 
   @override
   Widget build(BuildContext context) {
-    final content = switch (_activeThreadPath) {
+    final activeThreadPath = _activeThreadPath;
+    var content = switch (activeThreadPath) {
       final threadPath? => widget.builder(context, threadPath),
       _ => _buildNewThreadComposer(context),
     };
+    if (activeThreadPath == null && widget.newThreadWrapperBuilder != null) {
+      content = widget.newThreadWrapperBuilder!(context, content, _modelController);
+    }
 
     return CallbackShortcuts(
       bindings: {const SingleActivator(LogicalKeyboardKey.keyN, control: true): _goToNewMessageScreen},
