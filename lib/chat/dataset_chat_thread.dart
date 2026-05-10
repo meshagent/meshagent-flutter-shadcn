@@ -23,6 +23,7 @@ const String _agentTurnStartType = 'meshagent.agent.turn.start';
 const String _agentTurnSteerType = 'meshagent.agent.turn.steer';
 const String _agentTurnInterruptType = 'meshagent.agent.turn.interrupt';
 const String _agentRealtimeAudioChunkType = 'meshagent.agent.realtime_audio.chunk';
+const String _agentRealtimeAudioCommitType = 'meshagent.agent.realtime_audio.commit';
 const String _agentThreadOpenType = 'meshagent.agent.thread.open';
 const String _agentThreadCloseType = 'meshagent.agent.thread.close';
 const String _agentTurnStartAcceptedType = 'meshagent.agent.turn.start.accepted';
@@ -352,6 +353,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   final TextStreamAccumulator _liveTextContent = TextStreamAccumulator();
   final TextStreamAccumulator _liveReasoningContent = TextStreamAccumulator();
   final FileStreamAccumulator _liveFileContent = FileStreamAccumulator();
+  final Map<String, String> _realtimeAudioCommitItemIdsByTurnId = <String, String>{};
   final _DatasetThreadRealtimeAudioPlayer _audioPlayer = _DatasetThreadRealtimeAudioPlayer();
   late ChatThreadController _controller;
   late bool _ownsController;
@@ -711,7 +713,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     }
     if (event.message.type == _agentRoomMessageType) {
       final attachment = event.message.attachment;
-      final payload = event.message.message['payload'];
+      final message = event.message.message;
+      final payload = message['type'] is String ? message : message['payload'];
       if (payload is Map<String, dynamic>) {
         trackAgentThreadStatusPayload(room: widget.room, payload: payload);
         if (_shouldBufferAgentPayload(payload)) {
@@ -825,6 +828,19 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         break;
       case _agentTurnStartAcceptedType:
       case _agentTurnSteerAcceptedType:
+        final sourceMessageId = payload['source_message_id']?.toString().trim();
+        final turnId = _payloadTurnId(payload);
+        if (sourceMessageId != null && sourceMessageId.isNotEmpty && turnId != null && turnId.trim().isNotEmpty) {
+          _realtimeAudioCommitItemIdsByTurnId[turnId.trim()] = sourceMessageId;
+          final sourceRow = _agentRowsByItemId[sourceMessageId];
+          final sourceData = _mapValue(sourceRow?['data']);
+          if (sourceData?['message'] is Map || sourceData?['status'] == 'in_progress') {
+            if (sourceRow != null && sourceRow['turn_id'] != turnId) {
+              _agentRowsByItemId[sourceMessageId] = {...sourceRow, 'turn_id': turnId};
+              changed = true;
+            }
+          }
+        }
         break;
       case _agentTurnStartedType:
         changed =
@@ -848,16 +864,38 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             changed;
         changed = _materializePendingMessage(payload['source_message_id']?.toString()) || changed;
         break;
+      case _agentRealtimeAudioCommitType:
+        final turnId = _payloadTurnId(payload);
+        final itemId = _payloadItemId(payload);
+        if (turnId != null && turnId.trim().isNotEmpty) {
+          _realtimeAudioCommitItemIdsByTurnId[turnId.trim()] = itemId;
+        }
+        changed =
+            _upsertAgentRow(
+              itemId: itemId,
+              turnId: turnId,
+              timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
+              data: {
+                'kind': 'message',
+                'role': 'user',
+                'status': 'in_progress',
+                'text': '',
+                'sender_name': _senderNameFromPayload(payload),
+                'message': payload,
+              },
+            ) ||
+            changed;
+        break;
       case _agentTextContentStartedType:
       case _agentAudioTranscriptionStartedType:
-        _liveTextContent.upsert(itemId: _payloadItemId(payload), turnId: _payloadTurnId(payload), phase: _agentMessagePhase(payload));
+        _liveTextContent.upsert(itemId: _transcriptionItemId(payload), turnId: _payloadTurnId(payload), phase: _agentMessagePhase(payload));
         break;
       case _agentTextContentDeltaType:
       case _agentAudioTranscriptionDeltaType:
         final contentRole = _textContentRoleFromPayload(payload);
         changed =
             _appendAgentRowText(
-              itemId: _payloadItemId(payload),
+              itemId: _transcriptionItemId(payload),
               turnId: _payloadTurnId(payload),
               kind: 'message',
               role: contentRole,
@@ -870,27 +908,27 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       case _agentTextContentEndedType:
       case _agentAudioTranscriptionCompletedType:
         final contentRole = _textContentRoleFromPayload(payload);
-        final accumulatedText = _liveTextContent.complete(_payloadItemId(payload));
-        _liveTextContent.remove(_payloadItemId(payload));
+        final itemId = _transcriptionItemId(payload);
+        final accumulatedText = _liveTextContent.complete(itemId);
+        _liveTextContent.remove(itemId);
         final phase = _agentMessagePhase(payload) ?? accumulatedText?.phase;
         changed =
             _upsertAgentRow(
-              itemId: _payloadItemId(payload),
+              itemId: itemId,
               turnId: _payloadTurnId(payload),
               data: {
                 'kind': 'message',
                 'role': contentRole,
                 'status': accumulatedText?.status ?? 'completed',
-                'text': payload['text']?.toString() ?? accumulatedText?.text ?? _agentRowText(_payloadItemId(payload)),
-                'sender_name':
-                    _senderNameFromPayload(payload) ?? accumulatedText?.senderName ?? _agentRowSenderName(_payloadItemId(payload)),
+                'text': payload['text']?.toString() ?? accumulatedText?.text ?? _agentRowText(itemId),
+                'sender_name': _senderNameFromPayload(payload) ?? accumulatedText?.senderName ?? _agentRowSenderName(itemId),
                 'phase': ?phase,
               },
             ) ||
             changed;
         break;
       case _agentAudioTranscriptionFailedType:
-        _liveTextContent.remove(_payloadItemId(payload));
+        _liveTextContent.remove(_transcriptionItemId(payload));
         break;
       case _agentAudioGenerationStartedType:
         unawaited(_audioPlayer.start(_payloadItemId(payload)));
@@ -1191,6 +1229,24 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     );
   }
 
+  String _transcriptionItemId(Map<String, dynamic> payload) {
+    final type = payload['type']?.toString();
+    if (type != _agentAudioTranscriptionStartedType &&
+        type != _agentAudioTranscriptionDeltaType &&
+        type != _agentAudioTranscriptionCompletedType &&
+        type != _agentAudioTranscriptionFailedType) {
+      return _payloadItemId(payload);
+    }
+    if (_textContentRoleFromPayload(payload) != 'user') {
+      return _payloadItemId(payload);
+    }
+    final turnId = _payloadTurnId(payload);
+    if (turnId == null || turnId.trim().isEmpty) {
+      return _payloadItemId(payload);
+    }
+    return _realtimeAudioCommitItemIdsByTurnId[turnId.trim()] ?? _payloadItemId(payload);
+  }
+
   bool _upsertAgentRow({required String itemId, required String? turnId, required Map<String, Object?> data, DateTime? timestamp}) {
     if (itemId.trim().isEmpty) {
       return false;
@@ -1457,9 +1513,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
           to: agent,
           type: _agentRoomMessageType,
           ignoreOffline: true,
-          message: {
-            'payload': {'type': messageType, 'thread_id': path},
-          },
+          message: {'type': messageType, 'thread_id': path},
         );
       } catch (_) {}
     }());
@@ -1472,9 +1526,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
           to: agent,
           type: _agentRoomMessageType,
           ignoreOffline: true,
-          message: {
-            'payload': {'type': _agentModelsRequestType, 'message_id': const Uuid().v4()},
-          },
+          message: {'type': _agentModelsRequestType, 'message_id': const Uuid().v4()},
         );
       } catch (_) {}
     }());
@@ -1489,13 +1541,11 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       to: agent,
       type: _agentRoomMessageType,
       message: {
-        'payload': {
-          'type': _agentModelChangeType,
-          'thread_id': widget.path,
-          'message_id': const Uuid().v4(),
-          'provider': option.provider,
-          'model': option.model,
-        },
+        'type': _agentModelChangeType,
+        'thread_id': widget.path,
+        'message_id': const Uuid().v4(),
+        'provider': option.provider,
+        'model': option.model,
       },
     );
   }
@@ -1553,7 +1603,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     for (final row in rows) {
       final data = _rowData(row);
       final type = data?['type']?.toString();
-      final itemId = row['item_id']?.toString() ?? (data == null ? '' : _payloadItemId(Map<String, dynamic>.from(data)));
+      final itemId = _datasetThreadContentItemId(row: row, payload: data, type: type);
       if (type == _agentTextContentStartedType ||
           type == _agentAudioTranscriptionStartedType ||
           type == _agentReasoningContentStartedType) {
@@ -1778,9 +1828,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     await widget.room.messaging.sendMessage(
       to: agent,
       type: _agentRoomMessageType,
-      message: {
-        'payload': {'type': _agentTurnInterruptType, 'thread_id': widget.path, 'turn_id': turnId},
-      },
+      message: {'type': _agentTurnInterruptType, 'thread_id': widget.path, 'turn_id': turnId},
     );
   }
 
@@ -1790,21 +1838,32 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       throw StateError('No online agent supports agent messages for this thread.');
     }
     final activeModel = _modelController.activeModel;
-    await widget.room.messaging.sendMessage(
-      to: agent,
-      type: _agentRoomMessageType,
-      message: {
-        'payload': {
-          'type': _agentRealtimeAudioChunkType,
+    if (finalChunk) {
+      await widget.room.messaging.sendMessage(
+        to: agent,
+        type: _agentRoomMessageType,
+        message: {
+          'type': _agentRealtimeAudioCommitType,
           'thread_id': widget.path,
           'message_id': const Uuid().v4(),
           if (activeModel != null) 'provider': activeModel.provider,
           if (activeModel != null) 'model': activeModel.model,
-          'mime_type': 'audio/pcm',
-          'sample_rate': 24000,
-          'final': finalChunk,
-          if (finalChunk) 'output_modalities': [_modelController.activeModality],
+          'output_modalities': [_modelController.activeModality],
         },
+      );
+      return;
+    }
+    await widget.room.messaging.sendMessage(
+      to: agent,
+      type: _agentRoomMessageType,
+      message: {
+        'type': _agentRealtimeAudioChunkType,
+        'thread_id': widget.path,
+        'message_id': const Uuid().v4(),
+        if (activeModel != null) 'provider': activeModel.provider,
+        if (activeModel != null) 'model': activeModel.model,
+        'mime_type': 'audio/pcm',
+        'sample_rate': 24000,
       },
       attachment: chunk,
     );
@@ -1852,7 +1911,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       if (!isSteer) {
         payload['output_modalities'] = [_modelController.activeModality];
       }
-      await widget.room.messaging.sendMessage(to: agent, type: _agentRoomMessageType, message: {'payload': payload});
+      await widget.room.messaging.sendMessage(to: agent, type: _agentRoomMessageType, message: payload);
       _controller.outboundStatus.markDelivered(messageId);
       _controller.clear();
     } catch (error, stackTrace) {
@@ -2363,19 +2422,10 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       return explicitFinalIndex;
     }
 
-    final activeTurnId = _status.turnId?.trim();
-    if (activeTurnId != null && activeTurnId.isNotEmpty) {
-      for (var index = start; index < end; index += 1) {
-        final messageTurnId = messages[index].turnId?.trim();
-        if (messageTurnId == null || messageTurnId.isEmpty || messageTurnId == activeTurnId) {
-          return -1;
-        }
-      }
-    }
-
     var inferredFinalIndex = -1;
     for (var index = start; index < end; index += 1) {
-      if (_datasetThreadMessageCanRenderAsFinalAnswer(messages[index])) {
+      final message = messages[index];
+      if (_datasetThreadMessageCanRenderAsFinalAnswer(message)) {
         inferredFinalIndex = index;
       }
     }
@@ -2789,16 +2839,18 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     );
   }
 
-  Widget _buildThreadViewport(BuildContext context, List<_DatasetThreadMessage> messages, List<PendingAgentMessage> pendingMessages) {
+  Widget _buildThreadViewport(
+    BuildContext context,
+    List<_DatasetThreadMessage> messages,
+    List<PendingAgentMessage> pendingMessages, {
+    bool loading = false,
+  }) {
     final showStatus = shouldShowChatThreadStatus(_status);
     final feedImages = _collectThreadImages(messages);
     final threadView = ChatThreadViewportBody(
       scrollController: _controller.threadScrollController,
       bottomAlign: true,
-      centerContent: ChatThreadEmptyStateContent(
-        title: widget.emptyStateTitle ?? 'Chat to get started',
-        description: widget.emptyStateDescription,
-      ),
+      centerContent: loading ? const CircularProgressIndicator() : null,
       bottomSpacer: showStatus ? 20 : 0,
       overlays: [
         if (showStatus)
@@ -2823,7 +2875,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ),
           ),
       ],
-      children: _buildMessageWidgets(context, messages, pendingMessages, feedImages: feedImages),
+      children: loading ? const <Widget>[] : _buildMessageWidgets(context, messages, pendingMessages, feedImages: feedImages),
     );
 
     return OverlayPortal(
@@ -2853,15 +2905,12 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         child: Text(error.toString(), style: ShadTheme.of(context).textTheme.muted, textAlign: TextAlign.center),
       );
     }
-    if (!_ready) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
     return ListenableBuilder(
       listenable: _controller,
       builder: (context, _) {
-        final messages = _messages();
-        final pendingMessages = _combinedPendingMessages(messages);
+        final loading = !_ready;
+        final messages = loading ? const <_DatasetThreadMessage>[] : _messages();
+        final pendingMessages = loading ? const <PendingAgentMessage>[] : _combinedPendingMessages(messages);
         final snapshot = _snapshot(messages, pendingMessages);
         return FileDropArea(
           onFileDrop: (name, dataStream, size) async {
@@ -2869,7 +2918,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
           },
           child: Column(
             children: [
-              Expanded(child: _buildThreadViewport(context, messages, pendingMessages)),
+              Expanded(child: _buildThreadViewport(context, messages, pendingMessages, loading: loading)),
               ChatThreadInputFrame(
                 hasFooter: widget.showUsageFooter,
                 child: Column(
@@ -3056,7 +3105,7 @@ class _DatasetTextContentState {
     required String kind,
     required String role,
   }) {
-    final itemId = row['item_id']?.toString() ?? _payloadItemId(Map<String, dynamic>.from(payload));
+    final itemId = _datasetThreadContentItemId(row: row, payload: payload, type: payload['type']?.toString());
     return _DatasetTextContentState(
       itemId: itemId,
       kind: kind,
@@ -3747,7 +3796,7 @@ _DatasetThreadMessage? _messageForAgentPayload(
     return null;
   }
 
-  final itemId = row['item_id']?.toString() ?? _payloadItemId(Map<String, dynamic>.from(payload));
+  final itemId = _datasetThreadContentItemId(row: row, payload: payload, type: type);
   final createdAt = _rowTimestamp(row);
   final turnId = row['turn_id']?.toString() ?? payload['turn_id']?.toString();
   final phase = _agentMessagePhase(payload);
@@ -3777,6 +3826,21 @@ _DatasetThreadMessage? _messageForAgentPayload(
     case _agentModelChangeType:
     case _agentModelChangedType:
       return null;
+    case _agentRealtimeAudioCommitType:
+      final text = payload['text']?.toString() ?? '';
+      if (text.trim().isEmpty) {
+        return null;
+      }
+      return _DatasetThreadMessage(
+        id: itemId,
+        kind: 'message',
+        role: 'user',
+        text: text,
+        authorName: payload['sender_name']?.toString(),
+        attachments: const [],
+        createdAt: createdAt,
+        turnId: turnId,
+      );
     case _agentTurnStartedType:
     case _agentTurnSteeredType:
       final sourceMessageId = payload['source_message_id']?.toString().trim();
@@ -3809,12 +3873,15 @@ _DatasetThreadMessage? _messageForAgentPayload(
     case _agentAudioTranscriptionDeltaType:
     case _agentAudioTranscriptionCompletedType:
       final text = payload['text']?.toString() ?? '';
+      final role = type == _agentAudioTranscriptionDeltaType || type == _agentAudioTranscriptionCompletedType
+          ? _textContentRoleFromPayload(payload)
+          : 'assistant';
       return text.trim().isEmpty
           ? null
           : _DatasetThreadMessage(
               id: itemId,
               kind: 'message',
-              role: 'agent',
+              role: role == 'assistant' ? 'agent' : role,
               text: text,
               authorName: payload['sender_name']?.toString(),
               attachments: const [],
@@ -4169,6 +4236,35 @@ String? _payloadExplicitItemId(Map<String, dynamic> payload) {
     return messageId.trim();
   }
   return null;
+}
+
+String _datasetThreadContentItemId({required Map<String, Object?> row, required Map<String, Object?>? payload, required String? type}) {
+  if (_isAgentStreamContentType(type) && payload != null) {
+    final payloadItemId = payload['item_id'];
+    if (payloadItemId is String && payloadItemId.trim().isNotEmpty) {
+      return payloadItemId.trim();
+    }
+  }
+  final rowItemId = row['item_id'];
+  if (rowItemId is String && rowItemId.trim().isNotEmpty) {
+    return rowItemId.trim();
+  }
+  if (payload != null) {
+    return _payloadItemId(Map<String, dynamic>.from(payload));
+  }
+  return '';
+}
+
+bool _isAgentStreamContentType(String? type) {
+  return type == _agentTextContentStartedType ||
+      type == _agentTextContentDeltaType ||
+      type == _agentTextContentEndedType ||
+      type == _agentAudioTranscriptionStartedType ||
+      type == _agentAudioTranscriptionDeltaType ||
+      type == _agentAudioTranscriptionCompletedType ||
+      type == _agentReasoningContentStartedType ||
+      type == _agentReasoningContentDeltaType ||
+      type == _agentReasoningContentEndedType;
 }
 
 String? _payloadTurnId(Map<String, dynamic> payload) {

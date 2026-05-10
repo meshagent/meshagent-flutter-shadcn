@@ -735,6 +735,22 @@ void main() {
     expect(appliedState.supportsAgentMessages, isTrue);
   });
 
+  test('resolveChatThreadStatus ignores accepted messages with no known input content', () async {
+    final harness = await _startMessagingHarness();
+    addTearDown(harness.dispose);
+
+    const threadPath = '/threads/test.thread';
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {'type': 'meshagent.agent.turn.start.accepted', 'thread_id': threadPath, 'source_message_id': 'audio-message-1'},
+    );
+
+    final state = resolveChatThreadStatus(room: harness.room, path: threadPath, agentName: 'assistant');
+
+    expect(state.pendingMessages, isEmpty);
+    expect(state.supportsAgentMessages, isTrue);
+  });
+
   test('ChatThreadController marks replayed pending messages when applied', () async {
     final harness = await _startMessagingHarness();
     addTearDown(harness.dispose);
@@ -834,7 +850,8 @@ void main() {
       if (event is! RoomMessageEvent || event.message.type != 'agent-message') {
         return;
       }
-      final payload = event.message.message['payload'];
+      final message = event.message.message;
+      final payload = message['type'] is String ? message : message['payload'];
       if (payload is Map<String, dynamic>) {
         latestUsage = AgentUsageSnapshot.fromPayload(payload);
       } else if (payload is Map) {

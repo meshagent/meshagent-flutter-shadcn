@@ -25,6 +25,7 @@ class MultiThreadView extends StatefulWidget {
     this.centerComposer = true,
     this.showUsageFooter = false,
     this.emptyState,
+    this.inputPlaceholder,
     this.inputContextMenuBuilder,
     this.inputOnPressedOutside,
     this.modelController,
@@ -45,6 +46,7 @@ class MultiThreadView extends StatefulWidget {
   final bool centerComposer;
   final bool showUsageFooter;
   final Widget? emptyState;
+  final Widget? inputPlaceholder;
   final EditableTextContextMenuBuilder? inputContextMenuBuilder;
   final TapRegionCallback? inputOnPressedOutside;
   final DatasetChatModelController? modelController;
@@ -117,6 +119,7 @@ class _MultiThreadViewState extends State<MultiThreadView> {
       centerComposer: widget.centerComposer,
       showUsageFooter: widget.showUsageFooter,
       emptyState: widget.emptyState,
+      inputPlaceholder: widget.inputPlaceholder,
       inputContextMenuBuilder: widget.inputContextMenuBuilder,
       inputOnPressedOutside: widget.inputOnPressedOutside,
       modelController: widget.modelController,

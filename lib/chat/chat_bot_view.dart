@@ -280,6 +280,7 @@ class _ChatBotViewState extends State<ChatBotView> {
       centerComposer: widget.centerComposer,
       showUsageFooter: widget.showUsageFooter,
       emptyState: widget.emptyState,
+      inputPlaceholder: widget.inputPlaceholder,
       inputContextMenuBuilder: widget.inputContextMenuBuilder,
       inputOnPressedOutside: widget.inputOnPressedOutside,
       toolsBuilder: widget.toolsBuilder,

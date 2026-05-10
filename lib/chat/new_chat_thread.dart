@@ -16,6 +16,7 @@ const String _agentThreadStartedType = "meshagent.agent.thread.started";
 const String _agentTurnStartRejectedType = "meshagent.agent.turn.start.rejected";
 const String _agentTurnStartType = "meshagent.agent.turn.start";
 const String _agentRealtimeAudioChunkType = "meshagent.agent.realtime_audio.chunk";
+const String _agentRealtimeAudioCommitType = "meshagent.agent.realtime_audio.commit";
 const String _agentModelsRequestType = "meshagent.agent.models.request";
 const String _agentModelsResponseType = "meshagent.agent.models.response";
 const String _agentModelChangedType = "meshagent.agent.model.changed";
@@ -41,6 +42,7 @@ class NewChatThread extends StatefulWidget {
     this.centerComposer = true,
     this.showUsageFooter = false,
     this.emptyState,
+    this.inputPlaceholder,
     this.inputContextMenuBuilder,
     this.inputOnPressedOutside,
     this.modelController,
@@ -61,6 +63,7 @@ class NewChatThread extends StatefulWidget {
   final bool centerComposer;
   final bool showUsageFooter;
   final Widget? emptyState;
+  final Widget? inputPlaceholder;
   final EditableTextContextMenuBuilder? inputContextMenuBuilder;
   final TapRegionCallback? inputOnPressedOutside;
   final DatasetChatModelController? modelController;
@@ -102,15 +105,6 @@ class _NewChatThreadState extends State<NewChatThread> {
       return null;
     }
     return localPath;
-  }
-
-  String _chatPlaceholderText() {
-    final normalizedAgentName = widget.agentName.trim();
-    if (normalizedAgentName.isEmpty) {
-      return "Message...";
-    }
-
-    return "Message $normalizedAgentName...";
   }
 
   Widget _buildUsageFooter(BuildContext context) {
@@ -247,7 +241,8 @@ class _NewChatThreadState extends State<NewChatThread> {
       return;
     }
     if (event.message.type == _agentRoomMessageType && event.message.fromParticipantId == _agent?.id) {
-      final rawPayload = event.message.message["payload"];
+      final message = event.message.message;
+      final rawPayload = message["type"] is String ? message : message["payload"];
       final payload = rawPayload is Map<String, dynamic>
           ? rawPayload
           : rawPayload is Map
@@ -343,9 +338,7 @@ class _NewChatThreadState extends State<NewChatThread> {
           to: agent,
           type: _agentRoomMessageType,
           ignoreOffline: true,
-          message: {
-            "payload": {"type": _agentModelsRequestType, "message_id": const Uuid().v4()},
-          },
+          message: {"type": _agentModelsRequestType, "message_id": const Uuid().v4()},
         );
       } catch (_) {}
     }());
@@ -373,7 +366,7 @@ class _NewChatThreadState extends State<NewChatThread> {
         return;
       }
       final rawMessage = event.message.message;
-      final rawPayload = rawMessage["payload"];
+      final rawPayload = rawMessage["type"] is String ? rawMessage : rawMessage["payload"];
       if (rawPayload is! Map) {
         return;
       }
@@ -409,7 +402,7 @@ class _NewChatThreadState extends State<NewChatThread> {
       if (senderName != null && senderName.trim().isNotEmpty) {
         payload["sender_name"] = senderName.trim();
       }
-      await widget.room.messaging.sendMessage(to: agent, type: _agentRoomMessageType, message: {"payload": payload});
+      await widget.room.messaging.sendMessage(to: agent, type: _agentRoomMessageType, message: payload);
       return await completer.future.timeout(const Duration(seconds: 30));
     } on TimeoutException {
       throw RoomServerException("Timed out waiting for thread to start.");
@@ -429,7 +422,8 @@ class _NewChatThreadState extends State<NewChatThread> {
       if (event is! RoomMessageEvent || event.message.fromParticipantId != agent.id || event.message.type != _agentRoomMessageType) {
         return;
       }
-      final rawPayload = event.message.message["payload"];
+      final rawMessage = event.message.message;
+      final rawPayload = rawMessage["type"] is String ? rawMessage : rawMessage["payload"];
       if (rawPayload is! Map || rawPayload["source_message_id"] != messageId) {
         return;
       }
@@ -458,7 +452,7 @@ class _NewChatThreadState extends State<NewChatThread> {
       if (senderName != null && senderName.trim().isNotEmpty) {
         payload["sender_name"] = senderName.trim();
       }
-      await widget.room.messaging.sendMessage(to: agent, type: _agentRoomMessageType, message: {"payload": payload});
+      await widget.room.messaging.sendMessage(to: agent, type: _agentRoomMessageType, message: payload);
       return await completer.future.timeout(const Duration(seconds: 30));
     } on TimeoutException {
       throw RoomServerException("Timed out waiting for thread to start.");
@@ -509,39 +503,50 @@ class _NewChatThreadState extends State<NewChatThread> {
       final path = await _ensureRealtimeAudioThread();
       final agent = _agent ?? await _waitForAgentOnline();
       final activeModel = _modelController.activeModel;
-      await widget.room.messaging.sendMessage(
-        to: agent,
-        type: _agentRoomMessageType,
-        message: {
-          "payload": {
-            "type": _agentRealtimeAudioChunkType,
+      if (finalChunk) {
+        await widget.room.messaging.sendMessage(
+          to: agent,
+          type: _agentRoomMessageType,
+          message: {
+            "type": _agentRealtimeAudioCommitType,
             "thread_id": path,
             "message_id": const Uuid().v4(),
             if (activeModel != null) "provider": activeModel.provider,
             if (activeModel != null) "model": activeModel.model,
-            "mime_type": "audio/pcm",
-            "sample_rate": 24000,
-            "final": finalChunk,
-            if (finalChunk) "output_modalities": [_modelController.activeModality],
+            "output_modalities": [_modelController.activeModality],
           },
+        );
+        if (!mounted) {
+          return;
+        }
+        _realtimeAudioThreadPath = null;
+        setState(() {
+          _threadPath = path;
+          _newThreadError = null;
+          _creatingNewThread = false;
+          _waitingForAgent = false;
+          _pendingFirstMessage = null;
+        });
+        _modelController.setLocked(false);
+        _notifyThreadResolved(path, null);
+        _notifyThreadPathChanged(path);
+        _controller.clear();
+        return;
+      }
+      await widget.room.messaging.sendMessage(
+        to: agent,
+        type: _agentRoomMessageType,
+        message: {
+          "type": _agentRealtimeAudioChunkType,
+          "thread_id": path,
+          "message_id": const Uuid().v4(),
+          if (activeModel != null) "provider": activeModel.provider,
+          if (activeModel != null) "model": activeModel.model,
+          "mime_type": "audio/pcm",
+          "sample_rate": 24000,
         },
         attachment: chunk,
       );
-      if (!finalChunk || !mounted) {
-        return;
-      }
-      _realtimeAudioThreadPath = null;
-      setState(() {
-        _threadPath = path;
-        _newThreadError = null;
-        _creatingNewThread = false;
-        _waitingForAgent = false;
-        _pendingFirstMessage = null;
-      });
-      _modelController.setLocked(false);
-      _notifyThreadResolved(path, null);
-      _notifyThreadPathChanged(path);
-      _controller.clear();
     } catch (error) {
       if (!mounted) {
         return;
@@ -794,7 +799,7 @@ class _NewChatThreadState extends State<NewChatThread> {
         onCancelSend: _composerLocked ? _cancelPendingNewThread : null,
         readOnly: false,
         clearOnSend: false,
-        placeholder: Text(_chatPlaceholderText()),
+        placeholder: widget.inputPlaceholder,
         leading: toolArea.leading,
         footer: toolArea.footer,
         trailing: null,

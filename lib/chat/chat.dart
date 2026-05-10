@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:collection/collection.dart';
 
@@ -55,6 +56,8 @@ const double _mobileStorageSaveFlowDialogMaxWidth = 420;
 const double _mobileStorageSaveFlowDialogViewportTopGap = 20;
 const int _audioInputSampleRate = 24000;
 const int _audioInputChannels = 1;
+const Duration _audioInputFlushInterval = Duration(milliseconds: 250);
+const int _audioInputFlushBytes = _audioInputSampleRate * _audioInputChannels * 2 ~/ 4;
 const EdgeInsets _chatBubbleContentPadding = EdgeInsets.only(
   left: _chatBubbleContentHorizontalPadding,
   right: _chatBubbleContentHorizontalPadding,
@@ -812,6 +815,8 @@ class PendingAgentMessage {
   final bool awaitingApplication;
   final bool awaitingOnline;
 
+  bool get hasVisibleContent => text.trim().isNotEmpty || attachments.isNotEmpty;
+
   static ({String text, List<String> attachments}) _parseContent(Object? content) {
     final textParts = <String>[];
     final attachments = <String>[];
@@ -1292,6 +1297,12 @@ class _AgentThreadMessageStatusStore {
     }
     final pendingMessages = _pendingMessagesByThreadPath.putIfAbsent(threadPath, LinkedHashMap<String, PendingAgentMessage>.new);
     final existing = pendingMessages[parsedMessage.messageId];
+    if (existing == null && parsedMessage.text.trim().isEmpty && parsedMessage.attachments.isEmpty) {
+      if (pendingMessages.isEmpty) {
+        _pendingMessagesByThreadPath.remove(threadPath);
+      }
+      return false;
+    }
     final message = existing == null
         ? parsedMessage
         : PendingAgentMessage(
@@ -1312,6 +1323,13 @@ class _AgentThreadMessageStatusStore {
 
   bool _upsertPendingMessage(String threadPath, PendingAgentMessage message) {
     final pendingMessages = _pendingMessagesByThreadPath.putIfAbsent(threadPath, LinkedHashMap<String, PendingAgentMessage>.new);
+    if (!message.hasVisibleContent) {
+      final removed = pendingMessages.remove(message.messageId) != null;
+      if (pendingMessages.isEmpty) {
+        _pendingMessagesByThreadPath.remove(threadPath);
+      }
+      return removed;
+    }
     final existing = pendingMessages[message.messageId];
     if (existing != null &&
         existing.messageType == message.messageType &&
@@ -1753,6 +1771,9 @@ class ChatThreadController extends ChangeNotifier {
   }
 
   void _markPendingAgentMessage({required PendingAgentMessage message}) {
+    if (!message.hasVisibleContent) {
+      return;
+    }
     _pendingAgentMessages[message.messageId] = message;
     notifyListeners();
   }
@@ -1906,7 +1927,7 @@ class ChatThreadController extends ChangeNotifier {
         _markPendingAgentMessageAccepted(normalizedSourceMessageId);
       } else {
         final pendingMessage = PendingAgentMessage.fromAcceptedPayload(payload);
-        if (pendingMessage.threadPath.trim().isNotEmpty) {
+        if (pendingMessage.threadPath.trim().isNotEmpty && pendingMessage.hasVisibleContent) {
           _markPendingAgentMessage(message: pendingMessage);
         }
       }
@@ -2053,9 +2074,7 @@ class ChatThreadController extends ChangeNotifier {
           room.messaging.sendMessage(
             to: participant,
             type: _agentRoomMessageType,
-            message: {
-              "payload": {"type": _agentTurnInterruptType, "thread_id": path, "turn_id": turnId},
-            },
+            message: {"type": _agentTurnInterruptType, "thread_id": path, "turn_id": turnId},
           ),
       ]);
       return;
@@ -2081,9 +2100,7 @@ class ChatThreadController extends ChangeNotifier {
           room.messaging.sendMessage(
             to: participant,
             type: _agentRoomMessageType,
-            message: {
-              "payload": {"type": _agentThreadClearType, "thread_id": path},
-            },
+            message: {"type": _agentThreadClearType, "thread_id": path},
           ),
       ]);
       return;
@@ -2226,7 +2243,7 @@ class ChatThreadController extends ChangeNotifier {
         if (!isSteer && toolChoice != null) {
           payload["tool_choice"] = toolChoice.toJson();
         }
-        await room.messaging.sendMessage(to: participant, type: _agentRoomMessageType, message: {"payload": payload});
+        await room.messaging.sendMessage(to: participant, type: _agentRoomMessageType, message: payload);
         return;
       }
 
@@ -3282,7 +3299,6 @@ class _AudioWaveformPainter extends CustomPainter {
       return;
     }
     final paint = Paint()
-      ..color = color.withValues(alpha: 0.66)
       ..strokeCap = StrokeCap.round
       ..strokeWidth = 2;
     const barWidth = 2.0;
@@ -3290,9 +3306,12 @@ class _AudioWaveformPainter extends CustomPainter {
     final count = math.max(16, (size.width / (barWidth + barGap)).floor());
     for (var index = 0; index < count; index += 1) {
       final levelIndex = levels.length - count + index;
-      final rawLevel = levelIndex >= 0 ? levels[levelIndex].clamp(0.0, 1.0) : 0.04;
-      final level = math.max(0.08, math.sqrt(rawLevel) * 0.9);
-      final height = math.max(4.0, size.height * level);
+      final hasLevel = levelIndex >= 0;
+      final rawLevel = hasLevel ? levels[levelIndex].clamp(0.0, 1.0) : 0.0;
+      final active = rawLevel > 0.005;
+      final level = active ? math.sqrt(rawLevel) * 0.9 : 0.0;
+      final height = active ? math.max(4.0, size.height * level) : 1.0;
+      paint.color = color.withValues(alpha: active ? 0.66 : 0.24);
       final x = size.width - ((count - index) * (barWidth + barGap)) + barWidth / 2;
       canvas.drawLine(Offset(x, (size.height - height) / 2), Offset(x, (size.height + height) / 2), paint);
     }
@@ -3374,6 +3393,9 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   List<FileAttachment> attachments = [];
   AudioRecorder? _audioRecorder;
   StreamSubscription<Uint8List>? _audioStreamSubscription;
+  Timer? _audioFlushTimer;
+  final BytesBuilder _audioBuffer = BytesBuilder(copy: false);
+  Future<void> _audioSendTail = Future<void>.value();
   final List<double> _audioLevels = [];
 
   void _syncDraftStateFromController({bool triggerExternalOnChanged = false}) {
@@ -3498,6 +3520,24 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     });
   }
 
+  Future<void> _enqueueAudioChunk(Uint8List chunk, {required bool finalChunk}) {
+    final onAudioChunk = widget.onAudioChunk;
+    if (onAudioChunk == null) {
+      return Future<void>.value();
+    }
+    final previousSend = _audioSendTail;
+    final send = previousSend.then((_) => onAudioChunk(chunk, finalChunk: finalChunk));
+    _audioSendTail = send.catchError((_) {});
+    return send;
+  }
+
+  Future<void> _flushAudioBuffer() {
+    if (_audioBuffer.isEmpty) {
+      return Future<void>.value();
+    }
+    return _enqueueAudioChunk(_audioBuffer.takeBytes(), finalChunk: false);
+  }
+
   Future<void> _startAudioRecording() async {
     if (recordingAudio || widget.readOnly || !widget.audioInputEnabled) {
       return;
@@ -3529,18 +3569,23 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     }
     setState(() {
       _audioRecorder = recorder;
+      _audioBuffer.clear();
       _audioLevels.clear();
       recordingAudio = true;
       stoppingAudio = false;
+    });
+    _audioFlushTimer?.cancel();
+    _audioFlushTimer = Timer.periodic(_audioInputFlushInterval, (_) {
+      unawaited(_flushAudioBuffer());
     });
     _audioStreamSubscription = stream.listen(
       (chunk) {
         if (!mounted || chunk.isEmpty) {
           return;
         }
-        final onAudioChunk = widget.onAudioChunk;
-        if (onAudioChunk != null) {
-          unawaited(onAudioChunk(Uint8List.fromList(chunk), finalChunk: false));
+        _audioBuffer.add(chunk);
+        if (_audioBuffer.length >= _audioInputFlushBytes) {
+          unawaited(_flushAudioBuffer());
         }
         setState(() {
           _audioLevels.add(_audioLevelFromPcm16(chunk));
@@ -3573,6 +3618,8 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     _audioRecorder = null;
     await _audioStreamSubscription?.cancel();
     _audioStreamSubscription = null;
+    _audioFlushTimer?.cancel();
+    _audioFlushTimer = null;
     if (recorder != null) {
       await recorder.stop();
       await recorder.dispose();
@@ -3585,12 +3632,11 @@ class _ChatThreadInput extends State<ChatThreadInput> {
       stoppingAudio = false;
     });
     if (!submit) {
+      _audioBuffer.clear();
       return;
     }
-    final onAudioChunk = widget.onAudioChunk;
-    if (onAudioChunk != null) {
-      await onAudioChunk(Uint8List(0), finalChunk: true);
-    }
+    await _flushAudioBuffer();
+    await _enqueueAudioChunk(Uint8List(0), finalChunk: true);
   }
 
   Future<void> _cancelAudioRecording() async {
@@ -3755,6 +3801,8 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   void dispose() {
     super.dispose();
 
+    _audioFlushTimer?.cancel();
+    _audioBuffer.clear();
     unawaited(_audioStreamSubscription?.cancel());
     unawaited(_audioRecorder?.dispose());
     widget.controller.removeListener(_onChanged);
@@ -9250,8 +9298,8 @@ class _ChatThreadProcessingStatusRowState extends State<ChatThreadProcessingStat
                       widget.onCancel!();
                     }
                   : null,
-              child: ShadTooltip(
-                builder: (context) => Text(widget.cancelEnabled ? "Stop" : "Cancelling"),
+              child: Tooltip(
+                message: widget.cancelEnabled ? "Stop" : "Cancelling",
                 child: SizedBox(
                   width: 24,
                   height: 24,
@@ -9938,9 +9986,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
       await widget.room.messaging.sendMessage(
         to: agent,
         type: _agentRoomMessageType,
-        message: {
-          "payload": {"type": _agentCapabilitiesRequestType, "thread_id": widget.path, "message_id": const Uuid().v4()},
-        },
+        message: {"type": _agentCapabilitiesRequestType, "thread_id": widget.path, "message_id": const Uuid().v4()},
       );
     } catch (_) {
       if (_capabilitiesRequestKey == requestKey) {
@@ -10068,9 +10114,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
           to: agent,
           type: _agentRoomMessageType,
           ignoreOffline: true,
-          message: {
-            "payload": {"type": messageType, "thread_id": path},
-          },
+          message: {"type": messageType, "thread_id": path},
         );
       } catch (_) {}
     }());
@@ -10112,7 +10156,8 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
 
     if (event is RoomMessageEvent) {
       if (event.message.type == _agentRoomMessageType) {
-        final payload = event.message.message["payload"];
+        final message = event.message.message;
+        final payload = message["type"] is String ? message : message["payload"];
         if (payload is Map<String, dynamic>) {
           final statusChanged = trackAgentThreadStatusPayload(room: widget.room, payload: payload);
           if (_handleCapabilitiesPayload(event: event, payload: payload)) {
@@ -11059,12 +11104,10 @@ class _EventLineState extends State<EventLine> {
             type: useAgentMessages ? _agentRoomMessageType : (approve ? "approved" : "rejected"),
             message: useAgentMessages
                 ? {
-                    "payload": {
-                      "type": approve ? _agentToolApproveType : _agentToolRejectType,
-                      "thread_id": widget.path,
-                      "turn_id": turnId,
-                      "item_id": approvalId,
-                    },
+                    "type": approve ? _agentToolApproveType : _agentToolRejectType,
+                    "thread_id": widget.path,
+                    "turn_id": turnId,
+                    "item_id": approvalId,
                   }
                 : {"path": widget.path, "approval_id": approvalId},
           ),

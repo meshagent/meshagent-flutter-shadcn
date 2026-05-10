@@ -208,7 +208,7 @@ Future<String> _sendStartThreadMessage({
       return;
     }
     final rawMessage = event.message.message;
-    final rawPayload = rawMessage["payload"];
+    final rawPayload = rawMessage["type"] is String ? rawMessage : rawMessage["payload"];
     if (rawPayload is! Map) {
       return;
     }
@@ -231,7 +231,7 @@ Future<String> _sendStartThreadMessage({
     if (senderName is String && senderName.trim().isNotEmpty) {
       payload["sender_name"] = senderName.trim();
     }
-    await room.messaging.sendMessage(to: agent, type: _agentRoomMessageType, message: {"payload": payload});
+    await room.messaging.sendMessage(to: agent, type: _agentRoomMessageType, message: payload);
     return await completer.future.timeout(timeout);
   } on TimeoutException {
     throw RoomServerException("Timed out waiting for thread to start.");
