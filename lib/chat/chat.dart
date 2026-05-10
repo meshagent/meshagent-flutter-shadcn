@@ -23,6 +23,7 @@ import 'package:meshagent_flutter_shadcn/src/web_context_menu_manager/enable_web
 import 'package:meshagent_flutter_shadcn/chat/thread_attachment_share.dart';
 import 'package:meshagent_flutter_shadcn/chat/tool_call_status_accumulator.dart';
 import 'package:re_highlight/styles/monokai-sublime.dart';
+import 'package:record/record.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:super_clipboard/super_clipboard.dart';
 import 'package:super_drag_and_drop/super_drag_and_drop.dart';
@@ -52,6 +53,8 @@ const double _mobileReactionFlowDialogTopPadding = 30;
 const double _mobileReactionFlowDialogBottomPadding = 28;
 const double _mobileStorageSaveFlowDialogMaxWidth = 420;
 const double _mobileStorageSaveFlowDialogViewportTopGap = 20;
+const int _audioInputSampleRate = 24000;
+const int _audioInputChannels = 1;
 const EdgeInsets _chatBubbleContentPadding = EdgeInsets.only(
   left: _chatBubbleContentHorizontalPadding,
   right: _chatBubbleContentHorizontalPadding,
@@ -1542,7 +1545,7 @@ class ChatThreadStatusIndicator extends StatelessWidget {
 }
 
 class FileAttachment extends ChangeNotifier {
-  FileAttachment({required this.path, UploadStatus initialStatus = UploadStatus.initial}) : _status = initialStatus;
+  FileAttachment({required this.path, this.mimeType, UploadStatus initialStatus = UploadStatus.initial}) : _status = initialStatus;
 
   UploadStatus _status;
 
@@ -1557,16 +1560,17 @@ class FileAttachment extends ChangeNotifier {
   }
 
   String path;
+  final String? mimeType;
   String get filename => path.split("/").last;
 }
 
 class MeshagentFileUpload extends FileAttachment {
-  MeshagentFileUpload({required this.room, required super.path, required this.dataStream, this.size = 0}) {
+  MeshagentFileUpload({required this.room, required super.path, required this.dataStream, this.size = 0, super.mimeType}) {
     _upload();
   }
 
   // Requires to manually call startUpload()
-  MeshagentFileUpload.deferred({required this.room, required super.path, required this.dataStream, this.size = 0});
+  MeshagentFileUpload.deferred({required this.room, required super.path, required this.dataStream, this.size = 0, super.mimeType});
 
   int size;
 
@@ -1608,7 +1612,7 @@ class MeshagentFileUpload extends FileAttachment {
         }
       }
 
-      await room.storage.uploadStream(path, trackedStream(), overwrite: true, size: size > 0 ? size : null);
+      await room.storage.uploadStream(path, trackedStream(), overwrite: true, size: size > 0 ? size : null, mimeType: mimeType);
 
       _completer.complete();
 
@@ -2097,8 +2101,8 @@ class ChatThreadController extends ChangeNotifier {
     }
   }
 
-  Future<FileAttachment> uploadFile(String path, Stream<Uint8List> dataStream, int size) async {
-    final uploader = MeshagentFileUpload(room: room, path: path, dataStream: dataStream, size: size);
+  Future<FileAttachment> uploadFile(String path, Stream<Uint8List> dataStream, int size, {String? mimeType}) async {
+    final uploader = MeshagentFileUpload(room: room, path: path, dataStream: dataStream, size: size, mimeType: mimeType);
     uploader.addListener(notifyListeners);
 
     _attachmentUploads.add(uploader);
@@ -2107,8 +2111,8 @@ class ChatThreadController extends ChangeNotifier {
     return uploader;
   }
 
-  Future<FileAttachment> uploadFileDeferred(String path, Stream<Uint8List> dataStream, int size) async {
-    final uploader = MeshagentFileUpload.deferred(room: room, path: path, dataStream: dataStream, size: size);
+  Future<FileAttachment> uploadFileDeferred(String path, Stream<Uint8List> dataStream, int size, {String? mimeType}) async {
+    final uploader = MeshagentFileUpload.deferred(room: room, path: path, dataStream: dataStream, size: size, mimeType: mimeType);
 
     uploader.addListener(notifyListeners);
 
@@ -3248,6 +3252,56 @@ class _ChatThreadMcpFooterState extends State<ChatThreadMcpFooter> {
   }
 }
 
+double _audioLevelFromPcm16(Uint8List chunk) {
+  if (chunk.length < 2) {
+    return 0;
+  }
+  var total = 0.0;
+  var samples = 0;
+  final data = ByteData.sublistView(chunk);
+  for (var offset = 0; offset + 1 < chunk.length; offset += 2) {
+    final sample = data.getInt16(offset, Endian.little) / 32768.0;
+    total += sample * sample;
+    samples += 1;
+  }
+  if (samples == 0) {
+    return 0;
+  }
+  return math.sqrt(total / samples).clamp(0.0, 1.0);
+}
+
+class _AudioWaveformPainter extends CustomPainter {
+  const _AudioWaveformPainter({required this.levels, required this.color});
+
+  final List<double> levels;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.width <= 0 || size.height <= 0) {
+      return;
+    }
+    final paint = Paint()
+      ..color = color.withValues(alpha: 0.66)
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = 2;
+    const barWidth = 2.0;
+    const barGap = 2.0;
+    final count = math.max(16, (size.width / (barWidth + barGap)).floor());
+    for (var index = 0; index < count; index += 1) {
+      final levelIndex = levels.length - count + index;
+      final rawLevel = levelIndex >= 0 ? levels[levelIndex].clamp(0.0, 1.0) : 0.04;
+      final level = math.max(0.08, math.sqrt(rawLevel) * 0.9);
+      final height = math.max(4.0, size.height * level);
+      final x = size.width - ((count - index) * (barWidth + barGap)) + barWidth / 2;
+      canvas.drawLine(Offset(x, (size.height - height) / 2), Offset(x, (size.height + height) / 2), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _AudioWaveformPainter oldDelegate) => oldDelegate.levels != levels || oldDelegate.color != color;
+}
+
 class ChatThreadInput extends StatefulWidget {
   const ChatThreadInput({
     super.key,
@@ -3267,6 +3321,8 @@ class ChatThreadInput extends StatefulWidget {
     this.trailing,
     this.header,
     this.footer,
+    this.audioInputEnabled = false,
+    this.onAudioChunk,
     this.onClear,
     this.onInterrupt,
     this.onCancelSend,
@@ -3297,6 +3353,8 @@ class ChatThreadInput extends StatefulWidget {
   final Widget? trailing;
   final Widget? header;
   final Widget? footer;
+  final bool audioInputEnabled;
+  final Future<void> Function(Uint8List chunk, {required bool finalChunk})? onAudioChunk;
   final EditableTextContextMenuBuilder? contextMenuBuilder;
   final TapRegionCallback? onPressedOutside;
   final Object? tapRegionGroupId;
@@ -3308,10 +3366,15 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   bool showSendButton = false;
   bool allAttachmentsUploaded = true;
   bool sending = false;
+  bool recordingAudio = false;
+  bool stoppingAudio = false;
   int composerLineCount = 1;
 
   String text = "";
   List<FileAttachment> attachments = [];
+  AudioRecorder? _audioRecorder;
+  StreamSubscription<Uint8List>? _audioStreamSubscription;
+  final List<double> _audioLevels = [];
 
   void _syncDraftStateFromController({bool triggerExternalOnChanged = false}) {
     final nextText = widget.controller.text;
@@ -3416,10 +3479,131 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     }
   }
 
+  Future<void> _handleSendAction() async {
+    if (recordingAudio) {
+      await _stopAudioRecording(submit: true);
+      _resetAudioDraft();
+      return;
+    }
+    await _handleSend();
+    _resetAudioDraft();
+  }
+
+  void _resetAudioDraft() {
+    if (_audioLevels.isEmpty) {
+      return;
+    }
+    setState(() {
+      _audioLevels.clear();
+    });
+  }
+
+  Future<void> _startAudioRecording() async {
+    if (recordingAudio || widget.readOnly || !widget.audioInputEnabled) {
+      return;
+    }
+    final recorder = AudioRecorder();
+    final hasPermission = await recorder.hasPermission();
+    if (!hasPermission) {
+      await recorder.dispose();
+      if (!mounted) {
+        return;
+      }
+      ShadToaster.of(context).show(const ShadToast.destructive(title: Text("Microphone access is required")));
+      return;
+    }
+    final stream = await recorder.startStream(
+      const RecordConfig(
+        encoder: AudioEncoder.pcm16bits,
+        sampleRate: _audioInputSampleRate,
+        numChannels: _audioInputChannels,
+        autoGain: true,
+        echoCancel: true,
+        noiseSuppress: true,
+      ),
+    );
+    if (!mounted) {
+      await recorder.stop();
+      await recorder.dispose();
+      return;
+    }
+    setState(() {
+      _audioRecorder = recorder;
+      _audioLevels.clear();
+      recordingAudio = true;
+      stoppingAudio = false;
+    });
+    _audioStreamSubscription = stream.listen(
+      (chunk) {
+        if (!mounted || chunk.isEmpty) {
+          return;
+        }
+        final onAudioChunk = widget.onAudioChunk;
+        if (onAudioChunk != null) {
+          unawaited(onAudioChunk(Uint8List.fromList(chunk), finalChunk: false));
+        }
+        setState(() {
+          _audioLevels.add(_audioLevelFromPcm16(chunk));
+          if (_audioLevels.length > 96) {
+            _audioLevels.removeRange(0, _audioLevels.length - 96);
+          }
+        });
+      },
+      onError: (Object error) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          recordingAudio = false;
+          stoppingAudio = false;
+        });
+        ShadToaster.of(context).show(ShadToast.destructive(title: const Text("Unable to record audio"), description: Text("$error")));
+      },
+    );
+  }
+
+  Future<void> _stopAudioRecording({required bool submit}) async {
+    if (!recordingAudio || stoppingAudio) {
+      return;
+    }
+    setState(() {
+      stoppingAudio = true;
+    });
+    final recorder = _audioRecorder;
+    _audioRecorder = null;
+    await _audioStreamSubscription?.cancel();
+    _audioStreamSubscription = null;
+    if (recorder != null) {
+      await recorder.stop();
+      await recorder.dispose();
+    }
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      recordingAudio = false;
+      stoppingAudio = false;
+    });
+    if (!submit) {
+      return;
+    }
+    final onAudioChunk = widget.onAudioChunk;
+    if (onAudioChunk != null) {
+      await onAudioChunk(Uint8List(0), finalChunk: true);
+    }
+  }
+
+  Future<void> _cancelAudioRecording() async {
+    if (recordingAudio) {
+      await _stopAudioRecording(submit: false);
+    }
+    _resetAudioDraft();
+  }
+
   late final focusNode = FocusNode(
     onKeyEvent: (_, event) {
       if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.enter && !HardwareKeyboard.instance.isShiftPressed) {
-        unawaited(_handleSend());
+        unawaited(_handleSendAction());
 
         return KeyEventResult.handled;
       }
@@ -3442,7 +3626,10 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   );
 
   Widget _wrapAccessoryTapRegion(Widget child) {
-    return TextFieldTapRegion(groupId: widget.tapRegionGroupId, child: child);
+    return TextFieldTapRegion(
+      groupId: widget.tapRegionGroupId ?? EditableText,
+      child: Listener(behavior: HitTestBehavior.translucent, onPointerDown: (_) => _keepComposerFocusForAccessoryTap(), child: child),
+    );
   }
 
   void _onTextChanged() {
@@ -3528,6 +3715,13 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     });
   }
 
+  void _keepComposerFocusForAccessoryTap() {
+    _restoreComposerFocus();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _restoreComposerFocus();
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -3552,12 +3746,17 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     if ((!oldWidget.autoFocus && widget.autoFocus) || oldWidget.focusTrigger != widget.focusTrigger) {
       _scheduleAutoFocus();
     }
+    if (oldWidget.audioInputEnabled && !widget.audioInputEnabled && recordingAudio) {
+      unawaited(_cancelAudioRecording());
+    }
   }
 
   @override
   void dispose() {
     super.dispose();
 
+    unawaited(_audioStreamSubscription?.cancel());
+    unawaited(_audioRecorder?.dispose());
     widget.controller.removeListener(_onChanged);
     widget.controller.textFieldController.removeListener(_onTextChanged);
 
@@ -3624,6 +3823,47 @@ class _ChatThreadInput extends State<ChatThreadInput> {
 
     // Update the controller's value
     controller.textFieldController.value = TextEditingValue(text: newText, selection: newSelection);
+  }
+
+  Widget _buildAudioRecorderComposer(BuildContext context, {required ShadThemeData theme, required Widget sendButton}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.card,
+        borderRadius: theme.radius.resolve(Directionality.of(context)),
+        border: Border.all(color: theme.colorScheme.border, width: 2),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+      child: Row(
+        children: [
+          _wrapAccessoryTapRegion(
+            ShadTooltip(
+              waitDuration: const Duration(seconds: 1),
+              builder: (context) => const Text("Cancel recording"),
+              child: ShadGestureDetector(
+                cursor: stoppingAudio ? SystemMouseCursors.basic : SystemMouseCursors.click,
+                onTap: stoppingAudio ? null : () => unawaited(_cancelAudioRecording()),
+                child: SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: Center(child: Icon(LucideIcons.square, size: 16, fill: 1, color: theme.colorScheme.foreground)),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: SizedBox(
+              height: 32,
+              child: CustomPaint(
+                painter: _AudioWaveformPainter(levels: _audioLevels, color: theme.colorScheme.foreground),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          sendButton,
+        ],
+      ),
+    );
   }
 
   @override
@@ -3696,7 +3936,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
             },
             onTap: widget.sendEnabled
                 ? () {
-                    unawaited(_handleSend());
+                    unawaited(_handleSendAction());
                   }
                 : null,
             child: Opacity(
@@ -3712,14 +3952,76 @@ class _ChatThreadInput extends State<ChatThreadInput> {
         ),
       ),
     );
-    final trailer =
+    final micButton = widget.audioInputEnabled
+        ? _wrapAccessoryTapRegion(
+            ShadTooltip(
+              waitDuration: const Duration(seconds: 1),
+              builder: (context) => const Text("Record audio"),
+              child: ShadGestureDetector(
+                cursor: widget.readOnly ? SystemMouseCursors.basic : SystemMouseCursors.click,
+                onTap: widget.readOnly ? null : () => unawaited(_startAudioRecording()),
+                child: SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: Center(child: Icon(LucideIcons.mic, size: 16, color: theme.colorScheme.foreground)),
+                ),
+              ),
+            ),
+          )
+        : null;
+    final composerLeading = () {
+      final controls = <Widget>[];
+      if (widget.leading != null) {
+        controls.add(_wrapAccessoryTapRegion(wrapReadOnlyControls(widget.leading!)));
+      }
+      if (controls.isEmpty) {
+        return const SizedBox(width: 3);
+      }
+      return Row(mainAxisSize: MainAxisSize.min, children: controls);
+    }();
+    final primaryTrailer =
         widget.trailing ??
         (sending
             ? cancelSendButton
             : showSendButton && allAttachmentsUploaded
             ? sendButton
             : null);
+    final trailer = () {
+      final controls = <Widget>[];
+      if (micButton != null && !sending) {
+        controls.add(micButton);
+      }
+      if (primaryTrailer != null) {
+        if (controls.isNotEmpty) {
+          controls.add(const SizedBox(width: 4));
+        }
+        controls.add(primaryTrailer);
+      }
+      if (controls.isEmpty) {
+        return null;
+      }
+      if (controls.length == 1) {
+        return controls.single;
+      }
+      return Row(mainAxisSize: MainAxisSize.min, children: controls);
+    }();
+    final inputTrailer = widget.footer == null && trailer != null
+        ? Expanded(
+            child: Align(alignment: Alignment.centerRight, child: trailer),
+          )
+        : null;
     final reservedFooterTrailer = trailer ?? const SizedBox(width: 32, height: 32);
+    if (recordingAudio) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (widget.header != null) widget.header!,
+          _buildAudioRecorderComposer(context, theme: theme, sendButton: sendButton),
+          if (widget.footer != null) Padding(padding: const EdgeInsets.only(top: 6), child: widget.footer!),
+        ],
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
@@ -3778,8 +4080,8 @@ class _ChatThreadInput extends State<ChatThreadInput> {
             ),
             crossAxisAlignment: CrossAxisAlignment.center,
             inputPadding: EdgeInsets.all(2),
-            leading: widget.leading == null ? SizedBox(width: 3) : _wrapAccessoryTapRegion(wrapReadOnlyControls(widget.leading!)),
-            trailing: widget.footer == null ? trailer : null,
+            leading: composerLeading,
+            trailing: inputTrailer,
             padding: EdgeInsets.only(left: 5, right: 5, top: widget.footer == null ? 5 : 10, bottom: widget.footer == null ? 5 : 0),
             onLineCountChange: _onComposerLineCountChanged,
             decoration: (() {

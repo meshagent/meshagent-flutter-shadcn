@@ -15,6 +15,7 @@ const String _agentThreadStartType = "meshagent.agent.thread.start";
 const String _agentThreadStartedType = "meshagent.agent.thread.started";
 const String _agentTurnStartRejectedType = "meshagent.agent.turn.start.rejected";
 const String _agentTurnStartType = "meshagent.agent.turn.start";
+const String _agentRealtimeAudioChunkType = "meshagent.agent.realtime_audio.chunk";
 const String _agentModelsRequestType = "meshagent.agent.models.request";
 const String _agentModelsResponseType = "meshagent.agent.models.response";
 const String _agentModelChangedType = "meshagent.agent.model.changed";
@@ -81,6 +82,8 @@ class _NewChatThreadState extends State<NewChatThread> {
   bool _waitingForAgent = false;
   String? _newThreadError;
   String? _threadPath;
+  String? _realtimeAudioThreadPath;
+  Completer<String>? _realtimeAudioThreadCompleter;
   PendingAgentMessage? _pendingFirstMessage;
   int _newThreadOperationId = 0;
   Completer<RemoteParticipant>? _waitForAgentCompleter;
@@ -218,6 +221,7 @@ class _NewChatThreadState extends State<NewChatThread> {
   void dispose() {
     _roomSubscription?.cancel();
     widget.room.messaging.removeListener(_onMessagingChanged);
+    _resetRealtimeAudioThreadState();
     _cancelWaitingForAgent();
     if (_ownsController) {
       _controller.dispose();
@@ -227,6 +231,15 @@ class _NewChatThreadState extends State<NewChatThread> {
       _modelController.dispose();
     }
     super.dispose();
+  }
+
+  void _resetRealtimeAudioThreadState() {
+    _realtimeAudioThreadPath = null;
+    final completer = _realtimeAudioThreadCompleter;
+    _realtimeAudioThreadCompleter = null;
+    if (completer != null && !completer.isCompleted) {
+      completer.completeError(const ChatSendCancelledException());
+    }
   }
 
   void _onRoomEvent(RoomEvent event) {
@@ -341,8 +354,8 @@ class _NewChatThreadState extends State<NewChatThread> {
   List<Map<String, Object?>> _agentInputContent({required String text, required List<String> attachments}) {
     return [
       if (text.trim().isNotEmpty) {"type": "text", "text": text},
-      for (final path in attachments)
-        if (path.trim().isNotEmpty) {"type": "file", "url": path},
+      for (final attachment in attachments)
+        if (attachment.trim().isNotEmpty) {"type": "file", "url": attachment},
     ];
   }
 
@@ -350,7 +363,7 @@ class _NewChatThreadState extends State<NewChatThread> {
     required RemoteParticipant agent,
     required String messageId,
     required String text,
-    required List<String> attachmentPaths,
+    required List<String> attachments,
     required String? senderName,
   }) async {
     final completer = Completer<String>();
@@ -385,13 +398,14 @@ class _NewChatThreadState extends State<NewChatThread> {
       final payload = <String, Object?>{
         "type": _agentThreadStartType,
         "message_id": messageId,
-        "content": _agentInputContent(text: text, attachments: attachmentPaths),
+        "content": _agentInputContent(text: text, attachments: attachments),
       };
       final activeModel = _modelController.activeModel;
       if (activeModel != null) {
         payload["provider"] = activeModel.provider;
         payload["model"] = activeModel.model;
       }
+      payload["output_modalities"] = [_modelController.activeModality];
       if (senderName != null && senderName.trim().isNotEmpty) {
         payload["sender_name"] = senderName.trim();
       }
@@ -401,6 +415,140 @@ class _NewChatThreadState extends State<NewChatThread> {
       throw RoomServerException("Timed out waiting for thread to start.");
     } finally {
       await subscription.cancel();
+    }
+  }
+
+  Future<String> _sendRealtimeAudioThreadStartMessage({
+    required RemoteParticipant agent,
+    required String messageId,
+    required String? senderName,
+  }) async {
+    final completer = Completer<String>();
+    late final StreamSubscription<RoomEvent> subscription;
+    subscription = widget.room.listen((event) {
+      if (event is! RoomMessageEvent || event.message.fromParticipantId != agent.id || event.message.type != _agentRoomMessageType) {
+        return;
+      }
+      final rawPayload = event.message.message["payload"];
+      if (rawPayload is! Map || rawPayload["source_message_id"] != messageId) {
+        return;
+      }
+      if (rawPayload["type"] == _agentThreadStartedType) {
+        final threadId = rawPayload["thread_id"];
+        if (threadId is String && threadId.trim().isNotEmpty && !completer.isCompleted) {
+          completer.complete(threadId.trim());
+        }
+      } else if (rawPayload["type"] == _agentTurnStartRejectedType && !completer.isCompleted) {
+        final error = rawPayload["error"];
+        final message = error is Map ? error["message"] : null;
+        completer.completeError(
+          RoomServerException(message is String && message.trim().isNotEmpty ? message.trim() : "Thread start rejected."),
+        );
+      }
+    });
+
+    try {
+      final payload = <String, Object?>{"type": _agentThreadStartType, "message_id": messageId, "content": const <Object?>[]};
+      final activeModel = _modelController.activeModel;
+      if (activeModel != null) {
+        payload["provider"] = activeModel.provider;
+        payload["model"] = activeModel.model;
+      }
+      payload["output_modalities"] = [_modelController.activeModality];
+      if (senderName != null && senderName.trim().isNotEmpty) {
+        payload["sender_name"] = senderName.trim();
+      }
+      await widget.room.messaging.sendMessage(to: agent, type: _agentRoomMessageType, message: {"payload": payload});
+      return await completer.future.timeout(const Duration(seconds: 30));
+    } on TimeoutException {
+      throw RoomServerException("Timed out waiting for thread to start.");
+    } finally {
+      await subscription.cancel();
+    }
+  }
+
+  Future<String> _ensureRealtimeAudioThread() async {
+    final existingPath = _realtimeAudioThreadPath;
+    if (existingPath != null && existingPath.trim().isNotEmpty) {
+      return existingPath;
+    }
+    final existingCompleter = _realtimeAudioThreadCompleter;
+    if (existingCompleter != null) {
+      return existingCompleter.future;
+    }
+
+    final completer = Completer<String>();
+    _realtimeAudioThreadCompleter = completer;
+    try {
+      final agent = _agent ?? await _waitForAgentOnline();
+      final senderName = widget.room.localParticipant?.getAttribute("name");
+      final path = await _sendRealtimeAudioThreadStartMessage(
+        agent: agent,
+        messageId: const Uuid().v4(),
+        senderName: senderName is String && senderName.trim().isNotEmpty ? senderName.trim() : null,
+      );
+      _realtimeAudioThreadPath = path;
+      if (!completer.isCompleted) {
+        completer.complete(path);
+      }
+      return path;
+    } catch (error, stackTrace) {
+      if (!completer.isCompleted) {
+        completer.completeError(error, stackTrace);
+      }
+      rethrow;
+    } finally {
+      if (_realtimeAudioThreadCompleter == completer) {
+        _realtimeAudioThreadCompleter = null;
+      }
+    }
+  }
+
+  Future<void> _sendRealtimeAudioChunk(Uint8List chunk, {required bool finalChunk}) async {
+    try {
+      final path = await _ensureRealtimeAudioThread();
+      final agent = _agent ?? await _waitForAgentOnline();
+      final activeModel = _modelController.activeModel;
+      await widget.room.messaging.sendMessage(
+        to: agent,
+        type: _agentRoomMessageType,
+        message: {
+          "payload": {
+            "type": _agentRealtimeAudioChunkType,
+            "thread_id": path,
+            "message_id": const Uuid().v4(),
+            if (activeModel != null) "provider": activeModel.provider,
+            if (activeModel != null) "model": activeModel.model,
+            "mime_type": "audio/pcm",
+            "sample_rate": 24000,
+            "final": finalChunk,
+            if (finalChunk) "output_modalities": [_modelController.activeModality],
+          },
+        },
+        attachment: chunk,
+      );
+      if (!finalChunk || !mounted) {
+        return;
+      }
+      _realtimeAudioThreadPath = null;
+      setState(() {
+        _threadPath = path;
+        _newThreadError = null;
+        _creatingNewThread = false;
+        _waitingForAgent = false;
+        _pendingFirstMessage = null;
+      });
+      _modelController.setLocked(false);
+      _notifyThreadResolved(path, null);
+      _notifyThreadPathChanged(path);
+      _controller.clear();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _newThreadError = "$error";
+      });
     }
   }
 
@@ -460,7 +608,7 @@ class _NewChatThreadState extends State<NewChatThread> {
         agent: readyAgent,
         messageId: pendingFirstMessage.messageId,
         text: prompt,
-        attachmentPaths: attachmentPaths,
+        attachments: attachmentPaths,
         senderName: pendingFirstMessage.senderName,
       );
       final messageId = pendingFirstMessage.messageId;
@@ -526,6 +674,7 @@ class _NewChatThreadState extends State<NewChatThread> {
 
     _newThreadOperationId++;
     _cancelWaitingForAgent();
+    _resetRealtimeAudioThreadState();
 
     setState(() {
       _creatingNewThread = false;
@@ -544,6 +693,7 @@ class _NewChatThreadState extends State<NewChatThread> {
     if (_activeThreadPath == null) {
       return;
     }
+    _resetRealtimeAudioThreadState();
     setState(() {
       _threadPath = null;
       _newThreadError = null;
@@ -631,31 +781,36 @@ class _NewChatThreadState extends State<NewChatThread> {
     final toolsBuilder = widget.toolsBuilder;
     final toolArea = resolveChatThreadToolArea(toolsBuilder == null ? null : toolsBuilder(context, _controller, snapshot));
     final headingStyle = ShadTheme.of(context).textTheme.h4;
-    final input = ChatThreadInput(
-      key: _composerInputKey,
-      focusTrigger: _controller,
-      room: widget.room,
-      controller: _controller,
-      sendEnabled: !_composerLocked,
-      sendDisabledReason: _waitingForAgent ? "Waiting for ${widget.agentName} to be ready." : "Wait for the message to be accepted.",
-      sendPendingText: _waitingForAgent ? "Waiting for ${widget.agentName} to be ready." : "Wait for the message to be accepted.",
-      onCancelSend: _composerLocked ? _cancelPendingNewThread : null,
-      readOnly: false,
-      clearOnSend: false,
-      placeholder: Text(_chatPlaceholderText()),
-      leading: toolArea.leading,
-      footer: toolArea.footer,
-      trailing: null,
-      onSend: (value, attachments) async {
-        if (value.isEmpty && attachments.isEmpty) {
-          return;
-        }
-        if (!_creatingNewThread && !_waitingForAgent) {
-          await _startNewThread();
-        }
-      },
-      contextMenuBuilder: widget.inputContextMenuBuilder,
-      onPressedOutside: widget.inputOnPressedOutside,
+    final input = AnimatedBuilder(
+      animation: _modelController,
+      builder: (context, _) => ChatThreadInput(
+        key: _composerInputKey,
+        focusTrigger: _controller,
+        room: widget.room,
+        controller: _controller,
+        sendEnabled: !_composerLocked,
+        sendDisabledReason: _waitingForAgent ? "Waiting for ${widget.agentName} to be ready." : "Wait for the message to be accepted.",
+        sendPendingText: _waitingForAgent ? "Waiting for ${widget.agentName} to be ready." : "Wait for the message to be accepted.",
+        onCancelSend: _composerLocked ? _cancelPendingNewThread : null,
+        readOnly: false,
+        clearOnSend: false,
+        placeholder: Text(_chatPlaceholderText()),
+        leading: toolArea.leading,
+        footer: toolArea.footer,
+        trailing: null,
+        audioInputEnabled: _modelController.supportsAudioInput,
+        onAudioChunk: _sendRealtimeAudioChunk,
+        onSend: (value, attachments) async {
+          if (value.isEmpty && attachments.isEmpty) {
+            return;
+          }
+          if (!_creatingNewThread && !_waitingForAgent) {
+            await _startNewThread();
+          }
+        },
+        contextMenuBuilder: widget.inputContextMenuBuilder,
+        onPressedOutside: widget.inputOnPressedOutside,
+      ),
     );
     final composer = _buildComposerWithUsageFooter(context, input);
 

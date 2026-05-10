@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:google_fonts/google_fonts.dart';
 // ignore: depend_on_referenced_packages
 import 'package:irondash_message_channel/irondash_message_channel.dart';
 import 'package:meshagent/meshagent.dart';
@@ -417,6 +419,53 @@ Future<void> _pumpUntil(WidgetTester tester, bool Function() condition, {int max
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  GoogleFonts.config.allowRuntimeFetching = false;
+  setUpAll(() async {
+    var directory = File(Platform.resolvedExecutable).parent;
+    File? fontFile;
+    while (true) {
+      final candidates = [
+        File(
+          '${directory.path}/cache/dart-sdk/bin/resources/devtools/assets/packages/devtools_app_shared/fonts/Roboto_Mono/RobotoMono-Regular.ttf',
+        ),
+        File(
+          '${directory.path}/bin/cache/dart-sdk/bin/resources/devtools/assets/packages/devtools_app_shared/fonts/Roboto_Mono/RobotoMono-Regular.ttf',
+        ),
+      ];
+      for (final candidate in candidates) {
+        if (candidate.existsSync()) {
+          fontFile = candidate;
+          break;
+        }
+      }
+      if (fontFile != null || directory.parent.path == directory.path) {
+        break;
+      }
+      directory = directory.parent;
+    }
+    final resolvedFontFile = fontFile;
+    if (resolvedFontFile == null) {
+      throw StateError('Unable to locate a local monospace font for google_fonts tests.');
+    }
+    final fontBytes = resolvedFontFile.readAsBytesSync();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMessageHandler('flutter/assets', (message) async {
+      if (message == null) {
+        return null;
+      }
+      final key = utf8.decode(message.buffer.asUint8List());
+      if (key == 'AssetManifest.bin') {
+        return const StandardMessageCodec().encodeMessage({
+          'google_fonts/SourceCodePro-Regular.ttf': [
+            {'asset': 'google_fonts/SourceCodePro-Regular.ttf'},
+          ],
+        });
+      }
+      if (key == 'google_fonts/SourceCodePro-Regular.ttf') {
+        return ByteData.sublistView(fontBytes);
+      }
+      return null;
+    });
+  });
   TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
     const MethodChannel('dev.irondash.engine_context'),
     (call) async {
@@ -827,6 +876,133 @@ void main() {
         return 'applied dataset pending input did not materialize into the message feed. Rendered text: $texts';
       },
     );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    });
+  });
+
+  testWidgets('Dataset ChatBotView replays realtime second turn status promptly', (tester) async {
+    final harness = (await tester.runAsync<_MessagingHarness>(() async {
+      final harness = await _startMessagingHarness(initialDatasetBatch: _threadRowsBatch(const []));
+      await harness.room.messaging.enable();
+      await _waitUntil(() => harness.room.messaging.remoteParticipants.isNotEmpty);
+      return harness;
+    }))!;
+    addTearDown(harness.dispose);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox.expand(
+            child: ChatBotView(room: harness.room, agentName: 'assistant', documentPath: 'dataset://threads/test'),
+          ),
+        ),
+      ),
+    );
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    });
+    await tester.pump();
+
+    Future<void> sendAgentPayload(Map<String, Object?> payload) async {
+      await tester.runAsync(() async {
+        await harness.server.sendAgentMessage(harness.pair.serverProtocol, payload);
+      });
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+
+    Future<void> sendUserTurn({required String messageId, required String turnId, required String text, required String timestamp}) async {
+      await sendAgentPayload({
+        'type': 'meshagent.agent.turn.start',
+        'thread_id': 'dataset://threads/test',
+        'message_id': messageId,
+        'sender_name': 'self',
+        'content': [
+          {'type': 'text', 'text': text},
+        ],
+      });
+      await sendAgentPayload({
+        'type': 'meshagent.agent.turn.start.accepted',
+        'thread_id': 'dataset://threads/test',
+        'source_message_id': messageId,
+      });
+      await sendAgentPayload({
+        'type': 'meshagent.agent.thread.status',
+        'thread_id': 'dataset://threads/test',
+        'status': 'Working',
+        'mode': 'busy',
+        'started_at': timestamp,
+        'turn_id': turnId,
+      });
+      await sendAgentPayload({
+        'type': 'meshagent.agent.turn.started',
+        'thread_id': 'dataset://threads/test',
+        'turn_id': turnId,
+        'source_message_id': messageId,
+      });
+    }
+
+    Future<void> sendAssistantDelta({required String itemId, required String turnId, required String text}) async {
+      await sendAgentPayload({
+        'type': 'meshagent.agent.text_content.delta',
+        'thread_id': 'dataset://threads/test',
+        'turn_id': turnId,
+        'item_id': itemId,
+        'sender_name': 'assistant',
+        'text': text,
+      });
+    }
+
+    Future<void> endTurn(String turnId) async {
+      await sendAgentPayload({
+        'type': 'meshagent.agent.turn.ended',
+        'thread_id': 'dataset://threads/test',
+        'turn_id': turnId,
+        'error': null,
+      });
+    }
+
+    await sendUserTurn(messageId: 'user-message-1', turnId: 'turn-1', text: 'hello there', timestamp: '2026-05-07T16:00:00Z');
+    await _pumpUntil(
+      tester,
+      () => find.text('hello there').evaluate().isNotEmpty && find.byType(ChatThreadProcessingStatusRow).evaluate().isNotEmpty,
+      describe: () {
+        final texts = tester.widgetList<Text>(find.byType(Text)).map((text) => text.data).whereType<String>().join(' | ');
+        return 'first turn did not render user input and status before assistant delta. Rendered text: $texts';
+      },
+    );
+    await sendAssistantDelta(itemId: 'assistant-message-1', turnId: 'turn-1', text: 'Hi there.');
+    await _pumpUntil(tester, () => find.text('Hi there.').evaluate().isNotEmpty);
+    await endTurn('turn-1');
+    await _pumpUntil(tester, () => find.byType(ChatThreadProcessingStatusRow).evaluate().isEmpty);
+
+    await sendUserTurn(messageId: 'user-message-2', turnId: 'turn-2', text: 'tell me a joke', timestamp: '2026-05-07T16:00:01Z');
+    await _pumpUntil(
+      tester,
+      () =>
+          find.text('tell me a joke').evaluate().isNotEmpty &&
+          find.byType(ChatThreadProcessingStatusRow).evaluate().isNotEmpty &&
+          find.text('Working').evaluate().isNotEmpty,
+      describe: () {
+        final texts = tester.widgetList<Text>(find.byType(Text)).map((text) => text.data).whereType<String>().join(' | ');
+        return 'second turn did not render user input and status before assistant delta. Rendered text: $texts';
+      },
+    );
+    expect(find.text('Here is a short joke.'), findsNothing);
+
+    await sendAssistantDelta(itemId: 'assistant-message-2', turnId: 'turn-2', text: 'Here is a short joke.');
+    await _pumpUntil(
+      tester,
+      () => find.text('tell me a joke').evaluate().isNotEmpty && find.text('Here is a short joke.').evaluate().isNotEmpty,
+      describe: () {
+        final texts = tester.widgetList<Text>(find.byType(Text)).map((text) => text.data).whereType<String>().join(' | ');
+        return 'second turn assistant delta did not render after status. Rendered text: $texts';
+      },
+    );
+    await endTurn('turn-2');
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(milliseconds: 500));
