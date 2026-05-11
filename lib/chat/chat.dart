@@ -9911,7 +9911,7 @@ Size _measureStatusCounterDigit(BuildContext context, TextStyle style) {
     height = math.max(height, size.height);
   }
 
-  return Size(width.ceilToDouble() + 4, height.ceilToDouble());
+  return Size(width.ceilToDouble(), height.ceilToDouble());
 }
 
 class _PreviewSweepOverlay extends StatefulWidget {
