@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:google_fonts/google_fonts.dart';
 // ignore: depend_on_referenced_packages
 import 'package:irondash_message_channel/irondash_message_channel.dart';
 import 'package:meshagent/meshagent.dart';
@@ -63,6 +65,10 @@ class _MessagingHarness {
 
   Future<void> dispose() async {
     room.dispose();
+    await server.drainPendingSends();
+    // Room disposal can enqueue final protocol messages; give the protocol send
+    // loops a turn to flush before closing the in-memory stream sinks.
+    await Future<void>.delayed(const Duration(milliseconds: 50));
     await pair.dispose();
   }
 }
@@ -75,10 +81,30 @@ class _FakeMessagingServer {
   final ArrowRecordBatch _initialDatasetBatch;
   final Completer<void>? _initialReadyGate;
   final Map<String, String> _streamToolsByCallId = {};
+  final List<Future<void>> _pendingSends = [];
   final List<Map<String, dynamic>> invocations = [];
   int _watchPullCount = 0;
   int watchStarts = 0;
   int watchReadyEvents = 0;
+
+  Future<void> drainPendingSends() async {
+    final gate = _initialReadyGate;
+    if (gate != null && !gate.isCompleted) {
+      gate.complete();
+    }
+    while (_pendingSends.isNotEmpty) {
+      await Future.wait<void>(List<Future<void>>.of(_pendingSends));
+    }
+  }
+
+  void _trackPendingSend(Future<void> future) {
+    _pendingSends.add(future);
+    unawaited(
+      future.whenComplete(() {
+        _pendingSends.remove(future);
+      }),
+    );
+  }
 
   Future<void> handleMessage(Protocol protocol, int messageId, String type, Uint8List data) async {
     if (type == 'room.tool_call_request_chunk') {
@@ -95,31 +121,36 @@ class _FakeMessagingServer {
 
     if (request['toolkit'] == 'dataset') {
       final tool = request['tool']?.toString();
-      if (tool != 'watch_table') {
+      if (tool != 'watch_table' && tool != 'search') {
         throw StateError('unsupported dataset operation: $tool');
       }
       final input = _decodeInput(message: message, request: request);
       if (input is! ControlContent) {
-        throw StateError('dataset.watch_table expected stream control input');
+        throw StateError('dataset.$tool expected stream control input');
       }
       final toolCallId = request['tool_call_id']?.toString();
       if (toolCallId == null || toolCallId.isEmpty) {
-        throw StateError('dataset.watch_table missing tool_call_id');
+        throw StateError('dataset.$tool missing tool_call_id');
       }
       _streamToolsByCallId[toolCallId] = tool!;
       await protocol.send('__response__', ControlContent(method: 'open').pack(), id: messageId);
-      unawaited(() async {
+      _trackPendingSend(() async {
         try {
           await Future<void>.delayed(Duration.zero);
           watchStarts += 1;
           await _sendResponseChunk(
             protocol,
             toolCallId,
-            BinaryContent(data: _initialDatasetBatch.ipcBytes, headers: const {'kind': 'data', 'watch_event': 'data', 'phase': 'initial'}),
+            BinaryContent(
+              data: _initialDatasetBatch.ipcBytes,
+              headers: tool == 'watch_table' ? const {'kind': 'data', 'watch_event': 'data', 'phase': 'initial'} : const {'kind': 'data'},
+            ),
           );
           await _initialReadyGate?.future;
           watchReadyEvents += 1;
-          await _sendResponseChunk(protocol, toolCallId, JsonContent(json: const {'kind': 'ready', 'phase': 'initial'}));
+          if (tool == 'watch_table') {
+            await _sendResponseChunk(protocol, toolCallId, JsonContent(json: const {'kind': 'ready', 'phase': 'initial'}));
+          }
           await _sendResponseChunk(protocol, toolCallId, ControlContent(method: 'close'));
         } catch (_) {}
       }());
@@ -177,7 +208,10 @@ class _FakeMessagingServer {
       }
     }
     if (toolCallId == null) {
-      throw StateError('dataset watch has not started');
+      return;
+    }
+    if (_streamToolsByCallId[toolCallId] != 'watch_table') {
+      return;
     }
     await _sendResponseChunk(
       protocol,
@@ -194,13 +228,13 @@ class _FakeMessagingServer {
       return;
     }
     final tool = _streamToolsByCallId[toolCallId];
-    if (tool != 'watch_table') {
+    if (tool != 'watch_table' && tool != 'search') {
       return;
     }
 
     final chunk = _decodeChunk(message: message, request: request);
     if (chunk is! BinaryContent) {
-      throw StateError('dataset.watch_table expected binary stream input');
+      throw StateError('dataset.$tool expected binary stream input');
     }
     if (chunk.headers['kind'] == 'start') {
       _watchPullCount = 0;
@@ -208,16 +242,23 @@ class _FakeMessagingServer {
       await _sendResponseChunk(
         protocol,
         toolCallId,
-        BinaryContent(data: _initialDatasetBatch.ipcBytes, headers: const {'kind': 'data', 'watch_event': 'data', 'phase': 'initial'}),
+        BinaryContent(
+          data: _initialDatasetBatch.ipcBytes,
+          headers: tool == 'watch_table' ? const {'kind': 'data', 'watch_event': 'data', 'phase': 'initial'} : const {'kind': 'data'},
+        ),
       );
       return;
     }
     if (chunk.headers['kind'] == 'pull') {
       _watchPullCount += 1;
-      if (_watchPullCount == 1) {
+      if (_watchPullCount == 1 && tool == 'watch_table') {
         await _initialReadyGate?.future;
         watchReadyEvents += 1;
         await _sendResponseChunk(protocol, toolCallId, JsonContent(json: const {'kind': 'ready', 'phase': 'initial'}));
+      } else if (_watchPullCount == 1 && tool == 'search') {
+        await _initialReadyGate?.future;
+        watchReadyEvents += 1;
+        await _sendResponseChunk(protocol, toolCallId, ControlContent(method: 'close'));
       }
     }
   }
@@ -278,6 +319,15 @@ Map<String, Object?> _messageRow({
   if (senderName != null) {
     data['sender_name'] = senderName;
   }
+  return {'item_id': itemId, 'sequence': sequence, 'timestamp': timestamp, 'data': data};
+}
+
+Map<String, Object?> _agentPayloadRow({
+  required String itemId,
+  required int sequence,
+  required String timestamp,
+  required Map<String, Object?> data,
+}) {
   return {'item_id': itemId, 'sequence': sequence, 'timestamp': timestamp, 'data': data};
 }
 
@@ -369,6 +419,53 @@ Future<void> _pumpUntil(WidgetTester tester, bool Function() condition, {int max
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  GoogleFonts.config.allowRuntimeFetching = false;
+  setUpAll(() async {
+    var directory = File(Platform.resolvedExecutable).parent;
+    File? fontFile;
+    while (true) {
+      final candidates = [
+        File(
+          '${directory.path}/cache/dart-sdk/bin/resources/devtools/assets/packages/devtools_app_shared/fonts/Roboto_Mono/RobotoMono-Regular.ttf',
+        ),
+        File(
+          '${directory.path}/bin/cache/dart-sdk/bin/resources/devtools/assets/packages/devtools_app_shared/fonts/Roboto_Mono/RobotoMono-Regular.ttf',
+        ),
+      ];
+      for (final candidate in candidates) {
+        if (candidate.existsSync()) {
+          fontFile = candidate;
+          break;
+        }
+      }
+      if (fontFile != null || directory.parent.path == directory.path) {
+        break;
+      }
+      directory = directory.parent;
+    }
+    final resolvedFontFile = fontFile;
+    if (resolvedFontFile == null) {
+      throw StateError('Unable to locate a local monospace font for google_fonts tests.');
+    }
+    final fontBytes = resolvedFontFile.readAsBytesSync();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMessageHandler('flutter/assets', (message) async {
+      if (message == null) {
+        return null;
+      }
+      final key = utf8.decode(message.buffer.asUint8List());
+      if (key == 'AssetManifest.bin') {
+        return const StandardMessageCodec().encodeMessage({
+          'google_fonts/SourceCodePro-Regular.ttf': [
+            {'asset': 'google_fonts/SourceCodePro-Regular.ttf'},
+          ],
+        });
+      }
+      if (key == 'google_fonts/SourceCodePro-Regular.ttf') {
+        return ByteData.sublistView(fontBytes);
+      }
+      return null;
+    });
+  });
   TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
     const MethodChannel('dev.irondash.engine_context'),
     (call) async {
@@ -699,6 +796,484 @@ void main() {
     expect(find.text('context 480/128K'), findsNothing);
   });
 
+  testWidgets('Dataset ChatBotView materializes accepted pending input when turn is applied', (tester) async {
+    final harness = (await tester.runAsync<_MessagingHarness>(() async {
+      final harness = await _startMessagingHarness(initialDatasetBatch: _threadRowsBatch(const []));
+      await harness.room.messaging.enable();
+      await _waitUntil(() => harness.room.messaging.remoteParticipants.isNotEmpty);
+      return harness;
+    }))!;
+    addTearDown(harness.dispose);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox.expand(
+            child: ChatBotView(room: harness.room, agentName: 'assistant', documentPath: 'dataset://threads/test'),
+          ),
+        ),
+      ),
+    );
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    });
+    await tester.pump();
+
+    await tester.runAsync(() async {
+      await harness.server.sendAgentMessage(harness.pair.serverProtocol, {
+        'type': 'meshagent.agent.turn.start',
+        'thread_id': 'dataset://threads/test',
+        'message_id': 'user-message-1',
+        'sender_name': 'self',
+        'content': [
+          {'type': 'text', 'text': 'hello dataset'},
+        ],
+      });
+    });
+    await tester.runAsync(() async {
+      await harness.server.sendAgentMessage(harness.pair.serverProtocol, {
+        'type': 'meshagent.agent.turn.start.accepted',
+        'thread_id': 'dataset://threads/test',
+        'source_message_id': 'user-message-1',
+      });
+    });
+    await tester.pump(const Duration(milliseconds: 50));
+
+    await _pumpUntil(
+      tester,
+      () => find.byType(PendingChatThreadMessage).evaluate().isNotEmpty && find.text('hello dataset').evaluate().isNotEmpty,
+      describe: () {
+        final texts = tester.widgetList<Text>(find.byType(Text)).map((text) => text.data).whereType<String>().join(' | ');
+        return 'accepted dataset pending input did not render as pending before status. Rendered text: $texts';
+      },
+    );
+
+    await tester.runAsync(() async {
+      await harness.server.sendAgentMessage(harness.pair.serverProtocol, {
+        'type': 'meshagent.agent.thread.status',
+        'thread_id': 'dataset://threads/test',
+        'status': 'Working',
+        'mode': 'busy',
+        'started_at': '2026-05-07T16:00:00Z',
+        'turn_id': 'turn-1',
+      });
+    });
+    await tester.pump(const Duration(milliseconds: 50));
+
+    await tester.runAsync(() async {
+      await harness.server.sendAgentMessage(harness.pair.serverProtocol, {
+        'type': 'meshagent.agent.turn.started',
+        'thread_id': 'dataset://threads/test',
+        'turn_id': 'turn-1',
+        'source_message_id': 'user-message-1',
+      });
+    });
+    await _pumpUntil(
+      tester,
+      () => find.byType(PendingChatThreadMessage).evaluate().isEmpty && find.text('hello dataset').evaluate().isNotEmpty,
+      describe: () {
+        final texts = tester.widgetList<Text>(find.byType(Text)).map((text) => text.data).whereType<String>().join(' | ');
+        return 'applied dataset pending input did not materialize into the message feed. Rendered text: $texts';
+      },
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    });
+  });
+
+  testWidgets('Dataset ChatBotView replays realtime second turn status promptly', (tester) async {
+    final harness = (await tester.runAsync<_MessagingHarness>(() async {
+      final harness = await _startMessagingHarness(initialDatasetBatch: _threadRowsBatch(const []));
+      await harness.room.messaging.enable();
+      await _waitUntil(() => harness.room.messaging.remoteParticipants.isNotEmpty);
+      return harness;
+    }))!;
+    addTearDown(harness.dispose);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox.expand(
+            child: ChatBotView(room: harness.room, agentName: 'assistant', documentPath: 'dataset://threads/test'),
+          ),
+        ),
+      ),
+    );
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    });
+    await tester.pump();
+
+    Future<void> sendAgentPayload(Map<String, Object?> payload) async {
+      await tester.runAsync(() async {
+        await harness.server.sendAgentMessage(harness.pair.serverProtocol, payload);
+      });
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+
+    Future<void> sendUserTurn({required String messageId, required String turnId, required String text, required String timestamp}) async {
+      await sendAgentPayload({
+        'type': 'meshagent.agent.turn.start',
+        'thread_id': 'dataset://threads/test',
+        'message_id': messageId,
+        'sender_name': 'self',
+        'content': [
+          {'type': 'text', 'text': text},
+        ],
+      });
+      await sendAgentPayload({
+        'type': 'meshagent.agent.turn.start.accepted',
+        'thread_id': 'dataset://threads/test',
+        'source_message_id': messageId,
+      });
+      await sendAgentPayload({
+        'type': 'meshagent.agent.thread.status',
+        'thread_id': 'dataset://threads/test',
+        'status': 'Working',
+        'mode': 'busy',
+        'started_at': timestamp,
+        'turn_id': turnId,
+      });
+      await sendAgentPayload({
+        'type': 'meshagent.agent.turn.started',
+        'thread_id': 'dataset://threads/test',
+        'turn_id': turnId,
+        'source_message_id': messageId,
+      });
+    }
+
+    Future<void> sendAssistantDelta({required String itemId, required String turnId, required String text}) async {
+      await sendAgentPayload({
+        'type': 'meshagent.agent.text_content.delta',
+        'thread_id': 'dataset://threads/test',
+        'turn_id': turnId,
+        'item_id': itemId,
+        'sender_name': 'assistant',
+        'text': text,
+      });
+    }
+
+    Future<void> endTurn(String turnId) async {
+      await sendAgentPayload({
+        'type': 'meshagent.agent.turn.ended',
+        'thread_id': 'dataset://threads/test',
+        'turn_id': turnId,
+        'error': null,
+      });
+    }
+
+    await sendUserTurn(messageId: 'user-message-1', turnId: 'turn-1', text: 'hello there', timestamp: '2026-05-07T16:00:00Z');
+    await _pumpUntil(
+      tester,
+      () => find.text('hello there').evaluate().isNotEmpty && find.byType(ChatThreadProcessingStatusRow).evaluate().isNotEmpty,
+      describe: () {
+        final texts = tester.widgetList<Text>(find.byType(Text)).map((text) => text.data).whereType<String>().join(' | ');
+        return 'first turn did not render user input and status before assistant delta. Rendered text: $texts';
+      },
+    );
+    await sendAssistantDelta(itemId: 'assistant-message-1', turnId: 'turn-1', text: 'Hi there.');
+    await _pumpUntil(tester, () => find.text('Hi there.').evaluate().isNotEmpty);
+    await endTurn('turn-1');
+    await _pumpUntil(tester, () => find.byType(ChatThreadProcessingStatusRow).evaluate().isEmpty);
+
+    await sendUserTurn(messageId: 'user-message-2', turnId: 'turn-2', text: 'tell me a joke', timestamp: '2026-05-07T16:00:01Z');
+    await _pumpUntil(
+      tester,
+      () =>
+          find.text('tell me a joke').evaluate().isNotEmpty &&
+          find.byType(ChatThreadProcessingStatusRow).evaluate().isNotEmpty &&
+          find.text('Working').evaluate().isNotEmpty,
+      describe: () {
+        final texts = tester.widgetList<Text>(find.byType(Text)).map((text) => text.data).whereType<String>().join(' | ');
+        return 'second turn did not render user input and status before assistant delta. Rendered text: $texts';
+      },
+    );
+    expect(find.text('Here is a short joke.'), findsNothing);
+
+    await sendAssistantDelta(itemId: 'assistant-message-2', turnId: 'turn-2', text: 'Here is a short joke.');
+    await _pumpUntil(
+      tester,
+      () => find.text('tell me a joke').evaluate().isNotEmpty && find.text('Here is a short joke.').evaluate().isNotEmpty,
+      describe: () {
+        final texts = tester.widgetList<Text>(find.byType(Text)).map((text) => text.data).whereType<String>().join(' | ');
+        return 'second turn assistant delta did not render after status. Rendered text: $texts';
+      },
+    );
+    await endTurn('turn-2');
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    });
+  });
+
+  testWidgets('Dataset ChatBotView folds stored text deltas into one assistant message', (tester) async {
+    final harness = (await tester.runAsync<_MessagingHarness>(() async {
+      final harness = await _startMessagingHarness(
+        initialDatasetBatch: _threadRowsBatch([
+          _messageRow(itemId: 'user-1', sequence: 0, timestamp: '2026-05-09T18:00:00Z', role: 'user', text: 'hi', senderName: 'self'),
+          _agentPayloadRow(
+            itemId: 'assistant-1',
+            sequence: 1,
+            timestamp: '2026-05-09T18:00:01Z',
+            data: const {
+              'type': 'meshagent.agent.text_content.delta',
+              'item_id': 'assistant-1',
+              'turn_id': 'turn-1',
+              'sender_name': 'assistant',
+              'text': 'Hi',
+            },
+          ),
+          _agentPayloadRow(
+            itemId: 'assistant-1',
+            sequence: 2,
+            timestamp: '2026-05-09T18:00:02Z',
+            data: const {
+              'type': 'meshagent.agent.text_content.delta',
+              'item_id': 'assistant-1',
+              'turn_id': 'turn-1',
+              'sender_name': 'assistant',
+              'text': ' there',
+            },
+          ),
+          _agentPayloadRow(
+            itemId: 'assistant-1',
+            sequence: 3,
+            timestamp: '2026-05-09T18:00:03Z',
+            data: const {
+              'type': 'meshagent.agent.text_content.delta',
+              'item_id': 'assistant-1',
+              'turn_id': 'turn-1',
+              'sender_name': 'assistant',
+              'text': '!',
+            },
+          ),
+          _agentPayloadRow(
+            itemId: 'assistant-1',
+            sequence: 4,
+            timestamp: '2026-05-09T18:00:04Z',
+            data: const {
+              'type': 'meshagent.agent.text_content.delta',
+              'item_id': 'assistant-1',
+              'turn_id': 'turn-1',
+              'sender_name': 'assistant',
+              'text': 'Hi there!',
+            },
+          ),
+          _agentPayloadRow(
+            itemId: 'assistant-1',
+            sequence: 5,
+            timestamp: '2026-05-09T18:00:05Z',
+            data: const {
+              'type': 'meshagent.agent.text_content.ended',
+              'item_id': 'assistant-1',
+              'turn_id': 'turn-1',
+              'sender_name': 'assistant',
+            },
+          ),
+        ]),
+      );
+      await harness.room.messaging.enable();
+      await _waitUntil(() => harness.room.messaging.remoteParticipants.isNotEmpty);
+      return harness;
+    }))!;
+    addTearDown(harness.dispose);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox.expand(
+            child: ChatBotView(room: harness.room, agentName: 'assistant', documentPath: 'dataset://threads/test'),
+          ),
+        ),
+      ),
+    );
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    });
+
+    await _pumpUntil(
+      tester,
+      () => find.text('Hi there!').evaluate().isNotEmpty,
+      describe: () {
+        final texts = tester.widgetList<Text>(find.byType(Text)).map((text) => text.data).whereType<String>().join(' | ');
+        return 'stored text deltas did not render as one assistant message. Rendered text: $texts';
+      },
+    );
+
+    expect(find.text('Hi'), findsNothing);
+    expect(find.text(' there'), findsNothing);
+    expect(find.text('!'), findsNothing);
+    expect(find.textContaining('Worked for'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 500));
+  });
+
+  testWidgets('Dataset ChatBotView does not use the configured agent name as a placeholder author', (tester) async {
+    final harness = (await tester.runAsync<_MessagingHarness>(() async {
+      final harness = await _startMessagingHarness(initialDatasetBatch: _threadRowsBatch(const []));
+      await harness.room.messaging.enable();
+      await _waitUntil(() => harness.room.messaging.remoteParticipants.isNotEmpty);
+      return harness;
+    }))!;
+    addTearDown(harness.dispose);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox.expand(
+            child: ChatBotView(room: harness.room, agentName: 'assistant', documentPath: 'dataset://threads/test'),
+          ),
+        ),
+      ),
+    );
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    });
+    await tester.pump();
+
+    await tester.runAsync(() async {
+      await harness.server.sendAgentMessage(harness.pair.serverProtocol, {
+        'type': 'meshagent.agent.text_content.delta',
+        'thread_id': 'dataset://threads/test',
+        'turn_id': 'turn-1',
+        'item_id': 'assistant-message-1',
+        'text': 'hello',
+      });
+    });
+    await _pumpUntil(tester, () => find.text('hello').evaluate().isNotEmpty);
+
+    expect(find.text('assistant'), findsNothing);
+
+    await tester.runAsync(() async {
+      await harness.server.sendAgentMessage(harness.pair.serverProtocol, {
+        'type': 'meshagent.agent.text_content.delta',
+        'thread_id': 'dataset://threads/test',
+        'turn_id': 'turn-1',
+        'item_id': 'assistant-message-1',
+        'sender_name': 'chatbot',
+        'text': ' there',
+      });
+    });
+    await _pumpUntil(tester, () => find.text('chatbot').evaluate().isNotEmpty && find.text('hello there').evaluate().isNotEmpty);
+
+    expect(find.text('assistant'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 500));
+  });
+
+  testWidgets('Dataset ChatBotView keeps steered messages stable when dataset rows catch up', (tester) async {
+    final harness = (await tester.runAsync<_MessagingHarness>(() async {
+      final harness = await _startMessagingHarness(
+        initialDatasetBatch: _threadRowsBatch([
+          _messageRow(itemId: 'assistant-before', sequence: 0, timestamp: '2026-05-07T16:00:00Z', role: 'assistant', text: 'before steer'),
+        ]),
+      );
+      await harness.room.messaging.enable();
+      await _waitUntil(() => harness.room.messaging.remoteParticipants.isNotEmpty);
+      return harness;
+    }))!;
+    addTearDown(harness.dispose);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox.expand(
+            child: ChatBotView(room: harness.room, agentName: 'assistant', documentPath: 'dataset://threads/test'),
+          ),
+        ),
+      ),
+    );
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    });
+    await _pumpUntil(tester, () => find.text('before steer').evaluate().isNotEmpty);
+
+    await tester.runAsync(() async {
+      await harness.server.sendAgentMessage(harness.pair.serverProtocol, {
+        'type': 'meshagent.agent.turn.steer',
+        'thread_id': 'dataset://threads/test',
+        'turn_id': 'turn-1',
+        'message_id': 'steer-message-1',
+        'sender_name': 'self',
+        'content': [
+          {'type': 'text', 'text': 'in spanish'},
+        ],
+      });
+      await harness.server.sendAgentMessage(harness.pair.serverProtocol, {
+        'type': 'meshagent.agent.turn.steered',
+        'thread_id': 'dataset://threads/test',
+        'turn_id': 'turn-1',
+        'source_message_id': 'steer-message-1',
+      });
+      await harness.server.sendAgentMessage(harness.pair.serverProtocol, {
+        'type': 'meshagent.agent.text_content.delta',
+        'thread_id': 'dataset://threads/test',
+        'turn_id': 'turn-1',
+        'item_id': 'assistant-after',
+        'text': 'after steer',
+      });
+    });
+    await _pumpUntil(
+      tester,
+      () => find.text('in spanish').evaluate().length == 1 && find.text('after steer').evaluate().length == 1,
+      describe: () {
+        final texts = tester.widgetList<Text>(find.byType(Text)).map((text) => text.data).whereType<String>().join(' | ');
+        return 'live steered message did not render once. Rendered text: $texts';
+      },
+    );
+
+    await tester.runAsync(() async {
+      await harness.server.sendDatasetRows(
+        harness.pair.serverProtocol,
+        _threadRowsBatch([
+          _agentPayloadRow(
+            itemId: 'steer-message-1',
+            sequence: 1,
+            timestamp: '2026-05-07T16:00:01Z',
+            data: {
+              'type': 'meshagent.agent.turn.steer',
+              'thread_id': 'dataset://threads/test',
+              'turn_id': 'turn-1',
+              'message_id': 'steer-message-1',
+              'sender_name': 'self',
+              'content': [
+                {'type': 'text', 'text': 'in spanish'},
+              ],
+            },
+          ),
+          _agentPayloadRow(
+            itemId: 'steered-row-1',
+            sequence: 2,
+            timestamp: '2026-05-07T16:00:02Z',
+            data: {
+              'type': 'meshagent.agent.turn.steered',
+              'thread_id': 'dataset://threads/test',
+              'turn_id': 'turn-1',
+              'message_id': 'steered-row-1',
+              'source_message_id': 'steer-message-1',
+            },
+          ),
+        ]),
+      );
+    });
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.text('in spanish'), findsOneWidget);
+    expect(find.text('after steer'), findsOneWidget);
+    expect(tester.getTopLeft(find.text('before steer')).dy, lessThan(tester.getTopLeft(find.text('in spanish')).dy));
+    expect(tester.getTopLeft(find.text('in spanish')).dy, lessThan(tester.getTopLeft(find.text('after steer')).dy));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 500));
+  });
+
   testWidgets('ChatBotView renders direct compaction events in the feed', (tester) async {
     final harness = (await tester.runAsync<_MessagingHarness>(() async {
       final harness = await _startMessagingHarness();
@@ -720,6 +1295,7 @@ void main() {
     await tester.pump();
 
     await tester.runAsync(() async {
+      await _waitUntil(() => harness.server.watchReadyEvents == 1);
       await harness.server.sendAgentMessage(harness.pair.serverProtocol, {
         'type': 'meshagent.agent.context.compacted',
         'thread_id': 'dataset://threads/test',
@@ -742,9 +1318,15 @@ void main() {
       },
     );
     expect(find.text('Context compacted'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    });
   });
 
-  testWidgets('ChatBotView rebases live compaction events after the initial dataset watch is ready', (tester) async {
+  testWidgets('ChatBotView buffers live compaction events until the initial dataset load is ready', (tester) async {
     final initialReadyGate = Completer<void>();
     final initialRows = _threadRowsBatch([
       _messageRow(
@@ -790,7 +1372,8 @@ void main() {
         ],
       });
     });
-    await _pumpUntil(tester, () => find.text('Context compacted').evaluate().isNotEmpty);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Context compacted'), findsNothing);
 
     await tester.runAsync(() async {
       initialReadyGate.complete();

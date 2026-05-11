@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:collection/collection.dart';
 
@@ -21,7 +22,9 @@ import 'package:meshagent_flutter_shadcn/ui/coordinated_context_menu.dart';
 import 'package:meshagent_flutter_shadcn/ui/ui.dart';
 import 'package:meshagent_flutter_shadcn/src/web_context_menu_manager/enable_web_context_menu.dart';
 import 'package:meshagent_flutter_shadcn/chat/thread_attachment_share.dart';
+import 'package:meshagent_flutter_shadcn/chat/tool_call_status_accumulator.dart';
 import 'package:re_highlight/styles/monokai-sublime.dart';
+import 'package:record/record.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:super_clipboard/super_clipboard.dart';
 import 'package:super_drag_and_drop/super_drag_and_drop.dart';
@@ -51,6 +54,15 @@ const double _mobileReactionFlowDialogTopPadding = 30;
 const double _mobileReactionFlowDialogBottomPadding = 28;
 const double _mobileStorageSaveFlowDialogMaxWidth = 420;
 const double _mobileStorageSaveFlowDialogViewportTopGap = 20;
+const int _audioInputSampleRate = 24000;
+const int _audioInputChannels = 1;
+const Duration _audioInputFlushInterval = Duration(milliseconds: 250);
+const int _audioInputFlushBytes = _audioInputSampleRate * _audioInputChannels * 2 ~/ 4;
+const int _minimumRealtimeAudioBytes = _audioInputSampleRate * _audioInputChannels * 2 ~/ 10;
+const double _audioInputSilenceLevelThreshold = 0.004;
+const double _audioWaveformBarWidth = 2;
+const double _audioWaveformBarGap = 2;
+const int _audioWaveformMinBars = 16;
 const EdgeInsets _chatBubbleContentPadding = EdgeInsets.only(
   left: _chatBubbleContentHorizontalPadding,
   right: _chatBubbleContentHorizontalPadding,
@@ -77,8 +89,16 @@ const String _agentTurnInterruptAcceptedType = "meshagent.agent.turn.interrupt.a
 const String _agentTurnInterruptedType = "meshagent.agent.turn.interrupted";
 const String _agentTurnSteerAcceptedType = "meshagent.agent.turn.steer.accepted";
 const String _agentTurnSteerRejectedType = "meshagent.agent.turn.steer.rejected";
+const String _agentTurnStartedType = "meshagent.agent.turn.started";
+const String _agentTurnSteeredType = "meshagent.agent.turn.steered";
 const String _agentTurnEndedType = "meshagent.agent.turn.ended";
 const String _agentThreadClearedType = "meshagent.agent.thread.cleared";
+const String _agentThreadStatusType = "meshagent.agent.thread.status";
+const String _agentToolCallPendingType = "meshagent.agent.tool_call.pending";
+const String _agentToolCallInProgressType = "meshagent.agent.tool_call.in_progress";
+const String _agentToolCallStartedType = "meshagent.agent.tool_call.started";
+const String _agentToolCallArgumentsDeltaType = "meshagent.agent.tool_call.arguments_delta";
+const String _agentToolCallEndedType = "meshagent.agent.tool_call.ended";
 const String _agentUsageUpdatedType = "meshagent.agent.usage.updated";
 const double _mobileScreenWidthMax = 600;
 const double _mobileComposerPillCornerRadius = 999;
@@ -425,6 +445,13 @@ bool _threadMessageHasId(MeshElement message, String id) {
   }
 
   return false;
+}
+
+bool _pendingAgentMessageIsOptimisticallyRendered({required PendingAgentMessage pending, required Iterable<MeshElement> messages}) {
+  if (pending.messageType == _agentTurnSteerType || pending.matchByContentOnly) {
+    return false;
+  }
+  return pending.awaitingApplication || !messages.any((message) => _threadMessageHasId(message, pending.messageId));
 }
 
 List<String> _threadAttachmentPaths(MeshElement message) {
@@ -777,6 +804,7 @@ class PendingAgentMessage {
     this.createdAt,
     this.matchByContentOnly = false,
     this.awaitingAcceptance = false,
+    this.awaitingApplication = false,
     this.awaitingOnline = false,
   });
 
@@ -789,10 +817,12 @@ class PendingAgentMessage {
   final DateTime? createdAt;
   final bool matchByContentOnly;
   final bool awaitingAcceptance;
+  final bool awaitingApplication;
   final bool awaitingOnline;
 
-  factory PendingAgentMessage.fromQueueJson(Map<String, dynamic> json) {
-    final content = json["content"];
+  bool get hasVisibleContent => text.trim().isNotEmpty || attachments.isNotEmpty;
+
+  static ({String text, List<String> attachments}) _parseContent(Object? content) {
     final textParts = <String>[];
     final attachments = <String>[];
     if (content is List) {
@@ -814,7 +844,11 @@ class PendingAgentMessage {
         }
       }
     }
+    return (text: textParts.join("\n\n"), attachments: attachments);
+  }
 
+  factory PendingAgentMessage.fromQueueJson(Map<String, dynamic> json) {
+    final parsedContent = _parseContent(json["content"]);
     final senderName = json["sender_name"];
     final messageType = json["message_type"];
     final messageId = json["message_id"];
@@ -824,11 +858,56 @@ class PendingAgentMessage {
       messageId: messageId is String ? messageId : const Uuid().v4(),
       messageType: messageType is String ? messageType : _agentTurnSteerType,
       threadPath: threadPath is String ? threadPath : "",
-      text: textParts.join("\n\n"),
-      attachments: attachments,
+      text: parsedContent.text,
+      attachments: parsedContent.attachments,
       senderName: senderName is String && senderName.trim().isNotEmpty ? senderName.trim() : null,
       createdAt: createdAt is String ? DateTime.tryParse(createdAt) : null,
       matchByContentOnly: false,
+      awaitingApplication: true,
+      awaitingOnline: false,
+    );
+  }
+
+  factory PendingAgentMessage.fromAcceptedPayload(Map<String, dynamic> payload) {
+    final parsedContent = _parseContent(payload["content"]);
+    final type = payload["type"];
+    final senderName = payload["sender_name"];
+    final sourceMessageId = payload["source_message_id"];
+    final threadPath = payload["thread_id"];
+    final createdAt = payload["created_at"];
+    return PendingAgentMessage(
+      messageId: sourceMessageId is String && sourceMessageId.trim().isNotEmpty ? sourceMessageId.trim() : const Uuid().v4(),
+      messageType: type == _agentTurnStartAcceptedType ? _agentTurnStartType : _agentTurnSteerType,
+      threadPath: threadPath is String ? threadPath : "",
+      text: parsedContent.text,
+      attachments: parsedContent.attachments,
+      senderName: senderName is String && senderName.trim().isNotEmpty ? senderName.trim() : null,
+      createdAt: createdAt is String ? DateTime.tryParse(createdAt) : null,
+      matchByContentOnly: false,
+      awaitingAcceptance: false,
+      awaitingApplication: true,
+      awaitingOnline: false,
+    );
+  }
+
+  factory PendingAgentMessage.fromTurnInputPayload(Map<String, dynamic> payload) {
+    final parsedContent = _parseContent(payload["content"]);
+    final type = payload["type"];
+    final senderName = payload["sender_name"];
+    final messageId = payload["message_id"];
+    final threadPath = payload["thread_id"];
+    final createdAt = payload["created_at"];
+    return PendingAgentMessage(
+      messageId: messageId is String && messageId.trim().isNotEmpty ? messageId.trim() : const Uuid().v4(),
+      messageType: type is String ? type : _agentTurnStartType,
+      threadPath: threadPath is String ? threadPath : "",
+      text: parsedContent.text,
+      attachments: parsedContent.attachments,
+      senderName: senderName is String && senderName.trim().isNotEmpty ? senderName.trim() : null,
+      createdAt: createdAt is String ? DateTime.tryParse(createdAt) : null,
+      matchByContentOnly: false,
+      awaitingAcceptance: true,
+      awaitingApplication: true,
       awaitingOnline: false,
     );
   }
@@ -857,38 +936,497 @@ class _PendingSendWait {
   }
 }
 
-String? _threadStatusAttributeName(String path, String prefix) {
-  final normalizedPath = path.trim();
-  if (normalizedPath.isEmpty) {
-    return null;
+final Expando<_AgentThreadMessageStatusStore> _agentThreadMessageStatusStores = Expando<_AgentThreadMessageStatusStore>();
+
+_AgentThreadMessageStatusStore _agentThreadMessageStatusStore(RoomClient room) {
+  final existing = _agentThreadMessageStatusStores[room];
+  if (existing != null) {
+    return existing;
   }
-  return "$prefix.$normalizedPath";
+
+  final created = _AgentThreadMessageStatusStore();
+  _agentThreadMessageStatusStores[room] = created;
+  return created;
 }
 
-Map<String, dynamic>? _parsePendingMessagesStatus(Participant participant, String path) {
-  final key = _threadStatusAttributeName(path, "thread.status.pending_messages");
-  if (key == null) {
-    return null;
-  }
+bool trackAgentThreadStatusPayload({required RoomClient room, required Map<String, dynamic> payload}) {
+  return _agentThreadMessageStatusStore(room).apply(payload);
+}
 
-  final value = participant.getAttribute(key);
-  if (value is! String || value.trim().isEmpty) {
-    return null;
-  }
+int? _positiveIntValue(Object? value) {
+  final parsed = switch (value) {
+    int() => value,
+    BigInt() => value.toInt(),
+    num() when value.isFinite => value.toInt(),
+    _ => int.tryParse(value?.toString() ?? ""),
+  };
+  return parsed != null && parsed > 0 ? parsed : null;
+}
 
-  try {
-    final decoded = jsonDecode(value.trim());
-    if (decoded is Map<String, dynamic>) {
-      return decoded;
+int? _nonNegativeIntValue(Object? value) {
+  final parsed = switch (value) {
+    int() => value,
+    BigInt() => value.toInt(),
+    num() when value.isFinite => value.toInt(),
+    _ => int.tryParse(value?.toString() ?? ""),
+  };
+  return parsed != null && parsed >= 0 ? parsed : null;
+}
+
+class _AgentThreadMessageStatus {
+  const _AgentThreadMessageStatus({
+    this.text,
+    this.startedAt,
+    this.mode,
+    this.turnId,
+    this.pendingItemId,
+    this.totalBytes,
+    this.totalBytesFromStatus = false,
+    this.linesAdded,
+    this.linesRemoved,
+  });
+
+  final String? text;
+  final DateTime? startedAt;
+  final String? mode;
+  final String? turnId;
+  final String? pendingItemId;
+  final int? totalBytes;
+  final bool totalBytesFromStatus;
+  final int? linesAdded;
+  final int? linesRemoved;
+}
+
+class _AgentThreadMessageStatusStore {
+  final Set<String> _touchedThreadPaths = <String>{};
+  final Map<String, _AgentThreadMessageStatus> _statusByThreadPath = <String, _AgentThreadMessageStatus>{};
+  final Map<String, LinkedHashMap<String, PendingAgentMessage>> _pendingMessagesByThreadPath =
+      <String, LinkedHashMap<String, PendingAgentMessage>>{};
+  final Map<String, LiveToolCallAccumulator> _toolCallAccumulatorsByThreadPath = <String, LiveToolCallAccumulator>{};
+
+  bool apply(Map<String, dynamic> payload) {
+    final type = payload["type"];
+    final threadPath = payload["thread_id"];
+    if (type is! String || threadPath is! String || threadPath.trim().isEmpty) {
+      return false;
     }
-    if (decoded is Map) {
-      return Map<String, dynamic>.from(decoded);
+    final normalizedThreadPath = threadPath.trim();
+
+    switch (type) {
+      case _agentThreadStatusType:
+        _touchedThreadPaths.add(normalizedThreadPath);
+        return _applyStatus(normalizedThreadPath, payload);
+      case _agentTurnStartType:
+      case _agentTurnSteerType:
+        _touchedThreadPaths.add(normalizedThreadPath);
+        return _applyTurnInput(normalizedThreadPath, payload);
+      case _agentTurnStartAcceptedType:
+      case _agentTurnSteerAcceptedType:
+        _touchedThreadPaths.add(normalizedThreadPath);
+        return _applyAccepted(normalizedThreadPath, payload);
+      case _agentTurnStartedType:
+        _touchedThreadPaths.add(normalizedThreadPath);
+        return _markPendingApplied(normalizedThreadPath, payload["source_message_id"], turnId: payload["turn_id"]);
+      case _agentTurnSteeredType:
+        _touchedThreadPaths.add(normalizedThreadPath);
+        return _markPendingApplied(normalizedThreadPath, payload["source_message_id"]);
+      case _agentToolCallArgumentsDeltaType:
+        _touchedThreadPaths.add(normalizedThreadPath);
+        return _applyToolCallArgumentsDelta(normalizedThreadPath, payload);
+      case _agentToolCallPendingType:
+      case _agentToolCallInProgressType:
+      case _agentToolCallStartedType:
+        _touchedThreadPaths.add(normalizedThreadPath);
+        return _applyToolCallLifecycle(normalizedThreadPath, payload);
+      case _agentToolCallEndedType:
+        _touchedThreadPaths.add(normalizedThreadPath);
+        return _clearToolCallBytes(normalizedThreadPath, payload);
+      case _agentTurnStartRejectedType:
+      case _agentTurnSteerRejectedType:
+        _touchedThreadPaths.add(normalizedThreadPath);
+        return _removePending(normalizedThreadPath, payload["source_message_id"]);
+      case _agentTurnEndedType:
+      case _agentThreadClearedType:
+        _touchedThreadPaths.add(normalizedThreadPath);
+        final hadPending = _pendingMessagesByThreadPath.remove(normalizedThreadPath)?.isNotEmpty == true;
+        final hadStatus = _statusByThreadPath.remove(normalizedThreadPath) != null;
+        final hadTools = _toolCallAccumulatorsByThreadPath.remove(normalizedThreadPath)?.isEmpty == false;
+        return hadPending || hadStatus || hadTools;
     }
-  } catch (_) {
-    return null;
+
+    return false;
   }
 
-  return null;
+  bool hasThread(String path) => _touchedThreadPaths.contains(path.trim());
+
+  ChatThreadStatusState state({required String path, ChatThreadStatusState? previous, required bool supportsAgentMessages}) {
+    final normalizedPath = path.trim();
+    final status = _statusByThreadPath[normalizedPath];
+    final pendingMessages = List<PendingAgentMessage>.unmodifiable(
+      _pendingMessagesByThreadPath[normalizedPath]?.values ?? const <PendingAgentMessage>[],
+    );
+
+    if (status == null && pendingMessages.isEmpty) {
+      return ChatThreadStatusState(supportsAgentMessages: supportsAgentMessages);
+    }
+
+    var startedAt = status?.startedAt;
+    if (status?.text != null) {
+      startedAt ??= previous?.hasStatus == true ? previous?.startedAt : DateTime.now();
+    }
+
+    return ChatThreadStatusState(
+      text: status?.text,
+      startedAt: startedAt,
+      mode: status?.text == null ? status?.mode : status?.mode ?? "busy",
+      turnId: status?.turnId,
+      pendingMessages: pendingMessages,
+      pendingItemId: status?.pendingItemId,
+      totalBytes: status?.totalBytes,
+      linesAdded: status?.linesAdded,
+      linesRemoved: status?.linesRemoved,
+      supportsAgentMessages: true,
+    );
+  }
+
+  bool _applyStatus(String threadPath, Map<String, dynamic> payload) {
+    final rawStatus = payload["status"];
+    final rawMode = payload["mode"];
+    final rawStartedAt = payload["started_at"];
+    final rawTurnId = payload["turn_id"];
+    final rawPendingItemId = payload["pending_item_id"];
+    final rawTotalBytes = payload["total_bytes"];
+    final rawLinesAdded = payload["lines_added"];
+    final rawLinesRemoved = payload["lines_removed"];
+    final previous = _statusByThreadPath[threadPath];
+
+    final text = rawStatus is String && rawStatus.trim().isNotEmpty ? rawStatus.trim() : null;
+    final mode = rawMode is String && (rawMode.trim().toLowerCase() == "busy" || rawMode.trim().toLowerCase() == "steerable")
+        ? rawMode.trim().toLowerCase()
+        : null;
+    final startedAt = rawStartedAt is String && rawStartedAt.trim().isNotEmpty ? DateTime.tryParse(rawStartedAt.trim()) : null;
+    final turnId = rawTurnId is String && rawTurnId.trim().isNotEmpty ? rawTurnId.trim() : null;
+    final pendingItemId = rawPendingItemId is String && rawPendingItemId.trim().isNotEmpty ? rawPendingItemId.trim() : null;
+    final parsedTotalBytes = _positiveIntValue(rawTotalBytes);
+    final linesAdded =
+        _nonNegativeIntValue(rawLinesAdded) ??
+        (!payload.containsKey("lines_added") && previous?.text == text ? previous?.linesAdded : null);
+    final linesRemoved =
+        _nonNegativeIntValue(rawLinesRemoved) ??
+        (!payload.containsKey("lines_removed") && previous?.text == text ? previous?.linesRemoved : null);
+    final totalBytes =
+        parsedTotalBytes ??
+        _toolArgumentBytes(threadPath, pendingItemId) ??
+        (!payload.containsKey("total_bytes") && previous?.text == text ? previous?.totalBytes : null);
+    final totalBytesFromStatus = parsedTotalBytes != null;
+
+    if (text == null &&
+        mode == null &&
+        startedAt == null &&
+        turnId == null &&
+        pendingItemId == null &&
+        totalBytes == null &&
+        linesAdded == null &&
+        linesRemoved == null) {
+      _statusByThreadPath.remove(threadPath);
+      return true;
+    }
+
+    final next = _AgentThreadMessageStatus(
+      text: text,
+      startedAt: startedAt,
+      mode: mode,
+      turnId: turnId,
+      pendingItemId: pendingItemId,
+      totalBytes: totalBytes,
+      totalBytesFromStatus: totalBytesFromStatus,
+      linesAdded: linesAdded,
+      linesRemoved: linesRemoved,
+    );
+    if (previous != null &&
+        previous.text == next.text &&
+        previous.mode == next.mode &&
+        previous.turnId == next.turnId &&
+        previous.pendingItemId == next.pendingItemId &&
+        previous.totalBytes == next.totalBytes &&
+        previous.totalBytesFromStatus == next.totalBytesFromStatus &&
+        previous.linesAdded == next.linesAdded &&
+        previous.linesRemoved == next.linesRemoved &&
+        previous.startedAt?.millisecondsSinceEpoch == next.startedAt?.millisecondsSinceEpoch) {
+      return false;
+    }
+
+    _statusByThreadPath[threadPath] = next;
+    return true;
+  }
+
+  bool _applyToolCallArgumentsDelta(String threadPath, Map<String, dynamic> payload) {
+    final itemId = payload["item_id"];
+    if (itemId is! String || itemId.trim().isEmpty) {
+      return false;
+    }
+    final normalizedItemId = itemId.trim();
+
+    final delta = payload["delta"]?.toString() ?? "";
+    final deltaBytes = utf8.encode(delta).length;
+    if (deltaBytes <= 0) {
+      return false;
+    }
+
+    final accumulator = _toolCallAccumulatorsByThreadPath.putIfAbsent(threadPath, () => LiveToolCallAccumulator());
+    final status = _statusByThreadPath[threadPath];
+    final snapshot = accumulator.appendDelta(itemId: normalizedItemId, delta: delta, fallbackText: status?.text);
+
+    if (status == null || status.text == null || status.text!.trim().isEmpty) {
+      return false;
+    }
+
+    final isStatusItem =
+        status.pendingItemId == null || status.pendingItemId == normalizedItemId || accumulator.hasSingleItem(normalizedItemId);
+    if (!isStatusItem) {
+      return false;
+    }
+
+    final nextStatusText = snapshot.text ?? status.text;
+    final nextTotalBytesForStatus = snapshot.totalBytes == null
+        ? status.totalBytes
+        : math.max(status.totalBytes ?? 0, snapshot.totalBytes!);
+    if (status.text == nextStatusText &&
+        status.totalBytes == nextTotalBytesForStatus &&
+        status.linesAdded == (snapshot.linesAdded ?? status.linesAdded) &&
+        status.linesRemoved == (snapshot.linesRemoved ?? status.linesRemoved)) {
+      return false;
+    }
+
+    _statusByThreadPath[threadPath] = _AgentThreadMessageStatus(
+      text: nextStatusText,
+      startedAt: status.startedAt,
+      mode: status.mode,
+      turnId: status.turnId,
+      pendingItemId: status.pendingItemId ?? normalizedItemId,
+      totalBytes: nextTotalBytesForStatus,
+      totalBytesFromStatus: false,
+      linesAdded: snapshot.linesAdded ?? status.linesAdded,
+      linesRemoved: snapshot.linesRemoved ?? status.linesRemoved,
+    );
+    return true;
+  }
+
+  bool _applyToolCallLifecycle(String threadPath, Map<String, dynamic> payload) {
+    final rawItemId = payload["item_id"];
+    final itemId = rawItemId is String && rawItemId.trim().isNotEmpty ? rawItemId.trim() : null;
+    if (itemId == null) {
+      return false;
+    }
+    final rawTool = payload["tool"] ?? payload["tool_name"] ?? payload["name"];
+    final accumulator = _toolCallAccumulatorsByThreadPath.putIfAbsent(threadPath, () => LiveToolCallAccumulator());
+    final existing = accumulator[itemId];
+    final tool = rawTool is String && rawTool.trim().isNotEmpty ? rawTool.trim() : existing?.tool ?? "";
+    final rawArguments = payload["arguments"];
+    final arguments = rawArguments is Map ? Map<String, dynamic>.from(rawArguments) : existing?.arguments;
+
+    final status = _statusByThreadPath[threadPath];
+    final snapshot = accumulator.upsert(itemId: itemId, tool: tool, arguments: arguments, fallbackText: status?.text);
+    if (status == null || status.text == null || status.text!.trim().isEmpty) {
+      return false;
+    }
+    final nextTotalBytesForStatus = snapshot.totalBytes == null
+        ? status.totalBytes
+        : math.max(status.totalBytes ?? 0, snapshot.totalBytes!);
+    if (snapshot.text == status.text &&
+        snapshot.linesAdded == null &&
+        snapshot.linesRemoved == null &&
+        nextTotalBytesForStatus == status.totalBytes) {
+      return false;
+    }
+    _statusByThreadPath[threadPath] = _AgentThreadMessageStatus(
+      text: snapshot.text ?? status.text,
+      startedAt: status.startedAt,
+      mode: status.mode,
+      turnId: status.turnId,
+      pendingItemId: status.pendingItemId ?? itemId,
+      totalBytes: nextTotalBytesForStatus,
+      totalBytesFromStatus: false,
+      linesAdded: snapshot.linesAdded ?? status.linesAdded,
+      linesRemoved: snapshot.linesRemoved ?? status.linesRemoved,
+    );
+    return true;
+  }
+
+  int? _toolArgumentBytes(String threadPath, String? itemId) {
+    if (itemId == null || itemId.trim().isEmpty) {
+      return null;
+    }
+    final bytes = _toolCallAccumulatorsByThreadPath[threadPath]?.totalBytes(itemId.trim());
+    return bytes != null && bytes > 0 ? bytes : null;
+  }
+
+  bool _clearToolCallBytes(String threadPath, Map<String, dynamic> payload) {
+    final rawItemId = payload["item_id"];
+    final itemId = rawItemId is String && rawItemId.trim().isNotEmpty ? rawItemId.trim() : null;
+    var hadBytes = false;
+    if (itemId != null) {
+      final accumulator = _toolCallAccumulatorsByThreadPath[threadPath];
+      hadBytes = accumulator?.remove(itemId) == true;
+      if (accumulator != null && accumulator.isEmpty) {
+        _toolCallAccumulatorsByThreadPath.remove(threadPath);
+      }
+    }
+
+    final status = _statusByThreadPath[threadPath];
+    if (status?.totalBytes == null || (itemId != null && status?.pendingItemId != itemId)) {
+      return hadBytes;
+    }
+    _statusByThreadPath[threadPath] = _AgentThreadMessageStatus(
+      text: status?.text,
+      startedAt: status?.startedAt,
+      mode: status?.mode,
+      turnId: status?.turnId,
+      pendingItemId: status?.pendingItemId,
+    );
+    return true;
+  }
+
+  bool _applyTurnInput(String threadPath, Map<String, dynamic> payload) {
+    final parsedMessage = PendingAgentMessage.fromTurnInputPayload(payload);
+    if (parsedMessage.messageId.trim().isEmpty) {
+      return false;
+    }
+    return _upsertPendingMessage(threadPath, parsedMessage);
+  }
+
+  bool _applyAccepted(String threadPath, Map<String, dynamic> payload) {
+    final parsedMessage = PendingAgentMessage.fromAcceptedPayload(payload);
+    if (parsedMessage.messageId.trim().isEmpty) {
+      return false;
+    }
+    final pendingMessages = _pendingMessagesByThreadPath.putIfAbsent(threadPath, LinkedHashMap<String, PendingAgentMessage>.new);
+    final existing = pendingMessages[parsedMessage.messageId];
+    if (existing == null && parsedMessage.text.trim().isEmpty && parsedMessage.attachments.isEmpty) {
+      if (pendingMessages.isEmpty) {
+        _pendingMessagesByThreadPath.remove(threadPath);
+      }
+      return false;
+    }
+    final message = existing == null
+        ? parsedMessage
+        : PendingAgentMessage(
+            messageId: existing.messageId,
+            messageType: existing.messageType,
+            threadPath: existing.threadPath,
+            text: existing.text,
+            attachments: existing.attachments,
+            senderName: existing.senderName,
+            createdAt: existing.createdAt,
+            matchByContentOnly: existing.matchByContentOnly,
+            awaitingAcceptance: false,
+            awaitingApplication: existing.awaitingApplication,
+            awaitingOnline: existing.awaitingOnline,
+          );
+    return _upsertPendingMessage(threadPath, message);
+  }
+
+  bool _upsertPendingMessage(String threadPath, PendingAgentMessage message) {
+    final pendingMessages = _pendingMessagesByThreadPath.putIfAbsent(threadPath, LinkedHashMap<String, PendingAgentMessage>.new);
+    if (!message.hasVisibleContent) {
+      final removed = pendingMessages.remove(message.messageId) != null;
+      if (pendingMessages.isEmpty) {
+        _pendingMessagesByThreadPath.remove(threadPath);
+      }
+      return removed;
+    }
+    final existing = pendingMessages[message.messageId];
+    if (existing != null &&
+        existing.messageType == message.messageType &&
+        existing.text == message.text &&
+        const DeepCollectionEquality().equals(existing.attachments, message.attachments) &&
+        existing.senderName == message.senderName &&
+        existing.awaitingAcceptance == message.awaitingAcceptance &&
+        existing.awaitingApplication == message.awaitingApplication) {
+      return false;
+    }
+    pendingMessages[message.messageId] = message;
+    return true;
+  }
+
+  bool _markPendingApplied(String threadPath, Object? sourceMessageId, {Object? turnId}) {
+    var changed = false;
+    final pendingMessages = _pendingMessagesByThreadPath[threadPath];
+    final normalizedSourceMessageId = sourceMessageId is String ? sourceMessageId.trim() : "";
+    if (normalizedSourceMessageId.isNotEmpty) {
+      final existing = pendingMessages?[normalizedSourceMessageId];
+      if (existing != null && existing.awaitingApplication) {
+        if (existing.messageType == _agentTurnSteerType) {
+          pendingMessages!.remove(normalizedSourceMessageId);
+          if (pendingMessages.isEmpty) {
+            _pendingMessagesByThreadPath.remove(threadPath);
+          }
+        } else {
+          pendingMessages![normalizedSourceMessageId] = PendingAgentMessage(
+            messageId: existing.messageId,
+            messageType: existing.messageType,
+            threadPath: existing.threadPath,
+            text: existing.text,
+            attachments: existing.attachments,
+            senderName: existing.senderName,
+            createdAt: existing.createdAt,
+            matchByContentOnly: existing.matchByContentOnly,
+            awaitingAcceptance: existing.awaitingAcceptance,
+            awaitingApplication: false,
+            awaitingOnline: existing.awaitingOnline,
+          );
+        }
+        changed = true;
+      }
+    }
+
+    if (turnId is String && turnId.trim().isNotEmpty) {
+      final previous = _statusByThreadPath[threadPath];
+      if (previous?.turnId != turnId.trim()) {
+        _statusByThreadPath[threadPath] = _AgentThreadMessageStatus(
+          text: previous?.text,
+          startedAt: previous?.startedAt,
+          mode: previous?.mode,
+          turnId: turnId.trim(),
+          pendingItemId: previous?.pendingItemId,
+          totalBytes: previous?.totalBytes,
+          linesAdded: previous?.linesAdded,
+          linesRemoved: previous?.linesRemoved,
+        );
+        changed = true;
+      }
+    }
+
+    return changed;
+  }
+
+  bool _removePending(String threadPath, Object? sourceMessageId, {Object? turnId}) {
+    final pendingMessages = _pendingMessagesByThreadPath[threadPath];
+    final normalizedSourceMessageId = sourceMessageId is String ? sourceMessageId.trim() : "";
+    final changed = normalizedSourceMessageId.isNotEmpty && pendingMessages?.remove(normalizedSourceMessageId) != null;
+    if (pendingMessages != null && pendingMessages.isEmpty) {
+      _pendingMessagesByThreadPath.remove(threadPath);
+    }
+
+    if (turnId is String && turnId.trim().isNotEmpty) {
+      final previous = _statusByThreadPath[threadPath];
+      if (previous?.turnId != turnId.trim()) {
+        _statusByThreadPath[threadPath] = _AgentThreadMessageStatus(
+          text: previous?.text,
+          startedAt: previous?.startedAt,
+          mode: previous?.mode,
+          turnId: turnId.trim(),
+          pendingItemId: previous?.pendingItemId,
+          totalBytes: previous?.totalBytes,
+          linesAdded: previous?.linesAdded,
+          linesRemoved: previous?.linesRemoved,
+        );
+        return true;
+      }
+    }
+
+    return changed;
+  }
 }
 
 class ChatThreadStatusState {
@@ -899,6 +1437,9 @@ class ChatThreadStatusState {
     this.turnId,
     this.pendingMessages = const [],
     this.pendingItemId,
+    this.totalBytes,
+    this.linesAdded,
+    this.linesRemoved,
     this.supportsAgentMessages = false,
   });
 
@@ -908,9 +1449,16 @@ class ChatThreadStatusState {
   final String? turnId;
   final List<PendingAgentMessage> pendingMessages;
   final String? pendingItemId;
+  final int? totalBytes;
+  final int? linesAdded;
+  final int? linesRemoved;
   final bool supportsAgentMessages;
 
   bool get hasStatus => text != null && text!.trim().isNotEmpty;
+}
+
+bool shouldShowChatThreadStatus(ChatThreadStatusState status) {
+  return status.hasStatus;
 }
 
 ChatThreadStatusState resolveChatThreadStatus({
@@ -919,94 +1467,30 @@ ChatThreadStatusState resolveChatThreadStatus({
   String? agentName,
   ChatThreadStatusState? previous,
 }) {
-  final key = _threadStatusAttributeName(path, "thread.status");
-  final textKey = _threadStatusAttributeName(path, "thread.status.text");
-  final modeKey = _threadStatusAttributeName(path, "thread.status.mode");
-  final startedAtKey = _threadStatusAttributeName(path, "thread.status.started_at");
-  final pendingItemIdKey = _threadStatusAttributeName(path, "thread.status.pending_item_id");
   final candidates = <Participant>[
     if (agentName != null)
       ...room.messaging.remoteParticipants.where((participant) => participant.getAttribute("name") == agentName)
     else
       ...room.messaging.remoteParticipants,
   ];
+  final messageStatusStore = _agentThreadMessageStatusStore(room);
+  final hasMessageStatus = messageStatusStore.hasThread(path);
+  final messageState = messageStatusStore.state(path: path, previous: previous, supportsAgentMessages: hasMessageStatus);
 
-  String? nextStatus;
-  String? nextMode;
-  DateTime? nextStartedAt;
-  String? nextTurnId;
-  List<PendingAgentMessage> nextPendingMessages = const [];
-  String? nextPendingItemId;
-  bool nextSupportsAgentMessages = false;
+  String? nextStatus = messageState.text;
+  String? nextMode = messageState.mode;
+  DateTime? nextStartedAt = messageState.startedAt;
+  String? nextTurnId = messageState.turnId;
+  List<PendingAgentMessage> nextPendingMessages = messageState.pendingMessages;
+  String? nextPendingItemId = messageState.pendingItemId;
+  int? nextTotalBytes = messageState.totalBytes;
+  int? nextLinesAdded = messageState.linesAdded;
+  int? nextLinesRemoved = messageState.linesRemoved;
+  bool nextSupportsAgentMessages = messageState.supportsAgentMessages;
 
   for (final participant in candidates) {
     if (_supportsAgentMessages(participant)) {
       nextSupportsAgentMessages = true;
-    }
-
-    if (nextStatus == null && textKey != null) {
-      final value = participant.getAttribute(textKey);
-      if (value is String && value.trim().isNotEmpty) {
-        nextStatus = value.trim();
-      }
-    }
-    if (nextStatus == null && key != null) {
-      final value = participant.getAttribute(key);
-      if (value is String && value.trim().isNotEmpty) {
-        nextStatus = value.trim();
-      }
-    }
-
-    final pendingStatus = _parsePendingMessagesStatus(participant, path);
-    if (pendingStatus != null) {
-      if (nextTurnId == null) {
-        final turnId = pendingStatus["turn_id"];
-        if (turnId is String && turnId.trim().isNotEmpty) {
-          nextTurnId = turnId.trim();
-        }
-      }
-
-      if (nextPendingMessages.isEmpty) {
-        final messages = pendingStatus["messages"];
-        if (messages is List) {
-          nextPendingMessages = [
-            for (final item in messages)
-              if (item is Map<String, dynamic>)
-                PendingAgentMessage.fromQueueJson(item)
-              else if (item is Map)
-                PendingAgentMessage.fromQueueJson(Map<String, dynamic>.from(item)),
-          ];
-        }
-      }
-    }
-
-    if (nextMode == null && modeKey != null) {
-      final value = participant.getAttribute(modeKey);
-      if (value is String) {
-        final normalized = value.trim().toLowerCase();
-        if (normalized == "busy" || normalized == "steerable") {
-          nextMode = normalized;
-        }
-      }
-    }
-
-    if (nextStartedAt == null && startedAtKey != null) {
-      final value = participant.getAttribute(startedAtKey);
-      if (value is String) {
-        final normalized = value.trim();
-        nextStartedAt = normalized.isEmpty ? null : DateTime.tryParse(normalized);
-      }
-    }
-
-    if (nextPendingItemId == null && pendingItemIdKey != null) {
-      final value = participant.getAttribute(pendingItemIdKey);
-      if (value is String && value.trim().isNotEmpty) {
-        nextPendingItemId = value.trim();
-      }
-    }
-
-    if (nextStatus != null && nextMode != null && nextStartedAt != null && nextTurnId != null && nextPendingItemId != null) {
-      break;
     }
   }
 
@@ -1022,6 +1506,9 @@ ChatThreadStatusState resolveChatThreadStatus({
     turnId: nextTurnId,
     pendingMessages: nextPendingMessages,
     pendingItemId: nextPendingItemId,
+    totalBytes: nextTotalBytes,
+    linesAdded: nextLinesAdded,
+    linesRemoved: nextLinesRemoved,
     supportsAgentMessages: nextSupportsAgentMessages,
   );
 }
@@ -1031,6 +1518,9 @@ class ChatThreadStatusIndicator extends StatelessWidget {
     super.key,
     required this.statusText,
     this.startedAt,
+    this.totalBytes,
+    this.linesAdded,
+    this.linesRemoved,
     this.reserveSpace = false,
     this.size = 14,
     this.strokeWidth = 2,
@@ -1038,6 +1528,9 @@ class ChatThreadStatusIndicator extends StatelessWidget {
 
   final String? statusText;
   final DateTime? startedAt;
+  final int? totalBytes;
+  final int? linesAdded;
+  final int? linesRemoved;
   final bool reserveSpace;
   final double size;
   final double strokeWidth;
@@ -1057,7 +1550,16 @@ class ChatThreadStatusIndicator extends StatelessWidget {
         waitDuration: const Duration(milliseconds: 300),
         builder: (context) => ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 320),
-          child: Text(formatChatThreadStatusText(normalizedStatusText, startedAt: startedAt), style: ShadTheme.of(context).textTheme.small),
+          child: Text(
+            formatChatThreadStatusText(
+              normalizedStatusText,
+              startedAt: startedAt,
+              totalBytes: totalBytes,
+              linesAdded: linesAdded,
+              linesRemoved: linesRemoved,
+            ),
+            style: ShadTheme.of(context).textTheme.small,
+          ),
         ),
         child: _CyclingProgressIndicator(strokeWidth: strokeWidth),
       ),
@@ -1066,7 +1568,7 @@ class ChatThreadStatusIndicator extends StatelessWidget {
 }
 
 class FileAttachment extends ChangeNotifier {
-  FileAttachment({required this.path, UploadStatus initialStatus = UploadStatus.initial}) : _status = initialStatus;
+  FileAttachment({required this.path, this.mimeType, UploadStatus initialStatus = UploadStatus.initial}) : _status = initialStatus;
 
   UploadStatus _status;
 
@@ -1081,16 +1583,17 @@ class FileAttachment extends ChangeNotifier {
   }
 
   String path;
+  final String? mimeType;
   String get filename => path.split("/").last;
 }
 
 class MeshagentFileUpload extends FileAttachment {
-  MeshagentFileUpload({required this.room, required super.path, required this.dataStream, this.size = 0}) {
+  MeshagentFileUpload({required this.room, required super.path, required this.dataStream, this.size = 0, super.mimeType}) {
     _upload();
   }
 
   // Requires to manually call startUpload()
-  MeshagentFileUpload.deferred({required this.room, required super.path, required this.dataStream, this.size = 0});
+  MeshagentFileUpload.deferred({required this.room, required super.path, required this.dataStream, this.size = 0, super.mimeType});
 
   int size;
 
@@ -1132,7 +1635,7 @@ class MeshagentFileUpload extends FileAttachment {
         }
       }
 
-      await room.storage.uploadStream(path, trackedStream(), overwrite: true, size: size > 0 ? size : null);
+      await room.storage.uploadStream(path, trackedStream(), overwrite: true, size: size > 0 ? size : null, mimeType: mimeType);
 
       _completer.complete();
 
@@ -1273,6 +1776,9 @@ class ChatThreadController extends ChangeNotifier {
   }
 
   void _markPendingAgentMessage({required PendingAgentMessage message}) {
+    if (!message.hasVisibleContent) {
+      return;
+    }
     _pendingAgentMessages[message.messageId] = message;
     notifyListeners();
   }
@@ -1311,7 +1817,40 @@ class ChatThreadController extends ChangeNotifier {
       createdAt: existing.createdAt,
       matchByContentOnly: existing.matchByContentOnly,
       awaitingAcceptance: false,
+      awaitingApplication: true,
       awaitingOnline: false,
+    );
+    notifyListeners();
+  }
+
+  void _markPendingAgentMessageApplied(String? messageId) {
+    if (messageId == null || messageId.trim().isEmpty) {
+      return;
+    }
+
+    final existing = _pendingAgentMessages[messageId];
+    if (existing == null || !existing.awaitingApplication) {
+      return;
+    }
+
+    if (existing.messageType == _agentTurnSteerType) {
+      _pendingAgentMessages.remove(messageId);
+      notifyListeners();
+      return;
+    }
+
+    _pendingAgentMessages[messageId] = PendingAgentMessage(
+      messageId: existing.messageId,
+      messageType: existing.messageType,
+      threadPath: existing.threadPath,
+      text: existing.text,
+      attachments: existing.attachments,
+      senderName: existing.senderName,
+      createdAt: existing.createdAt,
+      matchByContentOnly: existing.matchByContentOnly,
+      awaitingAcceptance: existing.awaitingAcceptance,
+      awaitingApplication: false,
+      awaitingOnline: existing.awaitingOnline,
     );
     notifyListeners();
   }
@@ -1336,6 +1875,7 @@ class ChatThreadController extends ChangeNotifier {
       createdAt: existing.createdAt,
       matchByContentOnly: existing.matchByContentOnly,
       awaitingAcceptance: existing.awaitingAcceptance,
+      awaitingApplication: existing.awaitingApplication,
       awaitingOnline: awaitingOnline,
     );
     notifyListeners();
@@ -1379,8 +1919,28 @@ class ChatThreadController extends ChangeNotifier {
     final threadPath = payload["thread_id"];
     final normalizedThreadPath = threadPath is String ? threadPath.trim() : "";
 
+    if (type == _agentTurnStartType || type == _agentTurnSteerType) {
+      final pendingMessage = PendingAgentMessage.fromTurnInputPayload(payload);
+      if (pendingMessage.threadPath.trim().isNotEmpty) {
+        _markPendingAgentMessage(message: pendingMessage);
+      }
+      return;
+    }
+
     if (type == _agentTurnStartAcceptedType || type == _agentTurnSteerAcceptedType) {
-      _markPendingAgentMessageAccepted(normalizedSourceMessageId);
+      if (normalizedSourceMessageId != null && _pendingAgentMessages.containsKey(normalizedSourceMessageId)) {
+        _markPendingAgentMessageAccepted(normalizedSourceMessageId);
+      } else {
+        final pendingMessage = PendingAgentMessage.fromAcceptedPayload(payload);
+        if (pendingMessage.threadPath.trim().isNotEmpty && pendingMessage.hasVisibleContent) {
+          _markPendingAgentMessage(message: pendingMessage);
+        }
+      }
+      return;
+    }
+
+    if (type == _agentTurnStartedType || type == _agentTurnSteeredType) {
+      _markPendingAgentMessageApplied(normalizedSourceMessageId);
       return;
     }
 
@@ -1519,9 +2079,7 @@ class ChatThreadController extends ChangeNotifier {
           room.messaging.sendMessage(
             to: participant,
             type: _agentRoomMessageType,
-            message: {
-              "payload": {"type": _agentTurnInterruptType, "thread_id": path, "turn_id": turnId},
-            },
+            message: {"type": _agentTurnInterruptType, "thread_id": path, "turn_id": turnId},
           ),
       ]);
       return;
@@ -1547,9 +2105,7 @@ class ChatThreadController extends ChangeNotifier {
           room.messaging.sendMessage(
             to: participant,
             type: _agentRoomMessageType,
-            message: {
-              "payload": {"type": _agentThreadClearType, "thread_id": path},
-            },
+            message: {"type": _agentThreadClearType, "thread_id": path},
           ),
       ]);
       return;
@@ -1567,8 +2123,8 @@ class ChatThreadController extends ChangeNotifier {
     }
   }
 
-  Future<FileAttachment> uploadFile(String path, Stream<Uint8List> dataStream, int size) async {
-    final uploader = MeshagentFileUpload(room: room, path: path, dataStream: dataStream, size: size);
+  Future<FileAttachment> uploadFile(String path, Stream<Uint8List> dataStream, int size, {String? mimeType}) async {
+    final uploader = MeshagentFileUpload(room: room, path: path, dataStream: dataStream, size: size, mimeType: mimeType);
     uploader.addListener(notifyListeners);
 
     _attachmentUploads.add(uploader);
@@ -1577,8 +2133,8 @@ class ChatThreadController extends ChangeNotifier {
     return uploader;
   }
 
-  Future<FileAttachment> uploadFileDeferred(String path, Stream<Uint8List> dataStream, int size) async {
-    final uploader = MeshagentFileUpload.deferred(room: room, path: path, dataStream: dataStream, size: size);
+  Future<FileAttachment> uploadFileDeferred(String path, Stream<Uint8List> dataStream, int size, {String? mimeType}) async {
+    final uploader = MeshagentFileUpload.deferred(room: room, path: path, dataStream: dataStream, size: size, mimeType: mimeType);
 
     uploader.addListener(notifyListeners);
 
@@ -1692,7 +2248,7 @@ class ChatThreadController extends ChangeNotifier {
         if (!isSteer && toolChoice != null) {
           payload["tool_choice"] = toolChoice.toJson();
         }
-        await room.messaging.sendMessage(to: participant, type: _agentRoomMessageType, message: {"payload": payload});
+        await room.messaging.sendMessage(to: participant, type: _agentRoomMessageType, message: payload);
         return;
       }
 
@@ -1769,6 +2325,7 @@ class ChatThreadController extends ChangeNotifier {
             createdAt: DateTime.now(),
             matchByContentOnly: false,
             awaitingAcceptance: true,
+            awaitingApplication: true,
             awaitingOnline: false,
           ),
         );
@@ -1821,7 +2378,6 @@ class ChatThreadController extends ChangeNotifier {
         await Future.wait(sentMessages);
         outboundStatus.markDelivered(message.id);
         onMessageSent?.call(message);
-        clear();
       } on ChatSendCancelledException {
         outboundStatus.clear(message.id);
         if (useAgentMessages) {
@@ -2718,6 +3274,65 @@ class _ChatThreadMcpFooterState extends State<ChatThreadMcpFooter> {
   }
 }
 
+double _audioLevelFromPcm16(Uint8List chunk) {
+  if (chunk.length < 2) {
+    return 0;
+  }
+  var total = 0.0;
+  var samples = 0;
+  final data = ByteData.sublistView(chunk);
+  for (var offset = 0; offset + 1 < chunk.length; offset += 2) {
+    final sample = data.getInt16(offset, Endian.little) / 32768.0;
+    total += sample * sample;
+    samples += 1;
+  }
+  if (samples == 0) {
+    return 0;
+  }
+  return math.sqrt(total / samples).clamp(0.0, 1.0);
+}
+
+int _audioWaveformBarCountForWidth(double width) {
+  if (width <= 0) {
+    return _audioWaveformMinBars;
+  }
+  return math.max(_audioWaveformMinBars, (width / (_audioWaveformBarWidth + _audioWaveformBarGap)).floor());
+}
+
+class _AudioWaveformPainter extends CustomPainter {
+  const _AudioWaveformPainter({required this.levels, required this.color});
+
+  final List<double> levels;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.width <= 0 || size.height <= 0) {
+      return;
+    }
+    final paint = Paint()
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = _audioWaveformBarWidth;
+    final count = _audioWaveformBarCountForWidth(size.width);
+    final gap = count <= 1 ? 0.0 : math.max(0.0, (size.width - (_audioWaveformBarWidth * count)) / (count - 1));
+    for (var index = 0; index < count; index += 1) {
+      final levelIndex = levels.length - count + index;
+      final hasLevel = levelIndex >= 0;
+      final rawLevel = hasLevel ? levels[levelIndex].clamp(0.0, 1.0) : 0.0;
+      final active = rawLevel > 0.005;
+      final level = active ? math.sqrt(rawLevel) * 0.9 : 0.0;
+      final height = active ? math.max(4.0, size.height * level) : 1.0;
+      paint.color = color.withValues(alpha: active ? 0.66 : 0.24);
+      final x = (_audioWaveformBarWidth / 2) + (index * (_audioWaveformBarWidth + gap));
+      canvas.drawLine(Offset(x, (size.height - height) / 2), Offset(x, (size.height + height) / 2), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _AudioWaveformPainter oldDelegate) =>
+      oldDelegate.color != color || !const ListEquality<double>().equals(oldDelegate.levels, levels);
+}
+
 class ChatThreadInput extends StatefulWidget {
   const ChatThreadInput({
     super.key,
@@ -2737,6 +3352,12 @@ class ChatThreadInput extends StatefulWidget {
     this.trailing,
     this.header,
     this.footer,
+    this.audioInputEnabled = false,
+    this.automaticAudioTurnDetection = false,
+    this.onAudioRecordingStart,
+    this.onExternalAudioRecordingStart,
+    this.onExternalAudioRecordingStop,
+    this.onAudioChunk,
     this.onClear,
     this.onInterrupt,
     this.onCancelSend,
@@ -2767,6 +3388,12 @@ class ChatThreadInput extends StatefulWidget {
   final Widget? trailing;
   final Widget? header;
   final Widget? footer;
+  final bool audioInputEnabled;
+  final bool automaticAudioTurnDetection;
+  final Future<void> Function()? onAudioRecordingStart;
+  final Future<void> Function()? onExternalAudioRecordingStart;
+  final Future<void> Function()? onExternalAudioRecordingStop;
+  final Future<void> Function(Uint8List chunk, {required bool finalChunk})? onAudioChunk;
   final EditableTextContextMenuBuilder? contextMenuBuilder;
   final TapRegionCallback? onPressedOutside;
   final Object? tapRegionGroupId;
@@ -2778,10 +3405,22 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   bool showSendButton = false;
   bool allAttachmentsUploaded = true;
   bool sending = false;
+  bool recordingAudio = false;
+  bool stoppingAudio = false;
   int composerLineCount = 1;
 
   String text = "";
   List<FileAttachment> attachments = [];
+  AudioRecorder? _audioRecorder;
+  StreamSubscription<Uint8List>? _audioStreamSubscription;
+  Timer? _audioFlushTimer;
+  final BytesBuilder _audioBuffer = BytesBuilder(copy: false);
+  Future<void> _audioFlushTail = Future<void>.value();
+  Future<void> _audioSendTail = Future<void>.value();
+  int _submittedAudioByteCount = 0;
+  bool _sentAudibleAudioThisRecording = false;
+  final List<double> _audioLevels = [];
+  int _audioLevelCapacity = _audioWaveformMinBars;
 
   void _syncDraftStateFromController({bool triggerExternalOnChanged = false}) {
     final nextText = widget.controller.text;
@@ -2886,10 +3525,262 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     }
   }
 
+  Future<void> _handleSendAction() async {
+    if (recordingAudio) {
+      await _stopAudioRecording(submit: true);
+      _resetAudioDraft();
+      return;
+    }
+    await _handleSend();
+    _resetAudioDraft();
+  }
+
+  void _resetAudioDraft() {
+    if (_audioLevels.isEmpty) {
+      return;
+    }
+    setState(() {
+      _audioLevels.clear();
+    });
+  }
+
+  void _syncAudioLevelCapacity(double width) {
+    final nextCapacity = _audioWaveformBarCountForWidth(width);
+    if (_audioLevelCapacity == nextCapacity) {
+      return;
+    }
+    _audioLevelCapacity = nextCapacity;
+    if (_audioLevels.length > _audioLevelCapacity) {
+      _audioLevels.removeRange(0, _audioLevels.length - _audioLevelCapacity);
+    }
+  }
+
+  void _appendAudioLevel(double level) {
+    _audioLevels.add(level);
+    if (_audioLevels.length > _audioLevelCapacity) {
+      _audioLevels.removeRange(0, _audioLevels.length - _audioLevelCapacity);
+    }
+  }
+
+  Future<void> _enqueueAudioChunk(Uint8List chunk, {required bool finalChunk}) {
+    final onAudioChunk = widget.onAudioChunk;
+    if (onAudioChunk == null) {
+      return Future<void>.value();
+    }
+    final previousSend = _audioSendTail;
+    final send = previousSend.then((_) => onAudioChunk(chunk, finalChunk: finalChunk));
+    _audioSendTail = send.catchError((_) {});
+    return send;
+  }
+
+  Future<void> _flushAudioBuffer() {
+    final previousFlush = _audioFlushTail;
+    final flush = previousFlush.then((_) => _flushAudioBufferNow());
+    _audioFlushTail = flush.catchError((_) {});
+    return flush;
+  }
+
+  Future<void> _flushAudioBufferNow() {
+    if (_audioBuffer.isEmpty) {
+      return Future<void>.value();
+    }
+    final chunk = _audioBuffer.takeBytes();
+    _submittedAudioByteCount += chunk.length;
+    return _enqueueAudioChunk(chunk, finalChunk: false);
+  }
+
+  Future<void> _startAudioRecording() async {
+    if (recordingAudio || widget.readOnly || !widget.audioInputEnabled) {
+      return;
+    }
+    final onExternalAudioRecordingStart = widget.onExternalAudioRecordingStart;
+    if (widget.automaticAudioTurnDetection && onExternalAudioRecordingStart != null) {
+      setState(() {
+        _audioBuffer.clear();
+        _submittedAudioByteCount = 0;
+        _sentAudibleAudioThisRecording = false;
+        _audioLevels.clear();
+        recordingAudio = true;
+        stoppingAudio = false;
+      });
+      try {
+        await onExternalAudioRecordingStart();
+      } catch (error) {
+        if (mounted) {
+          setState(() {
+            recordingAudio = false;
+            stoppingAudio = false;
+          });
+          ShadToaster.of(
+            context,
+          ).show(ShadToast.destructive(title: const Text("Unable to start audio thread"), description: Text("$error")));
+        }
+      }
+      return;
+    }
+    final recorder = AudioRecorder();
+    final hasPermission = await recorder.hasPermission();
+    if (!hasPermission) {
+      await recorder.dispose();
+      if (!mounted) {
+        return;
+      }
+      ShadToaster.of(context).show(const ShadToast.destructive(title: Text("Microphone access is required")));
+      return;
+    }
+    final stream = await recorder.startStream(
+      const RecordConfig(
+        encoder: AudioEncoder.pcm16bits,
+        sampleRate: _audioInputSampleRate,
+        numChannels: _audioInputChannels,
+        autoGain: true,
+        echoCancel: true,
+        noiseSuppress: true,
+      ),
+    );
+    if (!mounted) {
+      await recorder.stop();
+      await recorder.dispose();
+      return;
+    }
+    setState(() {
+      _audioRecorder = recorder;
+      _audioBuffer.clear();
+      _submittedAudioByteCount = 0;
+      _sentAudibleAudioThisRecording = false;
+      _audioLevels.clear();
+      recordingAudio = true;
+      stoppingAudio = false;
+    });
+    final onAudioRecordingStart = widget.onAudioRecordingStart;
+    if (widget.automaticAudioTurnDetection && onAudioRecordingStart != null) {
+      unawaited(
+        onAudioRecordingStart().catchError((Object error) {
+          if (!mounted) {
+            return;
+          }
+          ShadToaster.of(
+            context,
+          ).show(ShadToast.destructive(title: const Text("Unable to start audio thread"), description: Text("$error")));
+        }),
+      );
+    }
+    _audioFlushTimer?.cancel();
+    if (!widget.automaticAudioTurnDetection) {
+      _audioFlushTimer = Timer.periodic(_audioInputFlushInterval, (_) {
+        unawaited(_flushAudioBuffer());
+      });
+    }
+    _audioStreamSubscription = stream.listen(
+      (chunk) {
+        if (!mounted || chunk.isEmpty) {
+          return;
+        }
+        final level = _audioLevelFromPcm16(chunk);
+        if (widget.automaticAudioTurnDetection) {
+          if (level >= _audioInputSilenceLevelThreshold) {
+            _sentAudibleAudioThisRecording = true;
+          }
+          if (_sentAudibleAudioThisRecording) {
+            _submittedAudioByteCount += chunk.length;
+            unawaited(_enqueueAudioChunk(chunk, finalChunk: false));
+          }
+        } else {
+          _audioBuffer.add(chunk);
+          if (_audioBuffer.length >= _audioInputFlushBytes) {
+            unawaited(_flushAudioBuffer());
+          }
+        }
+        setState(() {
+          _appendAudioLevel(level);
+        });
+      },
+      onError: (Object error) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          recordingAudio = false;
+          stoppingAudio = false;
+        });
+        ShadToaster.of(context).show(ShadToast.destructive(title: const Text("Unable to record audio"), description: Text("$error")));
+      },
+    );
+  }
+
+  Future<void> _stopAudioRecording({required bool submit}) async {
+    if (!recordingAudio || stoppingAudio) {
+      return;
+    }
+    setState(() {
+      stoppingAudio = true;
+    });
+    final recorder = _audioRecorder;
+    _audioRecorder = null;
+    _audioFlushTimer?.cancel();
+    _audioFlushTimer = null;
+    if (widget.automaticAudioTurnDetection && recorder == null && widget.onExternalAudioRecordingStop != null) {
+      await widget.onExternalAudioRecordingStop!();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        recordingAudio = false;
+        stoppingAudio = false;
+      });
+      _submittedAudioByteCount = 0;
+      _sentAudibleAudioThisRecording = false;
+      return;
+    }
+    if (recorder != null) {
+      await recorder.stop();
+    }
+    await _audioStreamSubscription?.cancel();
+    _audioStreamSubscription = null;
+    if (recorder != null) {
+      await recorder.dispose();
+    }
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      recordingAudio = false;
+      stoppingAudio = false;
+    });
+    if (!submit) {
+      _audioBuffer.clear();
+      _submittedAudioByteCount = 0;
+      _sentAudibleAudioThisRecording = false;
+      return;
+    }
+    if (widget.automaticAudioTurnDetection) {
+      await _audioSendTail;
+    } else {
+      await _flushAudioBuffer();
+      await _audioFlushTail;
+      await _audioSendTail;
+      if (_submittedAudioByteCount < _minimumRealtimeAudioBytes) {
+        _audioBuffer.clear();
+        _submittedAudioByteCount = 0;
+        return;
+      }
+    }
+    await _enqueueAudioChunk(Uint8List(0), finalChunk: true);
+    _submittedAudioByteCount = 0;
+    _sentAudibleAudioThisRecording = false;
+  }
+
+  Future<void> _cancelAudioRecording() async {
+    if (recordingAudio) {
+      await _stopAudioRecording(submit: false);
+    }
+    _resetAudioDraft();
+  }
+
   late final focusNode = FocusNode(
     onKeyEvent: (_, event) {
       if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.enter && !HardwareKeyboard.instance.isShiftPressed) {
-        unawaited(_handleSend());
+        unawaited(_handleSendAction());
 
         return KeyEventResult.handled;
       }
@@ -2912,7 +3803,10 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   );
 
   Widget _wrapAccessoryTapRegion(Widget child) {
-    return TextFieldTapRegion(groupId: widget.tapRegionGroupId, child: child);
+    return TextFieldTapRegion(
+      groupId: widget.tapRegionGroupId ?? EditableText,
+      child: Listener(behavior: HitTestBehavior.translucent, onPointerDown: (_) => _keepComposerFocusForAccessoryTap(), child: child),
+    );
   }
 
   void _onTextChanged() {
@@ -2998,6 +3892,13 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     });
   }
 
+  void _keepComposerFocusForAccessoryTap() {
+    _restoreComposerFocus();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _restoreComposerFocus();
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -3022,17 +3923,31 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     if ((!oldWidget.autoFocus && widget.autoFocus) || oldWidget.focusTrigger != widget.focusTrigger) {
       _scheduleAutoFocus();
     }
+    if (oldWidget.audioInputEnabled && !widget.audioInputEnabled && recordingAudio) {
+      unawaited(_cancelAudioRecording());
+    }
   }
 
   @override
   void dispose() {
-    super.dispose();
-
+    _audioFlushTimer?.cancel();
+    _audioBuffer.clear();
+    _submittedAudioByteCount = 0;
+    _sentAudibleAudioThisRecording = false;
+    if (recordingAudio && widget.automaticAudioTurnDetection && _audioRecorder == null) {
+      final onExternalAudioRecordingStop = widget.onExternalAudioRecordingStop;
+      if (onExternalAudioRecordingStop != null) {
+        unawaited(onExternalAudioRecordingStop());
+      }
+    }
+    unawaited(_audioStreamSubscription?.cancel());
+    unawaited(_audioRecorder?.dispose());
     widget.controller.removeListener(_onChanged);
     widget.controller.textFieldController.removeListener(_onTextChanged);
 
     focusNode.dispose();
     ClipboardEvents.instance?.unregisterPasteEventListener(onPasteEvent);
+    super.dispose();
   }
 
   Future<DataReaderFile> _getFile(DataReader reader, SimpleFileFormat? format) {
@@ -3094,6 +4009,105 @@ class _ChatThreadInput extends State<ChatThreadInput> {
 
     // Update the controller's value
     controller.textFieldController.value = TextEditingValue(text: newText, selection: newSelection);
+  }
+
+  Widget _buildAudioRecorderComposer(BuildContext context, {required ShadThemeData theme, required Widget sendButton}) {
+    final automaticMode = widget.automaticAudioTurnDetection;
+    final leadingButton = automaticMode
+        ? _wrapAccessoryTapRegion(
+            ShadTooltip(
+              waitDuration: const Duration(seconds: 1),
+              builder: (context) => Text(recordingAudio ? "Mute microphone" : "Unmute microphone"),
+              child: ShadGestureDetector(
+                cursor: stoppingAudio ? SystemMouseCursors.basic : SystemMouseCursors.click,
+                onTapDown: stoppingAudio
+                    ? null
+                    : (_) {
+                        if (recordingAudio) {
+                          unawaited(_stopAudioRecording(submit: false));
+                        } else {
+                          unawaited(_startAudioRecording());
+                        }
+                      },
+                child: SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: Center(
+                    child: Icon(recordingAudio ? LucideIcons.mic : LucideIcons.micOff, size: 16, color: theme.colorScheme.foreground),
+                  ),
+                ),
+              ),
+            ),
+          )
+        : _wrapAccessoryTapRegion(
+            ShadTooltip(
+              waitDuration: const Duration(seconds: 1),
+              builder: (context) => const Text("Cancel recording"),
+              child: ShadGestureDetector(
+                cursor: stoppingAudio ? SystemMouseCursors.basic : SystemMouseCursors.click,
+                onTapDown: stoppingAudio ? null : (_) => unawaited(_cancelAudioRecording()),
+                child: SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: Center(child: Icon(LucideIcons.square, size: 16, fill: 1, color: theme.colorScheme.foreground)),
+                ),
+              ),
+            ),
+          );
+    final trailingButton = automaticMode
+        ? _wrapAccessoryTapRegion(
+            ShadTooltip(
+              waitDuration: const Duration(seconds: 1),
+              builder: (context) => const Text("Stop recording"),
+              child: ShadGestureDetector(
+                cursor: stoppingAudio ? SystemMouseCursors.basic : SystemMouseCursors.click,
+                onTapDown: stoppingAudio
+                    ? null
+                    : (_) {
+                        unawaited(() async {
+                          widget.onInterrupt?.call();
+                          await _stopAudioRecording(submit: true);
+                          _resetAudioDraft();
+                        }());
+                      },
+                child: SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: Center(child: Icon(LucideIcons.square, size: 16, fill: 1, color: theme.colorScheme.foreground)),
+                ),
+              ),
+            ),
+          )
+        : sendButton;
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.card,
+        borderRadius: theme.radius.resolve(Directionality.of(context)),
+        border: Border.all(color: theme.colorScheme.border, width: 2),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+      child: Row(
+        children: [
+          leadingButton,
+          const SizedBox(width: 8),
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                _syncAudioLevelCapacity(constraints.maxWidth);
+                return SizedBox(
+                  height: 32,
+                  child: CustomPaint(
+                    painter: _AudioWaveformPainter(levels: List<double>.of(_audioLevels), color: theme.colorScheme.foreground),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(width: 8),
+          trailingButton,
+        ],
+      ),
+    );
   }
 
   @override
@@ -3166,7 +4180,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
             },
             onTap: widget.sendEnabled
                 ? () {
-                    unawaited(_handleSend());
+                    unawaited(_handleSendAction());
                   }
                 : null,
             child: Opacity(
@@ -3182,14 +4196,76 @@ class _ChatThreadInput extends State<ChatThreadInput> {
         ),
       ),
     );
-    final trailer =
+    final micButton = widget.audioInputEnabled
+        ? _wrapAccessoryTapRegion(
+            ShadTooltip(
+              waitDuration: const Duration(seconds: 1),
+              builder: (context) => const Text("Record audio"),
+              child: ShadGestureDetector(
+                cursor: widget.readOnly ? SystemMouseCursors.basic : SystemMouseCursors.click,
+                onTapDown: widget.readOnly ? null : (_) => unawaited(_startAudioRecording()),
+                child: SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: Center(child: Icon(LucideIcons.mic, size: 16, color: theme.colorScheme.foreground)),
+                ),
+              ),
+            ),
+          )
+        : null;
+    final composerLeading = () {
+      final controls = <Widget>[];
+      if (widget.leading != null) {
+        controls.add(_wrapAccessoryTapRegion(wrapReadOnlyControls(widget.leading!)));
+      }
+      if (controls.isEmpty) {
+        return const SizedBox(width: 3);
+      }
+      return Row(mainAxisSize: MainAxisSize.min, children: controls);
+    }();
+    final primaryTrailer =
         widget.trailing ??
         (sending
             ? cancelSendButton
             : showSendButton && allAttachmentsUploaded
             ? sendButton
             : null);
+    final trailer = () {
+      final controls = <Widget>[];
+      if (micButton != null && !sending) {
+        controls.add(micButton);
+      }
+      if (primaryTrailer != null) {
+        if (controls.isNotEmpty) {
+          controls.add(const SizedBox(width: 4));
+        }
+        controls.add(primaryTrailer);
+      }
+      if (controls.isEmpty) {
+        return null;
+      }
+      if (controls.length == 1) {
+        return controls.single;
+      }
+      return Row(mainAxisSize: MainAxisSize.min, children: controls);
+    }();
+    final inputTrailer = widget.footer == null && trailer != null
+        ? Expanded(
+            child: Align(alignment: Alignment.centerRight, child: trailer),
+          )
+        : null;
     final reservedFooterTrailer = trailer ?? const SizedBox(width: 32, height: 32);
+    if (recordingAudio) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (widget.header != null) widget.header!,
+          _buildAudioRecorderComposer(context, theme: theme, sendButton: sendButton),
+          if (widget.footer != null) Padding(padding: const EdgeInsets.only(top: 6), child: widget.footer!),
+        ],
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
@@ -3248,8 +4324,8 @@ class _ChatThreadInput extends State<ChatThreadInput> {
             ),
             crossAxisAlignment: CrossAxisAlignment.center,
             inputPadding: EdgeInsets.all(2),
-            leading: widget.leading == null ? SizedBox(width: 3) : _wrapAccessoryTapRegion(wrapReadOnlyControls(widget.leading!)),
-            trailing: widget.footer == null ? trailer : null,
+            leading: composerLeading,
+            trailing: inputTrailer,
             padding: EdgeInsets.only(left: 5, right: 5, top: widget.footer == null ? 5 : 10, bottom: widget.footer == null ? 5 : 0),
             onLineCountChange: _onComposerLineCountChanged,
             decoration: (() {
@@ -3397,6 +4473,11 @@ class ChatBubble extends StatefulWidget {
     this.mobileStorageSaveSurfacePresenter,
     this.fullWidth = false,
     this.accented = false,
+    this.backgroundColor,
+    this.textColor,
+    this.selectable = true,
+    this.showActionRail = true,
+    this.onTap,
   });
 
   final RoomClient? room;
@@ -3409,6 +4490,11 @@ class ChatBubble extends StatefulWidget {
   final ThreadStorageSaveSurfacePresenter? mobileStorageSaveSurfacePresenter;
   final bool fullWidth;
   final bool accented;
+  final Color? backgroundColor;
+  final Color? textColor;
+  final bool selectable;
+  final bool showActionRail;
+  final VoidCallback? onTap;
 
   @override
   State createState() => _ChatBubble();
@@ -3571,8 +4657,9 @@ class _ChatBubble extends State<ChatBubble> {
     final cs = theme.colorScheme;
     final text = widget.text;
     final mine = widget.mine;
-    final bubbleColor = widget.accented || mine ? cs.accent : cs.background;
-    final showActions = hovering || optionsController.isOpen || reactionController.isOpen || _keepingActionsVisible;
+    final bubbleColor = widget.backgroundColor ?? (widget.accented || mine ? cs.accent : cs.background);
+    final showActions =
+        widget.showActionRail && (hovering || optionsController.isOpen || reactionController.isOpen || _keepingActionsVisible);
     final canLongPressReact =
         (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS) && widget.onReactFromMenu != null;
     final optionItemCount = 1 + (canLongPressReact ? 1 : 0) + (widget.room != null ? 1 : 0) + (widget.onDelete != null ? 1 : 0);
@@ -3659,36 +4746,44 @@ class _ChatBubble extends State<ChatBubble> {
           padding: const EdgeInsets.all(0),
           threadTypography: true,
           shrinkWrap: true,
-          selectable: kIsWeb,
+          selectable: widget.selectable && kIsWeb,
+          color: widget.textColor,
         ),
       ),
     );
 
     final content = widget.fullWidth
-        ? Stack(
-            clipBehavior: Clip.none,
-            children: [
-              SizedBox(width: double.infinity, child: bubble),
-              Positioned(bottom: 0, right: 0, child: actions),
-            ],
-          )
+        ? widget.showActionRail
+              ? Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    SizedBox(width: double.infinity, child: bubble),
+                    Positioned(bottom: 0, right: 0, child: actions),
+                  ],
+                )
+              : SizedBox(width: double.infinity, child: bubble)
         : Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              if (mine) actions,
+              if (mine && widget.showActionRail) actions,
               Expanded(child: bubble),
-              if (!mine) actions,
+              if (!mine && widget.showActionRail) actions,
             ],
           );
 
     return TapRegion(
       groupId: _contextMenuGroupId,
       onTapOutside: (_) {
-        optionsController.hide();
-        reactionController.hide();
+        if (widget.showActionRail) {
+          optionsController.hide();
+          reactionController.hide();
+        }
       },
       child: ShadGestureDetector(
         onHoverChange: (h) {
+          if (!widget.showActionRail) {
+            return;
+          }
           _actionVisibilityTimer?.cancel();
           setState(() {
             hovering = h;
@@ -3701,7 +4796,9 @@ class _ChatBubble extends State<ChatBubble> {
             _scheduleActionVisibilityHide();
           }
         },
-        onLongPress: optionsController.show,
+        onLongPress: widget.showActionRail ? optionsController.show : null,
+        onTap: widget.onTap,
+        cursor: widget.onTap == null ? MouseCursor.defer : SystemMouseCursors.click,
         child: Container(
           padding: EdgeInsets.symmetric(horizontal: 5),
           color: Colors.transparent,
@@ -3929,11 +5026,13 @@ class _ChatThreadState extends State<ChatThread> {
     }
     final values = combined.values
         .where(
-          (pending) => !state.messages.any(
-            (message) =>
-                _shouldRenderThreadMessageElement(message, showCompletedToolCalls: _showCompletedToolCalls) &&
-                _threadMessageMatchesPendingAgentMessage(message, pending),
-          ),
+          (pending) =>
+              pending.awaitingApplication ||
+              !state.messages.any(
+                (message) =>
+                    _shouldRenderThreadMessageElement(message, showCompletedToolCalls: _showCompletedToolCalls) &&
+                    _threadMessageMatchesPendingAgentMessage(message, pending),
+              ),
         )
         .toList();
     return [...values.where((message) => !message.awaitingAcceptance), ...values.where((message) => message.awaitingAcceptance)];
@@ -4096,6 +5195,9 @@ class _ChatThreadState extends State<ChatThread> {
       threadStatus: null,
       threadStatusStartedAt: null,
       threadStatusMode: null,
+      threadStatusTotalBytes: null,
+      threadStatusLinesAdded: null,
+      threadStatusLinesRemoved: null,
       supportsAgentMessages: agent != null && _supportsAgentMessages(agent),
       supportsMcp: agent != null && _supportsMcp(agent),
       toolkits: const {},
@@ -4445,11 +5547,25 @@ class _ChatThreadState extends State<ChatThread> {
                       startChatCentered: widget.startChatCentered,
                       messages: state.messages,
                       online: state.online,
-                      showTyping: (state.threadStatusMode != null) && state.listening.isEmpty,
+                      showTyping:
+                          shouldShowChatThreadStatus(
+                            ChatThreadStatusState(
+                              text: state.threadStatus,
+                              startedAt: state.threadStatusStartedAt,
+                              mode: state.threadStatusMode,
+                              totalBytes: state.threadStatusTotalBytes,
+                              linesAdded: state.threadStatusLinesAdded,
+                              linesRemoved: state.threadStatusLinesRemoved,
+                            ),
+                          ) &&
+                          state.listening.isEmpty,
                       showListening: state.listening.isNotEmpty,
                       threadStatus: state.threadStatus,
                       threadStatusStartedAt: state.threadStatusStartedAt,
                       threadStatusMode: state.threadStatusMode,
+                      threadStatusTotalBytes: state.threadStatusTotalBytes,
+                      threadStatusLinesAdded: state.threadStatusLinesAdded,
+                      threadStatusLinesRemoved: state.threadStatusLinesRemoved,
                       pendingMessages: _combinedPendingMessages(state),
                       pendingItemId: state.pendingItemId,
                       onCancel: () {
@@ -4476,9 +5592,16 @@ class _ChatThreadState extends State<ChatThread> {
                   listenable: controller,
                   builder: (context, _) {
                     final pendingMessages = _combinedPendingMessages(state);
-                    final queuedSteerPendingMessages = pendingMessages
-                        .where((message) => message.messageType == _agentTurnSteerType)
-                        .toList(growable: false);
+                    final hasThreadStatus = state.threadStatus != null && state.threadStatus!.trim().isNotEmpty;
+                    final queuedPendingMessages = hasThreadStatus
+                        ? pendingMessages
+                              .where(
+                                (message) =>
+                                    (message.messageType == _agentTurnStartType || message.messageType == _agentTurnSteerType) &&
+                                    !_pendingAgentMessageIsOptimisticallyRendered(pending: message, messages: state.messages),
+                              )
+                              .toList(growable: false)
+                        : const <PendingAgentMessage>[];
                     final canInterruptActiveTurn = _canInterruptActiveTurn(state: state, pendingMessages: pendingMessages);
                     return ChatThreadInputFrame(
                       hasFooter: widget.showUsageFooter,
@@ -4486,7 +5609,7 @@ class _ChatThreadState extends State<ChatThread> {
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          if (queuedSteerPendingMessages.isNotEmpty)
+                          if (queuedPendingMessages.isNotEmpty)
                             Padding(
                               padding: const EdgeInsets.only(bottom: 10),
                               child: Row(
@@ -4505,7 +5628,7 @@ class _ChatThreadState extends State<ChatThread> {
                                           style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
                                         ),
                                         const SizedBox(height: 4),
-                                        for (final pending in queuedSteerPendingMessages)
+                                        for (final pending in queuedPendingMessages)
                                           Padding(
                                             padding: const EdgeInsets.only(bottom: 4),
                                             child: Text(
@@ -4672,6 +5795,9 @@ class ChatThreadMessages extends StatefulWidget {
     this.threadStatus,
     this.threadStatusStartedAt,
     this.threadStatusMode,
+    this.threadStatusTotalBytes,
+    this.threadStatusLinesAdded,
+    this.threadStatusLinesRemoved,
     this.pendingMessages = const [],
     this.pendingItemId,
     this.onCancel,
@@ -4703,6 +5829,9 @@ class ChatThreadMessages extends StatefulWidget {
   final String? threadStatus;
   final DateTime? threadStatusStartedAt;
   final String? threadStatusMode;
+  final int? threadStatusTotalBytes;
+  final int? threadStatusLinesAdded;
+  final int? threadStatusLinesRemoved;
   final List<PendingAgentMessage> pendingMessages;
   final String? pendingItemId;
   final void Function()? onCancel;
@@ -4741,6 +5870,11 @@ class ChatThreadMessageView extends StatelessWidget {
     this.showReactionAction = false,
     this.onReactFromMenu,
     this.mobileStorageSaveSurfacePresenter,
+    this.bubbleColor,
+    this.textColor,
+    this.selectable = true,
+    this.showBubbleActions = true,
+    this.onTap,
   });
 
   static const double chatBubbleHorizontalInset = 5;
@@ -4763,6 +5897,11 @@ class ChatThreadMessageView extends StatelessWidget {
   final bool showReactionAction;
   final VoidCallback? onReactFromMenu;
   final ThreadStorageSaveSurfacePresenter? mobileStorageSaveSurfacePresenter;
+  final Color? bubbleColor;
+  final Color? textColor;
+  final bool selectable;
+  final bool showBubbleActions;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -4770,6 +5909,7 @@ class ChatThreadMessageView extends StatelessWidget {
     final hasText = messageText != null && messageText.trim().isNotEmpty;
     final headerLeftInset = mine ? chatBubbleHorizontalInset + chatBubbleActionRailWidth : chatBubbleHorizontalInset;
     final headerRightInset = mine || isAgentMessage ? chatBubbleHorizontalInset : chatBubbleHorizontalInset + chatBubbleActionRailWidth;
+    const attachmentInset = chatBubbleHorizontalInset + _chatBubbleContentHorizontalPadding;
 
     return Column(
       mainAxisAlignment: MainAxisAlignment.start,
@@ -4797,12 +5937,22 @@ class ChatThreadMessageView extends StatelessWidget {
               reactionActionBuilder: reactionActionBuilder,
               showReactionAction: showReactionAction,
               onReactFromMenu: onReactFromMenu,
+              backgroundColor: bubbleColor,
+              textColor: textColor,
+              selectable: selectable,
+              showActionRail: showBubbleActions,
+              onTap: onTap,
             ),
           ),
         for (var i = 0; i < attachmentWidgets.length; i++) ...[
           if (hasText || i > 0) const SizedBox(height: chatBubbleSiblingSpacing),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: chatBubbleHorizontalInset),
+            padding: const EdgeInsets.only(
+              left: attachmentInset,
+              right: attachmentInset,
+              top: _chatBubbleContentTopPadding,
+              bottom: _chatBubbleContentBottomPadding,
+            ),
             child: Align(alignment: mine ? Alignment.centerRight : Alignment.centerLeft, child: attachmentWidgets[i]),
           ),
         ],
@@ -4953,6 +6103,9 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   String? get threadStatus => widget.threadStatus;
   DateTime? get threadStatusStartedAt => widget.threadStatusStartedAt;
   String? get threadStatusMode => widget.threadStatusMode;
+  int? get threadStatusTotalBytes => widget.threadStatusTotalBytes;
+  int? get threadStatusLinesAdded => widget.threadStatusLinesAdded;
+  int? get threadStatusLinesRemoved => widget.threadStatusLinesRemoved;
   String? get pendingItemId => widget.pendingItemId;
   void Function()? get onCancel => widget.onCancel;
   List<MeshElement> get messages => widget.messages;
@@ -4980,6 +6133,9 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   String? _lastThreadStatus;
   DateTime? _lastThreadStatusStartedAt;
   String? _lastThreadStatusMode;
+  int? _lastThreadStatusTotalBytes;
+  int? _lastThreadStatusLinesAdded;
+  int? _lastThreadStatusLinesRemoved;
 
   @override
   void initState() {
@@ -5017,6 +6173,9 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     }
     _lastThreadStatusStartedAt = threadStatusStartedAt;
     _lastThreadStatusMode = threadStatusMode;
+    _lastThreadStatusTotalBytes = threadStatusTotalBytes;
+    _lastThreadStatusLinesAdded = threadStatusLinesAdded;
+    _lastThreadStatusLinesRemoved = threadStatusLinesRemoved;
   }
 
   void _syncStatusSlot() {
@@ -6065,31 +7224,6 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     return _shouldRenderThreadMessageElement(message, showCompletedToolCalls: widget.showCompletedToolCalls);
   }
 
-  List<PendingAgentMessage> _optimisticPendingMessages(List<MeshElement> visibleMessages) {
-    return widget.pendingMessages
-        .where((message) {
-          if (visibleMessages.any((visibleMessage) => _threadMessageMatchesPendingAgentMessage(visibleMessage, message))) {
-            return false;
-          }
-
-          if (message.messageType == _agentTurnStartType) {
-            return true;
-          }
-
-          return false;
-        })
-        .toList(growable: false);
-  }
-
-  Widget _buildPendingMessage(BuildContext context, PendingAgentMessage message) {
-    return PendingChatThreadMessage(
-      room: room,
-      message: message,
-      shouldShowAuthorNames: widget.shouldShowAuthorNames,
-      mobileStorageSaveSurfacePresenter: mobileStorageSaveSurfacePresenter,
-    );
-  }
-
   Widget _buildMessage(
     BuildContext context,
     MeshElement? previous,
@@ -6189,8 +7323,11 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
 
   @override
   Widget build(BuildContext context) {
-    final visibleMessages = messages.where(_shouldRenderThreadMessage).toList();
-    final optimisticPendingMessages = _optimisticPendingMessages(visibleMessages);
+    final pendingApplicationMessages = widget.pendingMessages.where((message) => message.awaitingApplication).toList(growable: false);
+    final visibleMessages = messages
+        .where(_shouldRenderThreadMessage)
+        .where((message) => !pendingApplicationMessages.any((pending) => _threadMessageMatchesPendingAgentMessage(message, pending)))
+        .toList();
     const bool bottomAlign = true;
     final feedImages = _collectThreadImages();
 
@@ -6210,13 +7347,24 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
       }
       messageWidgets.insert(0, messageWidget);
     }
-
-    for (final pending in optimisticPendingMessages) {
+    final pendingFeedMessages = widget.pendingMessages.where(
+      (pending) => _pendingAgentMessageIsOptimisticallyRendered(pending: pending, messages: messages),
+    );
+    for (final pending in pendingFeedMessages) {
       if (messageWidgets.isNotEmpty) {
         messageWidgets.insert(0, const SizedBox(height: _chatMessageStackSpacing));
       }
-      messageWidgets.insert(0, _buildPendingMessage(context, pending));
+      messageWidgets.insert(
+        0,
+        PendingChatThreadMessage(
+          room: room,
+          message: pending,
+          shouldShowAuthorNames: widget.shouldShowAuthorNames,
+          mobileStorageSaveSurfacePresenter: mobileStorageSaveSurfacePresenter,
+        ),
+      );
     }
+
     final threadView = ChatThreadViewportBody(
       scrollController: widget.scrollController,
       tapRegionGroupId: widget.composerTapRegionGroupId,
@@ -6245,6 +7393,9 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                       ? ChatThreadProcessingStatusRow(
                           text: displayStatus,
                           startedAt: showTyping ? threadStatusStartedAt : _lastThreadStatusStartedAt,
+                          totalBytes: showTyping ? threadStatusTotalBytes : _lastThreadStatusTotalBytes,
+                          linesAdded: showTyping ? threadStatusLinesAdded : _lastThreadStatusLinesAdded,
+                          linesRemoved: showTyping ? threadStatusLinesRemoved : _lastThreadStatusLinesRemoved,
                           onCancel: showTyping ? onCancel : null,
                           showCancelButton: (showTyping ? threadStatusMode : _lastThreadStatusMode) != null,
                           cancelEnabled: showTyping && !cancelling,
@@ -6939,6 +8090,37 @@ class _ThreadImageRecord {
   final String mimeType;
 }
 
+_ThreadImageRecord? _threadImageRecordFromDataUri(String imageUri, {String? fallbackMimeType}) {
+  final trimmed = imageUri.trim();
+  if (!trimmed.startsWith("data:")) {
+    return null;
+  }
+
+  final commaIndex = trimmed.indexOf(",");
+  if (commaIndex == -1) {
+    return null;
+  }
+
+  final metadata = trimmed.substring(5, commaIndex);
+  final encodedData = trimmed.substring(commaIndex + 1).trim();
+  if (encodedData.isEmpty) {
+    return null;
+  }
+
+  final metadataParts = metadata.split(";");
+  final parsedMimeType = metadataParts.isNotEmpty ? metadataParts.first.trim() : "";
+  final fallback = fallbackMimeType?.trim() ?? "";
+  final mimeType = parsedMimeType.isNotEmpty ? parsedMimeType : (fallback.isNotEmpty ? fallback : "image/png");
+  final isBase64 = metadataParts.any((part) => part.trim().toLowerCase() == "base64");
+
+  try {
+    final data = isBase64 ? base64Decode(encodedData) : Uint8List.fromList(utf8.encode(Uri.decodeComponent(encodedData)));
+    return _ThreadImageRecord(data: data, mimeType: mimeType);
+  } catch (_) {
+    return null;
+  }
+}
+
 Future<_ThreadImageRecord?> _loadGeneratedThreadImageRecord(RoomClient room, {required String imageId, String? fallbackMimeType}) async {
   final trimmedImageId = imageId.trim();
   if (trimmedImageId.isEmpty) {
@@ -6983,6 +8165,11 @@ Future<_ThreadImageRecord?> _loadGeneratedThreadImageRecordFromUri(
   required String imageUri,
   String? fallbackMimeType,
 }) async {
+  final dataUriRecord = _threadImageRecordFromDataUri(imageUri, fallbackMimeType: fallbackMimeType);
+  if (dataUriRecord != null) {
+    return dataUriRecord;
+  }
+
   final parsed = Uri.tryParse(imageUri.trim());
   if (parsed == null || parsed.scheme != 'dataset') {
     return null;
@@ -7985,17 +9172,53 @@ class _CyclingProgressIndicatorState extends State<_CyclingProgressIndicator> wi
   }
 }
 
-String formatChatThreadStatusText(String text, {DateTime? startedAt}) {
+String formatChatThreadStatusText(String text, {DateTime? startedAt, int? totalBytes, int? linesAdded, int? linesRemoved}) {
+  if (linesAdded != null || linesRemoved != null) {
+    final added = linesAdded != null ? "+${_formatGroupedStatusByteDigits(linesAdded)}" : null;
+    final removed = linesRemoved != null ? "-${_formatGroupedStatusByteDigits(linesRemoved)}" : null;
+    return [text, ?added, ?removed].join(" ");
+  }
+  if (totalBytes != null && totalBytes > 100) {
+    return "$text ${_formatStatusByteCount(totalBytes)}";
+  }
   if (startedAt == null) {
     return text;
   }
 
   final elapsed = DateTime.now().difference(startedAt);
-  final seconds = elapsed.inSeconds < 0 ? 0 : elapsed.inSeconds;
+  final seconds = _clampedElapsedSeconds(elapsed);
   if (seconds == 0) {
     return text;
   }
-  return "$text (${seconds}s)";
+  return "$text ${_formatStatusSecondCount(seconds)}";
+}
+
+String _formatStatusByteCount(int value) {
+  return "${_formatGroupedStatusByteDigits(value)} bytes";
+}
+
+int _clampedElapsedSeconds(Duration elapsed) {
+  return elapsed.inSeconds < 0 ? 0 : elapsed.inSeconds;
+}
+
+String _formatStatusSecondCount(int value) {
+  return "$value ${_formatStatusSecondUnit(value)}";
+}
+
+String _formatStatusSecondUnit(int value) {
+  return value == 1 ? "second" : "seconds";
+}
+
+String _formatGroupedStatusByteDigits(int value) {
+  final text = value.toString();
+  final buffer = StringBuffer();
+  for (var index = 0; index < text.length; index++) {
+    if (index > 0 && (text.length - index) % 3 == 0) {
+      buffer.write(",");
+    }
+    buffer.write(text[index]);
+  }
+  return buffer.toString();
 }
 
 LinearGradient _processingSweepGradient(BuildContext context, {required double t}) {
@@ -8164,6 +9387,9 @@ class ChatThreadProcessingStatusRow extends StatefulWidget {
     super.key,
     required this.text,
     this.startedAt,
+    this.totalBytes,
+    this.linesAdded,
+    this.linesRemoved,
     this.onCancel,
     this.showCancelButton = false,
     this.cancelEnabled = true,
@@ -8171,6 +9397,9 @@ class ChatThreadProcessingStatusRow extends StatefulWidget {
 
   final String text;
   final DateTime? startedAt;
+  final int? totalBytes;
+  final int? linesAdded;
+  final int? linesRemoved;
   final VoidCallback? onCancel;
   final bool showCancelButton;
   final bool cancelEnabled;
@@ -8191,7 +9420,10 @@ class _ChatThreadProcessingStatusRowState extends State<ChatThreadProcessingStat
   @override
   void didUpdateWidget(covariant ChatThreadProcessingStatusRow oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.startedAt != widget.startedAt) {
+    if (oldWidget.startedAt != widget.startedAt ||
+        oldWidget.totalBytes != widget.totalBytes ||
+        oldWidget.linesAdded != widget.linesAdded ||
+        oldWidget.linesRemoved != widget.linesRemoved) {
       _syncTicker();
     }
   }
@@ -8203,7 +9435,7 @@ class _ChatThreadProcessingStatusRowState extends State<ChatThreadProcessingStat
   }
 
   void _syncTicker() {
-    final shouldTick = widget.startedAt != null;
+    final shouldTick = widget.startedAt != null && !_shouldDisplayBytes && !_shouldDisplayLineCounts;
     if (!shouldTick) {
       _ticker?.cancel();
       _ticker = null;
@@ -8222,8 +9454,17 @@ class _ChatThreadProcessingStatusRowState extends State<ChatThreadProcessingStat
   }
 
   String _displayText() {
-    return formatChatThreadStatusText(widget.text, startedAt: widget.startedAt);
+    return formatChatThreadStatusText(
+      widget.text,
+      startedAt: widget.startedAt,
+      totalBytes: widget.totalBytes,
+      linesAdded: widget.linesAdded,
+      linesRemoved: widget.linesRemoved,
+    );
   }
+
+  bool get _shouldDisplayBytes => widget.totalBytes != null && widget.totalBytes! > 100;
+  bool get _shouldDisplayLineCounts => widget.linesAdded != null || widget.linesRemoved != null;
 
   @override
   Widget build(BuildContext context) {
@@ -8231,6 +9472,12 @@ class _ChatThreadProcessingStatusRowState extends State<ChatThreadProcessingStat
     final cancelButtonColor = widget.cancelEnabled ? theme.colorScheme.foreground : theme.colorScheme.muted;
     final cancelIconColor = widget.cancelEnabled ? theme.colorScheme.background : theme.colorScheme.mutedForeground;
     final displayText = _displayText();
+    final statusTextStyle = TextStyle(fontSize: 13, color: theme.colorScheme.mutedForeground);
+    final elapsedSeconds = widget.startedAt == null || _shouldDisplayBytes || _shouldDisplayLineCounts
+        ? 0
+        : _clampedElapsedSeconds(DateTime.now().difference(widget.startedAt!));
+    final addedColor = Colors.green.shade500;
+    final removedColor = Colors.red.shade500;
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.start,
@@ -8247,8 +9494,8 @@ class _ChatThreadProcessingStatusRowState extends State<ChatThreadProcessingStat
                       widget.onCancel!();
                     }
                   : null,
-              child: ShadTooltip(
-                builder: (context) => Text(widget.cancelEnabled ? "Stop" : "Cancelling"),
+              child: Tooltip(
+                message: widget.cancelEnabled ? "Stop" : "Cancelling",
                 child: SizedBox(
                   width: 24,
                   height: 24,
@@ -8272,14 +9519,399 @@ class _ChatThreadProcessingStatusRowState extends State<ChatThreadProcessingStat
           const SizedBox(width: 13, height: 13, child: _CyclingProgressIndicator(strokeWidth: 2)),
         const SizedBox(width: 10),
         Expanded(
-          child: ChatThreadProcessingSweepText(
-            text: displayText,
-            style: TextStyle(fontSize: 13, color: theme.colorScheme.mutedForeground),
-          ),
+          child: _shouldDisplayLineCounts
+              ? Row(
+                  children: [
+                    Flexible(
+                      child: Text(widget.text, style: statusTextStyle, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ),
+                    const SizedBox(width: 8),
+                    if (widget.linesAdded != null)
+                      _AnimatedSignedStatusCounter(value: widget.linesAdded!, prefix: "+", style: statusTextStyle, color: addedColor),
+                    if (widget.linesAdded != null && widget.linesRemoved != null) const SizedBox(width: 6),
+                    if (widget.linesRemoved != null)
+                      _AnimatedSignedStatusCounter(value: widget.linesRemoved!, prefix: "-", style: statusTextStyle, color: removedColor),
+                  ],
+                )
+              : _shouldDisplayBytes
+              ? Row(
+                  children: [
+                    Flexible(
+                      child: Text(widget.text, style: statusTextStyle, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ),
+                    _StatusCounterSeparator(style: statusTextStyle),
+                    _AnimatedStatusByteCounter(totalBytes: widget.totalBytes!, style: statusTextStyle),
+                  ],
+                )
+              : elapsedSeconds > 0
+              ? Row(
+                  children: [
+                    Flexible(
+                      child: Text(widget.text, style: statusTextStyle, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ),
+                    _StatusCounterSeparator(style: statusTextStyle),
+                    _AnimatedStatusSecondCounter(seconds: elapsedSeconds, style: statusTextStyle),
+                  ],
+                )
+              : Text(displayText, style: statusTextStyle, maxLines: 1, overflow: TextOverflow.ellipsis),
         ),
       ],
     );
   }
+}
+
+class _AnimatedStatusByteCounter extends StatefulWidget {
+  const _AnimatedStatusByteCounter({required this.totalBytes, required this.style});
+
+  final int totalBytes;
+  final TextStyle style;
+
+  @override
+  State<_AnimatedStatusByteCounter> createState() => _AnimatedStatusByteCounterState();
+}
+
+class _AnimatedStatusSecondCounter extends StatefulWidget {
+  const _AnimatedStatusSecondCounter({required this.seconds, required this.style});
+
+  final int seconds;
+  final TextStyle style;
+
+  @override
+  State<_AnimatedStatusSecondCounter> createState() => _AnimatedStatusSecondCounterState();
+}
+
+class _AnimatedSignedStatusCounter extends StatefulWidget {
+  const _AnimatedSignedStatusCounter({required this.value, required this.prefix, required this.style, required this.color});
+
+  final int value;
+  final String prefix;
+  final TextStyle style;
+  final Color color;
+
+  @override
+  State<_AnimatedSignedStatusCounter> createState() => _AnimatedSignedStatusCounterState();
+}
+
+abstract class _AnimatedStatusValueCounterState<T extends StatefulWidget> extends State<T> with SingleTickerProviderStateMixin {
+  static const Duration _rollDuration = Duration(milliseconds: 360);
+  static const Duration _restDuration = Duration(milliseconds: 500);
+
+  int get value;
+  String prefixForValue(int value) => "";
+  String suffixForValue(int value);
+  Color? numberColor(BuildContext context) => null;
+  int get initialDisplayValue => value;
+
+  late int _displayValue;
+  late int _targetValue;
+  late double _transitionStartValue;
+  late double _transitionEndValue;
+  late DateTime _restStartedAt;
+  var _transitioning = false;
+  Timer? _restTimer;
+  Timer? _transitionTimer;
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    final startValue = initialDisplayValue;
+    _displayValue = startValue;
+    _targetValue = value;
+    _transitionStartValue = startValue.toDouble();
+    _transitionEndValue = startValue.toDouble();
+    _restStartedAt = DateTime.now().subtract(_restDuration);
+    _controller = AnimationController(vsync: this, duration: _rollDuration, value: 1);
+    if (_displayValue != _targetValue) {
+      _scheduleTransition();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant T oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_targetValue == value) {
+      return;
+    }
+
+    _targetValue = value;
+    _scheduleTransition();
+  }
+
+  void _scheduleTransition() {
+    if (_displayValue == _targetValue || _transitioning) {
+      return;
+    }
+
+    final elapsedRest = DateTime.now().difference(_restStartedAt);
+    if (elapsedRest < _restDuration) {
+      _restTimer?.cancel();
+      _restTimer = Timer(_restDuration - elapsedRest, _startTransition);
+      return;
+    }
+
+    _startTransition();
+  }
+
+  void _startTransition() {
+    _restTimer?.cancel();
+    _restTimer = null;
+    if (!mounted || _displayValue == _targetValue) {
+      return;
+    }
+
+    final nextValue = _targetValue;
+    setState(() {
+      _transitionStartValue = _currentAnimatedValue;
+      _transitionEndValue = nextValue.toDouble();
+      _displayValue = nextValue;
+      _transitioning = true;
+    });
+    _controller.forward(from: 0);
+    _transitionTimer?.cancel();
+    _transitionTimer = Timer(_rollDuration, () {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _transitioning = false;
+        _transitionStartValue = _displayValue.toDouble();
+        _transitionEndValue = _displayValue.toDouble();
+        _restStartedAt = DateTime.now();
+      });
+      _scheduleTransition();
+    });
+  }
+
+  double get _currentAnimatedValue {
+    if (!_transitioning) {
+      return _displayValue.toDouble();
+    }
+    final progress = Curves.easeOutCubic.transform(_controller.value);
+    return _transitionStartValue + ((_transitionEndValue - _transitionStartValue) * progress);
+  }
+
+  @override
+  void dispose() {
+    _restTimer?.cancel();
+    _transitionTimer?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Widget buildCounter(BuildContext context, TextStyle style) {
+    final counterStyle = style.copyWith(fontFeatures: const [FontFeature.tabularFigures()]);
+    final numberStyle = counterStyle.copyWith(
+      color: numberColor(context) ?? ShadTheme.of(context).colorScheme.foreground,
+      fontWeight: FontWeight.w700,
+    );
+    final digitSize = _measureStatusCounterDigit(context, numberStyle);
+    final wheelHeight = digitSize.height + 6;
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) {
+        final progress = _transitioning ? Curves.easeOutCubic.transform(_controller.value) : 1.0;
+        final digitCount = _transitioning
+            ? math.max(_transitionStartValue.floor().toString().length, _transitionEndValue.floor().toString().length)
+            : _displayValue.toString().length;
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(prefixForValue(_displayValue), style: numberStyle, maxLines: 1, overflow: TextOverflow.clip),
+            for (var index = 0; index < digitCount; index++) ...[
+              if (index > 0 && (digitCount - index) % 3 == 0) Text(",", style: numberStyle, maxLines: 1, overflow: TextOverflow.clip),
+              _StatusCounterWheelDigit(
+                startValue: _transitioning ? _transitionStartValue : _displayValue.toDouble(),
+                endValue: _transitioning ? _transitionEndValue : _displayValue.toDouble(),
+                progress: progress,
+                digitIndex: index,
+                digitCount: digitCount,
+                style: numberStyle,
+                width: digitSize.width,
+                height: wheelHeight,
+              ),
+            ],
+            Text(suffixForValue(_displayValue), style: counterStyle, maxLines: 1, overflow: TextOverflow.clip),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _AnimatedStatusByteCounterState extends _AnimatedStatusValueCounterState<_AnimatedStatusByteCounter> {
+  @override
+  int get value => widget.totalBytes;
+
+  @override
+  int get initialDisplayValue => widget.totalBytes > 100 ? 100 : widget.totalBytes;
+
+  @override
+  String suffixForValue(int value) => " bytes";
+
+  @override
+  Widget build(BuildContext context) => buildCounter(context, widget.style);
+}
+
+class _AnimatedStatusSecondCounterState extends _AnimatedStatusValueCounterState<_AnimatedStatusSecondCounter> {
+  @override
+  int get value => widget.seconds;
+
+  @override
+  String suffixForValue(int value) => " ${_formatStatusSecondUnit(value)}";
+
+  @override
+  Widget build(BuildContext context) => buildCounter(context, widget.style);
+}
+
+class _AnimatedSignedStatusCounterState extends _AnimatedStatusValueCounterState<_AnimatedSignedStatusCounter> {
+  @override
+  int get value => widget.value;
+
+  @override
+  String prefixForValue(int value) => widget.prefix;
+
+  @override
+  String suffixForValue(int value) => "";
+
+  @override
+  Color? numberColor(BuildContext context) => widget.color;
+
+  @override
+  Widget build(BuildContext context) => buildCounter(context, widget.style);
+}
+
+class _StatusCounterSeparator extends StatelessWidget {
+  const _StatusCounterSeparator({required this.style});
+
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(" • ", style: style, maxLines: 1, overflow: TextOverflow.clip);
+  }
+}
+
+class StatusByteCounter extends StatelessWidget {
+  const StatusByteCounter({super.key, required this.totalBytes, required this.style});
+
+  final int totalBytes;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    return _AnimatedStatusByteCounter(totalBytes: totalBytes, style: style);
+  }
+}
+
+class StatusSignedCounter extends StatelessWidget {
+  const StatusSignedCounter({super.key, required this.value, required this.prefix, required this.style, required this.color});
+
+  final int value;
+  final String prefix;
+  final TextStyle style;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return _AnimatedSignedStatusCounter(value: value, prefix: prefix, style: style, color: color);
+  }
+}
+
+class _StatusCounterWheelDigit extends StatelessWidget {
+  const _StatusCounterWheelDigit({
+    required this.startValue,
+    required this.endValue,
+    required this.progress,
+    required this.digitIndex,
+    required this.digitCount,
+    required this.style,
+    required this.width,
+    required this.height,
+  });
+
+  final double startValue;
+  final double endValue;
+  final double progress;
+  final int digitIndex;
+  final int digitCount;
+  final TextStyle style;
+  final double width;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    final place = math.pow(10, digitCount - digitIndex - 1).toDouble();
+    final startPlaceValue = (startValue / place).floor();
+    final endPlaceValue = (endValue / place).floor();
+    final startDigit = _positiveModulo(startPlaceValue, 10);
+    final wheelDelta = endPlaceValue - startPlaceValue;
+    final virtualDigit = startDigit + (wheelDelta * progress);
+    final firstStripValue = math.min(startDigit, startDigit + wheelDelta) - 10;
+    final lastStripValue = math.max(startDigit, startDigit + wheelDelta) + 10;
+    final stripOffset = -((virtualDigit - firstStripValue) * height);
+    return SizedBox(
+      width: width,
+      height: height,
+      child: ShaderMask(
+        blendMode: BlendMode.dstIn,
+        shaderCallback: (bounds) => const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Colors.transparent, Colors.black, Colors.black, Colors.transparent],
+          stops: [0, 0.12, 0.88, 1],
+        ).createShader(bounds),
+        child: ClipRect(
+          child: OverflowBox(
+            minHeight: 0,
+            maxHeight: double.infinity,
+            alignment: Alignment.topCenter,
+            child: Transform.translate(
+              offset: Offset(0, stripOffset),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (var value = firstStripValue; value <= lastStripValue; value++)
+                    SizedBox(
+                      width: width,
+                      height: height,
+                      child: Center(
+                        child: Text("${_positiveModulo(value, 10)}", style: style, maxLines: 1, overflow: TextOverflow.clip),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+int _positiveModulo(int value, int modulus) => ((value % modulus) + modulus) % modulus;
+
+Size _measureStatusCounterText(BuildContext context, TextStyle style, String text) {
+  final painter = TextPainter(
+    text: TextSpan(text: text, style: style),
+    textDirection: Directionality.of(context),
+    textScaler: MediaQuery.textScalerOf(context),
+    locale: Localizations.maybeLocaleOf(context),
+    maxLines: 1,
+  )..layout();
+  return painter.size;
+}
+
+Size _measureStatusCounterDigit(BuildContext context, TextStyle style) {
+  var width = 0.0;
+  var height = 0.0;
+  for (var digit = 0; digit <= 9; digit++) {
+    final size = _measureStatusCounterText(context, style, digit.toString());
+    width = math.max(width, size.width);
+    height = math.max(height, size.height);
+  }
+
+  return Size(width.ceilToDouble() + 4, height.ceilToDouble());
 }
 
 class _PreviewSweepOverlay extends StatefulWidget {
@@ -8403,6 +10035,9 @@ class ChatThreadSnapshot {
     required this.threadStatus,
     required this.threadStatusStartedAt,
     required this.threadStatusMode,
+    required this.threadStatusTotalBytes,
+    required this.threadStatusLinesAdded,
+    required this.threadStatusLinesRemoved,
     required this.supportsAgentMessages,
     required this.supportsMcp,
     required this.toolkits,
@@ -8421,6 +10056,9 @@ class ChatThreadSnapshot {
   final String? threadStatus;
   final DateTime? threadStatusStartedAt;
   final String? threadStatusMode;
+  final int? threadStatusTotalBytes;
+  final int? threadStatusLinesAdded;
+  final int? threadStatusLinesRemoved;
   final bool supportsAgentMessages;
   final bool supportsMcp;
   final Map<String, AgentToolkitCapabilities> toolkits;
@@ -8463,6 +10101,9 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
   String? threadStatus;
   DateTime? threadStatusStartedAt;
   String? threadStatusMode;
+  int? threadStatusTotalBytes;
+  int? threadStatusLinesAdded;
+  int? threadStatusLinesRemoved;
   bool supportsAgentMessages = false;
   Map<String, AgentToolkitCapabilities> toolkits = const {};
   String? threadTurnId;
@@ -8543,9 +10184,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
       await widget.room.messaging.sendMessage(
         to: agent,
         type: _agentRoomMessageType,
-        message: {
-          "payload": {"type": _agentCapabilitiesRequestType, "thread_id": widget.path, "message_id": const Uuid().v4()},
-        },
+        message: {"type": _agentCapabilitiesRequestType, "thread_id": widget.path, "message_id": const Uuid().v4()},
       );
     } catch (_) {
       if (_capabilitiesRequestKey == requestKey) {
@@ -8673,9 +10312,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
           to: agent,
           type: _agentRoomMessageType,
           ignoreOffline: true,
-          message: {
-            "payload": {"type": messageType, "thread_id": path},
-          },
+          message: {"type": messageType, "thread_id": path},
         );
       } catch (_) {}
     }());
@@ -8716,28 +10353,45 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
     }
 
     if (event is RoomMessageEvent) {
-      _getThreadStatus();
-
       if (event.message.type == _agentRoomMessageType) {
-        final payload = event.message.message["payload"];
+        final message = event.message.message;
+        final payload = message["type"] is String ? message : message["payload"];
         if (payload is Map<String, dynamic>) {
+          final statusChanged = trackAgentThreadStatusPayload(room: widget.room, payload: payload);
           if (_handleCapabilitiesPayload(event: event, payload: payload)) {
+            if (statusChanged) {
+              _getThreadStatus();
+            }
             return;
           }
           if (_handleUsagePayload(payload)) {
+            if (statusChanged) {
+              _getThreadStatus();
+            }
             return;
           }
           widget.controller.handleAgentMessagePayload(payload);
+          _getThreadStatus();
         } else if (payload is Map) {
           final normalized = Map<String, dynamic>.from(payload);
+          final statusChanged = trackAgentThreadStatusPayload(room: widget.room, payload: normalized);
           if (_handleCapabilitiesPayload(event: event, payload: normalized)) {
+            if (statusChanged) {
+              _getThreadStatus();
+            }
             return;
           }
           if (_handleUsagePayload(normalized)) {
+            if (statusChanged) {
+              _getThreadStatus();
+            }
             return;
           }
           widget.controller.handleAgentMessagePayload(normalized);
+          _getThreadStatus();
         }
+      } else {
+        _getThreadStatus();
       }
 
       if (event.message.type.startsWith("participant")) {
@@ -8810,6 +10464,9 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         turnId: threadTurnId,
         pendingMessages: pendingMessages,
         pendingItemId: pendingItemId,
+        totalBytes: threadStatusTotalBytes,
+        linesAdded: threadStatusLinesAdded,
+        linesRemoved: threadStatusLinesRemoved,
         supportsAgentMessages: supportsAgentMessages,
       ),
     );
@@ -8819,12 +10476,41 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         nextState.pendingMessages.length == pendingMessages.length &&
         const DeepCollectionEquality().equals(
           nextState.pendingMessages
-              .map((x) => [x.messageId, x.messageType, x.text, x.attachments, x.senderName, x.matchByContentOnly])
+              .map(
+                (x) => [
+                  x.messageId,
+                  x.messageType,
+                  x.text,
+                  x.attachments,
+                  x.senderName,
+                  x.matchByContentOnly,
+                  x.awaitingAcceptance,
+                  x.awaitingApplication,
+                  x.awaitingOnline,
+                ],
+              )
               .toList(),
-          pendingMessages.map((x) => [x.messageId, x.messageType, x.text, x.attachments, x.senderName, x.matchByContentOnly]).toList(),
+          pendingMessages
+              .map(
+                (x) => [
+                  x.messageId,
+                  x.messageType,
+                  x.text,
+                  x.attachments,
+                  x.senderName,
+                  x.matchByContentOnly,
+                  x.awaitingAcceptance,
+                  x.awaitingApplication,
+                  x.awaitingOnline,
+                ],
+              )
+              .toList(),
         );
     if (nextState.text == threadStatus &&
         nextState.mode == threadStatusMode &&
+        nextState.totalBytes == threadStatusTotalBytes &&
+        nextState.linesAdded == threadStatusLinesAdded &&
+        nextState.linesRemoved == threadStatusLinesRemoved &&
         sameStartedAt &&
         nextState.turnId == threadTurnId &&
         nextState.pendingItemId == pendingItemId &&
@@ -8837,6 +10523,9 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
       threadStatus = nextState.text;
       threadStatusStartedAt = nextState.startedAt;
       threadStatusMode = nextState.mode;
+      threadStatusTotalBytes = nextState.totalBytes;
+      threadStatusLinesAdded = nextState.linesAdded;
+      threadStatusLinesRemoved = nextState.linesRemoved;
       threadTurnId = nextState.turnId;
       supportsAgentMessages = nextState.supportsAgentMessages;
       pendingMessages = nextState.pendingMessages;
@@ -8848,6 +10537,9 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
       threadStatus = nextState.text;
       threadStatusStartedAt = nextState.startedAt;
       threadStatusMode = nextState.mode;
+      threadStatusTotalBytes = nextState.totalBytes;
+      threadStatusLinesAdded = nextState.linesAdded;
+      threadStatusLinesRemoved = nextState.linesRemoved;
       threadTurnId = nextState.turnId;
       supportsAgentMessages = nextState.supportsAgentMessages;
       pendingMessages = nextState.pendingMessages;
@@ -8874,6 +10566,9 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
         threadStatus: threadStatus,
         threadStatusStartedAt: threadStatusStartedAt,
         threadStatusMode: threadStatusMode,
+        threadStatusTotalBytes: threadStatusTotalBytes,
+        threadStatusLinesAdded: threadStatusLinesAdded,
+        threadStatusLinesRemoved: threadStatusLinesRemoved,
         supportsAgentMessages: supportsAgentMessages,
         supportsMcp: supportsMcp,
         toolkits: toolkits,
@@ -9237,6 +10932,78 @@ class _EventLineState extends State<EventLine> {
     return null;
   }
 
+  String _diffPreviewHeader({required String path, required int linesAdded, required int linesRemoved}) {
+    if (linesAdded == 0 && linesRemoved == 0) {
+      return path;
+    }
+    return "$path (+$linesAdded -$linesRemoved)";
+  }
+
+  List<Map<String, String>> _extractApplyPatchPreviewBlocks({required String encoded, required String headline, String? fallbackPath}) {
+    final normalized = encoded.replaceAll("\r\n", "\n").trimRight();
+    if (!normalized.contains("*** Begin Patch") &&
+        !normalized.contains("*** Update File:") &&
+        !normalized.contains("*** Add File:") &&
+        !normalized.contains("*** Delete File:")) {
+      return const [];
+    }
+
+    final previews = <Map<String, String>>[];
+    var currentPath = "";
+    var lines = <String>[];
+    var linesAdded = 0;
+    var linesRemoved = 0;
+
+    void flush() {
+      if (currentPath.isEmpty || lines.isEmpty) {
+        lines = <String>[];
+        linesAdded = 0;
+        linesRemoved = 0;
+        return;
+      }
+      previews.add({
+        "path": _diffPreviewHeader(path: currentPath, linesAdded: linesAdded, linesRemoved: linesRemoved),
+        "diff": lines.join("\n").trimRight(),
+      });
+      lines = <String>[];
+      linesAdded = 0;
+      linesRemoved = 0;
+    }
+
+    for (final rawLine in normalized.split("\n")) {
+      final fileMatch = RegExp(r"^\*\*\* (?:Update|Add|Delete) File: (.+)$").firstMatch(rawLine);
+      if (fileMatch != null) {
+        flush();
+        currentPath = fileMatch.group(1)?.trim() ?? "";
+        continue;
+      }
+
+      if (currentPath.isEmpty) {
+        continue;
+      }
+      if (rawLine.startsWith("*** ")) {
+        continue;
+      }
+
+      lines.add(rawLine);
+      if (rawLine.startsWith("+") && !rawLine.startsWith("+++")) {
+        linesAdded++;
+      } else if (rawLine.startsWith("-") && !rawLine.startsWith("---")) {
+        linesRemoved++;
+      }
+    }
+    flush();
+
+    if (previews.isNotEmpty) {
+      return previews;
+    }
+
+    final fallback = fallbackPath ?? headline;
+    return [
+      {"path": fallback, "diff": normalized},
+    ];
+  }
+
   List<Map<String, String>> _extractDiffPreviewBlocksFromEncoded({
     required String encoded,
     required String headline,
@@ -9244,6 +11011,11 @@ class _EventLineState extends State<EventLine> {
   }) {
     if (encoded.trim().isEmpty) {
       return const [];
+    }
+
+    final applyPatchPreviews = _extractApplyPatchPreviewBlocks(encoded: encoded, headline: headline, fallbackPath: fallbackPath);
+    if (applyPatchPreviews.isNotEmpty) {
+      return applyPatchPreviews;
     }
 
     try {
@@ -9344,19 +11116,20 @@ class _EventLineState extends State<EventLine> {
     final headerTextStyle = GoogleFonts.sourceCodePro(fontSize: usesMobileTypography ? 13 : 11, color: theme.colorScheme.mutedForeground);
     final resolvedLanguageId = resolveLanguageIdForFilename(languageOrFilename) ?? fallbackLanguageId;
     final body = resolvedLanguageId == "diff"
-        ? SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
+        ? Container(
+            width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: _chatBubbleContentHorizontalPadding, vertical: 8),
             child: Builder(
               builder: (context) {
                 final lines = normalizedCode.split("\n");
                 return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     for (final line in lines.indexed)
                       Padding(
                         padding: EdgeInsets.only(bottom: line.$1 < lines.length - 1 ? 2 : 0),
                         child: Container(
+                          width: double.infinity,
                           decoration: BoxDecoration(
                             color: diffLineBackgroundColor(context, line.$2),
                             borderRadius: BorderRadius.circular(4),
@@ -9510,18 +11283,7 @@ class _EventLineState extends State<EventLine> {
     final useAgentMessages = recipients.any(_supportsAgentMessages);
     String? turnId;
     if (useAgentMessages) {
-      for (final participant in recipients) {
-        final pendingStatus = _parsePendingMessagesStatus(participant, widget.path);
-        if (pendingStatus == null) {
-          continue;
-        }
-
-        final value = pendingStatus["turn_id"];
-        if (value is String && value.trim().isNotEmpty) {
-          turnId = value.trim();
-          break;
-        }
-      }
+      turnId = resolveChatThreadStatus(room: widget.room, path: widget.path, agentName: widget.agentName).turnId;
 
       if (turnId == null) {
         return;
@@ -9540,12 +11302,10 @@ class _EventLineState extends State<EventLine> {
             type: useAgentMessages ? _agentRoomMessageType : (approve ? "approved" : "rejected"),
             message: useAgentMessages
                 ? {
-                    "payload": {
-                      "type": approve ? _agentToolApproveType : _agentToolRejectType,
-                      "thread_id": widget.path,
-                      "turn_id": turnId,
-                      "item_id": approvalId,
-                    },
+                    "type": approve ? _agentToolApproveType : _agentToolRejectType,
+                    "thread_id": widget.path,
+                    "turn_id": turnId,
+                    "item_id": approvalId,
                   }
                 : {"path": widget.path, "approval_id": approvalId},
           ),

@@ -483,7 +483,7 @@ void main() {
     expect(find.textContaining("hidden output"), findsNothing);
   });
 
-  testWidgets('optimistically renders pending turn start messages in the feed', (tester) async {
+  testWidgets('renders pending turn start messages in the feed', (tester) async {
     final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     final controller = ChatThreadController(room: room);
     final document = _createThreadDocument();
@@ -509,7 +509,7 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.byType(ChatBubble), findsOneWidget);
+    expect(find.byType(PendingChatThreadMessage), findsOneWidget);
     expect(find.text("optimistic hello"), findsOneWidget);
   });
 
@@ -546,7 +546,7 @@ void main() {
     expect(find.text("queued steer"), findsNothing);
   });
 
-  test('keeps pending steer messages after acceptance and application events', () async {
+  test('marks pending steer messages after application events', () async {
     final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     final controller = ChatThreadController(room: room);
     final document = _createThreadDocument();
@@ -566,6 +566,7 @@ void main() {
     );
 
     expect(controller.pendingAgentMessages.single.awaitingAcceptance, isTrue);
+    expect(controller.pendingAgentMessages.single.awaitingApplication, isTrue);
 
     controller.handleAgentMessagePayload({
       "type": "meshagent.agent.turn.steer.accepted",
@@ -575,6 +576,7 @@ void main() {
     });
 
     expect(controller.pendingAgentMessages.single.awaitingAcceptance, isFalse);
+    expect(controller.pendingAgentMessages.single.awaitingApplication, isTrue);
     expect(controller.pendingAgentMessages.single.text, "translate to spanish");
 
     controller.handleAgentMessagePayload({
@@ -584,10 +586,49 @@ void main() {
       "source_message_id": "pending-steer-1",
     });
 
-    expect(controller.pendingAgentMessages.single.text, "translate to spanish");
+    expect(controller.pendingAgentMessages, isEmpty);
   });
 
-  testWidgets('hides optimistic pending turn start messages once the real message is visible', (tester) async {
+  testWidgets('does not render matching thread messages while pending application', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
+    final document = _createThreadDocument();
+    addTearDown(room.dispose);
+    addTearDown(controller.dispose);
+    addTearDown(document.dispose);
+
+    _insertElement(
+      document: document,
+      targetId: _messagesElement(document).id,
+      tagName: "message",
+      elementId: "message-visible",
+      attributes: {"id": "pending-steer-1", "text": "queued steer", "author_name": "user", "role": "user"},
+    );
+
+    await tester.pumpWidget(
+      _buildThreadHarness(
+        room: room,
+        controller: controller,
+        document: document,
+        pendingMessages: const [
+          PendingAgentMessage(
+            messageId: "pending-steer-1",
+            messageType: "meshagent.agent.turn.steer",
+            threadPath: "/threads/test",
+            text: "queued steer",
+            attachments: [],
+            awaitingApplication: true,
+          ),
+        ],
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(ChatBubble), findsNothing);
+    expect(find.text("queued steer"), findsNothing);
+  });
+
+  testWidgets('renders turn start messages once the real message is visible', (tester) async {
     final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     final controller = ChatThreadController(room: room);
     final document = _createThreadDocument();
@@ -625,7 +666,7 @@ void main() {
     expect(find.text("optimistic hello"), findsOneWidget);
   });
 
-  testWidgets('hides new thread first-message pending rows once matching content is visible', (tester) async {
+  testWidgets('does not render new thread first-message pending rows before matching content is visible', (tester) async {
     final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     final controller = ChatThreadController(room: room);
     final document = _createThreadDocument();
@@ -652,8 +693,8 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.byType(ChatBubble), findsOneWidget);
-    expect(find.text("first new thread message"), findsOneWidget);
+    expect(find.byType(ChatBubble), findsNothing);
+    expect(find.text("first new thread message"), findsNothing);
 
     _insertElement(
       document: document,
@@ -686,7 +727,7 @@ void main() {
     expect(find.text("first new thread message"), findsOneWidget);
   });
 
-  testWidgets('keeps optimistic pending messages until the real message text matches', (tester) async {
+  testWidgets('does not render pending messages when the real message text is incomplete', (tester) async {
     final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     final controller = ChatThreadController(room: room);
     final document = _createThreadDocument();
@@ -720,10 +761,10 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text("optimistic hello"), findsOneWidget);
+    expect(find.text("optimistic hello"), findsNothing);
   });
 
-  testWidgets('keeps optimistic pending turn starts visible while the agent is processing', (tester) async {
+  testWidgets('renders pending turn starts in the feed while the agent is processing', (tester) async {
     final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     final controller = ChatThreadController(room: room);
     final document = _createThreadDocument();
@@ -752,11 +793,11 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.byType(ChatBubble), findsOneWidget);
+    expect(find.byType(PendingChatThreadMessage), findsOneWidget);
     expect(find.text("optimistic hello"), findsOneWidget);
   });
 
-  testWidgets('keeps optimistic pending turn starts until matching server messages are renderable', (tester) async {
+  testWidgets('does not render pending turn starts when matching server messages are not renderable', (tester) async {
     final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     final controller = ChatThreadController(room: room);
     final document = _createThreadDocument();
@@ -793,8 +834,8 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.byType(ChatBubble), findsOneWidget);
-    expect(find.text("optimistic hello"), findsOneWidget);
+    expect(find.byType(ChatBubble), findsNothing);
+    expect(find.text("optimistic hello"), findsNothing);
   });
 
   testWidgets('animates the processing status spacer when status appears', (tester) async {
@@ -865,6 +906,32 @@ void main() {
 
     await tester.pump(const Duration(milliseconds: 1));
     expect(find.byType(ChatThreadProcessingStatusRow), findsNothing);
+  });
+
+  testWidgets('does not render a processing status row for mode-only thread status', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
+    final document = _createThreadDocument();
+    addTearDown(room.dispose);
+    addTearDown(controller.dispose);
+    addTearDown(document.dispose);
+
+    final status = ChatThreadStatusState(mode: 'busy', turnId: 'turn-1');
+
+    await tester.pumpWidget(
+      _buildThreadHarness(
+        room: room,
+        controller: controller,
+        document: document,
+        showTyping: shouldShowChatThreadStatus(status),
+        threadStatus: status.text,
+        threadStatusMode: status.mode,
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(ChatThreadProcessingStatusRow), findsNothing);
+    expect(find.text('Thinking'), findsNothing);
   });
 
   testWidgets('cancels delayed processing status collapse when status returns', (tester) async {

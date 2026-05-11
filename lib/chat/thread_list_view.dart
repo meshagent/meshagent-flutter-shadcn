@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:meshagent/meshagent.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
-import 'chat.dart';
 import 'conversation_descriptor.dart';
 import '../ui/coordinated_context_menu.dart';
 
@@ -41,7 +40,6 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
   String? _openedPath;
   Object? _error;
   bool _loading = true;
-  final Set<RemoteParticipant> _listenedParticipants = <RemoteParticipant>{};
 
   String? _normalizePath(String? path) {
     final normalized = path?.trim();
@@ -201,48 +199,8 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
     setState(() {});
   }
 
-  void _onParticipantChanged() {
-    if (!mounted) {
-      return;
-    }
-
-    setState(() {});
-  }
-
-  bool _rebindParticipantListeners() {
-    final nextParticipants = widget.room.messaging.remoteParticipants.toSet();
-    var changed = false;
-
-    for (final participant in _listenedParticipants.difference(nextParticipants)) {
-      participant.removeListener(_onParticipantChanged);
-      changed = true;
-    }
-
-    for (final participant in nextParticipants.difference(_listenedParticipants)) {
-      participant.addListener(_onParticipantChanged);
-      changed = true;
-    }
-
-    if (changed || _listenedParticipants.length != nextParticipants.length) {
-      _listenedParticipants
-        ..clear()
-        ..addAll(nextParticipants);
-      return true;
-    }
-
-    return false;
-  }
-
-  void _unbindParticipantListeners() {
-    for (final participant in _listenedParticipants) {
-      participant.removeListener(_onParticipantChanged);
-    }
-    _listenedParticipants.clear();
-  }
-
   void _onMessagingChanged() {
-    final participantSetChanged = _rebindParticipantListeners();
-    if (participantSetChanged && mounted) {
+    if (mounted) {
       setState(() {});
     }
   }
@@ -321,7 +279,6 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
   void initState() {
     super.initState();
     widget.room.messaging.addListener(_onMessagingChanged);
-    _rebindParticipantListeners();
     unawaited(_rebindDocument());
   }
 
@@ -329,10 +286,8 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
   void didUpdateWidget(covariant ChatThreadListView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.room != widget.room) {
-      _unbindParticipantListeners();
       oldWidget.room.messaging.removeListener(_onMessagingChanged);
       widget.room.messaging.addListener(_onMessagingChanged);
-      _rebindParticipantListeners();
     }
     if (oldWidget.room != widget.room || oldWidget.threadListPath != widget.threadListPath) {
       unawaited(_rebindDocument());
@@ -348,7 +303,6 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
 
   @override
   void dispose() {
-    _unbindParticipantListeners();
     widget.room.messaging.removeListener(_onMessagingChanged);
     unawaited(_closeDocument());
     super.dispose();
@@ -359,7 +313,6 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
     required String title,
     required bool selected,
     required VoidCallback onTap,
-    ChatThreadStatusState? status,
     IconData fallbackIcon = LucideIcons.messageSquare,
     Widget? trailing,
   }) {
@@ -383,19 +336,7 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
                 children: [
                   SizedBox(
                     width: 18,
-                    child: Center(
-                      child: status == null
-                          ? Icon(fallbackIcon, size: 14, color: foreground)
-                          : selected && !status.hasStatus
-                          ? Icon(LucideIcons.check, size: 14, color: foreground)
-                          : ChatThreadStatusIndicator(
-                              statusText: status.text,
-                              startedAt: status.startedAt,
-                              reserveSpace: true,
-                              size: 14,
-                              strokeWidth: 2,
-                            ),
-                    ),
+                    child: Center(child: Icon(selected ? LucideIcons.check : fallbackIcon, size: 14, color: foreground)),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
@@ -459,7 +400,6 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
             context,
             title: entry.name,
             selected: entry.path == selectedThreadPath,
-            status: resolveChatThreadStatus(room: widget.room, path: entry.path, agentName: widget.agentName),
             trailing: _ChatThreadListMenuButton(onRename: () => _renameThread(entry)),
             onTap: () {
               widget.onSelectedThreadPathChanged(entry.path);

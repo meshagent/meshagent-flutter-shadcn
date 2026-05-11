@@ -8,9 +8,10 @@ import 'package:http/http.dart';
 import 'package:meshagent/room_server_client.dart';
 import 'package:meshagent_flutter_shadcn/code_language_resolver.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
-import 'package:flutter_highlight/themes/monokai-sublime.dart';
 import 'package:meshagent_flutter_shadcn/code_editor.dart';
 import 'package:re_highlight/languages/plaintext.dart';
+import 'package:re_highlight/styles/base16/material-darker.dart';
+import 'package:re_highlight/styles/base16/material-lighter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 const int codePreviewLargeFileThresholdBytes = 1024 * 1024;
@@ -138,7 +139,6 @@ class CodePreview extends StatefulWidget {
 }
 
 class _CodePreview extends State<CodePreview> {
-  final theme = monokaiSublimeTheme;
   String? text;
   _LargeCodeFile? largeFile;
   Object? loadError;
@@ -340,6 +340,7 @@ class _CodePreview extends State<CodePreview> {
   @override
   Widget build(BuildContext context) {
     final mode = resolveModeForFilename(widget.filename) ?? langPlaintext;
+    final theme = _sourceCodeEditorTheme(context);
     final showEditorToolbar = !widget.readOnly && widget.showToolbar && largeFile == null;
 
     return Column(
@@ -434,6 +435,10 @@ class _CodePreview extends State<CodePreview> {
       ],
     );
   }
+}
+
+Map<String, TextStyle> _sourceCodeEditorTheme(BuildContext context) {
+  return ShadTheme.of(context).brightness == Brightness.dark ? materialDarkerTheme : materialLighterTheme;
 }
 
 class _CodePreviewLoadResult {

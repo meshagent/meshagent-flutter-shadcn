@@ -1,10 +1,11 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_flutter_shadcn/chat/chat.dart';
+import 'package:meshagent_flutter_shadcn/chat/agent_stream_accumulator.dart';
+import 'package:meshagent_flutter_shadcn/chat/tool_call_status_accumulator.dart';
 import 'package:meshagent/runtime.dart';
 
 class _ProtocolPair {
@@ -328,7 +329,75 @@ void main() {
     expect(harness.server.requests.last.input['to_participant_id'], 'remote-1');
   });
 
-  test('resolveChatThreadStatus reads the exact dataset thread path', () async {
+  test('resolveChatThreadStatus reads status messages for the exact dataset thread path', () async {
+    final harness = await _startMessagingHarness();
+    addTearDown(harness.dispose);
+
+    const threadPath = 'dataset://agents/dataset/threads/thread-1';
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.thread.status',
+        'thread_id': threadPath,
+        'status': 'Generating image',
+        'mode': 'busy',
+        'started_at': '2026-05-04T12:00:00Z',
+        'pending_item_id': 'image-1',
+      },
+    );
+
+    final state = resolveChatThreadStatus(room: harness.room, path: threadPath, agentName: 'assistant');
+
+    expect(state.text, 'Generating image');
+    expect(state.mode, 'busy');
+    expect(state.pendingItemId, 'image-1');
+    expect(state.totalBytes, isNull);
+    expect(state.startedAt, DateTime.parse('2026-05-04T12:00:00Z'));
+  });
+
+  test('resolveChatThreadStatus ignores stale participant status attributes', () async {
+    final harness = await _startMessagingHarness();
+    addTearDown(harness.dispose);
+
+    await harness.room.messaging.enable();
+    await _waitUntil(() => harness.room.messaging.remoteParticipants.isNotEmpty);
+
+    const threadPath = 'dataset://agents/dataset/threads/thread-1';
+    await harness.server.sendParticipantAttributes(harness.pair.serverProtocol, {
+      'thread.status.text.$threadPath': 'Old attribute status',
+      'thread.status.mode.$threadPath': 'busy',
+      'thread.status.pending_item_id.$threadPath': 'old-item',
+    });
+    await _waitUntil(
+      () => harness.room.messaging.remoteParticipants.first.getAttribute('thread.status.text.$threadPath') == 'Old attribute status',
+    );
+
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.thread.status',
+        'thread_id': threadPath,
+        'status': 'Generating image',
+        'mode': 'steerable',
+        'started_at': '2026-05-04T12:00:00Z',
+        'turn_id': 'turn-1',
+        'pending_item_id': 'image-1',
+        'total_bytes': 240,
+      },
+    );
+
+    final state = resolveChatThreadStatus(room: harness.room, path: threadPath, agentName: 'assistant');
+
+    expect(state.text, 'Generating image');
+    expect(state.mode, 'steerable');
+    expect(state.turnId, 'turn-1');
+    expect(state.totalBytes, 240);
+    expect(state.pendingItemId, 'image-1');
+    expect(state.startedAt, DateTime.parse('2026-05-04T12:00:00Z'));
+    expect(state.supportsAgentMessages, isTrue);
+  });
+
+  test('resolveChatThreadStatus stays clear when only stale attributes remain', () async {
     final harness = await _startMessagingHarness();
     addTearDown(harness.dispose);
 
@@ -339,48 +408,409 @@ void main() {
     await harness.server.sendParticipantAttributes(harness.pair.serverProtocol, {
       'thread.status.text.$threadPath': 'Generating image',
       'thread.status.mode.$threadPath': 'busy',
-      'thread.status.started_at.$threadPath': '2026-05-04T12:00:00Z',
-      'thread.status.pending_item_id.$threadPath': 'image-1',
     });
     await _waitUntil(
       () => harness.room.messaging.remoteParticipants.first.getAttribute('thread.status.text.$threadPath') == 'Generating image',
     );
 
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {'type': 'meshagent.agent.thread.status', 'thread_id': threadPath, 'status': 'Generating image', 'mode': 'busy'},
+    );
+    final changed = trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.thread.status',
+        'thread_id': threadPath,
+        'status': null,
+        'mode': null,
+        'started_at': null,
+        'turn_id': null,
+      },
+    );
     final state = resolveChatThreadStatus(room: harness.room, path: threadPath, agentName: 'assistant');
 
-    expect(state.text, 'Generating image');
-    expect(state.mode, 'busy');
-    expect(state.pendingItemId, 'image-1');
-    expect(state.startedAt, DateTime.parse('2026-05-04T12:00:00Z'));
+    expect(changed, isTrue);
+    expect(state.text, isNull);
+    expect(state.hasStatus, isFalse);
+    expect(state.supportsAgentMessages, isTrue);
+  });
+
+  test('resolveChatThreadStatus computes status bytes from tool argument deltas', () async {
+    final harness = await _startMessagingHarness();
+    addTearDown(harness.dispose);
+
+    const threadPath = 'dataset://agents/dataset/threads/thread-1';
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.thread.status',
+        'thread_id': threadPath,
+        'status': 'Preparing Command',
+        'mode': 'busy',
+        'started_at': '2026-05-04T12:00:00Z',
+        'pending_item_id': 'shell-1',
+      },
+    );
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.tool_call.arguments_delta',
+        'thread_id': threadPath,
+        'item_id': 'shell-1',
+        'delta': List.filled(120, 'x').join(),
+      },
+    );
+
+    final state = resolveChatThreadStatus(room: harness.room, path: threadPath, agentName: 'assistant');
+
+    expect(state.text, 'Preparing Command');
+    expect(state.totalBytes, 120);
+    expect(
+      formatChatThreadStatusText(state.text!, startedAt: state.startedAt, totalBytes: state.totalBytes),
+      'Preparing Command 120 bytes',
+    );
+  });
+
+  test('resolveChatThreadStatus computes status bytes from deltas before status', () async {
+    final harness = await _startMessagingHarness();
+    addTearDown(harness.dispose);
+
+    const threadPath = 'dataset://agents/dataset/threads/thread-1';
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.tool_call.arguments_delta',
+        'thread_id': threadPath,
+        'item_id': 'shell-1',
+        'delta': List.filled(120, 'x').join(),
+      },
+    );
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.thread.status',
+        'thread_id': threadPath,
+        'status': 'Preparing Command',
+        'mode': 'busy',
+        'started_at': '2026-05-04T12:00:00Z',
+        'pending_item_id': 'shell-1',
+      },
+    );
+
+    final state = resolveChatThreadStatus(room: harness.room, path: threadPath, agentName: 'assistant');
+
+    expect(state.text, 'Preparing Command');
+    expect(state.totalBytes, 120);
+    expect(
+      formatChatThreadStatusText(state.text!, startedAt: state.startedAt, totalBytes: state.totalBytes),
+      'Preparing Command 120 bytes',
+    );
+  });
+
+  test('resolveChatThreadStatus reads patch line counters from status messages', () async {
+    final harness = await _startMessagingHarness();
+    addTearDown(harness.dispose);
+
+    const threadPath = 'dataset://agents/dataset/threads/thread-1';
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.thread.status',
+        'thread_id': threadPath,
+        'status': 'Editing app.ts',
+        'mode': 'busy',
+        'started_at': '2026-05-04T12:00:00Z',
+        'pending_item_id': 'patch-1',
+        'lines_added': 100,
+        'lines_removed': 10,
+      },
+    );
+
+    final state = resolveChatThreadStatus(room: harness.room, path: threadPath, agentName: 'assistant');
+
+    expect(state.text, 'Editing app.ts');
+    expect(state.linesAdded, 100);
+    expect(state.linesRemoved, 10);
+    expect(
+      formatChatThreadStatusText(state.text!, startedAt: state.startedAt, linesAdded: state.linesAdded, linesRemoved: state.linesRemoved),
+      'Editing app.ts +100 -10',
+    );
+  });
+
+  test('resolveChatThreadStatus derives patch line counters from live argument deltas', () async {
+    final harness = await _startMessagingHarness();
+    addTearDown(harness.dispose);
+
+    const threadPath = 'dataset://agents/dataset/threads/thread-1';
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.thread.status',
+        'thread_id': threadPath,
+        'status': 'Preparing',
+        'mode': 'busy',
+        'started_at': '2026-05-04T12:00:00Z',
+        'pending_item_id': 'pending-placeholder',
+        'total_bytes': 270,
+      },
+    );
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.tool_call.arguments_delta',
+        'thread_id': threadPath,
+        'item_id': 'patch-1',
+        'delta': '*** Begin Patch\n*** Update File: app.ts\n@@\n-old\n+new\n',
+      },
+    );
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.tool_call.arguments_delta',
+        'thread_id': threadPath,
+        'item_id': 'patch-1',
+        'delta': '${List.filled(260, '+x\n').join()}*** End Patch\n',
+      },
+    );
+
+    final state = resolveChatThreadStatus(room: harness.room, path: threadPath, agentName: 'assistant');
+
+    expect(state.text, 'Editing app.ts');
+    expect(state.totalBytes, greaterThan(270));
+    expect(state.linesAdded, 261);
+    expect(state.linesRemoved, 1);
+    expect(
+      formatChatThreadStatusText(state.text!, startedAt: state.startedAt, linesAdded: state.linesAdded, linesRemoved: state.linesRemoved),
+      'Editing app.ts +261 -1',
+    );
+  });
+
+  test('resolveChatThreadStatus joins OpenAI apply patch operation args with lean deltas', () async {
+    final harness = await _startMessagingHarness();
+    addTearDown(harness.dispose);
+
+    const threadPath = 'dataset://agents/dataset/threads/thread-1';
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.thread.status',
+        'thread_id': threadPath,
+        'status': 'Preparing',
+        'mode': 'busy',
+        'started_at': '2026-05-04T12:00:00Z',
+        'pending_item_id': 'pending-placeholder',
+      },
+    );
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.tool_call.arguments_delta',
+        'thread_id': threadPath,
+        'item_id': 'patch-1',
+        'delta': '@@\n-old\n+new\n+extra\n',
+      },
+    );
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.tool_call.started',
+        'thread_id': threadPath,
+        'item_id': 'patch-1',
+        'toolkit': 'openai',
+        'tool': 'apply_patch',
+        'arguments': {
+          'operation': {'type': 'update_file', 'path': 'report.py', 'diff': '@@\n-old\n+new\n+extra\n'},
+        },
+      },
+    );
+
+    final state = resolveChatThreadStatus(room: harness.room, path: threadPath, agentName: 'assistant');
+
+    expect(state.text, 'Editing report.py');
+    expect(state.linesAdded, 2);
+    expect(state.linesRemoved, 1);
+    expect(state.pendingItemId, 'patch-1');
+  });
+
+  test('LiveToolCallAccumulator joins lean apply patch deltas with lifecycle arguments', () {
+    final accumulator = LiveToolCallAccumulator();
+
+    final deltaSnapshot = accumulator.appendDelta(itemId: 'patch-1', fallbackText: 'Preparing', delta: '@@\n-old\n+new\n+extra\n');
+    expect(deltaSnapshot.text, 'Applying patch');
+    expect(deltaSnapshot.linesAdded, 2);
+    expect(deltaSnapshot.linesRemoved, 1);
+    expect(deltaSnapshot.totalBytes, greaterThan(0));
+
+    final lifecycleSnapshot = accumulator.upsert(
+      itemId: 'patch-1',
+      tool: 'apply_patch',
+      fallbackText: 'Preparing',
+      arguments: {
+        'operation': {'type': 'update_file', 'path': 'report.py', 'diff': '@@\n-old\n+new\n+extra\n'},
+      },
+    );
+
+    expect(lifecycleSnapshot.text, 'Editing report.py');
+    expect(lifecycleSnapshot.linesAdded, 2);
+    expect(lifecycleSnapshot.linesRemoved, 1);
+    expect(lifecycleSnapshot.totalBytes, deltaSnapshot.totalBytes);
+    final completed = accumulator.complete(itemId: 'patch-1');
+    expect(completed?.status, 'completed');
+  });
+
+  test('LiveToolCallAccumulator keeps apply patch text stable before path arrives', () {
+    final accumulator = LiveToolCallAccumulator();
+
+    final started = accumulator.upsert(itemId: 'patch-1', tool: 'apply_patch', arguments: {}, fallbackText: 'Preparing');
+    expect(started.text, 'Applying patch');
+
+    final partialPatch = accumulator.appendDelta(itemId: 'patch-1', fallbackText: 'Preparing report', delta: '@@\n-old\n+new\n');
+    expect(partialPatch.text, 'Applying patch');
+    expect(partialPatch.linesAdded, 1);
+    expect(partialPatch.linesRemoved, 1);
+
+    final withPath = accumulator.appendDelta(itemId: 'patch-1', fallbackText: 'Preparing report', delta: '*** Update File: report.py\n');
+    expect(withPath.text, 'Editing report.py');
+  });
+
+  test('stream accumulators expose in progress and completed status', () {
+    final text = TextStreamAccumulator();
+    final firstText = text.appendDelta(itemId: 'msg-1', delta: 'hello');
+    expect(firstText.status, 'in_progress');
+    expect(firstText.text, 'hello');
+    final completedText = text.complete('msg-1');
+    expect(completedText?.status, 'completed');
+
+    final file = FileStreamAccumulator();
+    final firstFile = file.appendUrl(itemId: 'file-1', url: 'mesh://one');
+    expect(firstFile.status, 'in_progress');
+    expect(firstFile.latestUrl, 'mesh://one');
+    final completedFile = file.complete('file-1');
+    expect(completedFile?.status, 'completed');
+    expect(completedFile?.urls, <String>['mesh://one']);
+  });
+
+  test('resolveChatThreadStatus tracks accepted pending messages until applied', () async {
+    final harness = await _startMessagingHarness();
+    addTearDown(harness.dispose);
+
+    const threadPath = '/threads/test.thread';
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.turn.start',
+        'thread_id': threadPath,
+        'message_id': 'message-1',
+        'sender_name': 'sender',
+        'content': [
+          {'type': 'text', 'text': 'hello'},
+        ],
+      },
+    );
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {'type': 'meshagent.agent.turn.start.accepted', 'thread_id': threadPath, 'source_message_id': 'message-1'},
+    );
+
+    final pendingState = resolveChatThreadStatus(room: harness.room, path: threadPath, agentName: 'assistant');
+
+    expect(pendingState.pendingMessages, hasLength(1));
+    expect(pendingState.pendingMessages.single.messageId, 'message-1');
+    expect(pendingState.pendingMessages.single.text, 'hello');
+    expect(pendingState.pendingMessages.single.awaitingAcceptance, isFalse);
+    expect(pendingState.pendingMessages.single.awaitingApplication, isTrue);
+    expect(pendingState.supportsAgentMessages, isTrue);
+
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {'type': 'meshagent.agent.turn.started', 'thread_id': threadPath, 'turn_id': 'turn-1', 'source_message_id': 'message-1'},
+    );
+
+    final appliedState = resolveChatThreadStatus(room: harness.room, path: threadPath, agentName: 'assistant');
+
+    expect(appliedState.pendingMessages, hasLength(1));
+    expect(appliedState.pendingMessages.single.awaitingApplication, isFalse);
+    expect(appliedState.turnId, 'turn-1');
+    expect(appliedState.supportsAgentMessages, isTrue);
+  });
+
+  test('resolveChatThreadStatus ignores accepted messages with no known input content', () async {
+    final harness = await _startMessagingHarness();
+    addTearDown(harness.dispose);
+
+    const threadPath = '/threads/test.thread';
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {'type': 'meshagent.agent.turn.start.accepted', 'thread_id': threadPath, 'source_message_id': 'audio-message-1'},
+    );
+
+    final state = resolveChatThreadStatus(room: harness.room, path: threadPath, agentName: 'assistant');
+
+    expect(state.pendingMessages, isEmpty);
+    expect(state.supportsAgentMessages, isTrue);
+  });
+
+  test('ChatThreadController marks replayed pending messages when applied', () async {
+    final harness = await _startMessagingHarness();
+    addTearDown(harness.dispose);
+
+    const threadPath = '/threads/test.thread';
+    final controller = ChatThreadController(room: harness.room);
+    addTearDown(controller.dispose);
+
+    controller.handleAgentMessagePayload({
+      'type': 'meshagent.agent.turn.steer',
+      'thread_id': threadPath,
+      'turn_id': 'turn-1',
+      'message_id': 'message-1',
+      'sender_name': 'sender',
+      'content': [
+        {'type': 'text', 'text': 'wait'},
+      ],
+    });
+    controller.handleAgentMessagePayload({
+      'type': 'meshagent.agent.turn.steer.accepted',
+      'thread_id': threadPath,
+      'turn_id': 'turn-1',
+      'source_message_id': 'message-1',
+    });
+
+    expect(controller.pendingAgentMessagesForPath(threadPath), hasLength(1));
+    expect(controller.pendingAgentMessagesForPath(threadPath).single.text, 'wait');
+
+    controller.handleAgentMessagePayload({
+      'type': 'meshagent.agent.turn.steered',
+      'thread_id': threadPath,
+      'turn_id': 'turn-1',
+      'source_message_id': 'message-1',
+    });
+
+    expect(controller.pendingAgentMessagesForPath(threadPath), isEmpty);
   });
 
   test('resolveChatThreadStatus preserves active turn without visible status text', () async {
     final harness = await _startMessagingHarness();
     addTearDown(harness.dispose);
 
-    await harness.room.messaging.enable();
-    await _waitUntil(() => harness.room.messaging.remoteParticipants.isNotEmpty);
-
     const threadPath = 'dataset://agents/dataset/threads/thread-1';
-    await harness.server.sendParticipantAttributes(harness.pair.serverProtocol, {
-      'supports_agent_messages': true,
-      'thread.status.pending_messages.$threadPath': jsonEncode({
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {
+        'type': 'meshagent.agent.turn.steer',
+        'thread_id': threadPath,
         'turn_id': 'turn-1',
-        'messages': [
-          {
-            'message_id': 'message-1',
-            'message_type': 'meshagent.agent.turn.steer',
-            'sender_name': 'self',
-            'created_at': '2026-05-04T12:00:00Z',
-            'content': [
-              {'type': 'text', 'text': 'hello'},
-            ],
-          },
+        'message_id': 'message-1',
+        'sender_name': 'self',
+        'created_at': '2026-05-04T12:00:00Z',
+        'content': [
+          {'type': 'text', 'text': 'hello'},
         ],
-      }),
-    });
-    await _waitUntil(
-      () => harness.room.messaging.remoteParticipants.first.getAttribute('thread.status.pending_messages.$threadPath') != null,
+      },
+    );
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {'type': 'meshagent.agent.thread.status', 'thread_id': threadPath, 'turn_id': 'turn-1', 'status': null},
     );
 
     final state = resolveChatThreadStatus(room: harness.room, path: threadPath, agentName: 'assistant');
@@ -396,16 +826,10 @@ void main() {
     final harness = await _startMessagingHarness();
     addTearDown(harness.dispose);
 
-    await harness.room.messaging.enable();
-    await _waitUntil(() => harness.room.messaging.remoteParticipants.isNotEmpty);
-
     const threadPath = 'dataset://agents/dataset/threads/thread-1';
-    await harness.server.sendParticipantAttributes(harness.pair.serverProtocol, {
-      'thread.status.text.$threadPath': 'Generating image',
-      'thread.status.mode.$threadPath': 'busy',
-    });
-    await _waitUntil(
-      () => harness.room.messaging.remoteParticipants.first.getAttribute('thread.status.text.$threadPath') == 'Generating image',
+    trackAgentThreadStatusPayload(
+      room: harness.room,
+      payload: {'type': 'meshagent.agent.thread.status', 'thread_id': threadPath, 'status': 'Generating image', 'mode': 'busy'},
     );
 
     final state = resolveChatThreadStatus(room: harness.room, path: threadPath);
@@ -426,7 +850,8 @@ void main() {
       if (event is! RoomMessageEvent || event.message.type != 'agent-message') {
         return;
       }
-      final payload = event.message.message['payload'];
+      final message = event.message.message;
+      final payload = message['type'] is String ? message : message['payload'];
       if (payload is Map<String, dynamic>) {
         latestUsage = AgentUsageSnapshot.fromPayload(payload);
       } else if (payload is Map) {

@@ -1,27 +1,41 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:meshagent/meshagent.dart';
+import 'package:meshagent_flutter_shadcn/chat_bubble_markdown_config.dart';
+import 'package:re_highlight/styles/monokai-sublime.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:uuid/uuid.dart';
 
 import 'chat.dart';
+import 'agent_stream_accumulator.dart';
+import 'realtime_audio_output.dart';
+import 'tool_call_summary.dart';
 import 'usage_footer_tooltip.dart';
 
 const String _agentRoomMessageType = 'agent-message';
 const String _agentTurnStartType = 'meshagent.agent.turn.start';
 const String _agentTurnSteerType = 'meshagent.agent.turn.steer';
 const String _agentTurnInterruptType = 'meshagent.agent.turn.interrupt';
+const String _agentRealtimeAudioChunkType = 'meshagent.agent.realtime_audio.chunk';
+const String _agentRealtimeAudioCommitType = 'meshagent.agent.realtime_audio.commit';
 const String _agentThreadOpenType = 'meshagent.agent.thread.open';
 const String _agentThreadCloseType = 'meshagent.agent.thread.close';
 const String _agentTurnStartAcceptedType = 'meshagent.agent.turn.start.accepted';
 const String _agentTurnStartRejectedType = 'meshagent.agent.turn.start.rejected';
 const String _agentTurnSteerAcceptedType = 'meshagent.agent.turn.steer.accepted';
 const String _agentTurnSteerRejectedType = 'meshagent.agent.turn.steer.rejected';
+const String _agentTurnInterruptAcceptedType = 'meshagent.agent.turn.interrupt.accepted';
+const String _agentTurnInterruptedType = 'meshagent.agent.turn.interrupted';
 const String _agentTurnStartedType = 'meshagent.agent.turn.started';
 const String _agentTurnSteeredType = 'meshagent.agent.turn.steered';
+const String _agentTurnEndedType = 'meshagent.agent.turn.ended';
+const String _agentAudioInputSpeechStartedType = 'meshagent.agent.audio_input.speech_started';
 const String _agentTextContentStartedType = 'meshagent.agent.text_content.started';
 const String _agentTextContentDeltaType = 'meshagent.agent.text_content.delta';
 const String _agentTextContentEndedType = 'meshagent.agent.text_content.ended';
@@ -34,12 +48,383 @@ const String _agentFileContentEndedType = 'meshagent.agent.file_content.ended';
 const String _agentToolCallPendingType = 'meshagent.agent.tool_call.pending';
 const String _agentToolCallInProgressType = 'meshagent.agent.tool_call.in_progress';
 const String _agentToolCallStartedType = 'meshagent.agent.tool_call.started';
+const String _agentToolCallArgumentsDeltaType = 'meshagent.agent.tool_call.arguments_delta';
+const String _agentToolCallLogDeltaType = 'meshagent.agent.tool_call.log_delta';
 const String _agentToolCallEndedType = 'meshagent.agent.tool_call.ended';
 const String _agentImageGenerationStartedType = 'meshagent.agent.image_generation.started';
 const String _agentImageGenerationPartialType = 'meshagent.agent.image_generation.partial';
 const String _agentImageGenerationCompletedType = 'meshagent.agent.image_generation.completed';
 const String _agentImageGenerationFailedType = 'meshagent.agent.image_generation.failed';
+const String _agentAudioGenerationStartedType = 'meshagent.agent.audio_generation.started';
+const String _agentAudioGenerationDeltaType = 'meshagent.agent.audio_generation.delta';
+const String _agentAudioGenerationCompletedType = 'meshagent.agent.audio_generation.completed';
+const String _agentAudioGenerationFailedType = 'meshagent.agent.audio_generation.failed';
+const String _agentAudioTranscriptionStartedType = 'meshagent.agent.audio_transcription.started';
+const String _agentAudioTranscriptionDeltaType = 'meshagent.agent.audio_transcription.delta';
+const String _agentAudioTranscriptionCompletedType = 'meshagent.agent.audio_transcription.completed';
+const String _agentAudioTranscriptionFailedType = 'meshagent.agent.audio_transcription.failed';
 const String _agentContextCompactedType = 'meshagent.agent.context.compacted';
+const String _agentUsageUpdatedType = 'meshagent.agent.usage.updated';
+const String _agentModelsRequestType = 'meshagent.agent.models.request';
+const String _agentModelsResponseType = 'meshagent.agent.models.response';
+const String _agentModelChangeType = 'meshagent.agent.model.change';
+const String _agentModelChangedType = 'meshagent.agent.model.changed';
+const double _datasetDiffPreviewHorizontalPadding = 16;
+
+class DatasetChatAudioFormat {
+  const DatasetChatAudioFormat({this.type = 'audio/pcm', this.sampleRate = 24000, this.bitrate});
+
+  final String type;
+  final int? sampleRate;
+  final int? bitrate;
+
+  static DatasetChatAudioFormat? fromJson(Object? value) {
+    if (value is! Map) {
+      return null;
+    }
+    final rawType = value['type']?.toString().trim();
+    final rawSampleRate = value['sample_rate'] ?? value['rate'];
+    final rawBitrate = value['bitrate'];
+    return DatasetChatAudioFormat(
+      type: rawType == null || rawType.isEmpty ? 'audio/pcm' : rawType,
+      sampleRate: rawSampleRate is int ? rawSampleRate : int.tryParse(rawSampleRate?.toString() ?? ''),
+      bitrate: rawBitrate is int ? rawBitrate : int.tryParse(rawBitrate?.toString() ?? ''),
+    );
+  }
+
+  Map<String, Object?> toJson() {
+    return <String, Object?>{'type': type, if (sampleRate != null) 'sample_rate': sampleRate, if (bitrate != null) 'bitrate': bitrate};
+  }
+}
+
+class DatasetChatModelOption {
+  const DatasetChatModelOption({
+    required this.provider,
+    required this.providerFriendlyName,
+    required this.model,
+    this.modelFriendlyName,
+    this.modelDescription,
+    this.modalities = const <String>['text'],
+    this.availableVoices = const <String>[],
+    this.defaultOutputVoice,
+    this.inputFormat,
+    this.outputFormat,
+    this.turnDetection,
+    this.realtimeProtocols = const <String>[],
+    this.active = false,
+  });
+
+  final String provider;
+  final String providerFriendlyName;
+  final String model;
+  final String? modelFriendlyName;
+  final String? modelDescription;
+  final List<String> modalities;
+  final List<String> availableVoices;
+  final String? defaultOutputVoice;
+  final DatasetChatAudioFormat? inputFormat;
+  final DatasetChatAudioFormat? outputFormat;
+  final String? turnDetection;
+  final List<String> realtimeProtocols;
+  final bool active;
+
+  String get key => '$provider/$model';
+
+  String get label {
+    final displayModel = modelFriendlyName == null || modelFriendlyName!.trim().isEmpty ? model : modelFriendlyName!.trim();
+    final displayProvider = providerFriendlyName.trim().isEmpty ? provider : providerFriendlyName.trim();
+    return '$displayProvider / $displayModel';
+  }
+
+  DatasetChatModelOption copyWith({bool? active}) {
+    return DatasetChatModelOption(
+      provider: provider,
+      providerFriendlyName: providerFriendlyName,
+      model: model,
+      modelFriendlyName: modelFriendlyName,
+      modelDescription: modelDescription,
+      modalities: modalities,
+      availableVoices: availableVoices,
+      defaultOutputVoice: defaultOutputVoice,
+      inputFormat: inputFormat,
+      outputFormat: outputFormat,
+      turnDetection: turnDetection,
+      realtimeProtocols: realtimeProtocols,
+      active: active ?? this.active,
+    );
+  }
+}
+
+class DatasetChatModelController extends ChangeNotifier {
+  List<DatasetChatModelOption> _models = const <DatasetChatModelOption>[];
+  DatasetChatModelOption? _activeModel;
+  String _activeModality = 'text';
+  String? _activeVoice;
+  Future<void> Function(DatasetChatModelOption option)? _changeHandler;
+  Future<void> Function(String voice)? _voiceChangeHandler;
+  bool _locked = false;
+  bool _changing = false;
+
+  List<DatasetChatModelOption> get models => _models;
+  DatasetChatModelOption? get activeModel => _activeModel;
+  String get activeModality => _activeModality;
+  String? get activeVoice => _activeModality == 'audio' ? _activeVoice : null;
+  DatasetChatAudioFormat get activeInputFormat => _activeModel?.inputFormat ?? const DatasetChatAudioFormat();
+  String get activeTurnDetection => _activeModel?.turnDetection == 'automatic' ? 'automatic' : 'none';
+  List<String> get activeRealtimeProtocols => List<String>.unmodifiable(_activeModel?.realtimeProtocols ?? const <String>[]);
+  String get preferredRealtimeProtocol => activeRealtimeProtocols.contains('webrtc') ? 'webrtc' : 'websocket';
+  bool get prefersWebrtcRealtime => preferredRealtimeProtocol == 'webrtc';
+  List<String> get availableVoices =>
+      _activeModality == 'audio' ? List<String>.unmodifiable(_activeModel?.availableVoices ?? const <String>[]) : const <String>[];
+  List<String> get outputModalities {
+    final modalities = _activeModel?.modalities ?? const <String>['text'];
+    final supported = [
+      for (final modality in modalities)
+        if (modality == 'text' || modality == 'audio') modality,
+    ];
+    return supported.isEmpty ? const <String>['text'] : List<String>.unmodifiable(supported);
+  }
+
+  bool get supportsAudioInput => _activeModel?.modalities.contains('audio') ?? false;
+
+  bool get isChanging => _changing;
+  bool get isLocked => _locked;
+  bool get canChange => !_locked && !_changing;
+
+  String _resolvedOutputModality(DatasetChatModelOption? model, String current) {
+    final supported = [
+      for (final modality in model?.modalities ?? const <String>['text'])
+        if (modality == 'text' || modality == 'audio') modality,
+    ];
+    if (supported.isEmpty) {
+      return 'text';
+    }
+    return supported.contains(current) ? current : supported.first;
+  }
+
+  String? _resolvedVoice(DatasetChatModelOption? model, String? current) {
+    if (_activeModality != 'audio' || model == null || model.availableVoices.isEmpty) {
+      return null;
+    }
+    if (current != null && model.availableVoices.contains(current)) {
+      return current;
+    }
+    final defaultVoice = model.defaultOutputVoice;
+    if (defaultVoice != null && model.availableVoices.contains(defaultVoice)) {
+      return defaultVoice;
+    }
+    return model.availableVoices.first;
+  }
+
+  void bindChangeHandler(Future<void> Function(DatasetChatModelOption option) handler) {
+    _changeHandler = handler;
+  }
+
+  void bindVoiceChangeHandler(Future<void> Function(String voice) handler) {
+    _voiceChangeHandler = handler;
+  }
+
+  void unbindChangeHandler() {
+    _changeHandler = null;
+    _voiceChangeHandler = null;
+  }
+
+  void unbindVoiceChangeHandler() {
+    _voiceChangeHandler = null;
+  }
+
+  void setLocked(bool locked) {
+    if (_locked == locked) {
+      return;
+    }
+    _locked = locked;
+    notifyListeners();
+  }
+
+  void replaceModelsFrom(DatasetChatModelController other) {
+    _models = [for (final model in other.models) model.copyWith()];
+    _activeModel = other.activeModel?.copyWith();
+    _activeModality = other.activeModality;
+    _activeVoice = other.activeVoice;
+    notifyListeners();
+  }
+
+  Future<void> changeModel(DatasetChatModelOption option) async {
+    if (!canChange || _changeHandler == null || option.key == _activeModel?.key) {
+      return;
+    }
+    _changing = true;
+    notifyListeners();
+    try {
+      await _changeHandler!(option);
+    } finally {
+      _changing = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> changeVoice(String voice) async {
+    final normalized = voice.trim();
+    if (_activeModality != 'audio' || !canChange || _voiceChangeHandler == null || normalized.isEmpty || normalized == _activeVoice) {
+      return;
+    }
+    _changing = true;
+    notifyListeners();
+    try {
+      await _voiceChangeHandler!(normalized);
+    } finally {
+      _changing = false;
+      notifyListeners();
+    }
+  }
+
+  void selectVoiceLocally(String voice) {
+    final normalized = voice.trim();
+    if (_activeModality != 'audio' || _locked || normalized.isEmpty || normalized == _activeVoice) {
+      return;
+    }
+    if (availableVoices.isNotEmpty && !availableVoices.contains(normalized)) {
+      return;
+    }
+    _activeVoice = normalized;
+    notifyListeners();
+  }
+
+  void selectModelLocally(DatasetChatModelOption option) {
+    if (_locked || option.key == _activeModel?.key) {
+      return;
+    }
+    _models = _models.any((model) => model.key == option.key)
+        ? [for (final model in _models) model.copyWith(active: model.key == option.key)]
+        : [for (final model in _models) model.copyWith(active: false), option.copyWith(active: true)];
+    _activeModel = option.copyWith(active: true);
+    _activeModality = _resolvedOutputModality(_activeModel, _activeModality);
+    _activeVoice = _resolvedVoice(_activeModel, option.defaultOutputVoice);
+    notifyListeners();
+  }
+
+  void selectOutputModality(String modality) {
+    final normalized = modality.trim();
+    if (_locked || normalized.isEmpty || normalized == _activeModality || !outputModalities.contains(normalized)) {
+      return;
+    }
+    _activeModality = normalized;
+    _activeVoice = _resolvedVoice(_activeModel, _activeVoice);
+    notifyListeners();
+  }
+
+  void applyModelsResponse(Map<String, dynamic> payload) {
+    final providers = payload['providers'];
+    if (providers is! List) {
+      return;
+    }
+    final nextModels = <DatasetChatModelOption>[];
+    DatasetChatModelOption? active;
+    for (final providerValue in providers) {
+      if (providerValue is! Map) {
+        continue;
+      }
+      final provider = providerValue['name']?.toString().trim();
+      if (provider == null || provider.isEmpty) {
+        continue;
+      }
+      final providerFriendlyName = providerValue['friendly_name']?.toString() ?? provider;
+      final models = providerValue['models'];
+      if (models is! List) {
+        continue;
+      }
+      for (final modelValue in models) {
+        if (modelValue is! Map) {
+          continue;
+        }
+        final model = modelValue['name']?.toString().trim();
+        if (model == null || model.isEmpty) {
+          continue;
+        }
+        final rawModalities = modelValue['modalities'];
+        final modalities = rawModalities is List
+            ? [
+                for (final value in rawModalities)
+                  if (value.toString().trim().isNotEmpty) value.toString().trim(),
+              ]
+            : const <String>['text'];
+        final option = DatasetChatModelOption(
+          provider: provider,
+          providerFriendlyName: providerFriendlyName,
+          model: model,
+          modelFriendlyName: modelValue['friendly_name']?.toString(),
+          modelDescription: modelValue['description']?.toString(),
+          modalities: modalities.isEmpty ? const <String>['text'] : modalities,
+          availableVoices: _stringList(modelValue['available_voices']),
+          defaultOutputVoice: modelValue['default_output_voice']?.toString(),
+          inputFormat: DatasetChatAudioFormat.fromJson(modelValue['input_format']),
+          outputFormat: DatasetChatAudioFormat.fromJson(modelValue['output_format']),
+          turnDetection: modelValue['turn_detection']?.toString(),
+          realtimeProtocols: _stringList(modelValue['realtime_protocols']),
+          active: modelValue['active'] == true,
+        );
+        nextModels.add(option);
+        if (option.active) {
+          active = option;
+        }
+      }
+    }
+    final priorActive = _activeModel;
+    if (priorActive != null) {
+      final refreshedActive = nextModels.firstWhereOrNull((option) => option.key == priorActive.key);
+      if (refreshedActive != null) {
+        active = refreshedActive;
+      }
+    }
+    active ??= nextModels.isEmpty ? null : nextModels.first;
+    _models = [for (final option in nextModels) option.copyWith(active: option.key == active?.key)];
+    _activeModel = active?.copyWith(active: true);
+    _activeModality = _resolvedOutputModality(_activeModel, _activeModality);
+    _activeVoice = _resolvedVoice(_activeModel, _activeVoice);
+    notifyListeners();
+  }
+
+  void applyModelChanged(Map<String, dynamic> payload) {
+    final provider = payload['provider']?.toString().trim();
+    final model = payload['model']?.toString().trim();
+    if (provider == null || provider.isEmpty || model == null || model.isEmpty) {
+      return;
+    }
+    final existing = _models.firstWhereOrNull((option) => option.provider == provider && option.model == model);
+    final outputModalities = payload['output_modalities'];
+    if (outputModalities is List && outputModalities.isNotEmpty) {
+      final firstOutputModality = outputModalities.first?.toString().trim();
+      if (firstOutputModality != null && firstOutputModality.isNotEmpty) {
+        _activeModality = firstOutputModality;
+      }
+    }
+    final active =
+        existing?.copyWith(active: true) ??
+        DatasetChatModelOption(
+          provider: provider,
+          providerFriendlyName: payload['provider_friendly_name']?.toString() ?? provider,
+          model: model,
+          modelFriendlyName: payload['model_friendly_name']?.toString(),
+          modelDescription: payload['model_description']?.toString(),
+          inputFormat: DatasetChatAudioFormat.fromJson(payload['input_format']),
+          outputFormat: DatasetChatAudioFormat.fromJson(payload['output_format']),
+          turnDetection: payload['turn_detection']?.toString(),
+          realtimeProtocols: _stringList(payload['realtime_protocols']),
+          modalities: const <String>[],
+          active: true,
+        );
+    if (existing == null) {
+      _models = [for (final option in _models) option.copyWith(active: false), active];
+    } else {
+      _models = [for (final option in _models) option.copyWith(active: option.key == active.key)];
+    }
+    _activeModel = active;
+    _activeModality = _resolvedOutputModality(_activeModel, _activeModality);
+    final payloadVoice = payload['voice']?.toString().trim();
+    _activeVoice = _resolvedVoice(_activeModel, payloadVoice == null || payloadVoice.isEmpty ? active.defaultOutputVoice : payloadVoice);
+    notifyListeners();
+  }
+}
 
 class DatasetChatThread extends StatefulWidget {
   const DatasetChatThread({
@@ -57,6 +442,7 @@ class DatasetChatThread extends StatefulWidget {
     this.attachmentBuilder,
     this.inputContextMenuBuilder,
     this.inputOnPressedOutside,
+    this.modelController,
     this.initialShowCompletedToolCalls = false,
     this.showUsageFooter = false,
   });
@@ -74,6 +460,7 @@ class DatasetChatThread extends StatefulWidget {
   final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
   final EditableTextContextMenuBuilder? inputContextMenuBuilder;
   final TapRegionCallback? inputOnPressedOutside;
+  final DatasetChatModelController? modelController;
   final bool initialShowCompletedToolCalls;
   final bool showUsageFooter;
 
@@ -82,19 +469,26 @@ class DatasetChatThread extends StatefulWidget {
 }
 
 class _DatasetChatThreadState extends State<DatasetChatThread> {
-  StreamSubscription<DatasetTableWatchEvent>? _watchSubscription;
+  StreamSubscription<ArrowRecordBatch>? _tableLoadSubscription;
   StreamSubscription<RoomEvent>? _roomSubscription;
-  Timer? _watchRetryTimer;
+  Timer? _tableLoadRetryTimer;
   final Map<String, Map<String, Object?>> _rowsByItemId = {};
-  final Map<String, Map<String, Object?>> _initialRowsByItemId = {};
   final Map<String, Map<String, Object?>> _agentRowsByItemId = {};
+  final List<Map<String, dynamic>> _bufferedAgentPayloads = <Map<String, dynamic>>[];
+  final TextStreamAccumulator _liveTextContent = TextStreamAccumulator();
+  final TextStreamAccumulator _liveReasoningContent = TextStreamAccumulator();
+  final FileStreamAccumulator _liveFileContent = FileStreamAccumulator();
+  final Map<String, String> _realtimeAudioCommitItemIdsByTurnId = <String, String>{};
+  final _DatasetThreadRealtimeAudioPlayer _audioPlayer = _DatasetThreadRealtimeAudioPlayer();
   late ChatThreadController _controller;
   late bool _ownsController;
+  late DatasetChatModelController _modelController;
+  late bool _ownsModelController;
   late Key _composerInputKey;
+  int _tableLoadGeneration = 0;
   Object? _error;
   bool _fatalError = false;
   bool _ready = false;
-  late bool _showCompletedToolCalls;
   ChatThreadStatusState _status = const ChatThreadStatusState();
   AgentUsageSnapshot? _usage;
   int _nextAgentSequence = 0;
@@ -104,14 +498,19 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   LocalHistoryEntry? _imageViewerHistoryEntry;
   List<ChatThreadFeedImage> _overlayImages = const <ChatThreadFeedImage>[];
   int _overlayInitialIndex = 0;
+  final Set<String> _expandedDetailGroupIds = <String>{};
+  final Set<String> _expandedToolCallIds = <String>{};
 
   @override
   void initState() {
     super.initState();
     _ownsController = widget.controller == null;
     _controller = widget.controller ?? ChatThreadController(room: widget.room);
+    _ownsModelController = widget.modelController == null;
+    _modelController = widget.modelController ?? DatasetChatModelController();
+    _modelController.bindChangeHandler(_changeModel);
+    _modelController.bindVoiceChangeHandler(_changeVoice);
     _composerInputKey = widget.composerKey ?? GlobalObjectKey(_controller);
-    _showCompletedToolCalls = widget.initialShowCompletedToolCalls;
     _roomSubscription = widget.room.listen(_onRoomEvent);
     widget.room.messaging.addListener(_onMessagingChanged);
     _refreshStatus();
@@ -137,6 +536,16 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       _controller = widget.controller ?? ChatThreadController(room: widget.room);
       _composerInputKey = widget.composerKey ?? GlobalObjectKey(_controller);
     }
+    if (oldWidget.modelController != widget.modelController) {
+      _modelController.unbindChangeHandler();
+      if (_ownsModelController) {
+        _modelController.dispose();
+      }
+      _ownsModelController = widget.modelController == null;
+      _modelController = widget.modelController ?? DatasetChatModelController();
+      _modelController.bindChangeHandler(_changeModel);
+      _modelController.bindVoiceChangeHandler(_changeVoice);
+    }
     if (oldWidget.path != widget.path || oldWidget.agentName != widget.agentName || oldWidget.room != widget.room) {
       _usage = null;
       _refreshStatus();
@@ -149,8 +558,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
 
   @override
   void dispose() {
-    _watchRetryTimer?.cancel();
-    _watchSubscription?.cancel();
+    _tableLoadRetryTimer?.cancel();
+    _tableLoadSubscription?.cancel();
     _closeOpenSubscription();
     _roomSubscription?.cancel();
     final historyEntry = _imageViewerHistoryEntry;
@@ -160,15 +569,25 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (_ownsController) {
       _controller.dispose();
     }
+    _modelController.unbindChangeHandler();
+    if (_ownsModelController) {
+      _modelController.dispose();
+    }
+    unawaited(_audioPlayer.dispose());
     super.dispose();
   }
 
   void _startWatch() {
-    _watchRetryTimer?.cancel();
-    _watchSubscription?.cancel();
+    _tableLoadGeneration += 1;
+    _tableLoadRetryTimer?.cancel();
+    _tableLoadSubscription?.cancel();
     _rowsByItemId.clear();
-    _initialRowsByItemId.clear();
     _agentRowsByItemId.clear();
+    _bufferedAgentPayloads.clear();
+    _liveTextContent.clear();
+    _liveReasoningContent.clear();
+    _liveFileContent.clear();
+    unawaited(_audioPlayer.stopAll());
     _nextAgentSequence = 0;
     _error = null;
     _fatalError = false;
@@ -181,17 +600,31 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       return;
     }
 
-    _connectDatasetWatch();
+    _loadDatasetRows(generation: _tableLoadGeneration);
   }
 
-  void _connectDatasetWatch() {
-    _watchRetryTimer?.cancel();
-    _watchSubscription?.cancel();
+  void _loadDatasetRows({required int generation}) {
+    _tableLoadRetryTimer?.cancel();
+    _tableLoadSubscription?.cancel();
+    final loadedRowsByItemId = <String, Map<String, Object?>>{};
     try {
       final ref = _DatasetThreadRef.parse(widget.path);
-      _watchSubscription = widget.room.datasets
-          .watchTable(table: ref.table, namespace: ref.namespace)
-          .listen(_handleWatchEvent, onError: _handleWatchError);
+      _tableLoadSubscription = widget.room.datasets
+          .searchStream(table: ref.table, namespace: ref.namespace)
+          .listen(
+            (batch) {
+              if (!mounted || generation != _tableLoadGeneration) {
+                return;
+              }
+              _applyRowsToMap(batch.toRows(), loadedRowsByItemId);
+            },
+            onError: (Object error, StackTrace stackTrace) {
+              _handleTableLoadError(error, stackTrace, generation: generation);
+            },
+            onDone: () {
+              _finishDatasetRowsLoad(loadedRowsByItemId, generation: generation);
+            },
+          );
     } catch (error) {
       _error = error;
       _fatalError = true;
@@ -199,138 +632,71 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     }
   }
 
-  void _handleWatchError(Object error, StackTrace stackTrace) {
-    if (!mounted) {
+  void _handleTableLoadError(Object error, StackTrace stackTrace, {required int generation}) {
+    if (!mounted || generation != _tableLoadGeneration) {
       return;
     }
     setState(() {
       if (_isDatasetTableNotFoundError(error)) {
         _error = null;
         _fatalError = false;
-        _scheduleDatasetWatchRetry();
+        _ready = false;
+        _scheduleDatasetLoadRetry(generation: generation);
       } else {
         _error = error;
         _fatalError = true;
-      }
-      _ready = true;
-    });
-  }
-
-  void _scheduleDatasetWatchRetry() {
-    _watchRetryTimer?.cancel();
-    _watchRetryTimer = Timer(const Duration(milliseconds: 500), () {
-      if (!mounted) {
-        return;
-      }
-      _connectDatasetWatch();
-    });
-  }
-
-  void _handleWatchEvent(DatasetTableWatchEvent event) {
-    if (!_ready) {
-      _handlePreReadyWatchEvent(event);
-      return;
-    }
-
-    var changed = false;
-    if (event.kind == 'delete' && event.deletePredicate != null) {
-      changed = _applyDeletePredicate(event.deletePredicate!, _rowsByItemId) || changed;
-    }
-
-    final batch = event.batch;
-    if (batch != null) {
-      if (event.kind == 'delete' || event.changeType == 'delete') {
-        for (final row in batch.toRows()) {
-          final predicate = row['predicate']?.toString();
-          if (predicate != null && predicate.trim().isNotEmpty) {
-            changed = _applyDeletePredicate(predicate, _rowsByItemId) || changed;
-          }
-        }
-        _finishWatchEvent(event, changed);
-        return;
-      }
-      if (event.kind == 'transactions' || event.changeType == 'transactions') {
-        _finishWatchEvent(event, changed);
-        return;
-      }
-      changed = _applyRowsToMap(batch.toRows(), _rowsByItemId) || changed;
-    }
-
-    _finishWatchEvent(event, changed);
-  }
-
-  void _handlePreReadyWatchEvent(DatasetTableWatchEvent event) {
-    var changed = false;
-    if (event.kind == 'delete' && event.deletePredicate != null) {
-      changed = _applyDeletePredicate(event.deletePredicate!, _initialRowsByItemId) || changed;
-    }
-
-    final batch = event.batch;
-    if (batch != null) {
-      if (event.kind == 'delete' || event.changeType == 'delete') {
-        for (final row in batch.toRows()) {
-          final predicate = row['predicate']?.toString();
-          if (predicate != null && predicate.trim().isNotEmpty) {
-            changed = _applyDeletePredicate(predicate, _initialRowsByItemId) || changed;
-          }
-        }
-      } else if (event.kind != 'transactions' && event.changeType != 'transactions') {
-        changed = _applyRowsToMap(batch.toRows(), _initialRowsByItemId) || changed;
-      }
-    }
-
-    if (event.kind != 'ready') {
-      if (changed && mounted) {
-        setState(() {});
-      }
-      return;
-    }
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _rowsByItemId
-        ..clear()
-        ..addAll(_initialRowsByItemId);
-      _initialRowsByItemId.clear();
-      _advanceNextAgentSequencePastDatasetRows();
-      _rebaseAgentRowsAfterDatasetRows();
-      _usage = _latestUsageFromRows();
-      _ready = true;
-    });
-    _controller.scrollThreadToBottom(animated: false);
-  }
-
-  void _finishWatchEvent(DatasetTableWatchEvent event, bool changed) {
-    final initialReady = event.kind == 'ready' && event.phase == DatasetTableWatchPhase.initial && !_ready;
-    if (initialReady || changed) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        if (changed) {
-          _refreshUsageFromRows();
-        }
         _ready = true;
-      });
-      if (changed) {
-        _controller.scrollThreadToBottom(animated: false);
+      }
+    });
+  }
+
+  void _scheduleDatasetLoadRetry({required int generation}) {
+    _tableLoadRetryTimer?.cancel();
+    _tableLoadRetryTimer = Timer(const Duration(milliseconds: 500), () {
+      if (!mounted || generation != _tableLoadGeneration) {
+        return;
+      }
+      _loadDatasetRows(generation: generation);
+    });
+  }
+
+  void _finishDatasetRowsLoad(Map<String, Map<String, Object?>> loadedRowsByItemId, {required int generation}) {
+    if (!mounted || generation != _tableLoadGeneration) {
+      return;
+    }
+    _rowsByItemId
+      ..clear()
+      ..addAll(loadedRowsByItemId);
+    _advanceNextAgentSequencePastDatasetRows();
+
+    // Mark the load as ready before draining so any agent events delivered while
+    // buffered events are being reconciled apply normally instead of being left
+    // behind in the buffer.
+    _ready = true;
+    while (_bufferedAgentPayloads.isNotEmpty) {
+      final bufferedPayloads = List<Map<String, dynamic>>.from(_bufferedAgentPayloads);
+      _bufferedAgentPayloads.clear();
+      for (final payload in bufferedPayloads) {
+        _handleAgentMessagePayload(payload, notify: false, scroll: false);
       }
     }
+    _usage = _latestUsageFromRows();
+    setState(() {});
+    _controller.scrollThreadToBottom(animated: false);
   }
 
   bool _applyRowsToMap(Iterable<Map<String, Object?>> rows, Map<String, Map<String, Object?>> target) {
     var changed = false;
     for (final row in rows) {
       final normalized = Map<String, Object?>.from(row);
+      final rowKey = _datasetRowKey(normalized);
       final itemId = normalized['item_id']?.toString();
-      if (itemId == null || itemId.trim().isEmpty) {
+      if (rowKey == null || itemId == null || itemId.trim().isEmpty) {
         continue;
       }
-      final existing = target[itemId];
+      final existing = target[rowKey];
       if (existing == null || !const DeepCollectionEquality().equals(existing, normalized)) {
-        target[itemId] = normalized;
-        _agentRowsByItemId.remove(itemId);
+        target[rowKey] = normalized;
         _removeReconciledAgentRowsForDatasetRow(normalized);
         changed = true;
       }
@@ -342,24 +708,20 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return changed;
   }
 
-  bool _refreshUsageFromRows() {
-    final latestUsage = _latestUsageFromRows();
-    if (latestUsage == null || _sameUsage(_usage, latestUsage)) {
-      return false;
-    }
-    _usage = latestUsage;
-    return true;
-  }
-
   AgentUsageSnapshot? _latestUsageFromRows() {
-    final rows = [..._rowsByItemId.values, ..._initialRowsByItemId.values, ..._agentRowsByItemId.values]..sort(_compareDatasetThreadRows);
+    final rows = [..._rowsByItemId.values, ..._agentRowsByItemId.values]..sort(_compareDatasetThreadRows);
     AgentUsageSnapshot? latestUsage;
     for (final row in rows) {
       final data = _rowData(row);
-      if (data?['kind'] != 'usage') {
+      if (data == null) {
         continue;
       }
-      final message = _mapValue(data?['message']);
+      final rawType = data['type']?.toString();
+      final message = rawType == _agentUsageUpdatedType
+          ? data
+          : data['kind'] == 'usage'
+          ? _mapValue(data['message'])
+          : null;
       if (message == null) {
         continue;
       }
@@ -374,38 +736,10 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return latestUsage;
   }
 
-  bool _sameUsage(AgentUsageSnapshot? left, AgentUsageSnapshot? right) {
-    if (identical(left, right)) {
-      return true;
-    }
-    if (left == null || right == null) {
-      return false;
-    }
-    return left.threadPath == right.threadPath &&
-        left.turnId == right.turnId &&
-        left.contextUsedTokens == right.contextUsedTokens &&
-        left.contextTotalTokens == right.contextTotalTokens &&
-        left.compactionMode == right.compactionMode &&
-        left.compactionThreshold == right.compactionThreshold &&
-        const MapEquality<String, double>().equals(left.usage, right.usage);
-  }
-
   void _removeReconciledAgentRowsForDatasetRow(Map<String, Object?> datasetRow) {
-    final datasetData = _rowData(datasetRow);
-    if (datasetData?['kind'] != 'image_generation') {
-      return;
-    }
-    final datasetKeys = _imageGenerationCorrelationKeys(datasetRow);
-    if (datasetKeys.isEmpty) {
-      return;
-    }
     final liveItemIds = _agentRowsByItemId.entries
         .where((entry) {
-          final liveData = _rowData(entry.value);
-          if (liveData?['kind'] != 'image_generation') {
-            return false;
-          }
-          return _imageGenerationCorrelationKeys(entry.value).any(datasetKeys.contains);
+          return _datasetRowReconcilesLiveRow(datasetRow: datasetRow, liveRow: entry.value);
         })
         .map((entry) => entry.key)
         .toList(growable: false);
@@ -422,7 +756,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   bool _rebaseAgentRowsAfterDatasetRows() {
-    final maxDatasetSequence = _maxDatasetSequence();
+    final maxDatasetSequence = _maxVisibleDatasetSequence();
     if (maxDatasetSequence < 0 || _agentRowsByItemId.isEmpty) {
       return false;
     }
@@ -435,7 +769,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       if (itemId == null || itemId.trim().isEmpty) {
         continue;
       }
-      if (_rowsByItemId.containsKey(itemId) || _initialRowsByItemId.containsKey(itemId)) {
+      if (_datasetRowsContainItemId(itemId)) {
         continue;
       }
       final sequence = _intValue(row['sequence']);
@@ -455,7 +789,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
 
   int _maxDatasetSequence() {
     var maxSequence = -1;
-    for (final row in [..._rowsByItemId.values, ..._initialRowsByItemId.values]) {
+    for (final row in _rowsByItemId.values) {
       final sequence = _intValue(row['sequence']);
       if (sequence > maxSequence) {
         maxSequence = sequence;
@@ -464,16 +798,29 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return maxSequence;
   }
 
-  bool _applyDeletePredicate(String predicate, Map<String, Map<String, Object?>> target) {
-    final itemIds = _itemIdsForDeletePredicate(predicate);
-    if (itemIds.isEmpty) {
+  int _maxVisibleDatasetSequence() {
+    var maxSequence = -1;
+    final rows = _rowsByItemId.values.toList(growable: false);
+    final turnInputPayloadsById = _turnInputPayloadsById(rows);
+    for (final row in rows) {
+      final message = _messageForRow(row, turnInputPayloadsById: turnInputPayloadsById);
+      if (message == null || !_shouldRenderDatasetThreadMessage(message)) {
+        continue;
+      }
+      final sequence = _intValue(row['sequence']);
+      if (sequence > maxSequence) {
+        maxSequence = sequence;
+      }
+    }
+    return maxSequence;
+  }
+
+  bool _datasetRowsContainItemId(String itemId) {
+    final normalized = itemId.trim();
+    if (normalized.isEmpty) {
       return false;
     }
-    var changed = false;
-    for (final itemId in itemIds) {
-      changed = target.remove(itemId) != null || changed;
-    }
-    return changed;
+    return _rowsByItemId.values.any((row) => row['item_id']?.toString() == normalized);
   }
 
   void _onMessagingChanged() {
@@ -492,29 +839,71 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       return;
     }
     if (event.message.type == _agentRoomMessageType) {
-      final payload = event.message.message['payload'];
+      final attachment = event.message.attachment;
+      final message = event.message.message;
+      final payload = message['type'] is String ? message : message['payload'];
       if (payload is Map<String, dynamic>) {
-        _handleAgentMessagePayload(payload);
+        trackAgentThreadStatusPayload(room: widget.room, payload: payload);
+        if (_shouldBufferAgentPayload(payload)) {
+          _bufferedAgentPayloads.add(Map<String, dynamic>.from(payload));
+        } else {
+          _handleAgentMessagePayload(payload, attachment: attachment);
+        }
       } else if (payload is Map) {
-        _handleAgentMessagePayload(Map<String, dynamic>.from(payload));
+        final normalized = Map<String, dynamic>.from(payload);
+        trackAgentThreadStatusPayload(room: widget.room, payload: normalized);
+        if (_shouldBufferAgentPayload(normalized)) {
+          _bufferedAgentPayloads.add(normalized);
+        } else {
+          _handleAgentMessagePayload(normalized, attachment: attachment);
+        }
       }
     }
     _refreshStatus(notify: true);
   }
 
-  void _handleAgentMessagePayload(Map<String, dynamic> payload) {
-    if (_handleUsagePayload(payload)) {
+  bool _shouldBufferAgentPayload(Map<String, dynamic> payload) {
+    if (_isModelPayload(payload)) {
+      return false;
+    }
+    return !_ready && _agentPayloadBelongsToThread(payload);
+  }
+
+  bool _isModelPayload(Map<String, dynamic> payload) {
+    final type = payload['type'];
+    return type == _agentModelsRequestType ||
+        type == _agentModelsResponseType ||
+        type == _agentModelChangeType ||
+        type == _agentModelChangedType;
+  }
+
+  bool _agentPayloadBelongsToThread(Map<String, dynamic> payload) {
+    final threadId = payload['thread_id'];
+    if (threadId is String && threadId.trim() == widget.path) {
+      return true;
+    }
+    final usage = AgentUsageSnapshot.fromPayload(payload);
+    return usage != null && usage.threadPath == widget.path;
+  }
+
+  void _handleAgentMessagePayload(Map<String, dynamic> payload, {Uint8List? attachment, bool notify = true, bool scroll = true}) {
+    if (_handleUsagePayload(payload, notify: notify)) {
       return;
     }
-    final changed = _applyAgentMessagePayload(payload);
+    if (_handleModelPayload(payload)) {
+      return;
+    }
+    final changed = _applyAgentMessagePayload(payload, attachment: attachment);
     _controller.handleAgentMessagePayload(payload);
-    if (changed && mounted) {
+    if (changed && notify && mounted) {
       setState(() {});
-      _controller.scrollThreadToBottom(animated: false);
+      if (scroll) {
+        _controller.scrollThreadToBottom(animated: false);
+      }
     }
   }
 
-  bool _handleUsagePayload(Map<String, dynamic> payload) {
+  bool _handleUsagePayload(Map<String, dynamic> payload, {bool notify = true}) {
     final usage = AgentUsageSnapshot.fromPayload(payload);
     if (usage == null) {
       return false;
@@ -533,7 +922,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       return true;
     }
     _usage = usage;
-    if (mounted) {
+    if (notify && mounted) {
       setState(() {});
     } else if (changed) {
       return true;
@@ -541,7 +930,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return true;
   }
 
-  bool _applyAgentMessagePayload(Map<String, dynamic> payload) {
+  bool _applyAgentMessagePayload(Map<String, dynamic> payload, {Uint8List? attachment}) {
     if (payload['thread_id'] != widget.path) {
       return false;
     }
@@ -557,41 +946,151 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     var changed = false;
 
     switch (type) {
+      case _agentTurnStartType:
+      case _agentTurnSteerType:
+      case _agentTurnInterruptType:
+        unawaited(_audioPlayer.stopAll());
+        break;
+      case _agentModelsRequestType:
+      case _agentModelsResponseType:
+      case _agentModelChangeType:
+      case _agentModelChangedType:
+        break;
       case _agentTurnStartAcceptedType:
       case _agentTurnSteerAcceptedType:
+        final sourceMessageId = payload['source_message_id']?.toString().trim();
+        final turnId = _payloadTurnId(payload);
+        if (sourceMessageId != null && sourceMessageId.isNotEmpty && turnId != null && turnId.trim().isNotEmpty) {
+          _realtimeAudioCommitItemIdsByTurnId[turnId.trim()] = sourceMessageId;
+          final sourceRow = _agentRowsByItemId[sourceMessageId];
+          final sourceData = _mapValue(sourceRow?['data']);
+          if (sourceData?['message'] is Map || sourceData?['status'] == 'in_progress') {
+            if (sourceRow != null && sourceRow['turn_id'] != turnId) {
+              _agentRowsByItemId[sourceMessageId] = {...sourceRow, 'turn_id': turnId};
+              changed = true;
+            }
+          }
+        }
         break;
       case _agentTurnStartedType:
+        changed =
+            _upsertAgentRow(
+              itemId: _turnApplicationItemId(payload, 'started'),
+              turnId: _payloadTurnId(payload),
+              timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
+              data: payload,
+            ) ||
+            changed;
+        changed = _materializePendingMessage(payload['source_message_id']?.toString()) || changed;
+        break;
+      case _agentTurnInterruptAcceptedType:
+      case _agentTurnInterruptedType:
+      case _agentAudioInputSpeechStartedType:
+        unawaited(_audioPlayer.stopAll());
+        break;
       case _agentTurnSteeredType:
-        changed = _materializePendingMessage(payload['source_message_id']?.toString()) || _materializeTurnInputPayload(payload) || changed;
+        changed =
+            _upsertAgentRow(
+              itemId: _turnApplicationItemId(payload, 'steered'),
+              turnId: _payloadTurnId(payload),
+              timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
+              data: payload,
+            ) ||
+            changed;
+        changed = _materializePendingMessage(payload['source_message_id']?.toString()) || changed;
+        break;
+      case _agentRealtimeAudioCommitType:
+        final turnId = _payloadTurnId(payload);
+        final itemId = _payloadItemId(payload);
+        if (turnId != null && turnId.trim().isNotEmpty) {
+          _realtimeAudioCommitItemIdsByTurnId[turnId.trim()] = itemId;
+        }
+        changed =
+            _upsertAgentRow(
+              itemId: itemId,
+              turnId: turnId,
+              timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
+              data: {
+                'kind': 'message',
+                'role': 'user',
+                'status': 'in_progress',
+                'text': '',
+                'sender_name': _senderNameFromPayload(payload),
+                'message': payload,
+              },
+            ) ||
+            changed;
         break;
       case _agentTextContentStartedType:
+      case _agentAudioTranscriptionStartedType:
+        _liveTextContent.upsert(itemId: _transcriptionItemId(payload), turnId: _payloadTurnId(payload), phase: _agentMessagePhase(payload));
         break;
       case _agentTextContentDeltaType:
+      case _agentAudioTranscriptionDeltaType:
+        final contentRole = _textContentRoleFromPayload(payload);
         changed =
             _appendAgentRowText(
-              itemId: _payloadItemId(payload),
+              itemId: _transcriptionItemId(payload),
               turnId: _payloadTurnId(payload),
               kind: 'message',
-              role: 'assistant',
+              role: contentRole,
               delta: payload['text']?.toString() ?? '',
+              senderName: _senderNameFromPayload(payload),
+              phase: _agentMessagePhase(payload),
             ) ||
             changed;
         break;
       case _agentTextContentEndedType:
+      case _agentAudioTranscriptionCompletedType:
+        final contentRole = _textContentRoleFromPayload(payload);
+        final itemId = _transcriptionItemId(payload);
+        final accumulatedText = _liveTextContent.complete(itemId);
+        _liveTextContent.remove(itemId);
+        final phase = _agentMessagePhase(payload) ?? accumulatedText?.phase;
         changed =
             _upsertAgentRow(
-              itemId: _payloadItemId(payload),
+              itemId: itemId,
               turnId: _payloadTurnId(payload),
-              data: {'kind': 'message', 'role': 'assistant', 'text': payload['text']?.toString() ?? _agentRowText(_payloadItemId(payload))},
+              data: {
+                'kind': 'message',
+                'role': contentRole,
+                'status': accumulatedText?.status ?? 'completed',
+                'text': payload['text']?.toString() ?? accumulatedText?.text ?? _agentRowText(itemId),
+                'sender_name': _senderNameFromPayload(payload) ?? accumulatedText?.senderName ?? _agentRowSenderName(itemId),
+                'phase': ?phase,
+              },
             ) ||
             changed;
         break;
+      case _agentAudioTranscriptionFailedType:
+        _liveTextContent.remove(_transcriptionItemId(payload));
+        break;
+      case _agentAudioGenerationStartedType:
+        unawaited(_audioPlayer.start(_audioPlaybackStreamItemId(payload)));
+        break;
+      case _agentAudioGenerationDeltaType:
+        unawaited(
+          _audioPlayer.append(
+            itemId: _audioPlaybackStreamItemId(payload),
+            messageId: payload['message_id']?.toString(),
+            data: attachment,
+            mimeType: payload['mime_type']?.toString(),
+          ),
+        );
+        break;
+      case _agentAudioGenerationCompletedType:
+        unawaited(_audioPlayer.complete(_audioPlaybackStreamItemId(payload)));
+        break;
+      case _agentAudioGenerationFailedType:
+        unawaited(_audioPlayer.stop(_audioPlaybackStreamItemId(payload)));
+        break;
       case _agentReasoningContentStartedType:
+        _liveReasoningContent.upsert(itemId: _payloadItemId(payload), turnId: _payloadTurnId(payload));
         changed =
             _upsertAgentRow(
               itemId: _payloadItemId(payload),
               turnId: _payloadTurnId(payload),
-              data: const {'kind': 'reasoning', 'role': 'assistant', 'text': ''},
+              data: const {'kind': 'reasoning', 'role': 'assistant', 'status': 'in_progress', 'text': ''},
             ) ||
             changed;
         break;
@@ -603,10 +1102,14 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
               kind: 'reasoning',
               role: 'assistant',
               delta: payload['text']?.toString() ?? '',
+              phase: null,
+              senderName: _senderNameFromPayload(payload),
             ) ||
             changed;
         break;
       case _agentReasoningContentEndedType:
+        final accumulatedReasoning = _liveReasoningContent.complete(_payloadItemId(payload));
+        _liveReasoningContent.remove(_payloadItemId(payload));
         changed =
             _upsertAgentRow(
               itemId: _payloadItemId(payload),
@@ -614,55 +1117,147 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
               data: {
                 'kind': 'reasoning',
                 'role': 'assistant',
-                'text': payload['text']?.toString() ?? _agentRowText(_payloadItemId(payload)),
+                'status': accumulatedReasoning?.status ?? 'completed',
+                'text': payload['text']?.toString() ?? accumulatedReasoning?.text ?? _agentRowText(_payloadItemId(payload)),
+                'sender_name':
+                    _senderNameFromPayload(payload) ?? accumulatedReasoning?.senderName ?? _agentRowSenderName(_payloadItemId(payload)),
               },
             ) ||
             changed;
         break;
       case _agentFileContentStartedType:
+        _liveFileContent.upsert(itemId: _payloadItemId(payload), turnId: _payloadTurnId(payload));
         changed =
             _upsertAgentRow(
               itemId: _payloadItemId(payload),
               turnId: _payloadTurnId(payload),
-              data: const {'kind': 'file', 'role': 'assistant', 'urls': <String>[]},
+              data: const {'kind': 'file', 'role': 'assistant', 'status': 'in_progress', 'urls': <String>[]},
             ) ||
             changed;
         break;
       case _agentFileContentDeltaType:
-      case _agentFileContentEndedType:
         changed =
-            _appendAgentRowUrl(itemId: _payloadItemId(payload), turnId: _payloadTurnId(payload), url: payload['url']?.toString()) ||
+            _appendAgentRowUrl(
+              itemId: _payloadItemId(payload),
+              turnId: _payloadTurnId(payload),
+              url: payload['url']?.toString(),
+              senderName: _senderNameFromPayload(payload),
+            ) ||
+            changed;
+        break;
+      case _agentFileContentEndedType:
+        final endUrl = payload['url']?.toString();
+        if (endUrl != null && endUrl.trim().isNotEmpty) {
+          _liveFileContent.appendUrl(
+            itemId: _payloadItemId(payload),
+            turnId: _payloadTurnId(payload),
+            url: endUrl,
+            senderName: _senderNameFromPayload(payload),
+          );
+        }
+        final accumulatedFile = _liveFileContent.complete(_payloadItemId(payload));
+        _liveFileContent.remove(_payloadItemId(payload));
+        final existingData = _mapValue(_agentRowsByItemId[_payloadItemId(payload)]?['data']);
+        changed =
+            _upsertAgentRow(
+              itemId: _payloadItemId(payload),
+              turnId: _payloadTurnId(payload),
+              data: {
+                'kind': 'file',
+                'role': 'assistant',
+                'status': accumulatedFile?.status ?? 'completed',
+                'urls': accumulatedFile?.urls ?? _stringList(existingData?['urls']),
+                'sender_name': _senderNameFromPayload(payload) ?? accumulatedFile?.senderName ?? existingData?['sender_name']?.toString(),
+              },
+            ) ||
             changed;
         break;
       case _agentToolCallPendingType:
       case _agentToolCallInProgressType:
       case _agentToolCallStartedType:
       case _agentToolCallEndedType:
+        final itemId = _payloadItemId(payload);
+        final existingData = _mapValue(_agentRowsByItemId[itemId]?['data']);
         final tool = payload['tool']?.toString() ?? payload['tool_name']?.toString() ?? payload['name']?.toString() ?? '';
+        final resolvedTool = tool.trim().isEmpty ? (existingData?['tool']?.toString() ?? '') : tool;
+        final toolkit = payload['toolkit']?.toString() ?? payload['toolkit_name']?.toString() ?? existingData?['toolkit']?.toString() ?? '';
+        final payloadArguments = _mapValue(payload['arguments']);
+        final existingArgumentDeltaText = existingData?['argument_delta_text']?.toString() ?? '';
+        final arguments =
+            _toolArgumentsFromDeltaText(
+              tool: resolvedTool,
+              current: payloadArguments ?? _mapValue(existingData?['arguments']),
+              text: existingArgumentDeltaText,
+            ) ??
+            payloadArguments ??
+            _mapValue(existingData?['arguments']);
+        final errorMessage = _agentToolCallErrorMessage(payload['error']);
+        final errorData = errorMessage == null ? const <String, Object?>{} : <String, Object?>{'error_message': errorMessage};
+        final logs = _stringList(existingData?['logs']);
         final isImageGeneration = tool.trim().toLowerCase() == 'image_generation';
+        final status = type == _agentToolCallEndedType
+            ? (errorMessage == null ? 'completed' : 'failed')
+            : (type == _agentToolCallPendingType ? 'pending' : 'running');
         if (isImageGeneration && type == _agentToolCallEndedType && payload['error'] == null) {
           break;
         }
         changed =
             _upsertAgentRow(
-              itemId: _payloadItemId(payload),
+              itemId: itemId,
               turnId: _payloadTurnId(payload),
               data: isImageGeneration
                   ? {
                       'kind': 'image_generation',
                       'role': 'assistant',
                       'status': payload['error'] == null ? 'in_progress' : 'failed',
-                      'status_detail': payload['error'] == null ? 'Generating image' : payload['error']?.toString(),
                       'call_id': payload['call_id']?.toString(),
                       'arguments': _mapValue(payload['arguments']),
+                      'sender_name': _senderNameFromPayload(payload) ?? _agentRowSenderName(_payloadItemId(payload)),
                     }
                   : {
                       'kind': 'tool_call',
                       'role': 'assistant',
-                      'toolkit': payload['toolkit']?.toString() ?? payload['toolkit_name']?.toString() ?? '',
-                      'tool': tool,
-                      'status': type == _agentToolCallEndedType ? 'completed' : 'running',
+                      'toolkit': toolkit,
+                      'tool': resolvedTool,
+                      'status': status,
+                      'arguments': arguments,
+                      'logs': logs,
+                      if (_intValue(existingData?['argument_delta_bytes']) > 0)
+                        'argument_delta_bytes': _intValue(existingData?['argument_delta_bytes']),
+                      if (existingArgumentDeltaText.isNotEmpty) 'argument_delta_text': existingArgumentDeltaText,
+                      ...errorData,
+                      'text': formatToolCallEntryText(
+                        toolkit: toolkit,
+                        tool: resolvedTool,
+                        arguments: arguments,
+                        logs: logs,
+                        errorMessage: errorMessage,
+                        completed: type == _agentToolCallEndedType,
+                        pending: _toolCallStatusIsPending(status),
+                        argumentDeltaBytes: _intValue(existingData?['argument_delta_bytes']),
+                      ),
+                      'sender_name': _senderNameFromPayload(payload) ?? _agentRowSenderName(itemId),
                     },
+            ) ||
+            changed;
+        break;
+      case _agentToolCallArgumentsDeltaType:
+        changed =
+            _appendAgentToolArgumentDelta(
+              itemId: _payloadItemId(payload),
+              turnId: _payloadTurnId(payload),
+              delta: payload['delta']?.toString() ?? '',
+              senderName: _senderNameFromPayload(payload),
+            ) ||
+            changed;
+        break;
+      case _agentToolCallLogDeltaType:
+        changed =
+            _appendAgentToolLogs(
+              itemId: _payloadItemId(payload),
+              turnId: _payloadTurnId(payload),
+              lines: _agentToolCallLogLines(payload['lines']),
+              senderName: _senderNameFromPayload(payload),
             ) ||
             changed;
         break;
@@ -679,10 +1274,10 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                 'kind': 'image_generation',
                 'role': 'assistant',
                 'status': _imageGenerationStatusFromType(type),
-                'status_detail': payload['status_detail']?.toString(),
                 'call_id': payload['call_id']?.toString(),
                 'arguments': _mapValue(payload['arguments']),
                 'message': payload,
+                'sender_name': _senderNameFromPayload(payload) ?? _agentRowSenderName(_payloadItemId(payload)),
               },
             ) ||
             changed;
@@ -693,7 +1288,34 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
               itemId: _payloadItemId(payload),
               turnId: _payloadTurnId(payload),
               timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
-              data: {'kind': 'compaction', 'role': 'assistant', 'status': 'completed', 'message': payload},
+              data: {
+                'kind': 'compaction',
+                'role': 'assistant',
+                'status': 'completed',
+                'message': payload,
+                'sender_name': _senderNameFromPayload(payload) ?? _agentRowSenderName(_payloadItemId(payload)),
+              },
+            ) ||
+            changed;
+        break;
+      case _agentTurnEndedType:
+        final errorMessage = agentTurnEndedErrorMessage(payload);
+        if (errorMessage == null) {
+          break;
+        }
+        changed =
+            _upsertAgentRow(
+              itemId: _turnApplicationItemId(payload, 'error'),
+              turnId: _payloadTurnId(payload),
+              timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
+              data: {
+                'kind': 'error',
+                'role': 'assistant',
+                'status': 'failed',
+                'text': errorMessage,
+                'message': payload,
+                'sender_name': _senderNameFromPayload(payload) ?? _agentRowSenderName(_payloadItemId(payload)),
+              },
             ) ||
             changed;
         break;
@@ -701,66 +1323,27 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return changed;
   }
 
-  bool _materializeTurnInputPayload(Map<String, dynamic> payload) {
-    final messageId = payload['source_message_id']?.toString() ?? payload['message_id']?.toString();
-    if (messageId == null || messageId.trim().isEmpty) {
-      return false;
-    }
-    if (_rowsByItemId.containsKey(messageId) || _initialRowsByItemId.containsKey(messageId) || _agentRowsByItemId.containsKey(messageId)) {
-      return false;
-    }
-
-    final content = payload['content'];
-    if (content is! List) {
-      return false;
-    }
-
-    final textParts = <String>[];
-    final attachments = <String>[];
-    for (final item in content) {
-      final contentItem = item is Map<String, dynamic> ? item : (item is Map ? Map<String, dynamic>.from(item) : null);
-      if (contentItem == null) {
-        continue;
-      }
-      final contentType = contentItem['type'];
-      if (contentType == 'text') {
-        final text = contentItem['text']?.toString();
-        if (text != null && text.isNotEmpty) {
-          textParts.add(text);
-        }
-      } else if (contentType == 'file') {
-        final url = contentItem['url']?.toString();
-        if (url != null && url.trim().isNotEmpty) {
-          attachments.add(url.trim());
-        }
-      }
-    }
-
-    final text = textParts.join('\n');
-    if (text.trim().isEmpty && attachments.isEmpty) {
-      return false;
-    }
-
-    return _upsertAgentRow(
-      itemId: messageId,
-      turnId: payload['turn_id']?.toString(),
-      timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
-      data: {
-        'kind': 'message',
-        'role': 'user',
-        'text': text,
-        'sender_name': payload['sender_name']?.toString(),
-        'attachments': attachments,
-      },
-    );
-  }
-
   bool _materializePendingMessagesForThread() {
     var changed = false;
-    for (final pending in _controller.pendingAgentMessagesForPath(widget.path)) {
+    for (final pending in _pendingAgentMessagesForThread()) {
       changed = _materializePendingMessage(pending.messageId) || changed;
     }
     return changed;
+  }
+
+  List<PendingAgentMessage> _pendingAgentMessagesForThread() {
+    final combined = <String, PendingAgentMessage>{};
+    for (final pending in _status.pendingMessages) {
+      combined[pending.messageId] = pending;
+    }
+    final currentStatus = resolveChatThreadStatus(room: widget.room, path: widget.path, agentName: widget.agentName, previous: _status);
+    for (final pending in currentStatus.pendingMessages) {
+      combined[pending.messageId] = pending;
+    }
+    for (final pending in _controller.pendingAgentMessagesForPath(widget.path)) {
+      combined[pending.messageId] = pending;
+    }
+    return combined.values.toList(growable: false);
   }
 
   bool _materializePendingMessage(String? messageId) {
@@ -768,7 +1351,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       return false;
     }
     PendingAgentMessage? pending;
-    for (final candidate in _controller.pendingAgentMessagesForPath(widget.path)) {
+    for (final candidate in _pendingAgentMessagesForThread()) {
       if (candidate.messageId == messageId) {
         pending = candidate;
         break;
@@ -786,15 +1369,44 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     );
   }
 
+  String _transcriptionItemId(Map<String, dynamic> payload) {
+    final type = payload['type']?.toString();
+    if (type != _agentAudioTranscriptionStartedType &&
+        type != _agentAudioTranscriptionDeltaType &&
+        type != _agentAudioTranscriptionCompletedType &&
+        type != _agentAudioTranscriptionFailedType) {
+      return _payloadItemId(payload);
+    }
+    if (_textContentRoleFromPayload(payload) != 'user') {
+      return _payloadItemId(payload);
+    }
+    final turnId = _payloadTurnId(payload);
+    if (turnId == null || turnId.trim().isEmpty) {
+      return _payloadItemId(payload);
+    }
+    return _realtimeAudioCommitItemIdsByTurnId[turnId.trim()] ?? _payloadItemId(payload);
+  }
+
+  String _audioPlaybackStreamItemId(Map<String, dynamic> payload) {
+    final turnId = _payloadTurnId(payload);
+    if (turnId != null && turnId.trim().isNotEmpty) {
+      return 'turn:${turnId.trim()}:audio_generation';
+    }
+    return _payloadItemId(payload);
+  }
+
   bool _upsertAgentRow({required String itemId, required String? turnId, required Map<String, Object?> data, DateTime? timestamp}) {
     if (itemId.trim().isEmpty) {
       return false;
     }
-    if (_rowsByItemId.containsKey(itemId) || _initialRowsByItemId.containsKey(itemId)) {
-      return false;
-    }
     final candidateRow = <String, Object?>{'turn_id': turnId, 'item_id': itemId, 'data': data};
     if (_isReconciledByDatasetRows(candidateRow)) {
+      return false;
+    }
+    final dataKind = data['kind']?.toString();
+    final dataRole = data['role']?.toString();
+    final canOverlayDatasetLifecycleRow = dataKind == 'file' || dataKind == 'image_generation' || dataRole == 'assistant';
+    if (_datasetRowsContainItemId(itemId) && !canOverlayDatasetLifecycleRow) {
       return false;
     }
     final existing = _agentRowsByItemId[itemId];
@@ -813,24 +1425,34 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   bool _isReconciledByDatasetRows(Map<String, Object?> liveRow) {
-    final liveData = _rowData(liveRow);
-    if (liveData?['kind'] != 'image_generation') {
-      return false;
-    }
-    final liveKeys = _imageGenerationCorrelationKeys(liveRow);
-    if (liveKeys.isEmpty) {
-      return false;
-    }
-    for (final datasetRow in [..._rowsByItemId.values, ..._initialRowsByItemId.values]) {
-      final datasetData = _rowData(datasetRow);
-      if (datasetData?['kind'] != 'image_generation') {
-        continue;
-      }
-      if (_imageGenerationCorrelationKeys(datasetRow).any(liveKeys.contains)) {
+    for (final datasetRow in _rowsByItemId.values) {
+      if (_datasetRowReconcilesLiveRow(datasetRow: datasetRow, liveRow: liveRow)) {
         return true;
       }
     }
     return false;
+  }
+
+  bool _datasetRowReconcilesLiveRow({required Map<String, Object?> datasetRow, required Map<String, Object?> liveRow}) {
+    if (_isImageGenerationRow(liveRow) || _isImageGenerationRow(datasetRow)) {
+      if (!_imageGenerationRowsReconcile(datasetRow: datasetRow, liveRow: liveRow)) {
+        return false;
+      }
+      final liveMessage = _messageForRow(liveRow);
+      final datasetMessage = _messageForRow(datasetRow);
+      if (liveMessage?.image == null || datasetMessage?.image == null) {
+        return true;
+      }
+      return _datasetThreadMessageReconcilesLiveMessage(datasetMessage: datasetMessage!, liveMessage: liveMessage!);
+    }
+
+    final liveMessage = _messageForRow(liveRow);
+    final turnInputPayloadsById = _turnInputPayloadsById([..._rowsByItemId.values, datasetRow]);
+    final datasetMessage = _messageForRow(datasetRow, turnInputPayloadsById: turnInputPayloadsById);
+    if (liveMessage == null || datasetMessage == null) {
+      return false;
+    }
+    return _datasetThreadMessageReconcilesLiveMessage(datasetMessage: datasetMessage, liveMessage: liveMessage);
   }
 
   bool _appendAgentRowText({
@@ -839,35 +1461,151 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     required String kind,
     required String role,
     required String delta,
+    required String? senderName,
+    required String? phase,
   }) {
     if (delta.isEmpty) {
       return false;
     }
+    final accumulated = kind == 'reasoning'
+        ? _liveReasoningContent.appendDelta(itemId: itemId, delta: delta, turnId: turnId, senderName: senderName)
+        : _liveTextContent.appendDelta(itemId: itemId, delta: delta, turnId: turnId, senderName: senderName, phase: phase);
     final existingData = _mapValue(_agentRowsByItemId[itemId]?['data']);
-    final nextText = '${existingData?['text']?.toString() ?? ''}$delta';
-    return _upsertAgentRow(itemId: itemId, turnId: turnId, data: {'kind': kind, 'role': role, 'text': nextText});
+    return _upsertAgentRow(
+      itemId: itemId,
+      turnId: turnId,
+      data: {
+        'kind': kind,
+        'role': role,
+        'status': accumulated.status,
+        'text': accumulated.text,
+        'sender_name': accumulated.senderName ?? existingData?['sender_name']?.toString(),
+        if (accumulated.phase != null) 'phase': accumulated.phase else if (existingData?['phase'] != null) 'phase': existingData?['phase'],
+      },
+    );
   }
 
-  bool _appendAgentRowUrl({required String itemId, required String? turnId, required String? url}) {
+  bool _appendAgentRowUrl({required String itemId, required String? turnId, required String? url, required String? senderName}) {
     final normalizedUrl = url?.trim();
     if (normalizedUrl == null || normalizedUrl.isEmpty) {
       return false;
     }
+    final accumulated = _liveFileContent.appendUrl(itemId: itemId, url: normalizedUrl, turnId: turnId, senderName: senderName);
     final existingData = _mapValue(_agentRowsByItemId[itemId]?['data']);
-    final urls = _stringList(existingData?['urls']).toList(growable: true);
-    if (!urls.contains(normalizedUrl)) {
-      urls.add(normalizedUrl);
+    return _upsertAgentRow(
+      itemId: itemId,
+      turnId: turnId,
+      data: {
+        'kind': 'file',
+        'role': 'assistant',
+        'status': accumulated.status,
+        'urls': accumulated.urls,
+        'sender_name': accumulated.senderName ?? existingData?['sender_name']?.toString(),
+      },
+    );
+  }
+
+  bool _appendAgentToolLogs({required String itemId, required String? turnId, required List<String> lines, required String? senderName}) {
+    if (itemId.trim().isEmpty || lines.isEmpty) {
+      return false;
     }
-    return _upsertAgentRow(itemId: itemId, turnId: turnId, data: {'kind': 'file', 'role': 'assistant', 'urls': urls});
+    final existingData = _mapValue(_agentRowsByItemId[itemId]?['data']);
+    final logs = _stringList(existingData?['logs']).toList(growable: true)..addAll(lines);
+    final toolkit = existingData?['toolkit']?.toString() ?? '';
+    final tool = existingData?['tool']?.toString() ?? 'tool';
+    final arguments = _mapValue(existingData?['arguments']);
+    final status = existingData?['status']?.toString() ?? 'running';
+    final errorMessage = existingData?['error_message']?.toString();
+    final argumentDeltaBytes = _intValue(existingData?['argument_delta_bytes']);
+    return _upsertAgentRow(
+      itemId: itemId,
+      turnId: turnId,
+      data: {
+        'kind': 'tool_call',
+        'role': 'assistant',
+        'toolkit': toolkit,
+        'tool': tool,
+        'status': status,
+        'arguments': arguments,
+        'logs': logs,
+        if (argumentDeltaBytes > 0) 'argument_delta_bytes': argumentDeltaBytes,
+        if (errorMessage != null && errorMessage.trim().isNotEmpty) 'error_message': errorMessage,
+        'text': formatToolCallEntryText(
+          toolkit: toolkit,
+          tool: tool,
+          arguments: arguments,
+          logs: logs,
+          errorMessage: errorMessage,
+          completed: !_toolCallStatusIsRunning(status),
+          pending: _toolCallStatusIsPending(status),
+          argumentDeltaBytes: argumentDeltaBytes,
+        ),
+        'sender_name': senderName ?? existingData?['sender_name']?.toString(),
+      },
+    );
+  }
+
+  bool _appendAgentToolArgumentDelta({
+    required String itemId,
+    required String? turnId,
+    required String delta,
+    required String? senderName,
+  }) {
+    if (itemId.trim().isEmpty || delta.isEmpty) {
+      return false;
+    }
+    final existingData = _mapValue(_agentRowsByItemId[itemId]?['data']);
+    final totalDeltaBytes = _intValue(existingData?['argument_delta_bytes']) + utf8.encode(delta).length;
+    final toolkit = existingData?['toolkit']?.toString() ?? '';
+    final tool = existingData?['tool']?.toString() ?? 'tool';
+    final existingArguments = _mapValue(existingData?['arguments']);
+    final argumentDeltaText = '${existingData?['argument_delta_text']?.toString() ?? ''}$delta';
+    final arguments = _toolArgumentsFromDeltaText(tool: tool, current: existingArguments, text: argumentDeltaText) ?? existingArguments;
+    final logs = _stringList(existingData?['logs']);
+    final status = existingData?['status']?.toString() ?? 'running';
+    final errorMessage = existingData?['error_message']?.toString();
+    return _upsertAgentRow(
+      itemId: itemId,
+      turnId: turnId,
+      data: {
+        'kind': 'tool_call',
+        'role': 'assistant',
+        'toolkit': toolkit,
+        'tool': tool,
+        'status': status,
+        'arguments': arguments,
+        'logs': logs,
+        'argument_delta_bytes': totalDeltaBytes,
+        'argument_delta_text': argumentDeltaText,
+        if (errorMessage != null && errorMessage.trim().isNotEmpty) 'error_message': errorMessage,
+        'text': formatToolCallEntryText(
+          toolkit: toolkit,
+          tool: tool,
+          arguments: arguments,
+          logs: logs,
+          errorMessage: errorMessage,
+          completed: !_toolCallStatusIsRunning(status),
+          pending: _toolCallStatusIsPending(status),
+          argumentDeltaBytes: totalDeltaBytes,
+        ),
+        'sender_name': senderName ?? existingData?['sender_name']?.toString(),
+      },
+    );
   }
 
   String _agentRowText(String itemId) {
     return _mapValue(_agentRowsByItemId[itemId]?['data'])?['text']?.toString() ?? '';
   }
 
+  String? _agentRowSenderName(String itemId) {
+    final senderName = _mapValue(_agentRowsByItemId[itemId]?['data'])?['sender_name'];
+    return senderName is String && senderName.trim().isNotEmpty ? senderName.trim() : null;
+  }
+
   void _refreshStatus({bool notify = false}) {
     final next = resolveChatThreadStatus(room: widget.room, path: widget.path, agentName: widget.agentName, previous: _status);
     _status = next;
+    _modelController.setLocked(next.turnId != null);
     if (notify && mounted) {
       setState(() {});
     }
@@ -898,6 +1636,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     _openedPath = widget.path;
     _openedAgentParticipantId = agent.id;
     _sendThreadSubscriptionMessageNowait(agent: agent, messageType: _agentThreadOpenType, path: widget.path);
+    _sendModelsRequestNowait(agent: agent);
   }
 
   void _closeOpenSubscription() {
@@ -922,27 +1661,227 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
           to: agent,
           type: _agentRoomMessageType,
           ignoreOffline: true,
-          message: {
-            'payload': {'type': messageType, 'thread_id': path},
-          },
+          message: {'type': messageType, 'thread_id': path},
         );
       } catch (_) {}
     }());
   }
 
+  void _sendModelsRequestNowait({required RemoteParticipant agent}) {
+    unawaited(() async {
+      try {
+        await widget.room.messaging.sendMessage(
+          to: agent,
+          type: _agentRoomMessageType,
+          ignoreOffline: true,
+          message: {'type': _agentModelsRequestType, 'message_id': const Uuid().v4()},
+        );
+      } catch (_) {}
+    }());
+  }
+
+  Future<void> _changeModel(DatasetChatModelOption option) async {
+    final agent = _agentParticipant();
+    if (agent == null) {
+      throw StateError('No online agent supports agent messages for this thread.');
+    }
+    await widget.room.messaging.sendMessage(
+      to: agent,
+      type: _agentRoomMessageType,
+      message: {
+        'type': _agentModelChangeType,
+        'thread_id': widget.path,
+        'message_id': const Uuid().v4(),
+        'provider': option.provider,
+        'model': option.model,
+      },
+    );
+  }
+
+  Future<void> _changeVoice(String voice) async {
+    final agent = _agentParticipant();
+    final activeModel = _modelController.activeModel;
+    if (agent == null) {
+      throw StateError('No online agent supports agent messages for this thread.');
+    }
+    if (activeModel == null) {
+      throw StateError('No model selected for this thread.');
+    }
+    await widget.room.messaging.sendMessage(
+      to: agent,
+      type: _agentRoomMessageType,
+      message: {
+        'type': _agentModelChangeType,
+        'thread_id': widget.path,
+        'message_id': const Uuid().v4(),
+        'provider': activeModel.provider,
+        'model': activeModel.model,
+        'voice': voice,
+      },
+    );
+  }
+
+  bool _handleModelPayload(Map<String, dynamic> payload) {
+    final type = payload['type'];
+    if (type == _agentModelsResponseType) {
+      _modelController.applyModelsResponse(payload);
+      return true;
+    }
+    if (payload['thread_id'] != widget.path) {
+      return false;
+    }
+    if (type == _agentModelChangedType) {
+      _modelController.applyModelChanged(payload);
+      return true;
+    } else if (type == _agentModelsRequestType || type == _agentModelChangeType) {
+      return true;
+    }
+    return false;
+  }
+
   List<_DatasetThreadMessage> _messages() {
     final mergedRowsByItemId = <String, Map<String, Object?>>{};
     mergedRowsByItemId.addAll(_agentRowsByItemId);
-    mergedRowsByItemId.addAll(_rowsByItemId);
+    for (final entry in _rowsByItemId.entries) {
+      final liveRow = mergedRowsByItemId[entry.key];
+      mergedRowsByItemId[entry.key] = liveRow == null ? entry.value : _mergeDatasetAndLiveRow(datasetRow: entry.value, liveRow: liveRow);
+    }
     final rows = mergedRowsByItemId.values.toList(growable: false)..sort(_compareDatasetThreadRows);
-    final messages = <_DatasetThreadMessage>[];
-    for (final row in rows) {
-      final message = _messageForRow(row);
+    final turnInputPayloadsById = _turnInputPayloadsById(rows);
+    final messagesById = <String, _DatasetThreadMessage>{};
+    for (final parsed in _messagesForRows(rows, turnInputPayloadsById: turnInputPayloadsById)) {
+      final row = parsed.row;
+      final message = parsed.message;
       if (message != null && _shouldRenderDatasetThreadMessage(message)) {
-        messages.add(message);
+        final messageKey = _datasetThreadMessageDedupeKey(row: row, message: message);
+        final existing = messagesById[messageKey];
+        messagesById[messageKey] = existing == null ? message : _mergeDuplicateDatasetThreadMessage(existing, message);
       }
     }
+    return messagesById.values.toList(growable: false);
+  }
+
+  List<({Map<String, Object?> row, _DatasetThreadMessage? message})> _messagesForRows(
+    List<Map<String, Object?>> rows, {
+    required Map<String, Map<String, Object?>> turnInputPayloadsById,
+  }) {
+    final messages = <({Map<String, Object?> row, _DatasetThreadMessage? message})>[];
+    final toolCallsByItemId = <String, _DatasetToolCallState>{};
+    final toolArgumentDeltaBytesByItemId = <String, int>{};
+    final toolArgumentDeltaTextByItemId = <String, String>{};
+    final textContentByItemId = <String, _DatasetTextContentState>{};
+    final reasoningContentByItemId = <String, _DatasetTextContentState>{};
+    for (final row in rows) {
+      final data = _rowData(row);
+      final type = data?['type']?.toString();
+      final itemId = _datasetThreadContentItemId(row: row, payload: data, type: type);
+      if (type == _agentTextContentStartedType ||
+          type == _agentAudioTranscriptionStartedType ||
+          type == _agentReasoningContentStartedType) {
+        if (data != null) {
+          final statesByItemId = type == _agentReasoningContentStartedType ? reasoningContentByItemId : textContentByItemId;
+          statesByItemId[itemId] = _DatasetTextContentState.fromPayload(
+            row: row,
+            payload: data,
+            kind: type == _agentReasoningContentStartedType ? 'reasoning' : 'message',
+            role: type == _agentAudioTranscriptionStartedType ? _textContentRoleFromPayload(data) : 'assistant',
+          );
+        }
+        continue;
+      }
+      if (type == _agentTextContentDeltaType || type == _agentAudioTranscriptionDeltaType || type == _agentReasoningContentDeltaType) {
+        final statesByItemId = type == _agentReasoningContentDeltaType ? reasoningContentByItemId : textContentByItemId;
+        final state = statesByItemId.putIfAbsent(
+          itemId,
+          () => _DatasetTextContentState.fromPayload(
+            row: row,
+            payload: data ?? const <String, Object?>{},
+            kind: type == _agentReasoningContentDeltaType ? 'reasoning' : 'message',
+            role: type == _agentAudioTranscriptionDeltaType ? _textContentRoleFromPayload(data) : 'assistant',
+          ),
+        );
+        state.appendDelta(row: row, payload: data ?? const <String, Object?>{});
+        continue;
+      }
+      if (type == _agentTextContentEndedType || type == _agentAudioTranscriptionCompletedType || type == _agentReasoningContentEndedType) {
+        final statesByItemId = type == _agentReasoningContentEndedType ? reasoningContentByItemId : textContentByItemId;
+        final state = statesByItemId.remove(itemId);
+        final message =
+            state?.complete(row: row, payload: data ?? const <String, Object?>{}) ??
+            (type == _agentAudioTranscriptionCompletedType && data != null
+                ? _DatasetTextContentState.fromPayload(
+                    row: row,
+                    payload: data,
+                    kind: 'message',
+                    role: _textContentRoleFromPayload(data),
+                  ).complete(row: row, payload: data)
+                : null);
+        messages.add((row: row, message: message));
+        continue;
+      }
+      if (_isDatasetToolCallStartType(type)) {
+        toolCallsByItemId[itemId] = _DatasetToolCallState.fromPayload(row: row, payload: data!);
+        final pendingArgumentDeltaBytes = toolArgumentDeltaBytesByItemId[itemId];
+        if (pendingArgumentDeltaBytes != null) {
+          toolCallsByItemId[itemId]!.argumentDeltaBytes += pendingArgumentDeltaBytes;
+        }
+        final pendingArgumentDeltaText = toolArgumentDeltaTextByItemId[itemId];
+        if (pendingArgumentDeltaText != null && pendingArgumentDeltaText.isNotEmpty) {
+          toolCallsByItemId[itemId]!.appendArgumentDelta(pendingArgumentDeltaText);
+        }
+        continue;
+      }
+      if (type == _agentToolCallLogDeltaType) {
+        final state = toolCallsByItemId[itemId];
+        if (state != null) {
+          state.logs.addAll(_agentToolCallLogLines(data?['lines']));
+        }
+        continue;
+      }
+      if (type == _agentToolCallArgumentsDeltaType) {
+        final delta = data?['delta']?.toString() ?? '';
+        final deltaBytes = utf8.encode(delta).length;
+        final state = toolCallsByItemId[itemId];
+        if (state != null) {
+          state.argumentDeltaBytes += deltaBytes;
+          state.appendArgumentDelta(delta);
+        } else {
+          toolArgumentDeltaBytesByItemId[itemId] = (toolArgumentDeltaBytesByItemId[itemId] ?? 0) + deltaBytes;
+          toolArgumentDeltaTextByItemId[itemId] = '${toolArgumentDeltaTextByItemId[itemId] ?? ''}$delta';
+        }
+        continue;
+      }
+      if (type == _agentToolCallEndedType) {
+        final state = toolCallsByItemId.remove(itemId);
+        final message = _messageForToolCallEndRow(row: row, payload: data, state: state);
+        messages.add((row: row, message: message));
+        continue;
+      }
+      final message = _messageForRow(row, turnInputPayloadsById: turnInputPayloadsById);
+      messages.add((row: row, message: message));
+    }
+    for (final state in [...textContentByItemId.values, ...reasoningContentByItemId.values]) {
+      messages.add((row: state.latestRow, message: state.toMessage(row: state.latestRow)));
+    }
     return messages;
+  }
+
+  Map<String, Map<String, Object?>> _turnInputPayloadsById(Iterable<Map<String, Object?>> rows) {
+    final payloadsById = <String, Map<String, Object?>>{};
+    for (final row in rows) {
+      final data = _rowData(row);
+      final type = data?['type']?.toString();
+      if (type != _agentTurnStartType && type != _agentTurnSteerType) {
+        continue;
+      }
+      final messageId = data?['message_id']?.toString().trim();
+      final rowItemId = row['item_id']?.toString().trim();
+      final inputId = messageId != null && messageId.isNotEmpty ? messageId : rowItemId;
+      if (inputId != null && inputId.isNotEmpty && data != null) {
+        payloadsById[inputId] = data;
+      }
+    }
+    return payloadsById;
   }
 
   bool _hasWireBackedContent() {
@@ -955,9 +1894,6 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   bool _shouldRenderDatasetThreadMessage(_DatasetThreadMessage message) {
-    if (message.kind == 'tool_call') {
-      return _showCompletedToolCalls;
-    }
     final image = message.image;
     if (image != null) {
       final hasImageReference = _stringValue(image.imageId) != null || _stringValue(image.uri) != null;
@@ -976,14 +1912,79 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     for (final pending in _controller.pendingAgentMessagesForPath(widget.path)) {
       combined[pending.messageId] = pending;
     }
+    for (final pending in _pendingSteeringMessagesFromDatasetRows()) {
+      combined[pending.messageId] = pending;
+    }
     final values = combined.values.where((pending) {
       return !messages.any((message) => _datasetThreadMessageMatchesPendingAgentMessage(message, pending));
     }).toList();
     return [...values.where((message) => !message.awaitingAcceptance), ...values.where((message) => message.awaitingAcceptance)];
   }
 
-  bool _canInterruptActiveTurn(List<PendingAgentMessage> pendingMessages) {
-    return _status.supportsAgentMessages && _status.turnId != null && pendingMessages.isNotEmpty;
+  List<PendingAgentMessage> _pendingSteeringMessagesFromDatasetRows() {
+    final pendingByMessageId = <String, PendingAgentMessage>{};
+    final rows = [..._rowsByItemId.values, ..._agentRowsByItemId.values]..sort(_compareDatasetThreadRows);
+    for (final row in rows) {
+      final data = _rowData(row);
+      final type = data?['type']?.toString();
+      if (type == _agentTurnSteeredType || type == _agentTurnSteerRejectedType) {
+        final sourceMessageId = data?['source_message_id']?.toString();
+        if (sourceMessageId != null && sourceMessageId.trim().isNotEmpty) {
+          pendingByMessageId.remove(sourceMessageId.trim());
+        }
+        continue;
+      }
+      if (type == _agentTurnSteerAcceptedType) {
+        final sourceMessageId = data?['source_message_id']?.toString();
+        final existing = sourceMessageId == null ? null : pendingByMessageId[sourceMessageId.trim()];
+        if (existing != null && existing.awaitingAcceptance) {
+          pendingByMessageId[existing.messageId] = PendingAgentMessage(
+            messageId: existing.messageId,
+            messageType: existing.messageType,
+            threadPath: existing.threadPath,
+            text: existing.text,
+            attachments: existing.attachments,
+            senderName: existing.senderName,
+            createdAt: existing.createdAt,
+            awaitingAcceptance: false,
+            awaitingApplication: existing.awaitingApplication,
+          );
+        }
+        continue;
+      }
+      if (type != _agentTurnSteerType || data == null) {
+        continue;
+      }
+      final sourceMessageId = data['message_id']?.toString() ?? row['item_id']?.toString();
+      if (sourceMessageId == null || sourceMessageId.trim().isEmpty) {
+        continue;
+      }
+      final content = data['content'];
+      if (content is! List) {
+        continue;
+      }
+      final extracted = _agentInputContentParts(content);
+      if (extracted.text.trim().isEmpty && extracted.attachments.isEmpty) {
+        continue;
+      }
+      pendingByMessageId[sourceMessageId.trim()] = PendingAgentMessage(
+        messageId: sourceMessageId.trim(),
+        messageType: _agentTurnSteerType,
+        threadPath: widget.path,
+        text: extracted.text,
+        attachments: extracted.attachments,
+        senderName: data['sender_name']?.toString(),
+        createdAt: _rowTimestamp(row),
+        awaitingAcceptance: true,
+        awaitingApplication: true,
+      );
+    }
+    return pendingByMessageId.values.toList(growable: false);
+  }
+
+  bool _canInterruptActiveTurn() {
+    final turnId = _status.turnId;
+    return _status.supportsAgentMessages && turnId != null && turnId.trim().isNotEmpty;
   }
 
   Future<void> _cancelTurn() async {
@@ -991,6 +1992,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (turnId == null || turnId.trim().isEmpty) {
       return;
     }
+    await _audioPlayer.stopAll();
     final agent = _agentParticipant();
     if (agent == null) {
       return;
@@ -998,9 +2000,55 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     await widget.room.messaging.sendMessage(
       to: agent,
       type: _agentRoomMessageType,
+      message: {'type': _agentTurnInterruptType, 'thread_id': widget.path, 'turn_id': turnId},
+    );
+  }
+
+  Future<void> _sendRealtimeAudioChunk(Uint8List chunk, {required bool finalChunk}) async {
+    final agent = _agentParticipant();
+    if (agent == null) {
+      throw StateError('No online agent supports agent messages for this thread.');
+    }
+    final activeModel = _modelController.activeModel;
+    final activeVoice = _modelController.activeVoice;
+    final inputFormat = _modelController.activeInputFormat;
+    if (finalChunk) {
+      if (_modelController.activeTurnDetection == 'automatic') {
+        return;
+      }
+      final messageId = const Uuid().v4();
+      final turnId = const Uuid().v4();
+      await widget.room.messaging.sendMessage(
+        to: agent,
+        type: _agentRoomMessageType,
+        message: {'type': _agentRealtimeAudioCommitType, 'thread_id': widget.path, 'message_id': messageId, 'turn_id': turnId},
+      );
+      await widget.room.messaging.sendMessage(
+        to: agent,
+        type: _agentRoomMessageType,
+        message: {
+          'type': _agentTurnStartType,
+          'thread_id': widget.path,
+          'message_id': const Uuid().v4(),
+          'turn_id': turnId,
+          if (activeModel != null) 'provider': activeModel.provider,
+          if (activeModel != null) 'model': activeModel.model,
+          if (activeVoice != null && activeVoice.trim().isNotEmpty) 'voice': activeVoice.trim(),
+          'output_modalities': [_modelController.activeModality],
+        },
+      );
+      return;
+    }
+    await widget.room.messaging.sendMessage(
+      to: agent,
+      type: _agentRoomMessageType,
       message: {
-        'payload': {'type': _agentTurnInterruptType, 'thread_id': widget.path, 'turn_id': turnId},
+        'type': _agentRealtimeAudioChunkType,
+        'thread_id': widget.path,
+        'message_id': const Uuid().v4(),
+        'format': inputFormat.toJson(),
       },
+      attachment: chunk,
     );
   }
 
@@ -1038,7 +2086,15 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       if (isSteer && _status.turnId != null) {
         payload['turn_id'] = _status.turnId;
       }
-      await widget.room.messaging.sendMessage(to: agent, type: _agentRoomMessageType, message: {'payload': payload});
+      final activeModel = _modelController.activeModel;
+      if (!isSteer && activeModel != null) {
+        payload['provider'] = activeModel.provider;
+        payload['model'] = activeModel.model;
+      }
+      if (!isSteer) {
+        payload['output_modalities'] = [_modelController.activeModality];
+      }
+      await widget.room.messaging.sendMessage(to: agent, type: _agentRoomMessageType, message: payload);
       _controller.outboundStatus.markDelivered(messageId);
       _controller.clear();
     } catch (error, stackTrace) {
@@ -1062,6 +2118,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       threadStatus: _status.text,
       threadStatusStartedAt: _status.startedAt,
       threadStatusMode: _status.mode,
+      threadStatusTotalBytes: _status.totalBytes,
+      threadStatusLinesAdded: _status.linesAdded,
+      threadStatusLinesRemoved: _status.linesRemoved,
       supportsAgentMessages: agent != null,
       supportsMcp: agent?.getAttribute('supports_mcp') == true,
       toolkits: const <String, AgentToolkitCapabilities>{},
@@ -1245,44 +2304,115 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       }
     }
     final toolArea = resolveChatThreadToolArea(widget.toolsBuilder == null ? null : widget.toolsBuilder!(context, _controller, snapshot));
-    return ChatThreadInput(
-      key: _composerInputKey,
-      focusTrigger: _controller,
-      sendEnabled: snapshot.supportsAgentMessages,
-      sendDisabledReason: !snapshot.supportsAgentMessages ? 'This thread requires an online agent that supports agent messages.' : null,
-      onInterrupt: _canInterruptActiveTurn(pendingMessages) ? _cancelTurn : null,
-      sendPendingText: waitingForOnlineMessage == null
-          ? null
-          : 'Waiting for ${_displayAgentName(widget.agentName ?? "agent")} to come online.',
-      placeholder: widget.inputPlaceholder,
-      leading: toolArea.leading,
-      footer: toolArea.footer,
-      trailing: null,
-      room: widget.room,
-      controller: _controller,
-      attachmentBuilder: widget.attachmentBuilder,
-      contextMenuBuilder: widget.inputContextMenuBuilder,
-      onPressedOutside: widget.inputOnPressedOutside,
-      onSend: _send,
+    return AnimatedBuilder(
+      animation: _modelController,
+      builder: (context, _) => ChatThreadInput(
+        key: _composerInputKey,
+        focusTrigger: _controller,
+        sendEnabled: snapshot.supportsAgentMessages,
+        sendDisabledReason: !snapshot.supportsAgentMessages ? 'This thread requires an online agent that supports agent messages.' : null,
+        onInterrupt: _canInterruptActiveTurn() ? _cancelTurn : null,
+        sendPendingText: waitingForOnlineMessage == null
+            ? null
+            : 'Waiting for ${_displayAgentName(widget.agentName ?? "agent")} to come online.',
+        placeholder: widget.inputPlaceholder,
+        leading: toolArea.leading,
+        footer: toolArea.footer,
+        audioInputEnabled: _modelController.supportsAudioInput,
+        automaticAudioTurnDetection: _modelController.activeTurnDetection == 'automatic',
+        onAudioChunk: _sendRealtimeAudioChunk,
+        room: widget.room,
+        controller: _controller,
+        attachmentBuilder: widget.attachmentBuilder,
+        contextMenuBuilder: widget.inputContextMenuBuilder,
+        onPressedOutside: widget.inputOnPressedOutside,
+        onSend: _send,
+      ),
     );
   }
 
-  Widget _buildMessage(BuildContext context, _DatasetThreadMessage message, {required List<ChatThreadFeedImage> feedImages}) {
+  Widget _buildMessage(
+    BuildContext context,
+    _DatasetThreadMessage message, {
+    required List<ChatThreadFeedImage> feedImages,
+    required bool shouldShowParticipantHeader,
+  }) {
     final theme = ShadTheme.of(context);
     if (message.kind != 'message') {
+      if (message.kind == 'tool_call') {
+        final expanded = _expandedToolCallIds.contains(message.id);
+        final toolCallEntry = message.toolCallEntry ?? _toolCallEntryFromText(message.text);
+        final expandedToolCallEntry = message.expandedToolCallEntry;
+        final diffPreviewBlocks = message.diffPreviewBlocks;
+        final canExpand = expandedToolCallEntry != null && expandedToolCallEntry.text != toolCallEntry.text;
+        return Padding(
+          padding: const EdgeInsets.only(left: 42, right: 18),
+          child: SizedBox(
+            width: double.infinity,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildToolCallSummaryText(
+                  context,
+                  expanded && expandedToolCallEntry != null ? expandedToolCallEntry : toolCallEntry,
+                  canExpand: canExpand,
+                  onTapDetails: () {
+                    if (!canExpand) {
+                      return;
+                    }
+                    setState(() {
+                      if (!_expandedToolCallIds.add(message.id)) {
+                        _expandedToolCallIds.remove(message.id);
+                      }
+                    });
+                  },
+                ),
+                if (diffPreviewBlocks.isNotEmpty || expanded)
+                  for (final block in diffPreviewBlocks) _buildDatasetDiffPreviewBlock(context, block: block),
+              ],
+            ),
+          ),
+        );
+      }
+      if (message.kind == 'error') {
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
+          child: SizedBox(
+            width: double.infinity,
+            child: Align(
+              alignment: Alignment.center,
+              child: SelectableText(
+                message.text,
+                style: theme.textTheme.muted.copyWith(color: theme.colorScheme.destructive),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ),
+        );
+      }
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
-        child: Text(message.text, style: theme.textTheme.muted, textAlign: TextAlign.center),
+        child: SizedBox(
+          width: double.infinity,
+          child: Align(
+            alignment: Alignment.center,
+            child: Text(
+              message.text,
+              style: theme.textTheme.muted.copyWith(color: theme.colorScheme.mutedForeground),
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
       );
     }
 
     final localParticipantName = widget.room.localParticipant?.getAttribute('name');
     final isAgentMessage = message.role == 'agent';
     final rawAuthorName = message.authorName;
+    final authorName = rawAuthorName == null || rawAuthorName.trim().isEmpty ? null : rawAuthorName;
     final mine =
         !isAgentMessage &&
         (rawAuthorName == localParticipantName || ((rawAuthorName == null || rawAuthorName.trim().isEmpty) && message.role == 'user'));
-    final authorName = rawAuthorName ?? (isAgentMessage ? _displayAgentName(widget.agentName ?? 'agent') : '');
     final imageAttachmentId = message.id;
     final imageInitialIndex = feedImages.indexWhere((entry) => entry.attachmentElementId == imageAttachmentId);
 
@@ -1292,8 +2422,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       mine: mine,
       isAgentMessage: isAgentMessage,
       text: message.text,
-      authorName: authorName,
+      authorName: authorName ?? '',
       createdAt: message.createdAt,
+      shouldShowHeader: shouldShowParticipantHeader,
       attachmentWidgets: [
         for (final attachment in message.attachments)
           GestureDetector(
@@ -1319,6 +2450,23 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     );
   }
 
+  String? _datasetMessageParticipantKey(_DatasetThreadMessage message) {
+    if (message.kind == 'compaction') {
+      return null;
+    }
+    final authorName = message.authorName?.trim();
+    if (authorName != null && authorName.isNotEmpty) {
+      return '${message.role}:$authorName';
+    }
+    if (message.role == 'agent') {
+      final agentName = widget.agentName?.trim();
+      if (agentName != null && agentName.isNotEmpty) {
+        return '${message.role}:$agentName';
+      }
+    }
+    return message.role;
+  }
+
   List<Widget> _buildMessageWidgets(
     BuildContext context,
     List<_DatasetThreadMessage> messages,
@@ -1326,19 +2474,50 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     required List<ChatThreadFeedImage> feedImages,
   }) {
     final messageWidgets = <Widget>[];
-    for (final message in messages.indexed) {
+    final feedItems = _buildFeedItems(messages);
+    for (final item in feedItems.indexed) {
       if (messageWidgets.isNotEmpty) {
-        messageWidgets.insert(0, const SizedBox(height: ChatThreadMessageView.chatMessageStackSpacing));
+        messageWidgets.insert(0, SizedBox(height: _datasetThreadFeedItemSpacing(feedItems[item.$1 - 1], item.$2)));
       }
-      messageWidgets.insert(
-        0,
-        Container(
-          key: ValueKey(message.$2.id),
-          child: _buildMessage(context, message.$2, feedImages: feedImages),
-        ),
-      );
+      final feedItem = item.$2;
+      switch (feedItem) {
+        case _DatasetThreadMessageFeedItem():
+          messageWidgets.insert(
+            0,
+            Container(
+              key: ValueKey(feedItem.message.id),
+              child: _buildMessage(
+                context,
+                feedItem.message,
+                feedImages: feedImages,
+                shouldShowParticipantHeader: _shouldShowParticipantHeaderForFeedItem(feedItems, item.$1),
+              ),
+            ),
+          );
+        case _DatasetThreadDetailGroupFeedItem():
+          messageWidgets.insert(
+            0,
+            _DatasetDetailLine(
+              key: ValueKey(feedItem.id),
+              text: feedItem.collapsedText,
+              authorName: feedItem.authorName,
+              createdAt: feedItem.createdAt,
+              onTap: () {
+                setState(() {
+                  _expandedDetailGroupIds.add(feedItem.id);
+                });
+              },
+            ),
+          );
+      }
     }
-    for (final pending in pendingMessages) {
+    final pendingFeedMessages = pendingMessages.where((pending) {
+      if (pending.messageType == _agentTurnSteerType || pending.matchByContentOnly) {
+        return false;
+      }
+      return pending.awaitingApplication || !messages.any((message) => message.id == pending.messageId);
+    });
+    for (final pending in pendingFeedMessages) {
       if (messageWidgets.isNotEmpty) {
         messageWidgets.insert(0, const SizedBox(height: ChatThreadMessageView.chatMessageStackSpacing));
       }
@@ -1347,17 +2526,517 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return messageWidgets;
   }
 
-  Widget _buildThreadViewport(BuildContext context, List<_DatasetThreadMessage> messages, List<PendingAgentMessage> pendingMessages) {
-    final statusText = _status.text?.trim();
-    final showStatus = statusText != null && statusText.isNotEmpty;
+  List<_DatasetThreadFeedItem> _buildFeedItems(List<_DatasetThreadMessage> messages) {
+    final items = <_DatasetThreadFeedItem>[];
+    var index = 0;
+    while (index < messages.length) {
+      final segmentEnd = _nextUserMessageIndex(messages, index + 1) ?? messages.length;
+      final detailIndexes = <int>{};
+      _addDatasetThreadDetailIndexesForSegment(messages, index, segmentEnd, detailIndexes);
+      final detailMessages = detailIndexes.toList(growable: false)..sort();
+      final groupedMessages = detailMessages.map((detailIndex) => messages[detailIndex]).toList(growable: false);
+      var insertedDetailGroup = false;
+      for (var segmentIndex = index; segmentIndex < segmentEnd; segmentIndex += 1) {
+        if (!detailIndexes.contains(segmentIndex)) {
+          items.add(_DatasetThreadMessageFeedItem(messages[segmentIndex]));
+          continue;
+        }
+        if (insertedDetailGroup || groupedMessages.isEmpty) {
+          continue;
+        }
+        final group = _detailGroupForMessages(
+          groupedMessages,
+          nextMessage: _nextNonDetailMessage(messages, detailIndexes, segmentIndex + 1, segmentEnd),
+        );
+        if (_expandedDetailGroupIds.contains(group.id)) {
+          items.addAll(group.messages.map(_DatasetThreadMessageFeedItem.new));
+        } else {
+          items.add(group);
+        }
+        insertedDetailGroup = true;
+      }
+      index = segmentEnd;
+    }
+    return items;
+  }
+
+  _DatasetThreadMessage? _nextNonDetailMessage(List<_DatasetThreadMessage> messages, Set<int> detailIndexes, int start, int end) {
+    for (var index = start; index < end; index += 1) {
+      if (!detailIndexes.contains(index)) {
+        return messages[index];
+      }
+    }
+    return null;
+  }
+
+  int? _nextUserMessageIndex(List<_DatasetThreadMessage> messages, int start) {
+    for (var index = start; index < messages.length; index += 1) {
+      final message = messages[index];
+      if (message.kind == 'message' && message.role == 'user') {
+        return index;
+      }
+    }
+    return null;
+  }
+
+  void _addDatasetThreadDetailIndexesForSegment(List<_DatasetThreadMessage> messages, int start, int end, Set<int> detailIndexes) {
+    final finalAgentMessageIndex = _finalAgentMessageIndexForSegment(messages, start, end);
+    for (var index = start; index < end; index += 1) {
+      final message = messages[index];
+      if (_datasetThreadMessageIsIntrinsicDetail(message)) {
+        detailIndexes.add(index);
+        continue;
+      }
+      if (index != finalAgentMessageIndex && _datasetThreadMessageCanCollapseAsCommentary(message)) {
+        detailIndexes.add(index);
+      }
+    }
+  }
+
+  int _finalAgentMessageIndexForSegment(List<_DatasetThreadMessage> messages, int start, int end) {
+    var explicitFinalIndex = -1;
+    for (var index = start; index < end; index += 1) {
+      final message = messages[index];
+      if (_datasetThreadMessageCanRenderAsFinalAnswer(message) && message.phase == 'final_answer') {
+        explicitFinalIndex = index;
+      }
+    }
+    if (explicitFinalIndex != -1) {
+      return explicitFinalIndex;
+    }
+
+    var inferredFinalIndex = -1;
+    for (var index = start; index < end; index += 1) {
+      final message = messages[index];
+      if (_datasetThreadMessageCanRenderAsFinalAnswer(message)) {
+        inferredFinalIndex = index;
+      }
+    }
+    return inferredFinalIndex;
+  }
+
+  _DatasetThreadDetailGroupFeedItem _detailGroupForMessages(List<_DatasetThreadMessage> messages, {_DatasetThreadMessage? nextMessage}) {
+    final first = messages.first;
+    final collapsedMessage = _detailGroupCollapsedMessage(messages);
+    final id = ['details', first.turnId ?? '', first.id, first.createdAt.microsecondsSinceEpoch].join(':');
+    return _DatasetThreadDetailGroupFeedItem(
+      id: id,
+      messages: List<_DatasetThreadMessage>.unmodifiable(messages),
+      collapsedText: _detailGroupCollapsedText(messages, nextMessage: nextMessage),
+      authorName: _detailGroupAuthorName(collapsedMessage ?? first),
+      createdAt: collapsedMessage?.createdAt ?? first.createdAt,
+    );
+  }
+
+  String _detailGroupCollapsedText(List<_DatasetThreadMessage> messages, {_DatasetThreadMessage? nextMessage}) {
+    final first = messages.first;
+    if (_detailGroupHasFinalResponse(messages, nextMessage: nextMessage)) {
+      final finalMessage = nextMessage!;
+      final end = _status.turnId != null && first.turnId == _status.turnId ? DateTime.now() : finalMessage.createdAt;
+      return 'Worked for ${_formatDetailGroupDuration(end.difference(first.createdAt))}';
+    }
+    return _firstNonEmptyLine(_detailGroupCollapsedMessage(messages)?.text ?? '') ?? 'Working';
+  }
+
+  _DatasetThreadMessage? _detailGroupCollapsedMessage(List<_DatasetThreadMessage> messages) {
+    for (final message in messages.reversed) {
+      if (_datasetThreadMessageCanCollapseAsCommentary(message) && message.text.trim().isNotEmpty) {
+        return message;
+      }
+    }
+    for (final message in messages.reversed) {
+      if (message.kind == 'reasoning' && message.text.trim().isNotEmpty) {
+        return message;
+      }
+    }
+    return null;
+  }
+
+  String _detailGroupAuthorName(_DatasetThreadMessage message) {
+    final authorName = message.authorName?.trim();
+    if (authorName != null && authorName.isNotEmpty) {
+      return authorName;
+    }
+    if (message.role == 'agent') {
+      final agentName = widget.agentName?.trim();
+      if (agentName != null && agentName.isNotEmpty) {
+        return agentName;
+      }
+    }
+    return '';
+  }
+
+  bool _detailGroupHasFinalResponse(List<_DatasetThreadMessage> messages, {_DatasetThreadMessage? nextMessage}) {
+    return _datasetThreadMessageIsFinalAgentMessage(nextMessage) && _messagesShareTurn(messages.first, nextMessage!);
+  }
+
+  bool _datasetThreadMessageIsIntrinsicDetail(_DatasetThreadMessage message) {
+    if (message.kind == 'tool_call' || message.kind == 'reasoning') {
+      return true;
+    }
+    return _datasetThreadMessageCanCollapseAsCommentary(message) && message.phase == 'commentary';
+  }
+
+  bool _datasetThreadMessageCanCollapseAsCommentary(_DatasetThreadMessage message) {
+    if (message.phase == 'final_answer') {
+      return false;
+    }
+    return message.kind == 'message' && message.role == 'agent' && message.attachments.isEmpty && message.image == null;
+  }
+
+  bool _datasetThreadMessageCanRenderAsFinalAnswer(_DatasetThreadMessage message) {
+    if (message.kind != 'message' || message.role != 'agent' || message.phase == 'commentary') {
+      return false;
+    }
+    return message.text.trim().isNotEmpty || message.attachments.isNotEmpty || message.image != null;
+  }
+
+  bool _datasetThreadMessageIsFinalAgentMessage(_DatasetThreadMessage? message) {
+    return message != null && _datasetThreadMessageCanRenderAsFinalAnswer(message);
+  }
+
+  bool _messagesShareTurn(_DatasetThreadMessage left, _DatasetThreadMessage right) {
+    if (left.turnId == null || left.turnId!.trim().isEmpty || right.turnId == null || right.turnId!.trim().isEmpty) {
+      return true;
+    }
+    return left.turnId == right.turnId;
+  }
+
+  String? _firstNonEmptyLine(String text) {
+    for (final line in text.split('\n')) {
+      final trimmed = line.trim();
+      if (trimmed.isNotEmpty) {
+        return trimmed;
+      }
+    }
+    return null;
+  }
+
+  String _formatDetailGroupDuration(Duration duration) {
+    final seconds = duration.inSeconds < 0 ? 0 : duration.inSeconds;
+    if (seconds < 60) {
+      return '${seconds}s';
+    }
+    final minutes = seconds ~/ 60;
+    final remainingSeconds = seconds % 60;
+    if (minutes < 60) {
+      return remainingSeconds == 0 ? '${minutes}m' : '${minutes}m ${remainingSeconds}s';
+    }
+    final hours = minutes ~/ 60;
+    final remainingMinutes = minutes % 60;
+    return remainingMinutes == 0 ? '${hours}h' : '${hours}h ${remainingMinutes}m';
+  }
+
+  bool _shouldShowParticipantHeaderForFeedItem(List<_DatasetThreadFeedItem> items, int index) {
+    final item = items[index];
+    if (item is! _DatasetThreadMessageFeedItem) {
+      return false;
+    }
+    final message = item.message;
+    if (message.kind != 'message') {
+      return false;
+    }
+    final authorName = message.authorName?.trim();
+    if (message.role == 'agent' && (authorName == null || authorName.isEmpty)) {
+      return false;
+    }
+    if (index == 0) {
+      return true;
+    }
+    for (final previous in items.take(index).toList().reversed) {
+      if (previous is! _DatasetThreadMessageFeedItem) {
+        return true;
+      }
+      final previousKey = _datasetMessageParticipantKey(previous.message);
+      if (previousKey == null) {
+        continue;
+      }
+      return previousKey != _datasetMessageParticipantKey(message);
+    }
+    return true;
+  }
+
+  double _datasetThreadMessageSpacing(_DatasetThreadMessage previous, _DatasetThreadMessage next) {
+    if (previous.kind == 'tool_call' || next.kind == 'tool_call') {
+      return 10;
+    }
+    return ChatThreadMessageView.chatMessageStackSpacing;
+  }
+
+  double _datasetThreadFeedItemSpacing(_DatasetThreadFeedItem previous, _DatasetThreadFeedItem next) {
+    final previousMessage = previous is _DatasetThreadMessageFeedItem ? previous.message : null;
+    final nextMessage = next is _DatasetThreadMessageFeedItem ? next.message : null;
+    if (previousMessage == null || nextMessage == null) {
+      return 10;
+    }
+    return _datasetThreadMessageSpacing(previousMessage, nextMessage);
+  }
+
+  Widget _buildToolCallSummaryText(
+    BuildContext context,
+    ToolCallEntryDisplay display, {
+    required bool canExpand,
+    required VoidCallback onTapDetails,
+  }) {
+    final theme = ShadTheme.of(context);
+    final baseStyle = theme.textTheme.muted.copyWith(color: theme.colorScheme.mutedForeground);
+    final highlightStyle = baseStyle.copyWith(color: theme.colorScheme.foreground, fontWeight: FontWeight.w700);
+    final detailLines = display.detailLines;
+    final headlineRest = display.headline.rest;
+    final lineCountStyle = baseStyle.copyWith(fontWeight: FontWeight.w700);
+    final details = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final entry in detailLines.indexed)
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 18,
+                child: _buildToolCallDetailGutter(display, entry.$1, baseStyle, canExpand: canExpand, onTapDetails: onTapDetails),
+              ),
+              Expanded(
+                child: _buildToolCallDetailText(
+                  context,
+                  entry.$2,
+                  style: baseStyle,
+                  languageOrFilename: display.headline.detailLanguageOrFilename,
+                ),
+              ),
+            ],
+          ),
+      ],
+    );
+    final header = SelectionArea(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: SelectableText.rich(
+              TextSpan(
+                children: [
+                  TextSpan(text: display.headline.action, style: highlightStyle),
+                  if (headlineRest.trim().isNotEmpty) TextSpan(text: ' $headlineRest'),
+                ],
+              ),
+              style: baseStyle,
+              textAlign: TextAlign.left,
+            ),
+          ),
+          if (display.headline.linesAdded != null || display.headline.linesRemoved != null) const SizedBox(width: 8),
+          if (display.headline.linesAdded != null)
+            StatusSignedCounter(value: display.headline.linesAdded!, prefix: '+', style: lineCountStyle, color: Colors.green.shade500),
+          if (display.headline.linesAdded != null && display.headline.linesRemoved != null) const SizedBox(width: 6),
+          if (display.headline.linesRemoved != null)
+            StatusSignedCounter(value: display.headline.linesRemoved!, prefix: '-', style: lineCountStyle, color: Colors.red.shade500),
+        ],
+      ),
+    );
+    final headerWidget = canExpand
+        ? MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: onTapDetails, child: header),
+          )
+        : header;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [headerWidget, if (detailLines.isNotEmpty) details],
+    );
+  }
+
+  Widget? _buildToolCallDetailGutter(
+    ToolCallEntryDisplay display,
+    int index,
+    TextStyle style, {
+    required bool canExpand,
+    required VoidCallback onTapDetails,
+  }) {
+    if (display.detailsTruncated && index == 0) {
+      final marker = Text('…', style: style);
+      if (!canExpand) {
+        return marker;
+      }
+      return MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: SelectionContainer.disabled(
+          child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: onTapDetails, child: marker),
+        ),
+      );
+    }
+    if (index == 0) {
+      return Text('└', style: style);
+    }
+    return null;
+  }
+
+  Widget _buildToolCallDetailText(BuildContext context, String text, {required TextStyle style, required String? languageOrFilename}) {
+    if (languageOrFilename == null) {
+      return SelectableText(text, style: style, textAlign: TextAlign.left);
+    }
+    final codeStyle = GoogleFonts.sourceCodePro(textStyle: style);
+    return SelectableText.rich(
+      highlightCodeSpanWithReHighlight(context: context, code: text, languageOrFilename: languageOrFilename, textStyle: codeStyle),
+      textAlign: TextAlign.left,
+    );
+  }
+
+  Widget _buildDatasetDiffPreviewBlock(BuildContext context, {required _DatasetDiffPreviewBlock block}) {
+    final normalizedCode = block.code.replaceAll('\r\n', '\n').trimRight();
+    if (normalizedCode.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final theme = ShadTheme.of(context);
+    final codeTextStyle = GoogleFonts.sourceCodePro(fontSize: 12, color: const Color(0xFFE5E7EB), height: 1.3);
+    final headerTextStyle = GoogleFonts.sourceCodePro(fontSize: 11, color: theme.colorScheme.mutedForeground);
+    final headerCounterStyle = headerTextStyle.copyWith(fontWeight: FontWeight.w700);
+    final lines = normalizedCode.split('\n');
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFF050505),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: theme.colorScheme.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: _datasetDiffPreviewHorizontalPadding, vertical: 6),
+            decoration: const BoxDecoration(
+              color: Color(0xFF111111),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
+            ),
+            child: SelectionArea(
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(block.header, style: headerTextStyle, overflow: TextOverflow.ellipsis),
+                  ),
+                  if (block.linesAdded != null || block.linesRemoved != null) const SizedBox(width: 8),
+                  if (block.linesAdded != null)
+                    StatusSignedCounter(value: block.linesAdded!, prefix: '+', style: headerCounterStyle, color: Colors.green.shade500),
+                  if (block.linesAdded != null && block.linesRemoved != null) const SizedBox(width: 6),
+                  if (block.linesRemoved != null)
+                    StatusSignedCounter(value: block.linesRemoved!, prefix: '-', style: headerCounterStyle, color: Colors.red.shade500),
+                ],
+              ),
+            ),
+          ),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: _datasetDiffPreviewHorizontalPadding, vertical: 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (final line in lines.indexed)
+                  Padding(
+                    padding: EdgeInsets.only(bottom: line.$1 < lines.length - 1 ? 2 : 0),
+                    child: Container(
+                      width: double.infinity,
+                      decoration: BoxDecoration(color: diffLineBackgroundColor(context, line.$2), borderRadius: BorderRadius.circular(4)),
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                      child: SelectableText.rich(
+                        highlightCodeSpanWithReHighlight(
+                          context: context,
+                          code: line.$2,
+                          languageOrFilename: 'diff',
+                          textStyle: codeTextStyle,
+                          theme: monokaiSublimeTheme,
+                          fallbackLanguageId: 'diff',
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  ToolCallEntryDisplay _toolCallEntryFromText(String text) {
+    final lines = text.split('\n');
+    return ToolCallEntryDisplay(
+      headline: ToolCallHeadline(action: lines.first),
+      detailLines: lines.skip(1).toList(growable: false),
+    );
+  }
+
+  Widget? _buildQueuedPendingMessages(
+    BuildContext context,
+    List<_DatasetThreadMessage> messages,
+    List<PendingAgentMessage> pendingMessages,
+  ) {
+    final queuedPendingMessages = pendingMessages
+        .where(
+          (pending) =>
+              (pending.messageType == _agentTurnStartType || pending.messageType == _agentTurnSteerType) &&
+              !_pendingDatasetMessageIsOptimisticallyRendered(pending: pending, messages: messages),
+        )
+        .toList(growable: false);
+    if (queuedPendingMessages.isEmpty) {
+      return null;
+    }
+    final textStyle = TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(width: 10),
+          const SizedBox(width: 24, height: 24),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Pending messages:', style: textStyle),
+                const SizedBox(height: 4),
+                for (final pending in queuedPendingMessages)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(
+                      [
+                        if (pending.senderName != null) '${_displayAgentName(pending.senderName!)}:',
+                        if (pending.text.trim().isNotEmpty) pending.text.trim(),
+                        if (pending.attachments.isNotEmpty)
+                          '${pending.attachments.length} attachment${pending.attachments.length == 1 ? "" : "s"}',
+                      ].join(' '),
+                      style: textStyle,
+                    ),
+                  ),
+                if (_canInterruptActiveTurn())
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text('Messages will be processed shortly. Press Esc to interrupt and send now.', style: textStyle),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildThreadViewport(
+    BuildContext context,
+    List<_DatasetThreadMessage> messages,
+    List<PendingAgentMessage> pendingMessages, {
+    bool loading = false,
+  }) {
+    final showStatus = shouldShowChatThreadStatus(_status);
     final feedImages = _collectThreadImages(messages);
     final threadView = ChatThreadViewportBody(
       scrollController: _controller.threadScrollController,
       bottomAlign: true,
-      centerContent: ChatThreadEmptyStateContent(
-        title: widget.emptyStateTitle ?? 'Chat to get started',
-        description: widget.emptyStateDescription,
-      ),
+      centerContent: loading ? const CircularProgressIndicator() : null,
       bottomSpacer: showStatus ? 20 : 0,
       overlays: [
         if (showStatus)
@@ -1369,17 +3048,20 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
               builder: (context, constraints) => Padding(
                 padding: EdgeInsets.symmetric(horizontal: chatThreadStatusHorizontalPadding(constraints.maxWidth)),
                 child: ChatThreadProcessingStatusRow(
-                  text: statusText,
+                  text: _status.text!,
                   startedAt: _status.startedAt,
-                  onCancel: _canInterruptActiveTurn(pendingMessages) ? _cancelTurn : null,
+                  totalBytes: _status.totalBytes,
+                  linesAdded: _status.linesAdded,
+                  linesRemoved: _status.linesRemoved,
+                  onCancel: _canInterruptActiveTurn() ? _cancelTurn : null,
                   showCancelButton: _status.mode != null,
-                  cancelEnabled: true,
+                  cancelEnabled: _canInterruptActiveTurn(),
                 ),
               ),
             ),
           ),
       ],
-      children: _buildMessageWidgets(context, messages, pendingMessages, feedImages: feedImages),
+      children: loading ? const <Widget>[] : _buildMessageWidgets(context, messages, pendingMessages, feedImages: feedImages),
     );
 
     return OverlayPortal(
@@ -1409,15 +3091,12 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         child: Text(error.toString(), style: ShadTheme.of(context).textTheme.muted, textAlign: TextAlign.center),
       );
     }
-    if (!_ready && !hasWireBackedContent) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
     return ListenableBuilder(
       listenable: _controller,
       builder: (context, _) {
-        final messages = _messages();
-        final pendingMessages = _combinedPendingMessages(messages);
+        final loading = !_ready;
+        final messages = loading ? const <_DatasetThreadMessage>[] : _messages();
+        final pendingMessages = loading ? const <PendingAgentMessage>[] : _combinedPendingMessages(messages);
         final snapshot = _snapshot(messages, pendingMessages);
         return FileDropArea(
           onFileDrop: (name, dataStream, size) async {
@@ -1425,13 +3104,16 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
           },
           child: Column(
             children: [
-              Expanded(child: _buildThreadViewport(context, messages, pendingMessages)),
+              Expanded(child: _buildThreadViewport(context, messages, pendingMessages, loading: loading)),
               ChatThreadInputFrame(
                 hasFooter: widget.showUsageFooter,
-                child: _buildComposerWithUsageFooter(
-                  context,
-                  input: _buildInput(context, snapshot, pendingMessages),
-                  usage: snapshot.usage,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    ?_buildQueuedPendingMessages(context, messages, pendingMessages),
+                    _buildComposerWithUsageFooter(context, input: _buildInput(context, snapshot, pendingMessages), usage: snapshot.usage),
+                  ],
                 ),
               ),
             ],
@@ -1451,7 +3133,12 @@ class _DatasetThreadMessage {
     required this.attachments,
     required this.createdAt,
     this.image,
+    this.toolCallEntry,
+    this.expandedToolCallEntry,
+    this.diffPreviewBlocks = const <_DatasetDiffPreviewBlock>[],
     this.authorName,
+    this.phase,
+    this.turnId,
   });
 
   final String id;
@@ -1461,7 +3148,320 @@ class _DatasetThreadMessage {
   final List<String> attachments;
   final DateTime createdAt;
   final _DatasetThreadImage? image;
+  final ToolCallEntryDisplay? toolCallEntry;
+  final ToolCallEntryDisplay? expandedToolCallEntry;
+  final List<_DatasetDiffPreviewBlock> diffPreviewBlocks;
   final String? authorName;
+  final String? phase;
+  final String? turnId;
+}
+
+class _DatasetDiffPreviewBlock {
+  const _DatasetDiffPreviewBlock({required this.header, required this.code, this.linesAdded, this.linesRemoved});
+
+  final String header;
+  final String code;
+  final int? linesAdded;
+  final int? linesRemoved;
+}
+
+sealed class _DatasetThreadFeedItem {
+  const _DatasetThreadFeedItem();
+}
+
+class _DatasetThreadMessageFeedItem extends _DatasetThreadFeedItem {
+  const _DatasetThreadMessageFeedItem(this.message);
+
+  final _DatasetThreadMessage message;
+}
+
+class _DatasetThreadDetailGroupFeedItem extends _DatasetThreadFeedItem {
+  const _DatasetThreadDetailGroupFeedItem({
+    required this.id,
+    required this.messages,
+    required this.collapsedText,
+    required this.authorName,
+    required this.createdAt,
+  });
+
+  final String id;
+  final List<_DatasetThreadMessage> messages;
+  final String collapsedText;
+  final String authorName;
+  final DateTime createdAt;
+}
+
+class _DatasetDetailLine extends StatelessWidget {
+  const _DatasetDetailLine({super.key, required this.text, required this.authorName, required this.createdAt, required this.onTap});
+
+  final String text;
+  final String authorName;
+  final DateTime createdAt;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: ChatThreadMessageView(
+          mine: false,
+          isAgentMessage: true,
+          text: text,
+          authorName: authorName,
+          createdAt: createdAt,
+          bubbleColor: Colors.transparent,
+          textColor: theme.colorScheme.mutedForeground,
+          selectable: false,
+          showBubbleActions: false,
+          onTap: onTap,
+          header: ChatThreadAuthorHeader(authorName: authorName, createdAt: createdAt, text: text),
+        ),
+      ),
+    );
+  }
+}
+
+class _DatasetToolCallState {
+  _DatasetToolCallState({
+    required this.itemId,
+    required this.toolkit,
+    required this.tool,
+    required this.arguments,
+    required this.logs,
+    required this.argumentDeltaBytes,
+    required this.argumentDeltaText,
+    required this.authorName,
+    required this.createdAt,
+  });
+
+  factory _DatasetToolCallState.fromPayload({required Map<String, Object?> row, required Map<String, Object?> payload}) {
+    final tool = payload['tool']?.toString() ?? payload['tool_name']?.toString() ?? payload['name']?.toString() ?? 'tool';
+    return _DatasetToolCallState(
+      itemId: row['item_id']?.toString() ?? _payloadItemId(Map<String, dynamic>.from(payload)),
+      toolkit: payload['toolkit']?.toString() ?? payload['toolkit_name']?.toString() ?? '',
+      tool: tool.trim().isEmpty ? 'tool' : tool,
+      arguments: _mapValue(payload['arguments']),
+      logs: <String>[],
+      argumentDeltaBytes: _intValue(payload['argument_delta_bytes']),
+      argumentDeltaText: payload['argument_delta_text']?.toString() ?? '',
+      authorName: payload['sender_name']?.toString(),
+      createdAt: _rowTimestamp(row),
+    );
+  }
+
+  final String itemId;
+  String toolkit;
+  String tool;
+  Map<String, Object?>? arguments;
+  final List<String> logs;
+  int argumentDeltaBytes;
+  String argumentDeltaText;
+  String? authorName;
+  final DateTime createdAt;
+
+  void appendArgumentDelta(String delta) {
+    if (delta.isEmpty) {
+      return;
+    }
+    argumentDeltaText = '$argumentDeltaText$delta';
+    arguments = _toolArgumentsFromDeltaText(tool: tool, current: arguments, text: argumentDeltaText) ?? arguments;
+  }
+}
+
+class _DatasetTextContentState {
+  _DatasetTextContentState({
+    required this.itemId,
+    required this.kind,
+    required this.role,
+    required this.createdAt,
+    required this.latestRow,
+    this.text = '',
+    this.authorName,
+    this.phase,
+    this.turnId,
+  });
+
+  factory _DatasetTextContentState.fromPayload({
+    required Map<String, Object?> row,
+    required Map<String, Object?> payload,
+    required String kind,
+    required String role,
+  }) {
+    final itemId = _datasetThreadContentItemId(row: row, payload: payload, type: payload['type']?.toString());
+    return _DatasetTextContentState(
+      itemId: itemId,
+      kind: kind,
+      role: role,
+      text: payload['text']?.toString() ?? '',
+      authorName: payload['sender_name']?.toString(),
+      phase: _agentMessagePhase(payload),
+      turnId: row['turn_id']?.toString() ?? payload['turn_id']?.toString(),
+      createdAt: _rowTimestamp(row),
+      latestRow: row,
+    );
+  }
+
+  final String itemId;
+  final String kind;
+  final String role;
+  final DateTime createdAt;
+  String text;
+  String? authorName;
+  String? phase;
+  String? turnId;
+  Map<String, Object?> latestRow;
+
+  void appendDelta({required Map<String, Object?> row, required Map<String, Object?> payload}) {
+    text = accumulateTextStreamDelta(text, payload['text']?.toString() ?? '');
+    authorName ??= payload['sender_name']?.toString();
+    phase ??= _agentMessagePhase(payload);
+    turnId ??= row['turn_id']?.toString() ?? payload['turn_id']?.toString();
+    latestRow = row;
+  }
+
+  _DatasetThreadMessage? complete({required Map<String, Object?> row, required Map<String, Object?> payload}) {
+    final endedText = payload['text']?.toString() ?? '';
+    if (endedText.isNotEmpty) {
+      text = accumulateTextStreamDelta(text, endedText);
+    }
+    authorName ??= payload['sender_name']?.toString();
+    phase ??= _agentMessagePhase(payload);
+    turnId ??= row['turn_id']?.toString() ?? payload['turn_id']?.toString();
+    latestRow = row;
+    return toMessage(row: row);
+  }
+
+  _DatasetThreadMessage? toMessage({required Map<String, Object?> row}) {
+    if (text.trim().isEmpty) {
+      return null;
+    }
+    return _DatasetThreadMessage(
+      id: itemId,
+      kind: kind,
+      role: role == 'assistant' ? 'agent' : role,
+      text: text,
+      authorName: authorName,
+      attachments: const [],
+      createdAt: createdAt,
+      phase: phase,
+      turnId: turnId,
+    );
+  }
+}
+
+Map<String, Object?> _mergeDatasetAndLiveRow({required Map<String, Object?> datasetRow, required Map<String, Object?> liveRow}) {
+  final datasetData = _rowData(datasetRow);
+  final liveData = _rowData(liveRow);
+  if (datasetData == null || liveData == null) {
+    return datasetRow;
+  }
+
+  final datasetKind = datasetData['kind']?.toString();
+  final liveKind = liveData['kind']?.toString();
+  final datasetType = datasetData['type']?.toString();
+  final liveType = liveData['type']?.toString();
+  final isToolCall =
+      datasetKind == 'tool_call' ||
+      liveKind == 'tool_call' ||
+      datasetType?.startsWith('meshagent.agent.tool_call.') == true ||
+      liveType?.startsWith('meshagent.agent.tool_call.') == true;
+  if (!isToolCall) {
+    return datasetRow;
+  }
+
+  final datasetArguments = _mapValue(datasetData['arguments']);
+  final liveArguments = _mapValue(liveData['arguments']);
+  final mergedData = <String, Object?>{...liveData, ...datasetData};
+  if ((datasetArguments == null || datasetArguments.isEmpty) && liveArguments != null && liveArguments.isNotEmpty) {
+    mergedData['arguments'] = liveArguments;
+  }
+
+  final liveArgumentDeltaText = liveData['argument_delta_text']?.toString() ?? '';
+  final datasetArgumentDeltaText = datasetData['argument_delta_text']?.toString() ?? '';
+  if (datasetArgumentDeltaText.isEmpty && liveArgumentDeltaText.isNotEmpty) {
+    mergedData['argument_delta_text'] = liveArgumentDeltaText;
+    final tool = mergedData['tool']?.toString() ?? mergedData['tool_name']?.toString() ?? mergedData['name']?.toString() ?? '';
+    mergedData['arguments'] =
+        _toolArgumentsFromDeltaText(tool: tool, current: _mapValue(mergedData['arguments']), text: liveArgumentDeltaText) ??
+        _mapValue(mergedData['arguments']);
+  }
+
+  final mergedArgumentDeltaBytes = math.max(_intValue(datasetData['argument_delta_bytes']), _intValue(liveData['argument_delta_bytes']));
+  if (mergedArgumentDeltaBytes > 0) {
+    mergedData['argument_delta_bytes'] = mergedArgumentDeltaBytes;
+  }
+
+  return <String, Object?>{...liveRow, ...datasetRow, 'data': mergedData};
+}
+
+_DatasetThreadMessage _mergeDuplicateDatasetThreadMessage(_DatasetThreadMessage existing, _DatasetThreadMessage next) {
+  if (existing.kind != next.kind || existing.role != next.role) {
+    return existing;
+  }
+  return _DatasetThreadMessage(
+    id: existing.id,
+    kind: existing.kind,
+    role: existing.role,
+    text: existing.text.trim().isEmpty ? next.text : existing.text,
+    attachments: existing.attachments.isEmpty ? next.attachments : existing.attachments,
+    createdAt: existing.createdAt.isBefore(next.createdAt) ? existing.createdAt : next.createdAt,
+    image: existing.image ?? next.image,
+    toolCallEntry: existing.toolCallEntry ?? next.toolCallEntry,
+    expandedToolCallEntry: existing.expandedToolCallEntry ?? next.expandedToolCallEntry,
+    diffPreviewBlocks: existing.diffPreviewBlocks.isNotEmpty ? existing.diffPreviewBlocks : next.diffPreviewBlocks,
+    authorName: existing.authorName ?? next.authorName,
+    phase: existing.phase ?? next.phase,
+    turnId: existing.turnId ?? next.turnId,
+  );
+}
+
+String _datasetThreadMessageDedupeKey({required Map<String, Object?> row, required _DatasetThreadMessage message}) {
+  if (message.role == 'user') {
+    return 'user:${message.id}';
+  }
+  return [message.role, message.kind, row['item_id']?.toString() ?? message.id, row['sequence']?.toString() ?? ''].join(':');
+}
+
+bool _datasetThreadMessageReconcilesLiveMessage({
+  required _DatasetThreadMessage datasetMessage,
+  required _DatasetThreadMessage liveMessage,
+}) {
+  if (datasetMessage.id != liveMessage.id || datasetMessage.kind != liveMessage.kind || datasetMessage.role != liveMessage.role) {
+    return false;
+  }
+
+  final liveImage = liveMessage.image;
+  final datasetImage = datasetMessage.image;
+  if (liveImage != null || datasetImage != null) {
+    if (liveImage == null || datasetImage == null) {
+      return false;
+    }
+    if (_isTerminalImageGenerationStatus(liveImage.status) && !_isTerminalImageGenerationStatus(datasetImage.status)) {
+      return false;
+    }
+    final liveKeys = _datasetThreadImageReferenceKeys(liveImage);
+    final datasetKeys = _datasetThreadImageReferenceKeys(datasetImage);
+    if (liveKeys.isNotEmpty) {
+      return datasetKeys.any(liveKeys.contains);
+    }
+    return _normalizedImageGenerationStatus(datasetImage.status) == _normalizedImageGenerationStatus(liveImage.status);
+  }
+
+  if (liveMessage.attachments.isNotEmpty) {
+    final datasetAttachments = datasetMessage.attachments.map(_comparableThreadAttachmentPath).toSet();
+    return liveMessage.attachments.map(_comparableThreadAttachmentPath).every(datasetAttachments.contains);
+  }
+
+  final liveText = liveMessage.text.trim();
+  if (liveText.isNotEmpty) {
+    return datasetMessage.text.trim() == liveText;
+  }
+
+  return true;
 }
 
 class _DatasetThreadImage {
@@ -1492,14 +3492,184 @@ int _compareDatasetThreadRows(Map<String, Object?> left, Map<String, Object?> ri
   return (left['item_id']?.toString() ?? '').compareTo(right['item_id']?.toString() ?? '');
 }
 
-_DatasetThreadMessage? _messageForRow(Map<String, Object?> row) {
+String? _firstNestedStringValue(Object? value, Set<String> keys) {
+  if (value is String) {
+    final normalized = value.trim();
+    return normalized.isEmpty ? null : value;
+  }
+  if (value is Map) {
+    for (final entry in value.entries) {
+      final key = entry.key?.toString().trim().toLowerCase();
+      if (key != null && keys.contains(key)) {
+        final nested = _firstNestedStringValue(entry.value, keys);
+        if (nested != null) {
+          return nested;
+        }
+      }
+    }
+    for (final entry in value.entries) {
+      final nested = _firstNestedStringValue(entry.value, keys);
+      if (nested != null) {
+        return nested;
+      }
+    }
+  }
+  if (value is List) {
+    for (final item in value) {
+      final nested = _firstNestedStringValue(item, keys);
+      if (nested != null) {
+        return nested;
+      }
+    }
+  }
+  return null;
+}
+
+Map<String, Object?>? _toolArgumentsFromDeltaText({required String tool, required Map<String, Object?>? current, required String text}) {
+  final trimmedText = text.trim();
+  if (trimmedText.isEmpty) {
+    return current;
+  }
+
+  if (tool.trim().toLowerCase() == 'apply_patch' ||
+      trimmedText.contains('*** Begin Patch') ||
+      trimmedText.contains('*** Update File:') ||
+      trimmedText.contains('*** Add File:') ||
+      trimmedText.contains('*** Delete File:')) {
+    return <String, Object?>{...?current, 'patch': trimmedText};
+  }
+
+  try {
+    final decoded = jsonDecode(trimmedText);
+    if (decoded is Map) {
+      return <String, Object?>{...?current, ...decoded.map((key, value) => MapEntry(key.toString(), value))};
+    }
+  } on FormatException {
+    return current;
+  }
+  return current;
+}
+
+_DatasetDiffPreviewBlock? _openAiPatchOperationPreviewBlock(Map<String, Object?> arguments) {
+  final operation = arguments['operation'];
+  if (operation is! Map) {
+    return null;
+  }
+  final path = _firstNestedStringValue(operation, const {'path'});
+  final diff = _firstNestedStringValue(operation, const {'diff'});
+  if (path == null || diff == null) {
+    return null;
+  }
+  final counts = _diffLineCounts(diff);
+  return _DatasetDiffPreviewBlock(header: path, code: diff, linesAdded: counts.$1, linesRemoved: counts.$2);
+}
+
+List<_DatasetDiffPreviewBlock> _applyPatchDiffPreviewBlocks(String patch) {
+  final normalized = patch.replaceAll('\r\n', '\n').trimRight();
+  if (!normalized.contains('*** Begin Patch') &&
+      !normalized.contains('*** Update File:') &&
+      !normalized.contains('*** Add File:') &&
+      !normalized.contains('*** Delete File:')) {
+    return const <_DatasetDiffPreviewBlock>[];
+  }
+
+  final previews = <_DatasetDiffPreviewBlock>[];
+  var currentPath = '';
+  var lines = <String>[];
+  var linesAdded = 0;
+  var linesRemoved = 0;
+  final filePattern = RegExp(r'^\*\*\* (?:Update|Add|Delete) File: (.+)$');
+
+  void flush() {
+    if (currentPath.isNotEmpty && lines.isNotEmpty) {
+      previews.add(
+        _DatasetDiffPreviewBlock(
+          header: currentPath,
+          code: lines.join('\n').trimRight(),
+          linesAdded: linesAdded,
+          linesRemoved: linesRemoved,
+        ),
+      );
+    }
+    lines = <String>[];
+    linesAdded = 0;
+    linesRemoved = 0;
+  }
+
+  for (final line in normalized.split('\n')) {
+    final fileMatch = filePattern.firstMatch(line);
+    if (fileMatch != null) {
+      flush();
+      currentPath = fileMatch.group(1)?.trim() ?? '';
+      continue;
+    }
+    if (currentPath.isEmpty || line.startsWith('*** ')) {
+      continue;
+    }
+    lines.add(line);
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      linesAdded++;
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      linesRemoved++;
+    }
+  }
+  flush();
+  return previews;
+}
+
+(int, int) _diffLineCounts(String diff) {
+  var linesAdded = 0;
+  var linesRemoved = 0;
+  for (final line in diff.replaceAll('\r\n', '\n').split('\n')) {
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      linesAdded++;
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      linesRemoved++;
+    }
+  }
+  return (linesAdded, linesRemoved);
+}
+
+List<_DatasetDiffPreviewBlock> _toolCallDiffPreviewBlocks({required String tool, required Map<String, Object?>? arguments}) {
+  if (arguments == null) {
+    return const <_DatasetDiffPreviewBlock>[];
+  }
+  final operationBlock = _openAiPatchOperationPreviewBlock(arguments);
+  if (operationBlock != null && tool.trim().toLowerCase() == 'apply_patch') {
+    return <_DatasetDiffPreviewBlock>[operationBlock];
+  }
+  final patch = _firstNestedStringValue(arguments, const {'patch', 'input', 'diff'});
+  if (patch == null) {
+    return const <_DatasetDiffPreviewBlock>[];
+  }
+  if (tool.trim().toLowerCase() != 'apply_patch' &&
+      !patch.contains('*** Begin Patch') &&
+      !patch.contains('*** Update File:') &&
+      !patch.contains('*** Add File:') &&
+      !patch.contains('*** Delete File:')) {
+    return const <_DatasetDiffPreviewBlock>[];
+  }
+  return _applyPatchDiffPreviewBlocks(patch);
+}
+
+_DatasetThreadMessage? _messageForRow(
+  Map<String, Object?> row, {
+  Map<String, Map<String, Object?>> turnInputPayloadsById = const <String, Map<String, Object?>>{},
+}) {
   final data = _rowData(row);
   if (data == null) {
     return null;
   }
+  final agentMessage = _messageForAgentPayload(row, data, turnInputPayloadsById: turnInputPayloadsById);
+  if (agentMessage != null) {
+    return agentMessage;
+  }
+
   final kind = data['kind']?.toString();
   final itemId = row['item_id']?.toString() ?? const Uuid().v4();
   final role = data['role']?.toString();
+  final turnId = row['turn_id']?.toString();
+  final phase = data['phase']?.toString();
   switch (kind) {
     case 'message':
       final text = data['text']?.toString() ?? '';
@@ -1515,6 +3685,8 @@ _DatasetThreadMessage? _messageForRow(Map<String, Object?> row) {
         authorName: data['sender_name']?.toString(),
         attachments: attachments,
         createdAt: _rowTimestamp(row),
+        phase: phase,
+        turnId: turnId,
       );
     case 'file':
       final urls = _stringList(data['urls']);
@@ -1529,6 +3701,8 @@ _DatasetThreadMessage? _messageForRow(Map<String, Object?> row) {
         authorName: data['sender_name']?.toString(),
         attachments: urls,
         createdAt: _rowTimestamp(row),
+        phase: phase,
+        turnId: turnId,
       );
     case 'image_generation':
       final message = _mapValue(data['message']);
@@ -1541,9 +3715,11 @@ _DatasetThreadMessage? _messageForRow(Map<String, Object?> row) {
         kind: 'message',
         role: 'agent',
         text: '',
-        authorName: _stringValue(image?['created_by']),
+        authorName: _stringValue(data['sender_name']) ?? _stringValue(image?['created_by']),
         attachments: const [],
         createdAt: _rowTimestamp(row),
+        phase: phase,
+        turnId: turnId,
         image: _DatasetThreadImage(
           uri: imageUri,
           imageId: imageId,
@@ -1552,8 +3728,7 @@ _DatasetThreadMessage? _messageForRow(Map<String, Object?> row) {
               _stringValue(data['status']) ??
               _stringValue(image?['status']) ??
               _imageGenerationStatusFromType(_stringValue(message?['type'])),
-          statusDetail:
-              _stringValue(data['status_detail']) ?? _stringValue(message?['status_detail']) ?? _stringValue(image?['status_detail']),
+          statusDetail: _stringValue(image?['status_detail']),
           width: dimensions.$1,
           height: dimensions.$2,
         ),
@@ -1567,20 +3742,55 @@ _DatasetThreadMessage? _messageForRow(Map<String, Object?> row) {
               kind: 'reasoning',
               role: 'agent',
               text: text,
+              authorName: data['sender_name']?.toString(),
               attachments: const [],
               createdAt: _rowTimestamp(row),
+              phase: phase,
+              turnId: turnId,
             );
     case 'tool_call':
       final toolkit = data['toolkit']?.toString() ?? '';
       final tool = data['tool']?.toString() ?? '';
-      final summary = [toolkit, tool].where((part) => part.trim().isNotEmpty).join('.');
+      final arguments = _mapValue(data['arguments']);
+      final logs = _stringList(data['logs']);
+      final errorMessage = data['error_message']?.toString();
+      final status = data['status']?.toString();
+      final argumentDeltaBytes = _intValue(data['argument_delta_bytes']);
+      final diffPreviewBlocks = _toolCallDiffPreviewBlocks(tool: tool, arguments: arguments);
+      final summary = formatToolCallEntry(
+        toolkit: toolkit,
+        tool: tool.trim().isEmpty ? 'tool' : tool,
+        arguments: arguments,
+        logs: logs,
+        errorMessage: errorMessage,
+        completed: !_toolCallStatusIsRunning(status),
+        pending: _toolCallStatusIsPending(status),
+        argumentDeltaBytes: argumentDeltaBytes,
+      );
+      final expandedSummary = formatToolCallEntry(
+        toolkit: toolkit,
+        tool: tool.trim().isEmpty ? 'tool' : tool,
+        arguments: arguments,
+        logs: logs,
+        errorMessage: errorMessage,
+        completed: !_toolCallStatusIsRunning(status),
+        pending: _toolCallStatusIsPending(status),
+        detailLineLimit: null,
+        argumentDeltaBytes: argumentDeltaBytes,
+      );
       return _DatasetThreadMessage(
         id: itemId,
         kind: 'tool_call',
         role: 'agent',
-        text: summary.isEmpty ? 'Tool call' : summary,
+        text: summary.text.trim().isEmpty ? 'Tool call' : summary.text,
+        toolCallEntry: summary,
+        expandedToolCallEntry: expandedSummary.text.trim().isEmpty ? null : expandedSummary,
+        diffPreviewBlocks: diffPreviewBlocks,
+        authorName: data['sender_name']?.toString(),
         attachments: const [],
         createdAt: _rowTimestamp(row),
+        phase: phase,
+        turnId: turnId,
       );
     case 'compaction':
       return _DatasetThreadMessage(
@@ -1588,11 +3798,546 @@ _DatasetThreadMessage? _messageForRow(Map<String, Object?> row) {
         kind: 'compaction',
         role: 'agent',
         text: 'Context compacted',
+        authorName: data['sender_name']?.toString(),
         attachments: const [],
         createdAt: _rowTimestamp(row),
+        phase: phase,
+        turnId: turnId,
       );
+    case 'error':
+      final text = data['text']?.toString() ?? data['error_message']?.toString() ?? '';
+      return text.trim().isEmpty
+          ? null
+          : _DatasetThreadMessage(
+              id: itemId,
+              kind: 'error',
+              role: 'agent',
+              text: text,
+              authorName: data['sender_name']?.toString(),
+              attachments: const [],
+              createdAt: _rowTimestamp(row),
+              phase: phase,
+              turnId: turnId,
+            );
   }
   return null;
+}
+
+class _DatasetThreadRealtimeAudioPlayer {
+  static const int _sampleRate = 24000;
+  static const int _channels = 1;
+  static const int _bytesPerSample = 2;
+  static const int _bytesPerFrame = _channels * _bytesPerSample;
+
+  final Map<String, Future<void>> _queues = <String, Future<void>>{};
+  final Set<String> _closed = <String>{};
+  final Set<String> _seenDeltaMessageIds = <String>{};
+  final RealtimeAudioOutput _output = createRealtimeAudioOutput();
+  String? _activeItemId;
+  bool _streamStarted = false;
+
+  Future<void> start(String itemId) async {
+    final normalizedItemId = itemId.trim();
+    if (normalizedItemId.isEmpty || _closed.contains(normalizedItemId)) {
+      return;
+    }
+    if (_activeItemId == normalizedItemId && _streamStarted) {
+      return;
+    }
+    try {
+      if (_activeItemId != null && _activeItemId != normalizedItemId) {
+        await stop(_activeItemId!);
+      }
+      await _output.start(sampleRate: _sampleRate, channels: _channels);
+      _activeItemId = normalizedItemId;
+      _streamStarted = true;
+    } catch (_) {}
+  }
+
+  Future<void> append({required String itemId, required String? messageId, required Uint8List? data, required String? mimeType}) async {
+    final normalizedItemId = itemId.trim();
+    if (data == null || data.isEmpty || normalizedItemId.isEmpty || _closed.contains(normalizedItemId)) {
+      return;
+    }
+    final normalizedMessageId = messageId?.trim();
+    if (normalizedMessageId != null && normalizedMessageId.isNotEmpty && !_seenDeltaMessageIds.add(normalizedMessageId)) {
+      return;
+    }
+    final queue = (_queues[normalizedItemId] ?? Future<void>.value()).then(
+      (_) => _appendNow(itemId: normalizedItemId, data: data, mimeType: mimeType),
+    );
+    _queues[normalizedItemId] = queue.catchError((_) {});
+    await queue;
+  }
+
+  Future<void> _appendNow({required String itemId, required Uint8List data, required String? mimeType}) async {
+    try {
+      if (_closed.contains(itemId)) {
+        return;
+      }
+      await start(itemId);
+      final pcm = _pcmAudioBytes(bytes: data, mimeType: mimeType);
+      if (pcm.isEmpty || pcm.length % _bytesPerFrame != 0) {
+        return;
+      }
+      if (_activeItemId != itemId) {
+        return;
+      }
+      await _output.append(pcm);
+    } catch (_) {}
+  }
+
+  Future<void> complete(String itemId) async {
+    final normalizedItemId = itemId.trim();
+    if (normalizedItemId.isEmpty) {
+      return;
+    }
+    final queue = (_queues[normalizedItemId] ?? Future<void>.value()).then((_) => _completeNow(normalizedItemId));
+    _queues[normalizedItemId] = queue.catchError((_) {});
+    await queue;
+  }
+
+  Future<void> _completeNow(String itemId) async {
+    _queues.remove(itemId);
+    if (_activeItemId == itemId) {
+      await _output.complete();
+      _activeItemId = null;
+      _streamStarted = false;
+    }
+  }
+
+  Future<void> stop(String itemId) async {
+    final normalizedItemId = itemId.trim();
+    if (normalizedItemId.isEmpty) {
+      return;
+    }
+    _queues.remove(normalizedItemId);
+    _closed.add(normalizedItemId);
+    if (_activeItemId != normalizedItemId) {
+      unawaited(Future<void>.delayed(const Duration(seconds: 30)).then((_) => _closed.remove(normalizedItemId)));
+      return;
+    }
+    try {
+      await _output.stop();
+    } catch (_) {}
+    _activeItemId = null;
+    _streamStarted = false;
+    unawaited(Future<void>.delayed(const Duration(seconds: 30)).then((_) => _closed.remove(normalizedItemId)));
+  }
+
+  Future<void> stopAll() async {
+    final activeItemId = _activeItemId;
+    if (activeItemId != null) {
+      await stop(activeItemId);
+    } else {
+      await _output.stop();
+    }
+    _queues.clear();
+    _seenDeltaMessageIds.clear();
+  }
+
+  Future<void> dispose() async {
+    await stopAll();
+    try {
+      await _output.dispose();
+    } catch (_) {}
+  }
+}
+
+Uint8List _pcmAudioBytes({required Uint8List bytes, required String? mimeType}) {
+  final normalizedMimeType = mimeType?.split(';').first.trim().toLowerCase();
+  if (normalizedMimeType == 'audio/wav' || normalizedMimeType == 'audio/wave' || normalizedMimeType == 'audio/x-wav') {
+    return _wavDataChunk(bytes) ?? bytes;
+  }
+  return bytes;
+}
+
+Uint8List? _wavDataChunk(Uint8List bytes) {
+  if (bytes.length < 44 || String.fromCharCodes(bytes.sublist(0, 4)) != 'RIFF' || String.fromCharCodes(bytes.sublist(8, 12)) != 'WAVE') {
+    return null;
+  }
+  final data = ByteData.sublistView(bytes);
+  var offset = 12;
+  while (offset + 8 <= bytes.length) {
+    final chunkId = String.fromCharCodes(bytes.sublist(offset, offset + 4));
+    final chunkSize = data.getUint32(offset + 4, Endian.little);
+    final chunkStart = offset + 8;
+    final chunkEnd = chunkStart + chunkSize;
+    if (chunkEnd > bytes.length) {
+      return null;
+    }
+    if (chunkId == 'data') {
+      return Uint8List.sublistView(bytes, chunkStart, chunkEnd);
+    }
+    offset = chunkEnd + (chunkSize.isOdd ? 1 : 0);
+  }
+  return null;
+}
+
+_DatasetThreadMessage? _messageForAgentPayload(
+  Map<String, Object?> row,
+  Map<String, Object?> payload, {
+  Map<String, Map<String, Object?>> turnInputPayloadsById = const <String, Map<String, Object?>>{},
+}) {
+  final type = payload['type']?.toString();
+  if (type == null || type.trim().isEmpty) {
+    return null;
+  }
+
+  final itemId = _datasetThreadContentItemId(row: row, payload: payload, type: type);
+  final createdAt = _rowTimestamp(row);
+  final turnId = row['turn_id']?.toString() ?? payload['turn_id']?.toString();
+  final phase = _agentMessagePhase(payload);
+  switch (type) {
+    case _agentTurnStartType:
+    case _agentTurnSteerType:
+      final content = payload['content'];
+      if (content is! List) {
+        return null;
+      }
+      final extracted = _agentInputContentParts(content);
+      if (extracted.text.trim().isEmpty && extracted.attachments.isEmpty) {
+        return null;
+      }
+      return _DatasetThreadMessage(
+        id: payload['message_id']?.toString() ?? itemId,
+        kind: 'message',
+        role: 'user',
+        text: extracted.text,
+        authorName: payload['sender_name']?.toString(),
+        attachments: extracted.attachments,
+        createdAt: createdAt,
+        turnId: turnId,
+      );
+    case _agentModelsRequestType:
+    case _agentModelsResponseType:
+    case _agentModelChangeType:
+    case _agentModelChangedType:
+      return null;
+    case _agentRealtimeAudioCommitType:
+      final text = payload['text']?.toString() ?? '';
+      if (text.trim().isEmpty) {
+        return null;
+      }
+      return _DatasetThreadMessage(
+        id: itemId,
+        kind: 'message',
+        role: 'user',
+        text: text,
+        authorName: payload['sender_name']?.toString(),
+        attachments: const [],
+        createdAt: createdAt,
+        turnId: turnId,
+      );
+    case _agentTurnStartedType:
+    case _agentTurnSteeredType:
+      final sourceMessageId = payload['source_message_id']?.toString().trim();
+      if (sourceMessageId == null || sourceMessageId.isEmpty) {
+        return null;
+      }
+      final inputPayload = turnInputPayloadsById[sourceMessageId] ?? payload;
+      final content = inputPayload['content'];
+      if (content is! List) {
+        return null;
+      }
+      final extracted = _agentInputContentParts(content);
+      if (extracted.text.trim().isEmpty && extracted.attachments.isEmpty) {
+        return null;
+      }
+      return _DatasetThreadMessage(
+        id: sourceMessageId,
+        kind: 'message',
+        role: 'user',
+        text: extracted.text,
+        authorName: inputPayload['sender_name']?.toString(),
+        attachments: extracted.attachments,
+        createdAt: createdAt,
+        turnId: turnId,
+      );
+    case _agentTurnStartAcceptedType:
+    case _agentTurnSteerAcceptedType:
+      return null;
+    case _agentTextContentDeltaType:
+    case _agentAudioTranscriptionDeltaType:
+    case _agentAudioTranscriptionCompletedType:
+      final text = payload['text']?.toString() ?? '';
+      final role = type == _agentAudioTranscriptionDeltaType || type == _agentAudioTranscriptionCompletedType
+          ? _textContentRoleFromPayload(payload)
+          : 'assistant';
+      return text.trim().isEmpty
+          ? null
+          : _DatasetThreadMessage(
+              id: itemId,
+              kind: 'message',
+              role: role == 'assistant' ? 'agent' : role,
+              text: text,
+              authorName: payload['sender_name']?.toString(),
+              attachments: const [],
+              createdAt: createdAt,
+              phase: phase,
+              turnId: turnId,
+            );
+    case _agentAudioGenerationStartedType:
+    case _agentAudioGenerationDeltaType:
+    case _agentAudioGenerationCompletedType:
+    case _agentAudioGenerationFailedType:
+    case _agentAudioTranscriptionStartedType:
+    case _agentAudioTranscriptionFailedType:
+      return null;
+    case _agentReasoningContentDeltaType:
+      final text = payload['text']?.toString() ?? '';
+      return text.trim().isEmpty
+          ? null
+          : _DatasetThreadMessage(
+              id: itemId,
+              kind: 'reasoning',
+              role: 'agent',
+              text: text,
+              authorName: payload['sender_name']?.toString(),
+              attachments: const [],
+              createdAt: createdAt,
+              turnId: turnId,
+            );
+    case _agentFileContentDeltaType:
+      final url = payload['url']?.toString();
+      return url == null || url.trim().isEmpty
+          ? null
+          : _DatasetThreadMessage(
+              id: itemId,
+              kind: 'message',
+              role: 'agent',
+              text: '',
+              authorName: payload['sender_name']?.toString(),
+              attachments: [url.trim()],
+              createdAt: createdAt,
+              turnId: turnId,
+            );
+    case _agentImageGenerationStartedType:
+    case _agentImageGenerationPartialType:
+    case _agentImageGenerationCompletedType:
+    case _agentImageGenerationFailedType:
+      final image = _firstGeneratedImage(payload);
+      final dimensions = _imageGenerationDimensions(data: const <String, Object?>{}, message: payload, image: image);
+      final imageUri = _stringValue(image?['uri']);
+      return _DatasetThreadMessage(
+        id: itemId,
+        kind: 'message',
+        role: 'agent',
+        text: '',
+        authorName: payload['sender_name']?.toString() ?? _stringValue(image?['created_by']),
+        attachments: const [],
+        createdAt: createdAt,
+        turnId: turnId,
+        image: _DatasetThreadImage(
+          uri: imageUri,
+          imageId: _imageIdFromDatasetUri(imageUri),
+          mimeType: _stringValue(image?['mime_type']),
+          status: _stringValue(image?['status']) ?? _imageGenerationStatusFromType(type),
+          statusDetail: _stringValue(image?['status_detail']),
+          width: dimensions.$1,
+          height: dimensions.$2,
+        ),
+      );
+    case _agentToolCallStartedType:
+    case _agentToolCallArgumentsDeltaType:
+    case _agentToolCallLogDeltaType:
+      return null;
+    case _agentToolCallEndedType:
+      return _messageForToolCallEndRow(row: row, payload: payload, state: null);
+    case _agentContextCompactedType:
+      return _DatasetThreadMessage(
+        id: itemId,
+        kind: 'compaction',
+        role: 'agent',
+        text: 'Context compacted',
+        authorName: payload['sender_name']?.toString(),
+        attachments: const [],
+        createdAt: createdAt,
+        turnId: turnId,
+      );
+    case _agentTurnEndedType:
+      final errorMessage = agentTurnEndedErrorMessage(payload);
+      return errorMessage == null
+          ? null
+          : _DatasetThreadMessage(
+              id: itemId,
+              kind: 'error',
+              role: 'agent',
+              text: errorMessage,
+              authorName: payload['sender_name']?.toString(),
+              attachments: const [],
+              createdAt: createdAt,
+              phase: phase,
+              turnId: turnId,
+            );
+  }
+  return null;
+}
+
+bool _isDatasetToolCallStartType(String? type) {
+  return type == _agentToolCallPendingType || type == _agentToolCallInProgressType || type == _agentToolCallStartedType;
+}
+
+bool _toolCallStatusIsRunning(String? status) {
+  final normalized = status?.trim().toLowerCase();
+  return normalized == null || normalized.isEmpty || normalized == 'pending' || normalized == 'in_progress' || normalized == 'running';
+}
+
+bool _toolCallStatusIsPending(String? status) {
+  return status?.trim().toLowerCase() == 'pending';
+}
+
+_DatasetThreadMessage _messageForToolCallEndRow({
+  required Map<String, Object?> row,
+  required Map<String, Object?>? payload,
+  required _DatasetToolCallState? state,
+}) {
+  final itemId =
+      row['item_id']?.toString() ??
+      state?.itemId ??
+      (payload == null ? const Uuid().v4() : _payloadItemId(Map<String, dynamic>.from(payload)));
+  final toolkit = state?.toolkit ?? payload?['toolkit']?.toString() ?? payload?['toolkit_name']?.toString() ?? '';
+  final tool = state?.tool ?? payload?['tool']?.toString() ?? payload?['tool_name']?.toString() ?? payload?['name']?.toString() ?? 'tool';
+  final arguments = state?.arguments ?? _mapValue(payload?['arguments']);
+  final logs = state?.logs ?? const <String>[];
+  final argumentDeltaBytes = state?.argumentDeltaBytes ?? _intValue(payload?['argument_delta_bytes']);
+  final errorMessage = _agentToolCallErrorMessage(payload?['error']);
+  final diffPreviewBlocks = _toolCallDiffPreviewBlocks(tool: tool, arguments: arguments);
+  final entry = formatToolCallEntry(
+    toolkit: toolkit,
+    tool: tool.trim().isEmpty ? 'tool' : tool,
+    arguments: arguments,
+    logs: logs,
+    errorMessage: errorMessage,
+    argumentDeltaBytes: argumentDeltaBytes,
+  );
+  final expandedEntry = formatToolCallEntry(
+    toolkit: toolkit,
+    tool: tool.trim().isEmpty ? 'tool' : tool,
+    arguments: arguments,
+    logs: logs,
+    errorMessage: errorMessage,
+    detailLineLimit: null,
+    argumentDeltaBytes: argumentDeltaBytes,
+  );
+  return _DatasetThreadMessage(
+    id: itemId,
+    kind: 'tool_call',
+    role: 'agent',
+    text: entry.text,
+    toolCallEntry: entry,
+    expandedToolCallEntry: expandedEntry.text.trim().isEmpty ? null : expandedEntry,
+    diffPreviewBlocks: diffPreviewBlocks,
+    authorName: payload?['sender_name']?.toString() ?? state?.authorName,
+    attachments: const [],
+    createdAt: _rowTimestamp(row),
+    turnId: row['turn_id']?.toString() ?? payload?['turn_id']?.toString(),
+  );
+}
+
+@visibleForTesting
+String? agentTurnEndedErrorMessage(Map<String, Object?> payload) {
+  if (payload['type'] != _agentTurnEndedType) {
+    return null;
+  }
+  final error = payload['error'];
+  if (_agentErrorIsCancellation(error)) {
+    return null;
+  }
+  return _agentErrorMessage(error);
+}
+
+String? _agentToolCallErrorMessage(Object? error) {
+  return _agentErrorMessage(error);
+}
+
+bool _agentErrorIsCancellation(Object? error) {
+  if (error == null) {
+    return false;
+  }
+  final values = <String>[];
+  if (error is String) {
+    values.add(error);
+  } else if (error is Map) {
+    for (final key in const ['code', 'message', 'detail', 'error']) {
+      final value = error[key];
+      if (value is String) {
+        values.add(value);
+      }
+    }
+  } else {
+    values.add(error.toString());
+  }
+  return values.any((value) {
+    final normalized = value.trim().toLowerCase();
+    return normalized.contains('cancel') || normalized.contains('interrupt') || normalized.contains('abort');
+  });
+}
+
+String? _agentErrorMessage(Object? error) {
+  if (error == null) {
+    return null;
+  }
+  if (error is String) {
+    final normalized = error.trim();
+    return normalized.isEmpty ? null : normalized;
+  }
+  if (error is Map) {
+    for (final key in const ['message', 'detail', 'error']) {
+      final value = error[key];
+      if (value is String && value.trim().isNotEmpty) {
+        return value.trim();
+      }
+    }
+    final encoded = jsonEncode(error);
+    return encoded.trim().isEmpty ? null : encoded;
+  }
+  final normalized = error.toString().trim();
+  return normalized.isEmpty ? null : normalized;
+}
+
+List<String> _agentToolCallLogLines(Object? lines) {
+  if (lines is! List) {
+    return const [];
+  }
+  final output = <String>[];
+  for (final line in lines) {
+    if (line is Map) {
+      final text = line['text'];
+      if (text is String && text.trim().isNotEmpty) {
+        output.add(text);
+      }
+      continue;
+    }
+    if (line is String && line.trim().isNotEmpty) {
+      output.add(line);
+    }
+  }
+  return output;
+}
+
+({String text, List<String> attachments}) _agentInputContentParts(List<Object?> content) {
+  final textParts = <String>[];
+  final attachments = <String>[];
+  for (final item in content) {
+    final contentItem = item is Map<String, dynamic> ? item : (item is Map ? Map<String, dynamic>.from(item) : null);
+    if (contentItem == null) {
+      continue;
+    }
+    final contentType = contentItem['type'];
+    if (contentType == 'text') {
+      final text = contentItem['text']?.toString();
+      if (text != null && text.isNotEmpty) {
+        textParts.add(text);
+      }
+    } else if (contentType == 'file') {
+      final url = contentItem['url']?.toString();
+      if (url != null && url.trim().isNotEmpty) {
+        attachments.add(url.trim());
+      }
+    }
+  }
+  return (text: textParts.join('\n'), attachments: attachments);
 }
 
 bool _datasetThreadMessageMatchesPendingAgentMessage(_DatasetThreadMessage message, PendingAgentMessage pending) {
@@ -1609,6 +4354,16 @@ bool _datasetThreadMessageMatchesPendingAgentMessage(_DatasetThreadMessage messa
   }
 
   return _datasetThreadMessageContentMatchesPendingAgentMessage(message, pending);
+}
+
+bool _pendingDatasetMessageIsOptimisticallyRendered({
+  required PendingAgentMessage pending,
+  required Iterable<_DatasetThreadMessage> messages,
+}) {
+  if (pending.messageType == _agentTurnSteerType || pending.matchByContentOnly) {
+    return false;
+  }
+  return pending.awaitingApplication || !messages.any((message) => message.id == pending.messageId);
 }
 
 bool _datasetThreadMessageContentMatchesPendingAgentMessage(_DatasetThreadMessage message, PendingAgentMessage pending) {
@@ -1663,6 +4418,30 @@ bool _isDatasetTableNotFoundError(Object error) {
 }
 
 String _payloadItemId(Map<String, dynamic> payload) {
+  final explicitItemId = _payloadExplicitItemId(payload);
+  if (explicitItemId != null) {
+    return explicitItemId;
+  }
+  return const Uuid().v4();
+}
+
+String _turnApplicationItemId(Map<String, dynamic> payload, String suffix) {
+  final explicitItemId = _payloadExplicitItemId(payload);
+  if (explicitItemId != null) {
+    return explicitItemId;
+  }
+  final sourceMessageId = payload['source_message_id'];
+  if (sourceMessageId is String && sourceMessageId.trim().isNotEmpty) {
+    return '${sourceMessageId.trim()}.$suffix';
+  }
+  final turnId = payload['turn_id'];
+  if (turnId is String && turnId.trim().isNotEmpty) {
+    return '${turnId.trim()}.$suffix';
+  }
+  return const Uuid().v4();
+}
+
+String? _payloadExplicitItemId(Map<String, dynamic> payload) {
   final itemId = payload['item_id'];
   if (itemId is String && itemId.trim().isNotEmpty) {
     return itemId.trim();
@@ -1671,7 +4450,36 @@ String _payloadItemId(Map<String, dynamic> payload) {
   if (messageId is String && messageId.trim().isNotEmpty) {
     return messageId.trim();
   }
-  return const Uuid().v4();
+  return null;
+}
+
+String _datasetThreadContentItemId({required Map<String, Object?> row, required Map<String, Object?>? payload, required String? type}) {
+  if (_isAgentStreamContentType(type) && payload != null) {
+    final payloadItemId = payload['item_id'];
+    if (payloadItemId is String && payloadItemId.trim().isNotEmpty) {
+      return payloadItemId.trim();
+    }
+  }
+  final rowItemId = row['item_id'];
+  if (rowItemId is String && rowItemId.trim().isNotEmpty) {
+    return rowItemId.trim();
+  }
+  if (payload != null) {
+    return _payloadItemId(Map<String, dynamic>.from(payload));
+  }
+  return '';
+}
+
+bool _isAgentStreamContentType(String? type) {
+  return type == _agentTextContentStartedType ||
+      type == _agentTextContentDeltaType ||
+      type == _agentTextContentEndedType ||
+      type == _agentAudioTranscriptionStartedType ||
+      type == _agentAudioTranscriptionDeltaType ||
+      type == _agentAudioTranscriptionCompletedType ||
+      type == _agentReasoningContentStartedType ||
+      type == _agentReasoningContentDeltaType ||
+      type == _agentReasoningContentEndedType;
 }
 
 String? _payloadTurnId(Map<String, dynamic> payload) {
@@ -1681,6 +4489,37 @@ String? _payloadTurnId(Map<String, dynamic> payload) {
   }
   final trimmed = turnId.trim();
   return trimmed.isEmpty ? null : trimmed;
+}
+
+String? _senderNameFromPayload(Map<String, dynamic> payload) {
+  final senderName = payload['sender_name'];
+  if (senderName is! String) {
+    return null;
+  }
+  final trimmed = senderName.trim();
+  return trimmed.isEmpty ? null : trimmed;
+}
+
+String? _agentMessagePhase(Map<String, dynamic> payload) {
+  final phase = payload['phase'];
+  if (phase is String) {
+    final normalized = phase.trim();
+    if (normalized == 'commentary' || normalized == 'final_answer') {
+      return normalized;
+    }
+  }
+  final type = payload['type']?.toString();
+  if ((type == _agentAudioTranscriptionStartedType ||
+          type == _agentAudioTranscriptionDeltaType ||
+          type == _agentAudioTranscriptionCompletedType) &&
+      _textContentRoleFromPayload(payload) != 'user') {
+    return 'final_answer';
+  }
+  return null;
+}
+
+String _textContentRoleFromPayload(Map<String, Object?>? payload) {
+  return payload?['role']?.toString() == 'user' ? 'user' : 'assistant';
 }
 
 DateTime? _timestampFromPayload(Map<String, dynamic> payload) {
@@ -1725,6 +4564,34 @@ Map<String, Object?>? _rowData(Map<String, Object?> row) {
   return _mapValue(raw);
 }
 
+String? _datasetRowKey(Map<String, Object?> row) {
+  final itemId = row['item_id']?.toString();
+  if (itemId == null || itemId.trim().isEmpty) {
+    return null;
+  }
+  final sequence = row['sequence'];
+  if (sequence != null) {
+    final normalizedSequence = sequence.toString().trim();
+    if (normalizedSequence.isNotEmpty) {
+      return 'sequence:$normalizedSequence';
+    }
+  }
+  final data = _rowData(row);
+  final type = data?['type']?.toString();
+  if (type != null && type.trim().isNotEmpty) {
+    final messageId = data?['message_id']?.toString();
+    final timestamp = row['timestamp']?.toString();
+    return [
+      'agent',
+      itemId,
+      type,
+      if (messageId != null && messageId.trim().isNotEmpty) messageId.trim(),
+      if (timestamp != null && timestamp.trim().isNotEmpty) timestamp.trim(),
+    ].join(':');
+  }
+  return itemId;
+}
+
 Map<String, Object?>? _mapValue(Object? raw) {
   if (raw is Map<String, Object?>) {
     return raw;
@@ -1752,6 +4619,22 @@ Map<String, Object?>? _firstGeneratedImage(Map<String, Object?>? message) {
   return _mapValue(message['image']);
 }
 
+bool _isImageGenerationRow(Map<String, Object?> row) {
+  final data = _rowData(row);
+  if (data == null) {
+    return false;
+  }
+  final kind = data['kind']?.toString();
+  if (kind == 'image_generation') {
+    return true;
+  }
+  final type = data['type']?.toString();
+  return type == _agentImageGenerationStartedType ||
+      type == _agentImageGenerationPartialType ||
+      type == _agentImageGenerationCompletedType ||
+      type == _agentImageGenerationFailedType;
+}
+
 Set<String> _imageGenerationCorrelationKeys(Map<String, Object?> row) {
   final keys = <String>{};
   final itemId = _stringValue(row['item_id']);
@@ -1759,7 +4642,14 @@ Set<String> _imageGenerationCorrelationKeys(Map<String, Object?> row) {
     keys.add('item:$itemId');
   }
   final data = _rowData(row);
-  final message = _mapValue(data?['message']);
+  final rawType = data?['type']?.toString();
+  final message =
+      rawType == _agentImageGenerationStartedType ||
+          rawType == _agentImageGenerationPartialType ||
+          rawType == _agentImageGenerationCompletedType ||
+          rawType == _agentImageGenerationFailedType
+      ? data
+      : _mapValue(data?['message']);
   for (final value in <Object?>[data?['call_id'], message?['call_id']]) {
     final callId = _stringValue(value);
     if (callId != null) {
@@ -1771,6 +4661,36 @@ Set<String> _imageGenerationCorrelationKeys(Map<String, Object?> row) {
     if (id != null) {
       keys.add('item:$id');
     }
+  }
+  return keys;
+}
+
+bool _imageGenerationRowsReconcile({required Map<String, Object?> datasetRow, required Map<String, Object?> liveRow}) {
+  if (!_isImageGenerationRow(datasetRow) || !_isImageGenerationRow(liveRow)) {
+    return false;
+  }
+  final liveKeys = _imageGenerationCorrelationKeys(liveRow);
+  if (liveKeys.isEmpty || !_imageGenerationCorrelationKeys(datasetRow).any(liveKeys.contains)) {
+    return false;
+  }
+
+  final liveStatus = _messageForRow(liveRow)?.image?.status;
+  final datasetStatus = _messageForRow(datasetRow)?.image?.status;
+  if (_isTerminalImageGenerationStatus(liveStatus)) {
+    return _isTerminalImageGenerationStatus(datasetStatus);
+  }
+  return true;
+}
+
+Set<String> _datasetThreadImageReferenceKeys(_DatasetThreadImage image) {
+  final keys = <String>{};
+  final imageId = _stringValue(image.imageId);
+  if (imageId != null) {
+    keys.add('image:$imageId');
+  }
+  final uri = _stringValue(image.uri);
+  if (uri != null) {
+    keys.add('uri:$uri');
   }
   return keys;
 }
@@ -1847,6 +4767,18 @@ bool _isImageGenerationFailedStatus(String? status) {
   return normalized == 'failed' || normalized == 'cancelled';
 }
 
+bool _isTerminalImageGenerationStatus(String? status) {
+  final normalized = _normalizedImageGenerationStatus(status);
+  return normalized == 'completed' || _isImageGenerationFailedStatus(normalized);
+}
+
+String? _normalizedImageGenerationStatus(String? status) {
+  if (status == null || status.trim().isEmpty) {
+    return null;
+  }
+  return status.trim().toLowerCase();
+}
+
 String? _imageIdFromDatasetUri(String? uri) {
   if (uri == null || uri.trim().isEmpty) {
     return null;
@@ -1921,20 +4853,6 @@ List<String> _stringList(Object? value) {
     return const [];
   }
   return value.map((item) => item.toString().trim()).where((item) => item.isNotEmpty).toList(growable: false);
-}
-
-List<String> _itemIdsForDeletePredicate(String predicate) {
-  final normalized = predicate.trim();
-  final equality = RegExp(r'''^"?item_id"?\s*=\s*['"]([^'"]+)['"]$''', caseSensitive: false).firstMatch(normalized);
-  if (equality != null) {
-    return [equality.group(1)!];
-  }
-
-  final inList = RegExp(r'''^"?item_id"?\s+in\s*\((.*)\)$''', caseSensitive: false).firstMatch(normalized);
-  if (inList == null) {
-    return const [];
-  }
-  return RegExp(r'''['"]([^'"]+)['"]''').allMatches(inList.group(1)!).map((match) => match.group(1)!).toList(growable: false);
 }
 
 int _intValue(Object? value) {

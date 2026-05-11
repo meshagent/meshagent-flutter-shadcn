@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:meshagent/meshagent.dart';
+import 'package:meshagent_flutter_shadcn/chat/chat.dart';
 import 'package:meshagent_flutter_shadcn/chat/thread_list_view.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
@@ -45,5 +46,37 @@ void main() {
     expect(find.byIcon(LucideIcons.check), findsOneWidget);
     expect(find.byIcon(LucideIcons.messageSquarePlus), findsNothing);
     expect(find.text('No threads yet'), findsOneWidget);
+  });
+
+  testWidgets('does not render processing status on the thread list', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    addTearDown(room.dispose);
+
+    const threadPath = 'agents/assistant/threads/12345678-1234-5678-1234-567812345678.thread';
+    trackAgentThreadStatusPayload(
+      room: room,
+      payload: const {'type': 'meshagent.agent.thread.status', 'thread_id': threadPath, 'status': 'preparing', 'mode': 'busy'},
+    );
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 320,
+            child: ChatThreadListView(
+              room: room,
+              threadListPath: '',
+              selectedThreadPath: threadPath,
+              selectedThreadDisplayName: 'New Thread',
+              onSelectedThreadPathChanged: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(ChatThreadStatusIndicator), findsNothing);
+    expect(find.byIcon(LucideIcons.check), findsOneWidget);
   });
 }

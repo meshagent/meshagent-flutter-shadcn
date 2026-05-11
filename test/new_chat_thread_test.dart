@@ -274,6 +274,46 @@ void main() {
     await tester.pumpAndSettle();
   });
 
+  testWidgets('keeps text typed while send is pending when clearOnSend is true', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
+    final completer = Completer<void>();
+    addTearDown(room.dispose);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 640,
+            child: ChatThreadInput(room: room, controller: controller, onSend: (text, attachments) => completer.future),
+          ),
+        ),
+      ),
+    );
+
+    controller.textFieldController.text = 'draft message';
+    await tester.pump();
+    await tester.tap(find.byType(EditableText));
+    await tester.pump();
+
+    await tester.tap(find.byIcon(LucideIcons.arrowUp));
+    await tester.pump();
+
+    expect(controller.text, isEmpty);
+    expect(find.text('draft message'), findsNothing);
+
+    controller.textFieldController.text = 'next draft';
+    await tester.pump();
+
+    completer.complete();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+
+    expect(controller.text, 'next draft');
+    expect(find.text('next draft'), findsOneWidget);
+  });
+
   testWidgets('mouse clicking send keeps the composer focused', (tester) async {
     final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     final controller = ChatThreadController(room: room);
