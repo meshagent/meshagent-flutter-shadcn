@@ -5,7 +5,6 @@ import 'dart:typed_data';
 
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_soloud/flutter_soloud.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_flutter_shadcn/chat_bubble_markdown_config.dart';
@@ -15,6 +14,7 @@ import 'package:uuid/uuid.dart';
 
 import 'chat.dart';
 import 'agent_stream_accumulator.dart';
+import 'realtime_audio_output.dart';
 import 'tool_call_summary.dart';
 import 'usage_footer_tooltip.dart';
 
@@ -30,9 +30,12 @@ const String _agentTurnStartAcceptedType = 'meshagent.agent.turn.start.accepted'
 const String _agentTurnStartRejectedType = 'meshagent.agent.turn.start.rejected';
 const String _agentTurnSteerAcceptedType = 'meshagent.agent.turn.steer.accepted';
 const String _agentTurnSteerRejectedType = 'meshagent.agent.turn.steer.rejected';
+const String _agentTurnInterruptAcceptedType = 'meshagent.agent.turn.interrupt.accepted';
+const String _agentTurnInterruptedType = 'meshagent.agent.turn.interrupted';
 const String _agentTurnStartedType = 'meshagent.agent.turn.started';
 const String _agentTurnSteeredType = 'meshagent.agent.turn.steered';
 const String _agentTurnEndedType = 'meshagent.agent.turn.ended';
+const String _agentAudioInputSpeechStartedType = 'meshagent.agent.audio_input.speech_started';
 const String _agentTextContentStartedType = 'meshagent.agent.text_content.started';
 const String _agentTextContentDeltaType = 'meshagent.agent.text_content.delta';
 const String _agentTextContentEndedType = 'meshagent.agent.text_content.ended';
@@ -106,6 +109,7 @@ class DatasetChatModelOption {
     this.defaultOutputVoice,
     this.inputFormat,
     this.outputFormat,
+    this.turnDetection,
     this.active = false,
   });
 
@@ -119,6 +123,7 @@ class DatasetChatModelOption {
   final String? defaultOutputVoice;
   final DatasetChatAudioFormat? inputFormat;
   final DatasetChatAudioFormat? outputFormat;
+  final String? turnDetection;
   final bool active;
 
   String get key => '$provider/$model';
@@ -141,6 +146,7 @@ class DatasetChatModelOption {
       defaultOutputVoice: defaultOutputVoice,
       inputFormat: inputFormat,
       outputFormat: outputFormat,
+      turnDetection: turnDetection,
       active: active ?? this.active,
     );
   }
@@ -161,6 +167,7 @@ class DatasetChatModelController extends ChangeNotifier {
   String get activeModality => _activeModality;
   String? get activeVoice => _activeModality == 'audio' ? _activeVoice : null;
   DatasetChatAudioFormat get activeInputFormat => _activeModel?.inputFormat ?? const DatasetChatAudioFormat();
+  String get activeTurnDetection => _activeModel?.turnDetection == 'automatic' ? 'automatic' : 'none';
   List<String> get availableVoices =>
       _activeModality == 'audio' ? List<String>.unmodifiable(_activeModel?.availableVoices ?? const <String>[]) : const <String>[];
   List<String> get outputModalities {
@@ -346,6 +353,7 @@ class DatasetChatModelController extends ChangeNotifier {
           defaultOutputVoice: modelValue['default_output_voice']?.toString(),
           inputFormat: DatasetChatAudioFormat.fromJson(modelValue['input_format']),
           outputFormat: DatasetChatAudioFormat.fromJson(modelValue['output_format']),
+          turnDetection: modelValue['turn_detection']?.toString(),
           active: modelValue['active'] == true,
         );
         nextModels.add(option);
@@ -393,6 +401,7 @@ class DatasetChatModelController extends ChangeNotifier {
           modelDescription: payload['model_description']?.toString(),
           inputFormat: DatasetChatAudioFormat.fromJson(payload['input_format']),
           outputFormat: DatasetChatAudioFormat.fromJson(payload['output_format']),
+          turnDetection: payload['turn_detection']?.toString(),
           modalities: const <String>[],
           active: true,
         );
@@ -931,6 +940,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     switch (type) {
       case _agentTurnStartType:
       case _agentTurnSteerType:
+      case _agentTurnInterruptType:
+        unawaited(_audioPlayer.stopAll());
+        break;
       case _agentModelsRequestType:
       case _agentModelsResponseType:
       case _agentModelChangeType:
@@ -962,6 +974,11 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         changed = _materializePendingMessage(payload['source_message_id']?.toString()) || changed;
+        break;
+      case _agentTurnInterruptAcceptedType:
+      case _agentTurnInterruptedType:
+      case _agentAudioInputSpeechStartedType:
+        unawaited(_audioPlayer.stopAll());
         break;
       case _agentTurnSteeredType:
         changed =
@@ -1041,16 +1058,23 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         _liveTextContent.remove(_transcriptionItemId(payload));
         break;
       case _agentAudioGenerationStartedType:
-        unawaited(_audioPlayer.start(_payloadItemId(payload)));
+        unawaited(_audioPlayer.start(_audioPlaybackStreamItemId(payload)));
         break;
       case _agentAudioGenerationDeltaType:
-        unawaited(_audioPlayer.append(itemId: _payloadItemId(payload), data: attachment, mimeType: payload['mime_type']?.toString()));
+        unawaited(
+          _audioPlayer.append(
+            itemId: _audioPlaybackStreamItemId(payload),
+            messageId: payload['message_id']?.toString(),
+            data: attachment,
+            mimeType: payload['mime_type']?.toString(),
+          ),
+        );
         break;
       case _agentAudioGenerationCompletedType:
-        unawaited(_audioPlayer.complete(_payloadItemId(payload)));
+        unawaited(_audioPlayer.complete(_audioPlaybackStreamItemId(payload)));
         break;
       case _agentAudioGenerationFailedType:
-        unawaited(_audioPlayer.stop(_payloadItemId(payload)));
+        unawaited(_audioPlayer.stop(_audioPlaybackStreamItemId(payload)));
         break;
       case _agentReasoningContentStartedType:
         _liveReasoningContent.upsert(itemId: _payloadItemId(payload), turnId: _payloadTurnId(payload));
@@ -1178,7 +1202,6 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                       'kind': 'image_generation',
                       'role': 'assistant',
                       'status': payload['error'] == null ? 'in_progress' : 'failed',
-                      'status_detail': payload['error'] == null ? 'Generating image' : payload['error']?.toString(),
                       'call_id': payload['call_id']?.toString(),
                       'arguments': _mapValue(payload['arguments']),
                       'sender_name': _senderNameFromPayload(payload) ?? _agentRowSenderName(_payloadItemId(payload)),
@@ -1243,7 +1266,6 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                 'kind': 'image_generation',
                 'role': 'assistant',
                 'status': _imageGenerationStatusFromType(type),
-                'status_detail': payload['status_detail']?.toString(),
                 'call_id': payload['call_id']?.toString(),
                 'arguments': _mapValue(payload['arguments']),
                 'message': payload,
@@ -1355,6 +1377,14 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       return _payloadItemId(payload);
     }
     return _realtimeAudioCommitItemIdsByTurnId[turnId.trim()] ?? _payloadItemId(payload);
+  }
+
+  String _audioPlaybackStreamItemId(Map<String, dynamic> payload) {
+    final turnId = _payloadTurnId(payload);
+    if (turnId != null && turnId.trim().isNotEmpty) {
+      return 'turn:${turnId.trim()}:audio_generation';
+    }
+    return _payloadItemId(payload);
   }
 
   bool _upsertAgentRow({required String itemId, required String? turnId, required Map<String, Object?> data, DateTime? timestamp}) {
@@ -1954,6 +1984,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (turnId == null || turnId.trim().isEmpty) {
       return;
     }
+    await _audioPlayer.stopAll();
     final agent = _agentParticipant();
     if (agent == null) {
       return;
@@ -1974,13 +2005,24 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     final activeVoice = _modelController.activeVoice;
     final inputFormat = _modelController.activeInputFormat;
     if (finalChunk) {
+      if (_modelController.activeTurnDetection == 'automatic') {
+        return;
+      }
+      final messageId = const Uuid().v4();
+      final turnId = const Uuid().v4();
+      await widget.room.messaging.sendMessage(
+        to: agent,
+        type: _agentRoomMessageType,
+        message: {'type': _agentRealtimeAudioCommitType, 'thread_id': widget.path, 'message_id': messageId, 'turn_id': turnId},
+      );
       await widget.room.messaging.sendMessage(
         to: agent,
         type: _agentRoomMessageType,
         message: {
-          'type': _agentRealtimeAudioCommitType,
+          'type': _agentTurnStartType,
           'thread_id': widget.path,
           'message_id': const Uuid().v4(),
+          'turn_id': turnId,
           if (activeModel != null) 'provider': activeModel.provider,
           if (activeModel != null) 'model': activeModel.model,
           if (activeVoice != null && activeVoice.trim().isNotEmpty) 'voice': activeVoice.trim(),
@@ -1996,11 +2038,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         'type': _agentRealtimeAudioChunkType,
         'thread_id': widget.path,
         'message_id': const Uuid().v4(),
-        if (activeModel != null) 'provider': activeModel.provider,
-        if (activeModel != null) 'model': activeModel.model,
-        'mime_type': inputFormat.type,
-        if (inputFormat.sampleRate != null) 'sample_rate': inputFormat.sampleRate,
-        if (inputFormat.bitrate != null) 'bitrate': inputFormat.bitrate,
+        'format': inputFormat.toJson(),
       },
       attachment: chunk,
     );
@@ -2273,6 +2311,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         leading: toolArea.leading,
         footer: toolArea.footer,
         audioInputEnabled: _modelController.supportsAudioInput,
+        automaticAudioTurnDetection: _modelController.activeTurnDetection == 'automatic',
         onAudioChunk: _sendRealtimeAudioChunk,
         room: widget.room,
         controller: _controller,
@@ -2631,6 +2670,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   bool _datasetThreadMessageCanCollapseAsCommentary(_DatasetThreadMessage message) {
+    if (message.phase == 'final_answer') {
+      return false;
+    }
     return message.kind == 'message' && message.role == 'agent' && message.attachments.isEmpty && message.image == null;
   }
 
@@ -3678,8 +3720,7 @@ _DatasetThreadMessage? _messageForRow(
               _stringValue(data['status']) ??
               _stringValue(image?['status']) ??
               _imageGenerationStatusFromType(_stringValue(message?['type'])),
-          statusDetail:
-              _stringValue(data['status_detail']) ?? _stringValue(message?['status_detail']) ?? _stringValue(image?['status_detail']),
+          statusDetail: _stringValue(image?['status_detail']),
           width: dimensions.$1,
           height: dimensions.$2,
         ),
@@ -3779,179 +3820,119 @@ class _DatasetThreadRealtimeAudioPlayer {
   static const int _channels = 1;
   static const int _bytesPerSample = 2;
   static const int _bytesPerFrame = _channels * _bytesPerSample;
-  static const Duration _prebufferDuration = Duration(seconds: 1);
-  static const Duration _underrunPaddingGrace = Duration(milliseconds: 20);
-  static const Duration _endSilenceDuration = Duration(milliseconds: 120);
-  static const Duration _maxUnderrunPadding = Duration(seconds: 5);
-  static final int _prebufferBytes = _bytesForDuration(_prebufferDuration);
 
-  final Map<String, AudioSource> _streams = <String, AudioSource>{};
   final Map<String, Future<void>> _queues = <String, Future<void>>{};
-  final Map<String, int> _bufferedBytes = <String, int>{};
-  final Map<String, DateTime> _playStartedAt = <String, DateTime>{};
-  final Set<String> _playing = <String>{};
-  bool _initialized = false;
-
-  Future<void> _ensureInitialized() async {
-    if (_initialized) {
-      return;
-    }
-    if (!SoLoud.instance.isInitialized) {
-      await SoLoud.instance.init(sampleRate: _sampleRate, channels: Channels.mono);
-    }
-    _initialized = true;
-  }
+  final Set<String> _closed = <String>{};
+  final Set<String> _seenDeltaMessageIds = <String>{};
+  final RealtimeAudioOutput _output = createRealtimeAudioOutput();
+  String? _activeItemId;
+  bool _streamStarted = false;
 
   Future<void> start(String itemId) async {
-    if (itemId.trim().isEmpty || _streams.containsKey(itemId)) {
+    final normalizedItemId = itemId.trim();
+    if (normalizedItemId.isEmpty || _closed.contains(normalizedItemId)) {
+      return;
+    }
+    if (_activeItemId == normalizedItemId && _streamStarted) {
       return;
     }
     try {
-      await _ensureInitialized();
-      final source = SoLoud.instance.setBufferStream(
-        maxBufferSizeDuration: const Duration(seconds: 120),
-        bufferingType: BufferingType.released,
-        bufferingTimeNeeds: _prebufferDuration.inMilliseconds / Duration.millisecondsPerSecond,
-        sampleRate: _sampleRate,
-        channels: Channels.mono,
-        format: BufferType.s16le,
-      );
-      _streams[itemId] = source;
+      if (_activeItemId != null && _activeItemId != normalizedItemId) {
+        await stop(_activeItemId!);
+      }
+      await _output.start(sampleRate: _sampleRate, channels: _channels);
+      _activeItemId = normalizedItemId;
+      _streamStarted = true;
     } catch (_) {}
   }
 
-  Future<void> append({required String itemId, required Uint8List? data, required String? mimeType}) async {
-    if (data == null || data.isEmpty) {
+  Future<void> append({required String itemId, required String? messageId, required Uint8List? data, required String? mimeType}) async {
+    final normalizedItemId = itemId.trim();
+    if (data == null || data.isEmpty || normalizedItemId.isEmpty || _closed.contains(normalizedItemId)) {
       return;
     }
-    final queue = (_queues[itemId] ?? Future<void>.value()).then((_) => _appendNow(itemId: itemId, data: data, mimeType: mimeType));
-    _queues[itemId] = queue.catchError((_) {});
+    final normalizedMessageId = messageId?.trim();
+    if (normalizedMessageId != null && normalizedMessageId.isNotEmpty && !_seenDeltaMessageIds.add(normalizedMessageId)) {
+      return;
+    }
+    final queue = (_queues[normalizedItemId] ?? Future<void>.value()).then(
+      (_) => _appendNow(itemId: normalizedItemId, data: data, mimeType: mimeType),
+    );
+    _queues[normalizedItemId] = queue.catchError((_) {});
     await queue;
   }
 
   Future<void> _appendNow({required String itemId, required Uint8List data, required String? mimeType}) async {
     try {
+      if (_closed.contains(itemId)) {
+        return;
+      }
       await start(itemId);
-      final source = _streams[itemId];
-      if (source == null) {
-        return;
-      }
       final pcm = _pcmAudioBytes(bytes: data, mimeType: mimeType);
-      if (pcm.isEmpty) {
+      if (pcm.isEmpty || pcm.length % _bytesPerFrame != 0) {
         return;
       }
-      _padLateChunkWithSilence(itemId: itemId, source: source);
-      SoLoud.instance.addAudioDataStream(source, pcm);
-      final bufferedBytes = (_bufferedBytes[itemId] ?? 0) + pcm.length;
-      _bufferedBytes[itemId] = bufferedBytes;
-      _startPlaybackIfReady(itemId: itemId, source: source);
+      if (_activeItemId != itemId) {
+        return;
+      }
+      await _output.append(pcm);
     } catch (_) {}
   }
 
   Future<void> complete(String itemId) async {
-    final queue = (_queues[itemId] ?? Future<void>.value()).then((_) => _completeNow(itemId));
-    _queues[itemId] = queue.catchError((_) {});
+    final normalizedItemId = itemId.trim();
+    if (normalizedItemId.isEmpty) {
+      return;
+    }
+    final queue = (_queues[normalizedItemId] ?? Future<void>.value()).then((_) => _completeNow(normalizedItemId));
+    _queues[normalizedItemId] = queue.catchError((_) {});
     await queue;
   }
 
   Future<void> _completeNow(String itemId) async {
-    final source = _streams[itemId];
-    try {
-      if (source == null) {
-        return;
-      }
-      _appendSilence(source: source, itemId: itemId, byteCount: _bytesForDuration(_endSilenceDuration));
-      if (_playing.add(itemId)) {
-        _playStartedAt[itemId] = DateTime.now();
-        SoLoud.instance.play(source);
-      }
-      SoLoud.instance.setDataIsEnded(source);
-      unawaited(
-        Future<void>.delayed(const Duration(seconds: 30)).then((_) async {
-          try {
-            await SoLoud.instance.disposeSource(source);
-          } catch (_) {}
-        }),
-      );
-    } catch (_) {}
-    _streams.remove(itemId);
     _queues.remove(itemId);
-    _bufferedBytes.remove(itemId);
-    _playStartedAt.remove(itemId);
-    _playing.remove(itemId);
+    if (_activeItemId == itemId) {
+      await _output.complete();
+      _activeItemId = null;
+      _streamStarted = false;
+    }
   }
 
   Future<void> stop(String itemId) async {
-    _queues.remove(itemId);
-    _bufferedBytes.remove(itemId);
-    _playStartedAt.remove(itemId);
-    _playing.remove(itemId);
-    final source = _streams.remove(itemId);
-    if (source == null) {
+    final normalizedItemId = itemId.trim();
+    if (normalizedItemId.isEmpty) {
+      return;
+    }
+    _queues.remove(normalizedItemId);
+    _closed.add(normalizedItemId);
+    if (_activeItemId != normalizedItemId) {
+      unawaited(Future<void>.delayed(const Duration(seconds: 30)).then((_) => _closed.remove(normalizedItemId)));
       return;
     }
     try {
-      await SoLoud.instance.disposeSource(source);
+      await _output.stop();
     } catch (_) {}
+    _activeItemId = null;
+    _streamStarted = false;
+    unawaited(Future<void>.delayed(const Duration(seconds: 30)).then((_) => _closed.remove(normalizedItemId)));
   }
 
   Future<void> stopAll() async {
-    final itemIds = _streams.keys.toList(growable: false);
-    for (final itemId in itemIds) {
-      await stop(itemId);
+    final activeItemId = _activeItemId;
+    if (activeItemId != null) {
+      await stop(activeItemId);
+    } else {
+      await _output.stop();
     }
+    _queues.clear();
+    _seenDeltaMessageIds.clear();
   }
 
-  Future<void> dispose() => stopAll();
-
-  void _startPlaybackIfReady({required String itemId, required AudioSource source}) {
-    final bufferedBytes = _bufferedBytes[itemId] ?? 0;
-    if (bufferedBytes < _prebufferBytes || !_playing.add(itemId)) {
-      return;
-    }
-    _playStartedAt[itemId] = DateTime.now();
-    SoLoud.instance.play(source);
-  }
-
-  void _padLateChunkWithSilence({required String itemId, required AudioSource source}) {
-    final startedAt = _playStartedAt[itemId];
-    if (startedAt == null) {
-      return;
-    }
-    final elapsed = DateTime.now().difference(startedAt) - _underrunPaddingGrace;
-    final expectedBytes = _bytesForDuration(elapsed);
-    final bufferedBytes = _bufferedBytes[itemId] ?? 0;
-    final missingBytes = expectedBytes - bufferedBytes;
-    if (missingBytes <= 0) {
-      return;
-    }
-    _appendSilence(source: source, itemId: itemId, byteCount: math.min(missingBytes, _bytesForDuration(_maxUnderrunPadding)));
-  }
-
-  void _appendSilence({required AudioSource source, required String itemId, required int byteCount}) {
-    final alignedByteCount = _alignedByteCount(byteCount);
-    if (alignedByteCount <= 0) {
-      return;
-    }
-    SoLoud.instance.addAudioDataStream(source, Uint8List(alignedByteCount));
-    _bufferedBytes[itemId] = (_bufferedBytes[itemId] ?? 0) + alignedByteCount;
-  }
-
-  static int _bytesForDuration(Duration duration) {
-    final microseconds = duration.inMicroseconds;
-    if (microseconds <= 0) {
-      return 0;
-    }
-    final frames = (_sampleRate * microseconds / Duration.microsecondsPerSecond).ceil();
-    return frames * _bytesPerFrame;
-  }
-
-  static int _alignedByteCount(int byteCount) {
-    if (byteCount <= 0) {
-      return 0;
-    }
-    final remainder = byteCount % _bytesPerFrame;
-    return remainder == 0 ? byteCount : byteCount + _bytesPerFrame - remainder;
+  Future<void> dispose() async {
+    await stopAll();
+    try {
+      await _output.dispose();
+    } catch (_) {}
   }
 }
 
@@ -4144,7 +4125,7 @@ _DatasetThreadMessage? _messageForAgentPayload(
           imageId: _imageIdFromDatasetUri(imageUri),
           mimeType: _stringValue(image?['mime_type']),
           status: _stringValue(image?['status']) ?? _imageGenerationStatusFromType(type),
-          statusDetail: _stringValue(payload['status_detail']) ?? _stringValue(image?['status_detail']),
+          statusDetail: _stringValue(image?['status_detail']),
           width: dimensions.$1,
           height: dimensions.$2,
         ),
@@ -4251,11 +4232,38 @@ String? agentTurnEndedErrorMessage(Map<String, Object?> payload) {
   if (payload['type'] != _agentTurnEndedType) {
     return null;
   }
-  return _agentErrorMessage(payload['error']);
+  final error = payload['error'];
+  if (_agentErrorIsCancellation(error)) {
+    return null;
+  }
+  return _agentErrorMessage(error);
 }
 
 String? _agentToolCallErrorMessage(Object? error) {
   return _agentErrorMessage(error);
+}
+
+bool _agentErrorIsCancellation(Object? error) {
+  if (error == null) {
+    return false;
+  }
+  final values = <String>[];
+  if (error is String) {
+    values.add(error);
+  } else if (error is Map) {
+    for (final key in const ['code', 'message', 'detail', 'error']) {
+      final value = error[key];
+      if (value is String) {
+        values.add(value);
+      }
+    }
+  } else {
+    values.add(error.toString());
+  }
+  return values.any((value) {
+    final normalized = value.trim().toLowerCase();
+    return normalized.contains('cancel') || normalized.contains('interrupt') || normalized.contains('abort');
+  });
 }
 
 String? _agentErrorMessage(Object? error) {
@@ -4486,11 +4494,20 @@ String? _senderNameFromPayload(Map<String, dynamic> payload) {
 
 String? _agentMessagePhase(Map<String, dynamic> payload) {
   final phase = payload['phase'];
-  if (phase is! String) {
-    return null;
+  if (phase is String) {
+    final normalized = phase.trim();
+    if (normalized == 'commentary' || normalized == 'final_answer') {
+      return normalized;
+    }
   }
-  final normalized = phase.trim();
-  return normalized == 'commentary' || normalized == 'final_answer' ? normalized : null;
+  final type = payload['type']?.toString();
+  if ((type == _agentAudioTranscriptionStartedType ||
+          type == _agentAudioTranscriptionDeltaType ||
+          type == _agentAudioTranscriptionCompletedType) &&
+      _textContentRoleFromPayload(payload) != 'user') {
+    return 'final_answer';
+  }
+  return null;
 }
 
 String _textContentRoleFromPayload(Map<String, Object?>? payload) {

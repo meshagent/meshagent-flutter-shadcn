@@ -58,6 +58,11 @@ const int _audioInputSampleRate = 24000;
 const int _audioInputChannels = 1;
 const Duration _audioInputFlushInterval = Duration(milliseconds: 250);
 const int _audioInputFlushBytes = _audioInputSampleRate * _audioInputChannels * 2 ~/ 4;
+const int _minimumRealtimeAudioBytes = _audioInputSampleRate * _audioInputChannels * 2 ~/ 10;
+const double _audioInputSilenceLevelThreshold = 0.004;
+const double _audioWaveformBarWidth = 2;
+const double _audioWaveformBarGap = 2;
+const int _audioWaveformMinBars = 16;
 const EdgeInsets _chatBubbleContentPadding = EdgeInsets.only(
   left: _chatBubbleContentHorizontalPadding,
   right: _chatBubbleContentHorizontalPadding,
@@ -3287,6 +3292,13 @@ double _audioLevelFromPcm16(Uint8List chunk) {
   return math.sqrt(total / samples).clamp(0.0, 1.0);
 }
 
+int _audioWaveformBarCountForWidth(double width) {
+  if (width <= 0) {
+    return _audioWaveformMinBars;
+  }
+  return math.max(_audioWaveformMinBars, (width / (_audioWaveformBarWidth + _audioWaveformBarGap)).floor());
+}
+
 class _AudioWaveformPainter extends CustomPainter {
   const _AudioWaveformPainter({required this.levels, required this.color});
 
@@ -3300,10 +3312,9 @@ class _AudioWaveformPainter extends CustomPainter {
     }
     final paint = Paint()
       ..strokeCap = StrokeCap.round
-      ..strokeWidth = 2;
-    const barWidth = 2.0;
-    const barGap = 2.0;
-    final count = math.max(16, (size.width / (barWidth + barGap)).floor());
+      ..strokeWidth = _audioWaveformBarWidth;
+    final count = _audioWaveformBarCountForWidth(size.width);
+    final gap = count <= 1 ? 0.0 : math.max(0.0, (size.width - (_audioWaveformBarWidth * count)) / (count - 1));
     for (var index = 0; index < count; index += 1) {
       final levelIndex = levels.length - count + index;
       final hasLevel = levelIndex >= 0;
@@ -3312,13 +3323,14 @@ class _AudioWaveformPainter extends CustomPainter {
       final level = active ? math.sqrt(rawLevel) * 0.9 : 0.0;
       final height = active ? math.max(4.0, size.height * level) : 1.0;
       paint.color = color.withValues(alpha: active ? 0.66 : 0.24);
-      final x = size.width - ((count - index) * (barWidth + barGap)) + barWidth / 2;
+      final x = (_audioWaveformBarWidth / 2) + (index * (_audioWaveformBarWidth + gap));
       canvas.drawLine(Offset(x, (size.height - height) / 2), Offset(x, (size.height + height) / 2), paint);
     }
   }
 
   @override
-  bool shouldRepaint(covariant _AudioWaveformPainter oldDelegate) => oldDelegate.levels != levels || oldDelegate.color != color;
+  bool shouldRepaint(covariant _AudioWaveformPainter oldDelegate) =>
+      oldDelegate.color != color || !const ListEquality<double>().equals(oldDelegate.levels, levels);
 }
 
 class ChatThreadInput extends StatefulWidget {
@@ -3341,6 +3353,8 @@ class ChatThreadInput extends StatefulWidget {
     this.header,
     this.footer,
     this.audioInputEnabled = false,
+    this.automaticAudioTurnDetection = false,
+    this.onAudioRecordingStart,
     this.onAudioChunk,
     this.onClear,
     this.onInterrupt,
@@ -3373,6 +3387,8 @@ class ChatThreadInput extends StatefulWidget {
   final Widget? header;
   final Widget? footer;
   final bool audioInputEnabled;
+  final bool automaticAudioTurnDetection;
+  final Future<void> Function()? onAudioRecordingStart;
   final Future<void> Function(Uint8List chunk, {required bool finalChunk})? onAudioChunk;
   final EditableTextContextMenuBuilder? contextMenuBuilder;
   final TapRegionCallback? onPressedOutside;
@@ -3395,8 +3411,12 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   StreamSubscription<Uint8List>? _audioStreamSubscription;
   Timer? _audioFlushTimer;
   final BytesBuilder _audioBuffer = BytesBuilder(copy: false);
+  Future<void> _audioFlushTail = Future<void>.value();
   Future<void> _audioSendTail = Future<void>.value();
+  int _submittedAudioByteCount = 0;
+  bool _sentAudibleAudioThisRecording = false;
   final List<double> _audioLevels = [];
+  int _audioLevelCapacity = _audioWaveformMinBars;
 
   void _syncDraftStateFromController({bool triggerExternalOnChanged = false}) {
     final nextText = widget.controller.text;
@@ -3520,6 +3540,24 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     });
   }
 
+  void _syncAudioLevelCapacity(double width) {
+    final nextCapacity = _audioWaveformBarCountForWidth(width);
+    if (_audioLevelCapacity == nextCapacity) {
+      return;
+    }
+    _audioLevelCapacity = nextCapacity;
+    if (_audioLevels.length > _audioLevelCapacity) {
+      _audioLevels.removeRange(0, _audioLevels.length - _audioLevelCapacity);
+    }
+  }
+
+  void _appendAudioLevel(double level) {
+    _audioLevels.add(level);
+    if (_audioLevels.length > _audioLevelCapacity) {
+      _audioLevels.removeRange(0, _audioLevels.length - _audioLevelCapacity);
+    }
+  }
+
   Future<void> _enqueueAudioChunk(Uint8List chunk, {required bool finalChunk}) {
     final onAudioChunk = widget.onAudioChunk;
     if (onAudioChunk == null) {
@@ -3532,10 +3570,19 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   }
 
   Future<void> _flushAudioBuffer() {
+    final previousFlush = _audioFlushTail;
+    final flush = previousFlush.then((_) => _flushAudioBufferNow());
+    _audioFlushTail = flush.catchError((_) {});
+    return flush;
+  }
+
+  Future<void> _flushAudioBufferNow() {
     if (_audioBuffer.isEmpty) {
       return Future<void>.value();
     }
-    return _enqueueAudioChunk(_audioBuffer.takeBytes(), finalChunk: false);
+    final chunk = _audioBuffer.takeBytes();
+    _submittedAudioByteCount += chunk.length;
+    return _enqueueAudioChunk(chunk, finalChunk: false);
   }
 
   Future<void> _startAudioRecording() async {
@@ -3570,28 +3617,53 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     setState(() {
       _audioRecorder = recorder;
       _audioBuffer.clear();
+      _submittedAudioByteCount = 0;
+      _sentAudibleAudioThisRecording = false;
       _audioLevels.clear();
       recordingAudio = true;
       stoppingAudio = false;
     });
+    final onAudioRecordingStart = widget.onAudioRecordingStart;
+    if (widget.automaticAudioTurnDetection && onAudioRecordingStart != null) {
+      unawaited(
+        onAudioRecordingStart().catchError((Object error) {
+          if (!mounted) {
+            return;
+          }
+          ShadToaster.of(
+            context,
+          ).show(ShadToast.destructive(title: const Text("Unable to start audio thread"), description: Text("$error")));
+        }),
+      );
+    }
     _audioFlushTimer?.cancel();
-    _audioFlushTimer = Timer.periodic(_audioInputFlushInterval, (_) {
-      unawaited(_flushAudioBuffer());
-    });
+    if (!widget.automaticAudioTurnDetection) {
+      _audioFlushTimer = Timer.periodic(_audioInputFlushInterval, (_) {
+        unawaited(_flushAudioBuffer());
+      });
+    }
     _audioStreamSubscription = stream.listen(
       (chunk) {
         if (!mounted || chunk.isEmpty) {
           return;
         }
-        _audioBuffer.add(chunk);
-        if (_audioBuffer.length >= _audioInputFlushBytes) {
-          unawaited(_flushAudioBuffer());
+        final level = _audioLevelFromPcm16(chunk);
+        if (widget.automaticAudioTurnDetection) {
+          if (level >= _audioInputSilenceLevelThreshold) {
+            _sentAudibleAudioThisRecording = true;
+          }
+          if (_sentAudibleAudioThisRecording) {
+            _submittedAudioByteCount += chunk.length;
+            unawaited(_enqueueAudioChunk(chunk, finalChunk: false));
+          }
+        } else {
+          _audioBuffer.add(chunk);
+          if (_audioBuffer.length >= _audioInputFlushBytes) {
+            unawaited(_flushAudioBuffer());
+          }
         }
         setState(() {
-          _audioLevels.add(_audioLevelFromPcm16(chunk));
-          if (_audioLevels.length > 96) {
-            _audioLevels.removeRange(0, _audioLevels.length - 96);
-          }
+          _appendAudioLevel(level);
         });
       },
       onError: (Object error) {
@@ -3616,12 +3688,14 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     });
     final recorder = _audioRecorder;
     _audioRecorder = null;
-    await _audioStreamSubscription?.cancel();
-    _audioStreamSubscription = null;
     _audioFlushTimer?.cancel();
     _audioFlushTimer = null;
     if (recorder != null) {
       await recorder.stop();
+    }
+    await _audioStreamSubscription?.cancel();
+    _audioStreamSubscription = null;
+    if (recorder != null) {
       await recorder.dispose();
     }
     if (!mounted) {
@@ -3633,10 +3707,25 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     });
     if (!submit) {
       _audioBuffer.clear();
+      _submittedAudioByteCount = 0;
+      _sentAudibleAudioThisRecording = false;
       return;
     }
-    await _flushAudioBuffer();
+    if (widget.automaticAudioTurnDetection) {
+      await _audioSendTail;
+    } else {
+      await _flushAudioBuffer();
+      await _audioFlushTail;
+      await _audioSendTail;
+      if (_submittedAudioByteCount < _minimumRealtimeAudioBytes) {
+        _audioBuffer.clear();
+        _submittedAudioByteCount = 0;
+        return;
+      }
+    }
     await _enqueueAudioChunk(Uint8List(0), finalChunk: true);
+    _submittedAudioByteCount = 0;
+    _sentAudibleAudioThisRecording = false;
   }
 
   Future<void> _cancelAudioRecording() async {
@@ -3803,6 +3892,8 @@ class _ChatThreadInput extends State<ChatThreadInput> {
 
     _audioFlushTimer?.cancel();
     _audioBuffer.clear();
+    _submittedAudioByteCount = 0;
+    _sentAudibleAudioThisRecording = false;
     unawaited(_audioStreamSubscription?.cancel());
     unawaited(_audioRecorder?.dispose());
     widget.controller.removeListener(_onChanged);
@@ -3874,6 +3965,73 @@ class _ChatThreadInput extends State<ChatThreadInput> {
   }
 
   Widget _buildAudioRecorderComposer(BuildContext context, {required ShadThemeData theme, required Widget sendButton}) {
+    final automaticMode = widget.automaticAudioTurnDetection;
+    final leadingButton = automaticMode
+        ? _wrapAccessoryTapRegion(
+            ShadTooltip(
+              waitDuration: const Duration(seconds: 1),
+              builder: (context) => Text(recordingAudio ? "Mute microphone" : "Unmute microphone"),
+              child: ShadGestureDetector(
+                cursor: stoppingAudio ? SystemMouseCursors.basic : SystemMouseCursors.click,
+                onTapDown: stoppingAudio
+                    ? null
+                    : (_) {
+                        if (recordingAudio) {
+                          unawaited(_stopAudioRecording(submit: false));
+                        } else {
+                          unawaited(_startAudioRecording());
+                        }
+                      },
+                child: SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: Center(
+                    child: Icon(recordingAudio ? LucideIcons.mic : LucideIcons.micOff, size: 16, color: theme.colorScheme.foreground),
+                  ),
+                ),
+              ),
+            ),
+          )
+        : _wrapAccessoryTapRegion(
+            ShadTooltip(
+              waitDuration: const Duration(seconds: 1),
+              builder: (context) => const Text("Cancel recording"),
+              child: ShadGestureDetector(
+                cursor: stoppingAudio ? SystemMouseCursors.basic : SystemMouseCursors.click,
+                onTapDown: stoppingAudio ? null : (_) => unawaited(_cancelAudioRecording()),
+                child: SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: Center(child: Icon(LucideIcons.square, size: 16, fill: 1, color: theme.colorScheme.foreground)),
+                ),
+              ),
+            ),
+          );
+    final trailingButton = automaticMode
+        ? _wrapAccessoryTapRegion(
+            ShadTooltip(
+              waitDuration: const Duration(seconds: 1),
+              builder: (context) => const Text("Stop recording"),
+              child: ShadGestureDetector(
+                cursor: stoppingAudio ? SystemMouseCursors.basic : SystemMouseCursors.click,
+                onTapDown: stoppingAudio
+                    ? null
+                    : (_) {
+                        unawaited(() async {
+                          widget.onInterrupt?.call();
+                          await _stopAudioRecording(submit: true);
+                          _resetAudioDraft();
+                        }());
+                      },
+                child: SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: Center(child: Icon(LucideIcons.square, size: 16, fill: 1, color: theme.colorScheme.foreground)),
+                ),
+              ),
+            ),
+          )
+        : sendButton;
     return Container(
       decoration: BoxDecoration(
         color: theme.colorScheme.card,
@@ -3883,32 +4041,23 @@ class _ChatThreadInput extends State<ChatThreadInput> {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
       child: Row(
         children: [
-          _wrapAccessoryTapRegion(
-            ShadTooltip(
-              waitDuration: const Duration(seconds: 1),
-              builder: (context) => const Text("Cancel recording"),
-              child: ShadGestureDetector(
-                cursor: stoppingAudio ? SystemMouseCursors.basic : SystemMouseCursors.click,
-                onTap: stoppingAudio ? null : () => unawaited(_cancelAudioRecording()),
-                child: SizedBox(
-                  width: 32,
-                  height: 32,
-                  child: Center(child: Icon(LucideIcons.square, size: 16, fill: 1, color: theme.colorScheme.foreground)),
-                ),
-              ),
-            ),
-          ),
+          leadingButton,
           const SizedBox(width: 8),
           Expanded(
-            child: SizedBox(
-              height: 32,
-              child: CustomPaint(
-                painter: _AudioWaveformPainter(levels: _audioLevels, color: theme.colorScheme.foreground),
-              ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                _syncAudioLevelCapacity(constraints.maxWidth);
+                return SizedBox(
+                  height: 32,
+                  child: CustomPaint(
+                    painter: _AudioWaveformPainter(levels: List<double>.of(_audioLevels), color: theme.colorScheme.foreground),
+                  ),
+                );
+              },
             ),
           ),
           const SizedBox(width: 8),
-          sendButton,
+          trailingButton,
         ],
       ),
     );
@@ -4007,7 +4156,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
               builder: (context) => const Text("Record audio"),
               child: ShadGestureDetector(
                 cursor: widget.readOnly ? SystemMouseCursors.basic : SystemMouseCursors.click,
-                onTap: widget.readOnly ? null : () => unawaited(_startAudioRecording()),
+                onTapDown: widget.readOnly ? null : (_) => unawaited(_startAudioRecording()),
                 child: SizedBox(
                   width: 32,
                   height: 32,
@@ -9699,6 +9848,8 @@ Size _measureStatusCounterText(BuildContext context, TextStyle style, String tex
   final painter = TextPainter(
     text: TextSpan(text: text, style: style),
     textDirection: Directionality.of(context),
+    textScaler: MediaQuery.textScalerOf(context),
+    locale: Localizations.maybeLocaleOf(context),
     maxLines: 1,
   )..layout();
   return painter.size;
@@ -9713,7 +9864,7 @@ Size _measureStatusCounterDigit(BuildContext context, TextStyle style) {
     height = math.max(height, size.height);
   }
 
-  return Size(width.ceilToDouble() + 2, height.ceilToDouble());
+  return Size(width.ceilToDouble() + 4, height.ceilToDouble());
 }
 
 class _PreviewSweepOverlay extends StatefulWidget {

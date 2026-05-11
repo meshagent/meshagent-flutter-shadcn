@@ -453,7 +453,7 @@ class _NewChatThreadState extends State<NewChatThread> {
     });
 
     try {
-      final payload = <String, Object?>{"type": _agentThreadStartType, "message_id": messageId, "content": const <Object?>[]};
+      final payload = <String, Object?>{"type": _agentThreadStartType, "message_id": messageId, "content": null, "name": "Audio message"};
       final activeModel = _modelController.activeModel;
       if (activeModel != null) {
         payload["provider"] = activeModel.provider;
@@ -476,14 +476,21 @@ class _NewChatThreadState extends State<NewChatThread> {
     }
   }
 
-  Future<String> _ensureRealtimeAudioThread() async {
+  Future<String> _ensureRealtimeAudioThread({bool resolveWhenStarted = false}) async {
     final existingPath = _realtimeAudioThreadPath;
     if (existingPath != null && existingPath.trim().isNotEmpty) {
+      if (resolveWhenStarted) {
+        _resolveRealtimeAudioThreadPath(existingPath);
+      }
       return existingPath;
     }
     final existingCompleter = _realtimeAudioThreadCompleter;
     if (existingCompleter != null) {
-      return existingCompleter.future;
+      final path = await existingCompleter.future;
+      if (resolveWhenStarted) {
+        _resolveRealtimeAudioThreadPath(path);
+      }
+      return path;
     }
 
     final completer = Completer<String>();
@@ -497,6 +504,9 @@ class _NewChatThreadState extends State<NewChatThread> {
         senderName: senderName is String && senderName.trim().isNotEmpty ? senderName.trim() : null,
       );
       _realtimeAudioThreadPath = path;
+      if (resolveWhenStarted) {
+        _resolveRealtimeAudioThreadPath(path);
+      }
       if (!completer.isCompleted) {
         completer.complete(path);
       }
@@ -513,6 +523,26 @@ class _NewChatThreadState extends State<NewChatThread> {
     }
   }
 
+  void _resolveRealtimeAudioThreadPath(String path) {
+    if (!mounted) {
+      return;
+    }
+    final normalizedPath = path.trim();
+    if (normalizedPath.isEmpty || _activeThreadPath == normalizedPath) {
+      return;
+    }
+    setState(() {
+      _threadPath = normalizedPath;
+      _newThreadError = null;
+      _creatingNewThread = false;
+      _waitingForAgent = false;
+      _pendingFirstMessage = null;
+    });
+    _modelController.setLocked(false);
+    _notifyThreadResolved(normalizedPath, "Audio message");
+    _notifyThreadPathChanged(normalizedPath);
+  }
+
   Future<void> _sendRealtimeAudioChunk(Uint8List chunk, {required bool finalChunk}) async {
     try {
       final path = await _ensureRealtimeAudioThread();
@@ -521,13 +551,39 @@ class _NewChatThreadState extends State<NewChatThread> {
       final activeVoice = _modelController.activeVoice;
       final inputFormat = _modelController.activeInputFormat;
       if (finalChunk) {
+        if (_modelController.activeTurnDetection == "automatic") {
+          if (!mounted) {
+            return;
+          }
+          _realtimeAudioThreadPath = null;
+          setState(() {
+            _threadPath = path;
+            _newThreadError = null;
+            _creatingNewThread = false;
+            _waitingForAgent = false;
+            _pendingFirstMessage = null;
+          });
+          _modelController.setLocked(false);
+          _notifyThreadResolved(path, null);
+          _notifyThreadPathChanged(path);
+          _controller.clear();
+          return;
+        }
+        final messageId = const Uuid().v4();
+        final turnId = const Uuid().v4();
+        await widget.room.messaging.sendMessage(
+          to: agent,
+          type: _agentRoomMessageType,
+          message: {"type": _agentRealtimeAudioCommitType, "thread_id": path, "message_id": messageId, "turn_id": turnId},
+        );
         await widget.room.messaging.sendMessage(
           to: agent,
           type: _agentRoomMessageType,
           message: {
-            "type": _agentRealtimeAudioCommitType,
+            "type": _agentTurnStartType,
             "thread_id": path,
             "message_id": const Uuid().v4(),
+            "turn_id": turnId,
             if (activeModel != null) "provider": activeModel.provider,
             if (activeModel != null) "model": activeModel.model,
             if (activeVoice != null && activeVoice.trim().isNotEmpty) "voice": activeVoice.trim(),
@@ -554,26 +610,17 @@ class _NewChatThreadState extends State<NewChatThread> {
       await widget.room.messaging.sendMessage(
         to: agent,
         type: _agentRoomMessageType,
-        message: {
-          "type": _agentRealtimeAudioChunkType,
-          "thread_id": path,
-          "message_id": const Uuid().v4(),
-          if (activeModel != null) "provider": activeModel.provider,
-          if (activeModel != null) "model": activeModel.model,
-          if (activeVoice != null && activeVoice.trim().isNotEmpty) "voice": activeVoice.trim(),
-          "mime_type": inputFormat.type,
-          if (inputFormat.sampleRate != null) "sample_rate": inputFormat.sampleRate,
-          if (inputFormat.bitrate != null) "bitrate": inputFormat.bitrate,
-        },
+        message: {"type": _agentRealtimeAudioChunkType, "thread_id": path, "message_id": const Uuid().v4(), "format": inputFormat.toJson()},
         attachment: chunk,
       );
     } catch (error) {
       if (!mounted) {
-        return;
+        rethrow;
       }
       setState(() {
         _newThreadError = "$error";
       });
+      rethrow;
     }
   }
 
@@ -823,6 +870,10 @@ class _NewChatThreadState extends State<NewChatThread> {
         leading: toolArea.leading,
         footer: toolArea.footer,
         audioInputEnabled: _modelController.supportsAudioInput,
+        automaticAudioTurnDetection: _modelController.activeTurnDetection == "automatic",
+        onAudioRecordingStart: _modelController.activeTurnDetection == "automatic"
+            ? () => _ensureRealtimeAudioThread(resolveWhenStarted: true)
+            : null,
         onAudioChunk: _sendRealtimeAudioChunk,
         onSend: (value, attachments) async {
           if (value.isEmpty && attachments.isEmpty) {
