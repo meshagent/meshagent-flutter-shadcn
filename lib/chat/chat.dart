@@ -3355,6 +3355,8 @@ class ChatThreadInput extends StatefulWidget {
     this.audioInputEnabled = false,
     this.automaticAudioTurnDetection = false,
     this.onAudioRecordingStart,
+    this.onExternalAudioRecordingStart,
+    this.onExternalAudioRecordingStop,
     this.onAudioChunk,
     this.onClear,
     this.onInterrupt,
@@ -3389,6 +3391,8 @@ class ChatThreadInput extends StatefulWidget {
   final bool audioInputEnabled;
   final bool automaticAudioTurnDetection;
   final Future<void> Function()? onAudioRecordingStart;
+  final Future<void> Function()? onExternalAudioRecordingStart;
+  final Future<void> Function()? onExternalAudioRecordingStop;
   final Future<void> Function(Uint8List chunk, {required bool finalChunk})? onAudioChunk;
   final EditableTextContextMenuBuilder? contextMenuBuilder;
   final TapRegionCallback? onPressedOutside;
@@ -3589,6 +3593,31 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     if (recordingAudio || widget.readOnly || !widget.audioInputEnabled) {
       return;
     }
+    final onExternalAudioRecordingStart = widget.onExternalAudioRecordingStart;
+    if (widget.automaticAudioTurnDetection && onExternalAudioRecordingStart != null) {
+      setState(() {
+        _audioBuffer.clear();
+        _submittedAudioByteCount = 0;
+        _sentAudibleAudioThisRecording = false;
+        _audioLevels.clear();
+        recordingAudio = true;
+        stoppingAudio = false;
+      });
+      try {
+        await onExternalAudioRecordingStart();
+      } catch (error) {
+        if (mounted) {
+          setState(() {
+            recordingAudio = false;
+            stoppingAudio = false;
+          });
+          ShadToaster.of(
+            context,
+          ).show(ShadToast.destructive(title: const Text("Unable to start audio thread"), description: Text("$error")));
+        }
+      }
+      return;
+    }
     final recorder = AudioRecorder();
     final hasPermission = await recorder.hasPermission();
     if (!hasPermission) {
@@ -3690,6 +3719,19 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     _audioRecorder = null;
     _audioFlushTimer?.cancel();
     _audioFlushTimer = null;
+    if (widget.automaticAudioTurnDetection && recorder == null && widget.onExternalAudioRecordingStop != null) {
+      await widget.onExternalAudioRecordingStop!();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        recordingAudio = false;
+        stoppingAudio = false;
+      });
+      _submittedAudioByteCount = 0;
+      _sentAudibleAudioThisRecording = false;
+      return;
+    }
     if (recorder != null) {
       await recorder.stop();
     }
@@ -3888,12 +3930,16 @@ class _ChatThreadInput extends State<ChatThreadInput> {
 
   @override
   void dispose() {
-    super.dispose();
-
     _audioFlushTimer?.cancel();
     _audioBuffer.clear();
     _submittedAudioByteCount = 0;
     _sentAudibleAudioThisRecording = false;
+    if (recordingAudio && widget.automaticAudioTurnDetection && _audioRecorder == null) {
+      final onExternalAudioRecordingStop = widget.onExternalAudioRecordingStop;
+      if (onExternalAudioRecordingStop != null) {
+        unawaited(onExternalAudioRecordingStop());
+      }
+    }
     unawaited(_audioStreamSubscription?.cancel());
     unawaited(_audioRecorder?.dispose());
     widget.controller.removeListener(_onChanged);
@@ -3901,6 +3947,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
 
     focusNode.dispose();
     ClipboardEvents.instance?.unregisterPasteEventListener(onPasteEvent);
+    super.dispose();
   }
 
   Future<DataReaderFile> _getFile(DataReader reader, SimpleFileFormat? format) {

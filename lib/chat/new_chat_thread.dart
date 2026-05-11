@@ -9,6 +9,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:uuid/uuid.dart';
 
 import 'dataset_chat_thread.dart';
+import 'realtime_webrtc_session.dart';
 
 const String _agentRoomMessageType = "agent-message";
 const String _agentThreadStartType = "meshagent.agent.thread.start";
@@ -86,6 +87,8 @@ class _NewChatThreadState extends State<NewChatThread> {
   String? _newThreadError;
   String? _threadPath;
   String? _realtimeAudioThreadPath;
+  RealtimeConnectionInfo? _realtimeAudioConnection;
+  final RealtimeWebrtcSession _realtimeWebrtcSession = RealtimeWebrtcSession();
   Completer<String>? _realtimeAudioThreadCompleter;
   PendingAgentMessage? _pendingFirstMessage;
   int _newThreadOperationId = 0;
@@ -217,6 +220,7 @@ class _NewChatThreadState extends State<NewChatThread> {
   void dispose() {
     _roomSubscription?.cancel();
     widget.room.messaging.removeListener(_onMessagingChanged);
+    unawaited(_realtimeWebrtcSession.stop());
     _resetRealtimeAudioThreadState();
     _cancelWaitingForAgent();
     if (_ownsController) {
@@ -232,6 +236,7 @@ class _NewChatThreadState extends State<NewChatThread> {
 
   void _resetRealtimeAudioThreadState() {
     _realtimeAudioThreadPath = null;
+    _realtimeAudioConnection = null;
     final completer = _realtimeAudioThreadCompleter;
     _realtimeAudioThreadCompleter = null;
     if (completer != null && !completer.isCompleted) {
@@ -383,6 +388,7 @@ class _NewChatThreadState extends State<NewChatThread> {
       if (rawPayload["type"] == _agentThreadStartedType) {
         final threadId = rawPayload["thread_id"];
         if (threadId is String && threadId.trim().isNotEmpty && !completer.isCompleted) {
+          _realtimeAudioConnection = RealtimeConnectionInfo.fromJson(rawPayload["realtime_connection"]);
           completer.complete(threadId.trim());
         }
       } else if (rawPayload["type"] == _agentTurnStartRejectedType && !completer.isCompleted) {
@@ -404,6 +410,9 @@ class _NewChatThreadState extends State<NewChatThread> {
       if (activeModel != null) {
         payload["provider"] = activeModel.provider;
         payload["model"] = activeModel.model;
+      }
+      if (_modelController.activeTurnDetection == "automatic" && _modelController.prefersWebrtcRealtime) {
+        payload["realtime_protocol"] = "webrtc";
       }
       final activeVoice = _modelController.activeVoice;
       if (activeVoice != null && activeVoice.trim().isNotEmpty) {
@@ -441,6 +450,7 @@ class _NewChatThreadState extends State<NewChatThread> {
       if (rawPayload["type"] == _agentThreadStartedType) {
         final threadId = rawPayload["thread_id"];
         if (threadId is String && threadId.trim().isNotEmpty && !completer.isCompleted) {
+          _realtimeAudioConnection = RealtimeConnectionInfo.fromJson(rawPayload["realtime_connection"]);
           completer.complete(threadId.trim());
         }
       } else if (rawPayload["type"] == _agentTurnStartRejectedType && !completer.isCompleted) {
@@ -458,6 +468,9 @@ class _NewChatThreadState extends State<NewChatThread> {
       if (activeModel != null) {
         payload["provider"] = activeModel.provider;
         payload["model"] = activeModel.model;
+      }
+      if (_modelController.activeTurnDetection == "automatic" && _modelController.prefersWebrtcRealtime) {
+        payload["realtime_protocol"] = "webrtc";
       }
       final activeVoice = _modelController.activeVoice;
       if (activeVoice != null && activeVoice.trim().isNotEmpty) {
@@ -521,6 +534,19 @@ class _NewChatThreadState extends State<NewChatThread> {
         _realtimeAudioThreadCompleter = null;
       }
     }
+  }
+
+  Future<void> _startWebrtcRealtimeAudioThread() async {
+    await _ensureRealtimeAudioThread(resolveWhenStarted: true);
+    final connection = _realtimeAudioConnection;
+    if (connection == null || connection.protocol != "webrtc") {
+      throw RoomServerException("Realtime WebRTC is not available for this model.");
+    }
+    await _realtimeWebrtcSession.start(connection);
+  }
+
+  Future<void> _stopWebrtcRealtimeAudioThread() async {
+    await _realtimeWebrtcSession.stop();
   }
 
   void _resolveRealtimeAudioThreadPath(String path) {
@@ -871,6 +897,12 @@ class _NewChatThreadState extends State<NewChatThread> {
         footer: toolArea.footer,
         audioInputEnabled: _modelController.supportsAudioInput,
         automaticAudioTurnDetection: _modelController.activeTurnDetection == "automatic",
+        onExternalAudioRecordingStart: _modelController.activeTurnDetection == "automatic" && _modelController.prefersWebrtcRealtime
+            ? _startWebrtcRealtimeAudioThread
+            : null,
+        onExternalAudioRecordingStop: _modelController.activeTurnDetection == "automatic" && _modelController.prefersWebrtcRealtime
+            ? _stopWebrtcRealtimeAudioThread
+            : null,
         onAudioRecordingStart: _modelController.activeTurnDetection == "automatic"
             ? () => _ensureRealtimeAudioThread(resolveWhenStarted: true)
             : null,

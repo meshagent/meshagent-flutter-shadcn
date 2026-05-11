@@ -110,6 +110,7 @@ class DatasetChatModelOption {
     this.inputFormat,
     this.outputFormat,
     this.turnDetection,
+    this.realtimeProtocols = const <String>[],
     this.active = false,
   });
 
@@ -124,6 +125,7 @@ class DatasetChatModelOption {
   final DatasetChatAudioFormat? inputFormat;
   final DatasetChatAudioFormat? outputFormat;
   final String? turnDetection;
+  final List<String> realtimeProtocols;
   final bool active;
 
   String get key => '$provider/$model';
@@ -147,6 +149,7 @@ class DatasetChatModelOption {
       inputFormat: inputFormat,
       outputFormat: outputFormat,
       turnDetection: turnDetection,
+      realtimeProtocols: realtimeProtocols,
       active: active ?? this.active,
     );
   }
@@ -168,6 +171,9 @@ class DatasetChatModelController extends ChangeNotifier {
   String? get activeVoice => _activeModality == 'audio' ? _activeVoice : null;
   DatasetChatAudioFormat get activeInputFormat => _activeModel?.inputFormat ?? const DatasetChatAudioFormat();
   String get activeTurnDetection => _activeModel?.turnDetection == 'automatic' ? 'automatic' : 'none';
+  List<String> get activeRealtimeProtocols => List<String>.unmodifiable(_activeModel?.realtimeProtocols ?? const <String>[]);
+  String get preferredRealtimeProtocol => activeRealtimeProtocols.contains('webrtc') ? 'webrtc' : 'websocket';
+  bool get prefersWebrtcRealtime => preferredRealtimeProtocol == 'webrtc';
   List<String> get availableVoices =>
       _activeModality == 'audio' ? List<String>.unmodifiable(_activeModel?.availableVoices ?? const <String>[]) : const <String>[];
   List<String> get outputModalities {
@@ -354,6 +360,7 @@ class DatasetChatModelController extends ChangeNotifier {
           inputFormat: DatasetChatAudioFormat.fromJson(modelValue['input_format']),
           outputFormat: DatasetChatAudioFormat.fromJson(modelValue['output_format']),
           turnDetection: modelValue['turn_detection']?.toString(),
+          realtimeProtocols: _stringList(modelValue['realtime_protocols']),
           active: modelValue['active'] == true,
         );
         nextModels.add(option);
@@ -402,6 +409,7 @@ class DatasetChatModelController extends ChangeNotifier {
           inputFormat: DatasetChatAudioFormat.fromJson(payload['input_format']),
           outputFormat: DatasetChatAudioFormat.fromJson(payload['output_format']),
           turnDetection: payload['turn_detection']?.toString(),
+          realtimeProtocols: _stringList(payload['realtime_protocols']),
           modalities: const <String>[],
           active: true,
         );
