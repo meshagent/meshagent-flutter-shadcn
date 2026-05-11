@@ -68,6 +68,32 @@ const String _agentModelChangeType = 'meshagent.agent.model.change';
 const String _agentModelChangedType = 'meshagent.agent.model.changed';
 const double _datasetDiffPreviewHorizontalPadding = 16;
 
+class DatasetChatAudioFormat {
+  const DatasetChatAudioFormat({this.type = 'audio/pcm', this.sampleRate = 24000, this.bitrate});
+
+  final String type;
+  final int? sampleRate;
+  final int? bitrate;
+
+  static DatasetChatAudioFormat? fromJson(Object? value) {
+    if (value is! Map) {
+      return null;
+    }
+    final rawType = value['type']?.toString().trim();
+    final rawSampleRate = value['sample_rate'] ?? value['rate'];
+    final rawBitrate = value['bitrate'];
+    return DatasetChatAudioFormat(
+      type: rawType == null || rawType.isEmpty ? 'audio/pcm' : rawType,
+      sampleRate: rawSampleRate is int ? rawSampleRate : int.tryParse(rawSampleRate?.toString() ?? ''),
+      bitrate: rawBitrate is int ? rawBitrate : int.tryParse(rawBitrate?.toString() ?? ''),
+    );
+  }
+
+  Map<String, Object?> toJson() {
+    return <String, Object?>{'type': type, if (sampleRate != null) 'sample_rate': sampleRate, if (bitrate != null) 'bitrate': bitrate};
+  }
+}
+
 class DatasetChatModelOption {
   const DatasetChatModelOption({
     required this.provider,
@@ -76,6 +102,10 @@ class DatasetChatModelOption {
     this.modelFriendlyName,
     this.modelDescription,
     this.modalities = const <String>['text'],
+    this.availableVoices = const <String>[],
+    this.defaultOutputVoice,
+    this.inputFormat,
+    this.outputFormat,
     this.active = false,
   });
 
@@ -85,6 +115,10 @@ class DatasetChatModelOption {
   final String? modelFriendlyName;
   final String? modelDescription;
   final List<String> modalities;
+  final List<String> availableVoices;
+  final String? defaultOutputVoice;
+  final DatasetChatAudioFormat? inputFormat;
+  final DatasetChatAudioFormat? outputFormat;
   final bool active;
 
   String get key => '$provider/$model';
@@ -103,6 +137,10 @@ class DatasetChatModelOption {
       modelFriendlyName: modelFriendlyName,
       modelDescription: modelDescription,
       modalities: modalities,
+      availableVoices: availableVoices,
+      defaultOutputVoice: defaultOutputVoice,
+      inputFormat: inputFormat,
+      outputFormat: outputFormat,
       active: active ?? this.active,
     );
   }
@@ -112,13 +150,19 @@ class DatasetChatModelController extends ChangeNotifier {
   List<DatasetChatModelOption> _models = const <DatasetChatModelOption>[];
   DatasetChatModelOption? _activeModel;
   String _activeModality = 'text';
+  String? _activeVoice;
   Future<void> Function(DatasetChatModelOption option)? _changeHandler;
+  Future<void> Function(String voice)? _voiceChangeHandler;
   bool _locked = false;
   bool _changing = false;
 
   List<DatasetChatModelOption> get models => _models;
   DatasetChatModelOption? get activeModel => _activeModel;
   String get activeModality => _activeModality;
+  String? get activeVoice => _activeModality == 'audio' ? _activeVoice : null;
+  DatasetChatAudioFormat get activeInputFormat => _activeModel?.inputFormat ?? const DatasetChatAudioFormat();
+  List<String> get availableVoices =>
+      _activeModality == 'audio' ? List<String>.unmodifiable(_activeModel?.availableVoices ?? const <String>[]) : const <String>[];
   List<String> get outputModalities {
     final modalities = _activeModel?.modalities ?? const <String>['text'];
     final supported = [
@@ -134,12 +178,46 @@ class DatasetChatModelController extends ChangeNotifier {
   bool get isLocked => _locked;
   bool get canChange => !_locked && !_changing;
 
+  String _resolvedOutputModality(DatasetChatModelOption? model, String current) {
+    final supported = [
+      for (final modality in model?.modalities ?? const <String>['text'])
+        if (modality == 'text' || modality == 'audio') modality,
+    ];
+    if (supported.isEmpty) {
+      return 'text';
+    }
+    return supported.contains(current) ? current : supported.first;
+  }
+
+  String? _resolvedVoice(DatasetChatModelOption? model, String? current) {
+    if (_activeModality != 'audio' || model == null || model.availableVoices.isEmpty) {
+      return null;
+    }
+    if (current != null && model.availableVoices.contains(current)) {
+      return current;
+    }
+    final defaultVoice = model.defaultOutputVoice;
+    if (defaultVoice != null && model.availableVoices.contains(defaultVoice)) {
+      return defaultVoice;
+    }
+    return model.availableVoices.first;
+  }
+
   void bindChangeHandler(Future<void> Function(DatasetChatModelOption option) handler) {
     _changeHandler = handler;
   }
 
+  void bindVoiceChangeHandler(Future<void> Function(String voice) handler) {
+    _voiceChangeHandler = handler;
+  }
+
   void unbindChangeHandler() {
     _changeHandler = null;
+    _voiceChangeHandler = null;
+  }
+
+  void unbindVoiceChangeHandler() {
+    _voiceChangeHandler = null;
   }
 
   void setLocked(bool locked) {
@@ -154,6 +232,7 @@ class DatasetChatModelController extends ChangeNotifier {
     _models = [for (final model in other.models) model.copyWith()];
     _activeModel = other.activeModel?.copyWith();
     _activeModality = other.activeModality;
+    _activeVoice = other.activeVoice;
     notifyListeners();
   }
 
@@ -171,6 +250,33 @@ class DatasetChatModelController extends ChangeNotifier {
     }
   }
 
+  Future<void> changeVoice(String voice) async {
+    final normalized = voice.trim();
+    if (_activeModality != 'audio' || !canChange || _voiceChangeHandler == null || normalized.isEmpty || normalized == _activeVoice) {
+      return;
+    }
+    _changing = true;
+    notifyListeners();
+    try {
+      await _voiceChangeHandler!(normalized);
+    } finally {
+      _changing = false;
+      notifyListeners();
+    }
+  }
+
+  void selectVoiceLocally(String voice) {
+    final normalized = voice.trim();
+    if (_activeModality != 'audio' || _locked || normalized.isEmpty || normalized == _activeVoice) {
+      return;
+    }
+    if (availableVoices.isNotEmpty && !availableVoices.contains(normalized)) {
+      return;
+    }
+    _activeVoice = normalized;
+    notifyListeners();
+  }
+
   void selectModelLocally(DatasetChatModelOption option) {
     if (_locked || option.key == _activeModel?.key) {
       return;
@@ -179,9 +285,8 @@ class DatasetChatModelController extends ChangeNotifier {
         ? [for (final model in _models) model.copyWith(active: model.key == option.key)]
         : [for (final model in _models) model.copyWith(active: false), option.copyWith(active: true)];
     _activeModel = option.copyWith(active: true);
-    if (option.modalities.isNotEmpty && !option.modalities.contains(_activeModality)) {
-      _activeModality = 'text';
-    }
+    _activeModality = _resolvedOutputModality(_activeModel, _activeModality);
+    _activeVoice = _resolvedVoice(_activeModel, option.defaultOutputVoice);
     notifyListeners();
   }
 
@@ -191,6 +296,7 @@ class DatasetChatModelController extends ChangeNotifier {
       return;
     }
     _activeModality = normalized;
+    _activeVoice = _resolvedVoice(_activeModel, _activeVoice);
     notifyListeners();
   }
 
@@ -236,6 +342,10 @@ class DatasetChatModelController extends ChangeNotifier {
           modelFriendlyName: modelValue['friendly_name']?.toString(),
           modelDescription: modelValue['description']?.toString(),
           modalities: modalities.isEmpty ? const <String>['text'] : modalities,
+          availableVoices: _stringList(modelValue['available_voices']),
+          defaultOutputVoice: modelValue['default_output_voice']?.toString(),
+          inputFormat: DatasetChatAudioFormat.fromJson(modelValue['input_format']),
+          outputFormat: DatasetChatAudioFormat.fromJson(modelValue['output_format']),
           active: modelValue['active'] == true,
         );
         nextModels.add(option);
@@ -249,17 +359,13 @@ class DatasetChatModelController extends ChangeNotifier {
       final refreshedActive = nextModels.firstWhereOrNull((option) => option.key == priorActive.key);
       if (refreshedActive != null) {
         active = refreshedActive;
-        if (refreshedActive.modalities.isNotEmpty && !refreshedActive.modalities.contains(_activeModality)) {
-          _activeModality = 'text';
-        }
       }
     }
     active ??= nextModels.isEmpty ? null : nextModels.first;
-    if (active != null && active.modalities.isNotEmpty && !active.modalities.contains(_activeModality)) {
-      _activeModality = 'text';
-    }
     _models = [for (final option in nextModels) option.copyWith(active: option.key == active?.key)];
     _activeModel = active?.copyWith(active: true);
+    _activeModality = _resolvedOutputModality(_activeModel, _activeModality);
+    _activeVoice = _resolvedVoice(_activeModel, _activeVoice);
     notifyListeners();
   }
 
@@ -285,6 +391,8 @@ class DatasetChatModelController extends ChangeNotifier {
           model: model,
           modelFriendlyName: payload['model_friendly_name']?.toString(),
           modelDescription: payload['model_description']?.toString(),
+          inputFormat: DatasetChatAudioFormat.fromJson(payload['input_format']),
+          outputFormat: DatasetChatAudioFormat.fromJson(payload['output_format']),
           modalities: const <String>[],
           active: true,
         );
@@ -293,10 +401,10 @@ class DatasetChatModelController extends ChangeNotifier {
     } else {
       _models = [for (final option in _models) option.copyWith(active: option.key == active.key)];
     }
-    if (active.modalities.isNotEmpty && !active.modalities.contains(_activeModality)) {
-      _activeModality = 'text';
-    }
     _activeModel = active;
+    _activeModality = _resolvedOutputModality(_activeModel, _activeModality);
+    final payloadVoice = payload['voice']?.toString().trim();
+    _activeVoice = _resolvedVoice(_activeModel, payloadVoice == null || payloadVoice.isEmpty ? active.defaultOutputVoice : payloadVoice);
     notifyListeners();
   }
 }
@@ -384,6 +492,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     _ownsModelController = widget.modelController == null;
     _modelController = widget.modelController ?? DatasetChatModelController();
     _modelController.bindChangeHandler(_changeModel);
+    _modelController.bindVoiceChangeHandler(_changeVoice);
     _composerInputKey = widget.composerKey ?? GlobalObjectKey(_controller);
     _roomSubscription = widget.room.listen(_onRoomEvent);
     widget.room.messaging.addListener(_onMessagingChanged);
@@ -418,6 +527,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       _ownsModelController = widget.modelController == null;
       _modelController = widget.modelController ?? DatasetChatModelController();
       _modelController.bindChangeHandler(_changeModel);
+      _modelController.bindVoiceChangeHandler(_changeVoice);
     }
     if (oldWidget.path != widget.path || oldWidget.agentName != widget.agentName || oldWidget.room != widget.room) {
       _usage = null;
@@ -1550,6 +1660,29 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     );
   }
 
+  Future<void> _changeVoice(String voice) async {
+    final agent = _agentParticipant();
+    final activeModel = _modelController.activeModel;
+    if (agent == null) {
+      throw StateError('No online agent supports agent messages for this thread.');
+    }
+    if (activeModel == null) {
+      throw StateError('No model selected for this thread.');
+    }
+    await widget.room.messaging.sendMessage(
+      to: agent,
+      type: _agentRoomMessageType,
+      message: {
+        'type': _agentModelChangeType,
+        'thread_id': widget.path,
+        'message_id': const Uuid().v4(),
+        'provider': activeModel.provider,
+        'model': activeModel.model,
+        'voice': voice,
+      },
+    );
+  }
+
   bool _handleModelPayload(Map<String, dynamic> payload) {
     final type = payload['type'];
     if (type == _agentModelsResponseType) {
@@ -1838,6 +1971,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       throw StateError('No online agent supports agent messages for this thread.');
     }
     final activeModel = _modelController.activeModel;
+    final activeVoice = _modelController.activeVoice;
+    final inputFormat = _modelController.activeInputFormat;
     if (finalChunk) {
       await widget.room.messaging.sendMessage(
         to: agent,
@@ -1848,6 +1983,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
           'message_id': const Uuid().v4(),
           if (activeModel != null) 'provider': activeModel.provider,
           if (activeModel != null) 'model': activeModel.model,
+          if (activeVoice != null && activeVoice.trim().isNotEmpty) 'voice': activeVoice.trim(),
           'output_modalities': [_modelController.activeModality],
         },
       );
@@ -1862,8 +1998,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         'message_id': const Uuid().v4(),
         if (activeModel != null) 'provider': activeModel.provider,
         if (activeModel != null) 'model': activeModel.model,
-        'mime_type': 'audio/pcm',
-        'sample_rate': 24000,
+        'mime_type': inputFormat.type,
+        if (inputFormat.sampleRate != null) 'sample_rate': inputFormat.sampleRate,
+        if (inputFormat.bitrate != null) 'bitrate': inputFormat.bitrate,
       },
       attachment: chunk,
     );
@@ -2135,7 +2272,6 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         placeholder: widget.inputPlaceholder,
         leading: toolArea.leading,
         footer: toolArea.footer,
-        trailing: null,
         audioInputEnabled: _modelController.supportsAudioInput,
         onAudioChunk: _sendRealtimeAudioChunk,
         room: widget.room,
@@ -3642,11 +3778,17 @@ class _DatasetThreadRealtimeAudioPlayer {
   static const int _sampleRate = 24000;
   static const int _channels = 1;
   static const int _bytesPerSample = 2;
-  static const int _prebufferBytes = _sampleRate * _channels * _bytesPerSample ~/ 4;
+  static const int _bytesPerFrame = _channels * _bytesPerSample;
+  static const Duration _prebufferDuration = Duration(seconds: 1);
+  static const Duration _underrunPaddingGrace = Duration(milliseconds: 20);
+  static const Duration _endSilenceDuration = Duration(milliseconds: 120);
+  static const Duration _maxUnderrunPadding = Duration(seconds: 5);
+  static final int _prebufferBytes = _bytesForDuration(_prebufferDuration);
 
   final Map<String, AudioSource> _streams = <String, AudioSource>{};
   final Map<String, Future<void>> _queues = <String, Future<void>>{};
   final Map<String, int> _bufferedBytes = <String, int>{};
+  final Map<String, DateTime> _playStartedAt = <String, DateTime>{};
   final Set<String> _playing = <String>{};
   bool _initialized = false;
 
@@ -3668,7 +3810,8 @@ class _DatasetThreadRealtimeAudioPlayer {
       await _ensureInitialized();
       final source = SoLoud.instance.setBufferStream(
         maxBufferSizeDuration: const Duration(seconds: 120),
-        bufferingTimeNeeds: 0.25,
+        bufferingType: BufferingType.released,
+        bufferingTimeNeeds: _prebufferDuration.inMilliseconds / Duration.millisecondsPerSecond,
         sampleRate: _sampleRate,
         channels: Channels.mono,
         format: BufferType.s16le,
@@ -3694,12 +3837,14 @@ class _DatasetThreadRealtimeAudioPlayer {
         return;
       }
       final pcm = _pcmAudioBytes(bytes: data, mimeType: mimeType);
+      if (pcm.isEmpty) {
+        return;
+      }
+      _padLateChunkWithSilence(itemId: itemId, source: source);
       SoLoud.instance.addAudioDataStream(source, pcm);
       final bufferedBytes = (_bufferedBytes[itemId] ?? 0) + pcm.length;
       _bufferedBytes[itemId] = bufferedBytes;
-      if (bufferedBytes >= _prebufferBytes && _playing.add(itemId)) {
-        SoLoud.instance.play(source);
-      }
+      _startPlaybackIfReady(itemId: itemId, source: source);
     } catch (_) {}
   }
 
@@ -3715,7 +3860,9 @@ class _DatasetThreadRealtimeAudioPlayer {
       if (source == null) {
         return;
       }
+      _appendSilence(source: source, itemId: itemId, byteCount: _bytesForDuration(_endSilenceDuration));
       if (_playing.add(itemId)) {
+        _playStartedAt[itemId] = DateTime.now();
         SoLoud.instance.play(source);
       }
       SoLoud.instance.setDataIsEnded(source);
@@ -3730,12 +3877,14 @@ class _DatasetThreadRealtimeAudioPlayer {
     _streams.remove(itemId);
     _queues.remove(itemId);
     _bufferedBytes.remove(itemId);
+    _playStartedAt.remove(itemId);
     _playing.remove(itemId);
   }
 
   Future<void> stop(String itemId) async {
     _queues.remove(itemId);
     _bufferedBytes.remove(itemId);
+    _playStartedAt.remove(itemId);
     _playing.remove(itemId);
     final source = _streams.remove(itemId);
     if (source == null) {
@@ -3754,6 +3903,56 @@ class _DatasetThreadRealtimeAudioPlayer {
   }
 
   Future<void> dispose() => stopAll();
+
+  void _startPlaybackIfReady({required String itemId, required AudioSource source}) {
+    final bufferedBytes = _bufferedBytes[itemId] ?? 0;
+    if (bufferedBytes < _prebufferBytes || !_playing.add(itemId)) {
+      return;
+    }
+    _playStartedAt[itemId] = DateTime.now();
+    SoLoud.instance.play(source);
+  }
+
+  void _padLateChunkWithSilence({required String itemId, required AudioSource source}) {
+    final startedAt = _playStartedAt[itemId];
+    if (startedAt == null) {
+      return;
+    }
+    final elapsed = DateTime.now().difference(startedAt) - _underrunPaddingGrace;
+    final expectedBytes = _bytesForDuration(elapsed);
+    final bufferedBytes = _bufferedBytes[itemId] ?? 0;
+    final missingBytes = expectedBytes - bufferedBytes;
+    if (missingBytes <= 0) {
+      return;
+    }
+    _appendSilence(source: source, itemId: itemId, byteCount: math.min(missingBytes, _bytesForDuration(_maxUnderrunPadding)));
+  }
+
+  void _appendSilence({required AudioSource source, required String itemId, required int byteCount}) {
+    final alignedByteCount = _alignedByteCount(byteCount);
+    if (alignedByteCount <= 0) {
+      return;
+    }
+    SoLoud.instance.addAudioDataStream(source, Uint8List(alignedByteCount));
+    _bufferedBytes[itemId] = (_bufferedBytes[itemId] ?? 0) + alignedByteCount;
+  }
+
+  static int _bytesForDuration(Duration duration) {
+    final microseconds = duration.inMicroseconds;
+    if (microseconds <= 0) {
+      return 0;
+    }
+    final frames = (_sampleRate * microseconds / Duration.microsecondsPerSecond).ceil();
+    return frames * _bytesPerFrame;
+  }
+
+  static int _alignedByteCount(int byteCount) {
+    if (byteCount <= 0) {
+      return 0;
+    }
+    final remainder = byteCount % _bytesPerFrame;
+    return remainder == 0 ? byteCount : byteCount + _bytesPerFrame - remainder;
+  }
 }
 
 Uint8List _pcmAudioBytes({required Uint8List bytes, required String? mimeType}) {

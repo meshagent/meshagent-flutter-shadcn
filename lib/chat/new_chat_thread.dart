@@ -151,6 +151,7 @@ class _NewChatThreadState extends State<NewChatThread> {
     _ownsModelController = widget.modelController == null;
     _modelController = widget.modelController ?? DatasetChatModelController();
     _modelController.bindChangeHandler(_selectModelForNewThread);
+    _modelController.bindVoiceChangeHandler(_selectVoiceForNewThread);
     _composerInputKey = widget.composerKey ?? GlobalObjectKey(_controller);
     _roomSubscription = widget.room.listen(_onRoomEvent);
     widget.room.messaging.addListener(_onMessagingChanged);
@@ -194,6 +195,7 @@ class _NewChatThreadState extends State<NewChatThread> {
       _ownsModelController = widget.modelController == null;
       _modelController = widget.modelController ?? DatasetChatModelController();
       _modelController.bindChangeHandler(_selectModelForNewThread);
+      _modelController.bindVoiceChangeHandler(_selectVoiceForNewThread);
       _requestModels();
     }
 
@@ -221,6 +223,7 @@ class _NewChatThreadState extends State<NewChatThread> {
       _controller.dispose();
     }
     _modelController.unbindChangeHandler();
+    _modelController.unbindVoiceChangeHandler();
     if (_ownsModelController) {
       _modelController.dispose();
     }
@@ -327,6 +330,10 @@ class _NewChatThreadState extends State<NewChatThread> {
     _modelController.selectModelLocally(option);
   }
 
+  Future<void> _selectVoiceForNewThread(String voice) async {
+    _modelController.selectVoiceLocally(voice);
+  }
+
   void _requestModels() {
     final agent = _agent;
     if (agent == null) {
@@ -398,6 +405,10 @@ class _NewChatThreadState extends State<NewChatThread> {
         payload["provider"] = activeModel.provider;
         payload["model"] = activeModel.model;
       }
+      final activeVoice = _modelController.activeVoice;
+      if (activeVoice != null && activeVoice.trim().isNotEmpty) {
+        payload["voice"] = activeVoice.trim();
+      }
       payload["output_modalities"] = [_modelController.activeModality];
       if (senderName != null && senderName.trim().isNotEmpty) {
         payload["sender_name"] = senderName.trim();
@@ -447,6 +458,10 @@ class _NewChatThreadState extends State<NewChatThread> {
       if (activeModel != null) {
         payload["provider"] = activeModel.provider;
         payload["model"] = activeModel.model;
+      }
+      final activeVoice = _modelController.activeVoice;
+      if (activeVoice != null && activeVoice.trim().isNotEmpty) {
+        payload["voice"] = activeVoice.trim();
       }
       payload["output_modalities"] = [_modelController.activeModality];
       if (senderName != null && senderName.trim().isNotEmpty) {
@@ -503,6 +518,8 @@ class _NewChatThreadState extends State<NewChatThread> {
       final path = await _ensureRealtimeAudioThread();
       final agent = _agent ?? await _waitForAgentOnline();
       final activeModel = _modelController.activeModel;
+      final activeVoice = _modelController.activeVoice;
+      final inputFormat = _modelController.activeInputFormat;
       if (finalChunk) {
         await widget.room.messaging.sendMessage(
           to: agent,
@@ -513,6 +530,7 @@ class _NewChatThreadState extends State<NewChatThread> {
             "message_id": const Uuid().v4(),
             if (activeModel != null) "provider": activeModel.provider,
             if (activeModel != null) "model": activeModel.model,
+            if (activeVoice != null && activeVoice.trim().isNotEmpty) "voice": activeVoice.trim(),
             "output_modalities": [_modelController.activeModality],
           },
         );
@@ -542,8 +560,10 @@ class _NewChatThreadState extends State<NewChatThread> {
           "message_id": const Uuid().v4(),
           if (activeModel != null) "provider": activeModel.provider,
           if (activeModel != null) "model": activeModel.model,
-          "mime_type": "audio/pcm",
-          "sample_rate": 24000,
+          if (activeVoice != null && activeVoice.trim().isNotEmpty) "voice": activeVoice.trim(),
+          "mime_type": inputFormat.type,
+          if (inputFormat.sampleRate != null) "sample_rate": inputFormat.sampleRate,
+          if (inputFormat.bitrate != null) "bitrate": inputFormat.bitrate,
         },
         attachment: chunk,
       );
@@ -802,7 +822,6 @@ class _NewChatThreadState extends State<NewChatThread> {
         placeholder: widget.inputPlaceholder,
         leading: toolArea.leading,
         footer: toolArea.footer,
-        trailing: null,
         audioInputEnabled: _modelController.supportsAudioInput,
         onAudioChunk: _sendRealtimeAudioChunk,
         onSend: (value, attachments) async {
