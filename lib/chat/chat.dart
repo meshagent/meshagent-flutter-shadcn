@@ -6671,6 +6671,24 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
 
     for (final message in messages) {
       for (final attachment in message.getChildren().whereType<MeshElement>()) {
+        if (attachment.tagName != "image" && attachment.tagName != "file") {
+          continue;
+        }
+
+        final pathAttribute = attachment.getAttribute("path");
+        final path = pathAttribute is String ? _sanitizePath(pathAttribute) : null;
+        if (path != null && path.trim().isNotEmpty && _isImageFilePath(path)) {
+          final attachmentElementId = attachment.id;
+          imagesInThread.add(
+            ChatThreadFeedImage(
+              attachmentElementId: attachmentElementId == null || attachmentElementId.trim().isEmpty ? "path:$path" : attachmentElementId,
+              imageId: "",
+              path: path,
+            ),
+          );
+          continue;
+        }
+
         if (attachment.tagName != "image") {
           continue;
         }
@@ -6906,28 +6924,29 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     _ThreadImageRecord? imageRecord,
     bool loading, {
     required List<ShadContextMenuItem> items,
+    VoidCallback? onOpenFullscreen,
   }) {
-    final child = _wrapTapTarget(
-      SizedBox(
-        width: 312.5,
-        height: 312.5,
-        child: _wrapWithCorners(
-          ColoredBox(
-            color: ShadTheme.of(context).colorScheme.background,
-            child: imageRecord == null
-                ? Center(
-                    child: loading
-                        ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
-                        : Icon(LucideIcons.imageOff, size: 20, color: ShadTheme.of(context).colorScheme.mutedForeground),
-                  )
-                : _ImageMime.isSvg(imageRecord.mimeType)
-                ? SvgPicture.memory(imageRecord.data, fit: BoxFit.cover)
-                : UniversalImage(imageRecord.data, fit: BoxFit.cover),
-          ),
+    final imagePreview = SizedBox(
+      width: 312.5,
+      height: 312.5,
+      child: _wrapWithCorners(
+        ColoredBox(
+          color: ShadTheme.of(context).colorScheme.background,
+          child: imageRecord == null
+              ? Center(
+                  child: loading
+                      ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                      : Icon(LucideIcons.imageOff, size: 20, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                )
+              : _ImageMime.isSvg(imageRecord.mimeType)
+              ? SvgPicture.memory(imageRecord.data, fit: BoxFit.cover)
+              : UniversalImage(imageRecord.data, fit: BoxFit.cover),
         ),
       ),
-      path,
     );
+    final child = onOpenFullscreen == null
+        ? _wrapTapTarget(imagePreview, path)
+        : ShadGestureDetector(cursor: SystemMouseCursors.zoomIn, onTap: onOpenFullscreen, child: imagePreview);
 
     if (_usesMobileContextLayout(context)) {
       return CoordinatedShadContextMenuRegion(items: items, tapEnabled: false, child: child);
@@ -7071,6 +7090,12 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     final normalizedPath = _sanitizePath(pathAttribute);
 
     if (attachment.tagName == "file" && _isImageFilePath(normalizedPath)) {
+      final initialIndex = feedImages.indexWhere((entry) => entry.path == normalizedPath);
+      final onOpenFullscreen = initialIndex < 0
+          ? null
+          : () {
+              _openThreadImageViewer(context, images: feedImages, initialIndex: initialIndex);
+            };
       return _ThreadImageLookup(
         lookupKey: normalizedPath,
         readCached: () => _readCachedImageRecord(normalizedPath),
@@ -7090,7 +7115,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
           return Column(
             crossAxisAlignment: mine ? .end : .start,
             children: [
-              _buildFileImageInThread(context, normalizedPath, imageRecord, loading, items: items),
+              _buildFileImageInThread(context, normalizedPath, imageRecord, loading, items: items, onOpenFullscreen: onOpenFullscreen),
               if (normalizedAttachmentRef != null)
                 _buildReactionRow(
                   context,
@@ -8266,6 +8291,7 @@ class ChatThreadFeedImage {
   const ChatThreadFeedImage({
     required this.attachmentElementId,
     required this.imageId,
+    this.path,
     this.imageUri,
     this.mimeType,
     this.status,
@@ -8276,6 +8302,7 @@ class ChatThreadFeedImage {
 
   final String attachmentElementId;
   final String imageId;
+  final String? path;
   final String? imageUri;
   final String? mimeType;
   final String? status;
@@ -8737,6 +8764,13 @@ class _ThreadImageGalleryPageState extends State<ChatThreadImageGalleryPage> {
 
   Future<_ThreadImageRecord?> _loadCurrentImage() async {
     final entry = widget.images[_currentIndex];
+    final path = entry.path?.trim();
+    if (path != null && path.isNotEmpty) {
+      final file = await widget.room.storage.download(path);
+      final mimeType = file.mimeType.trim().isNotEmpty ? file.mimeType.trim() : (entry.mimeType ?? "image/png");
+      return _ThreadImageRecord(data: file.data, mimeType: mimeType);
+    }
+
     final imageUri = entry.imageUri?.trim();
     if (imageUri != null && imageUri.isNotEmpty) {
       final record = await _loadGeneratedThreadImageRecordFromUri(widget.room, imageUri: imageUri, fallbackMimeType: entry.mimeType);
@@ -8912,6 +8946,7 @@ class _ThreadImageGalleryPageState extends State<ChatThreadImageGalleryPage> {
                     final image = widget.images[index];
                     return _ThreadFullscreenImage(
                       room: widget.room,
+                      path: image.path,
                       imageId: image.imageId,
                       imageUri: image.imageUri,
                       fallbackMimeType: image.mimeType,
@@ -8996,6 +9031,7 @@ class _ThreadFullscreenImage extends StatelessWidget {
   const _ThreadFullscreenImage({
     required this.room,
     required this.imageId,
+    this.path,
     this.imageUri,
     this.fallbackMimeType,
     this.status,
@@ -9006,6 +9042,7 @@ class _ThreadFullscreenImage extends StatelessWidget {
 
   final RoomClient room;
   final String imageId;
+  final String? path;
   final String? imageUri;
   final String? fallbackMimeType;
   final String? status;
@@ -9014,6 +9051,13 @@ class _ThreadFullscreenImage extends StatelessWidget {
   final Future<void> Function(_ThreadImageRecord image)? onSaveImage;
 
   Future<_ThreadImageRecord?> _loadImage() async {
+    final imagePath = path?.trim();
+    if (imagePath != null && imagePath.isNotEmpty) {
+      final file = await room.storage.download(imagePath);
+      final mimeType = file.mimeType.trim().isNotEmpty ? file.mimeType.trim() : (fallbackMimeType ?? "image/png");
+      return _ThreadImageRecord(data: file.data, mimeType: mimeType);
+    }
+
     final uri = imageUri?.trim();
     if (uri != null && uri.isNotEmpty) {
       final record = await _loadGeneratedThreadImageRecordFromUri(room, imageUri: uri, fallbackMimeType: fallbackMimeType);
