@@ -4249,11 +4249,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
       }
       return Row(mainAxisSize: MainAxisSize.min, children: controls);
     }();
-    final inputTrailer = widget.footer == null && trailer != null
-        ? Expanded(
-            child: Align(alignment: Alignment.centerRight, child: trailer),
-          )
-        : null;
+    final inputTrailer = widget.footer == null ? trailer : null;
     final reservedFooterTrailer = trailer ?? const SizedBox(width: 32, height: 32);
     if (recordingAudio) {
       return Column(
