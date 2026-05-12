@@ -80,16 +80,22 @@ class _MultiThreadViewState extends State<MultiThreadView> {
   @override
   void didUpdateWidget(covariant MultiThreadView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.room == widget.room && oldWidget.controller == widget.controller) {
-      return;
+    final controllerChanged = oldWidget.room != widget.room || oldWidget.controller != widget.controller;
+    final agentChanged = oldWidget.agentName != widget.agentName;
+
+    if (controllerChanged) {
+      if (_ownsController) {
+        _controller.dispose();
+      }
+      _ownsController = widget.controller == null;
+      _controller = widget.controller ?? ChatThreadController(room: widget.room);
+      _composerKey = GlobalKey();
     }
 
-    if (_ownsController) {
-      _controller.dispose();
+    if (agentChanged) {
+      _controller.clear();
+      _composerKey = GlobalKey();
     }
-    _ownsController = widget.controller == null;
-    _controller = widget.controller ?? ChatThreadController(room: widget.room);
-    _composerKey = GlobalKey();
   }
 
   @override
