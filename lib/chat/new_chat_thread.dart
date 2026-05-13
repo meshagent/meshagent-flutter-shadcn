@@ -4,23 +4,26 @@ import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:meshagent/meshagent.dart';
+import 'package:meshagent_agents/meshagent_agents.dart'
+    show
+        AgentMessage,
+        ModelsRequest,
+        StartThread,
+        ThreadStarted,
+        ThreadStartRejected,
+        agentInputContent,
+        agentModelChangedType,
+        agentModelsResponseType,
+        agentRealtimeAudioChunkType,
+        agentRealtimeAudioCommitType,
+        agentRoomMessageType,
+        agentTurnStartType;
 import 'package:meshagent_flutter_shadcn/chat/chat.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:uuid/uuid.dart';
 
 import 'dataset_chat_thread.dart';
 import 'realtime_webrtc_session.dart';
-
-const String _agentRoomMessageType = "agent-message";
-const String _agentThreadStartType = "meshagent.agent.thread.start";
-const String _agentThreadStartedType = "meshagent.agent.thread.started";
-const String _agentTurnStartRejectedType = "meshagent.agent.turn.start.rejected";
-const String _agentTurnStartType = "meshagent.agent.turn.start";
-const String _agentRealtimeAudioChunkType = "meshagent.agent.realtime_audio.chunk";
-const String _agentRealtimeAudioCommitType = "meshagent.agent.realtime_audio.commit";
-const String _agentModelsRequestType = "meshagent.agent.models.request";
-const String _agentModelsResponseType = "meshagent.agent.models.response";
-const String _agentModelChangedType = "meshagent.agent.model.changed";
 
 typedef NewChatThreadBuilder = Widget Function(BuildContext context, String threadPath);
 typedef NewChatThreadToolsBuilder = Widget Function(BuildContext context, ChatThreadController controller, ChatThreadSnapshot state);
@@ -248,7 +251,7 @@ class _NewChatThreadState extends State<NewChatThread> {
     if (event is! RoomMessageEvent) {
       return;
     }
-    if (event.message.type == _agentRoomMessageType && event.message.fromParticipantId == _agent?.id) {
+    if (event.message.type == agentRoomMessageType && event.message.fromParticipantId == _agent?.id) {
       final message = event.message.message;
       final rawPayload = message["type"] is String ? message : message["payload"];
       final payload = rawPayload is Map<String, dynamic>
@@ -257,9 +260,9 @@ class _NewChatThreadState extends State<NewChatThread> {
           ? Map<String, dynamic>.from(rawPayload)
           : null;
       if (payload != null) {
-        if (payload["type"] == _agentModelsResponseType) {
+        if (payload["type"] == agentModelsResponseType) {
           _modelController.applyModelsResponse(payload);
-        } else if (payload["type"] == _agentModelChangedType && payload["thread_id"] == null) {
+        } else if (payload["type"] == agentModelChangedType && payload["thread_id"] == null) {
           _modelController.applyModelChanged(payload);
         }
       }
@@ -348,20 +351,12 @@ class _NewChatThreadState extends State<NewChatThread> {
       try {
         await widget.room.messaging.sendMessage(
           to: agent,
-          type: _agentRoomMessageType,
+          type: agentRoomMessageType,
           ignoreOffline: true,
-          message: {"type": _agentModelsRequestType, "message_id": const Uuid().v4()},
+          message: ModelsRequest(messageId: const Uuid().v4()).toJson(),
         );
       } catch (_) {}
     }());
-  }
-
-  List<Map<String, Object?>> _agentInputContent({required String text, required List<String> attachments}) {
-    return [
-      if (text.trim().isNotEmpty) {"type": "text", "text": text},
-      for (final attachment in attachments)
-        if (attachment.trim().isNotEmpty) {"type": "file", "url": attachment},
-    ];
   }
 
   Future<String> _sendStartThreadMessage({
@@ -374,7 +369,7 @@ class _NewChatThreadState extends State<NewChatThread> {
     final completer = Completer<String>();
     late final StreamSubscription<RoomEvent> subscription;
     subscription = widget.room.listen((event) {
-      if (event is! RoomMessageEvent || event.message.fromParticipantId != agent.id || event.message.type != _agentRoomMessageType) {
+      if (event is! RoomMessageEvent || event.message.fromParticipantId != agent.id || event.message.type != agentRoomMessageType) {
         return;
       }
       final rawMessage = event.message.message;
@@ -382,47 +377,34 @@ class _NewChatThreadState extends State<NewChatThread> {
       if (rawPayload is! Map) {
         return;
       }
-      if (rawPayload["source_message_id"] != messageId) {
+      final payload = AgentMessage.fromJson(Map<String, dynamic>.from(rawPayload));
+      if (payload is ThreadStarted && payload.sourceMessageId == messageId) {
+        final threadId = payload.threadId.trim();
+        if (threadId.isNotEmpty && !completer.isCompleted) {
+          _realtimeAudioConnection = RealtimeConnectionInfo.fromJson(payload.realtimeConnection?.toJson());
+          completer.complete(threadId);
+        }
         return;
       }
-      if (rawPayload["type"] == _agentThreadStartedType) {
-        final threadId = rawPayload["thread_id"];
-        if (threadId is String && threadId.trim().isNotEmpty && !completer.isCompleted) {
-          _realtimeAudioConnection = RealtimeConnectionInfo.fromJson(rawPayload["realtime_connection"]);
-          completer.complete(threadId.trim());
-        }
-      } else if (rawPayload["type"] == _agentTurnStartRejectedType && !completer.isCompleted) {
-        final error = rawPayload["error"];
-        final message = error is Map ? error["message"] : null;
-        completer.completeError(
-          RoomServerException(message is String && message.trim().isNotEmpty ? message.trim() : "Thread start rejected."),
-        );
+      if (payload is ThreadStartRejected && payload.sourceMessageId == messageId && !completer.isCompleted) {
+        completer.completeError(RoomServerException(payload.error.message));
       }
     });
 
     try {
-      final payload = <String, Object?>{
-        "type": _agentThreadStartType,
-        "message_id": messageId,
-        "content": _agentInputContent(text: text, attachments: attachments),
-      };
       final activeModel = _modelController.activeModel;
-      if (activeModel != null) {
-        payload["provider"] = activeModel.provider;
-        payload["model"] = activeModel.model;
-      }
-      if (_modelController.activeTurnDetection == "automatic" && _modelController.prefersWebrtcRealtime) {
-        payload["realtime_protocol"] = "webrtc";
-      }
       final activeVoice = _modelController.activeVoice;
-      if (activeVoice != null && activeVoice.trim().isNotEmpty) {
-        payload["voice"] = activeVoice.trim();
-      }
-      payload["output_modalities"] = [_modelController.activeModality];
-      if (senderName != null && senderName.trim().isNotEmpty) {
-        payload["sender_name"] = senderName.trim();
-      }
-      await widget.room.messaging.sendMessage(to: agent, type: _agentRoomMessageType, message: payload);
+      final payload = StartThread(
+        messageId: messageId,
+        content: agentInputContent(text: text, attachments: attachments),
+        provider: activeModel?.provider,
+        model: activeModel?.model,
+        realtimeProtocol: _modelController.activeTurnDetection == "automatic" && _modelController.prefersWebrtcRealtime ? "webrtc" : null,
+        voice: activeVoice != null && activeVoice.trim().isNotEmpty ? activeVoice.trim() : null,
+        outputModalities: [_modelController.activeModality],
+        senderName: senderName != null && senderName.trim().isNotEmpty ? senderName.trim() : null,
+      );
+      await widget.room.messaging.sendMessage(to: agent, type: agentRoomMessageType, message: payload.toJson());
       return await completer.future.timeout(const Duration(seconds: 30));
     } on TimeoutException {
       throw RoomServerException("Timed out waiting for thread to start.");
@@ -439,48 +421,41 @@ class _NewChatThreadState extends State<NewChatThread> {
     final completer = Completer<String>();
     late final StreamSubscription<RoomEvent> subscription;
     subscription = widget.room.listen((event) {
-      if (event is! RoomMessageEvent || event.message.fromParticipantId != agent.id || event.message.type != _agentRoomMessageType) {
+      if (event is! RoomMessageEvent || event.message.fromParticipantId != agent.id || event.message.type != agentRoomMessageType) {
         return;
       }
       final rawMessage = event.message.message;
       final rawPayload = rawMessage["type"] is String ? rawMessage : rawMessage["payload"];
-      if (rawPayload is! Map || rawPayload["source_message_id"] != messageId) {
+      if (rawPayload is! Map) {
         return;
       }
-      if (rawPayload["type"] == _agentThreadStartedType) {
-        final threadId = rawPayload["thread_id"];
-        if (threadId is String && threadId.trim().isNotEmpty && !completer.isCompleted) {
-          _realtimeAudioConnection = RealtimeConnectionInfo.fromJson(rawPayload["realtime_connection"]);
-          completer.complete(threadId.trim());
+      final payload = AgentMessage.fromJson(Map<String, dynamic>.from(rawPayload));
+      if (payload is ThreadStarted && payload.sourceMessageId == messageId) {
+        final threadId = payload.threadId.trim();
+        if (threadId.isNotEmpty && !completer.isCompleted) {
+          _realtimeAudioConnection = RealtimeConnectionInfo.fromJson(payload.realtimeConnection?.toJson());
+          completer.complete(threadId);
         }
-      } else if (rawPayload["type"] == _agentTurnStartRejectedType && !completer.isCompleted) {
-        final error = rawPayload["error"];
-        final message = error is Map ? error["message"] : null;
-        completer.completeError(
-          RoomServerException(message is String && message.trim().isNotEmpty ? message.trim() : "Thread start rejected."),
-        );
+      } else if (payload is ThreadStartRejected && payload.sourceMessageId == messageId && !completer.isCompleted) {
+        completer.completeError(RoomServerException(payload.error.message));
       }
     });
 
     try {
-      final payload = <String, Object?>{"type": _agentThreadStartType, "message_id": messageId, "content": null, "name": "Audio message"};
       final activeModel = _modelController.activeModel;
-      if (activeModel != null) {
-        payload["provider"] = activeModel.provider;
-        payload["model"] = activeModel.model;
-      }
-      if (_modelController.activeTurnDetection == "automatic" && _modelController.prefersWebrtcRealtime) {
-        payload["realtime_protocol"] = "webrtc";
-      }
       final activeVoice = _modelController.activeVoice;
-      if (activeVoice != null && activeVoice.trim().isNotEmpty) {
-        payload["voice"] = activeVoice.trim();
-      }
-      payload["output_modalities"] = [_modelController.activeModality];
-      if (senderName != null && senderName.trim().isNotEmpty) {
-        payload["sender_name"] = senderName.trim();
-      }
-      await widget.room.messaging.sendMessage(to: agent, type: _agentRoomMessageType, message: payload);
+      final payload = StartThread(
+        messageId: messageId,
+        content: null,
+        name: "Audio message",
+        provider: activeModel?.provider,
+        model: activeModel?.model,
+        realtimeProtocol: _modelController.activeTurnDetection == "automatic" && _modelController.prefersWebrtcRealtime ? "webrtc" : null,
+        voice: activeVoice != null && activeVoice.trim().isNotEmpty ? activeVoice.trim() : null,
+        outputModalities: [_modelController.activeModality],
+        senderName: senderName != null && senderName.trim().isNotEmpty ? senderName.trim() : null,
+      );
+      await widget.room.messaging.sendMessage(to: agent, type: agentRoomMessageType, message: payload.toJson());
       return await completer.future.timeout(const Duration(seconds: 30));
     } on TimeoutException {
       throw RoomServerException("Timed out waiting for thread to start.");
@@ -599,14 +574,14 @@ class _NewChatThreadState extends State<NewChatThread> {
         final turnId = const Uuid().v4();
         await widget.room.messaging.sendMessage(
           to: agent,
-          type: _agentRoomMessageType,
-          message: {"type": _agentRealtimeAudioCommitType, "thread_id": path, "message_id": messageId, "turn_id": turnId},
+          type: agentRoomMessageType,
+          message: {"type": agentRealtimeAudioCommitType, "thread_id": path, "message_id": messageId, "turn_id": turnId},
         );
         await widget.room.messaging.sendMessage(
           to: agent,
-          type: _agentRoomMessageType,
+          type: agentRoomMessageType,
           message: {
-            "type": _agentTurnStartType,
+            "type": agentTurnStartType,
             "thread_id": path,
             "message_id": const Uuid().v4(),
             "turn_id": turnId,
@@ -635,8 +610,8 @@ class _NewChatThreadState extends State<NewChatThread> {
       }
       await widget.room.messaging.sendMessage(
         to: agent,
-        type: _agentRoomMessageType,
-        message: {"type": _agentRealtimeAudioChunkType, "thread_id": path, "message_id": const Uuid().v4(), "format": inputFormat.toJson()},
+        type: agentRoomMessageType,
+        message: {"type": agentRealtimeAudioChunkType, "thread_id": path, "message_id": const Uuid().v4(), "format": inputFormat.toJson()},
         attachment: chunk,
       );
     } catch (error) {
@@ -669,7 +644,7 @@ class _NewChatThreadState extends State<NewChatThread> {
     final senderName = widget.room.localParticipant?.getAttribute("name");
     final pendingFirstMessage = PendingAgentMessage(
       messageId: pendingMessageId,
-      messageType: _agentTurnStartType,
+      messageType: agentTurnStartType,
       threadPath: "",
       text: prompt,
       attachments: attachmentPaths,

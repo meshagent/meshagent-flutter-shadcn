@@ -8,10 +8,6 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'conversation_descriptor.dart';
 import '../ui/coordinated_context_menu.dart';
 
-const String _agentRoomMessageType = "agent-message";
-const String _agentThreadDeleteType = "meshagent.agent.thread.delete";
-const String _agentThreadRenameType = "meshagent.agent.thread.rename";
-
 class ChatThreadListView extends StatefulWidget {
   const ChatThreadListView({
     super.key,
@@ -178,7 +174,7 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
       _optimisticNames[entry.path] = trimmed;
     });
     try {
-      await _sendThreadControlMessage(<String, Object?>{"type": _agentThreadRenameType, "thread_id": entry.path, "name": trimmed});
+      await _sendThreadControlMessage(RenameThread(threadId: entry.path, name: trimmed));
     } catch (_) {
       if (mounted) {
         setState(() {
@@ -215,7 +211,7 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
       _optimisticDeletedPaths.add(entry.path);
     });
     try {
-      await _sendThreadControlMessage(<String, Object?>{"type": _agentThreadDeleteType, "thread_id": entry.path});
+      await _sendThreadControlMessage(DeleteThread(threadId: entry.path));
     } catch (_) {
       if (mounted) {
         setState(() {
@@ -243,12 +239,12 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
     return null;
   }
 
-  Future<void> _sendThreadControlMessage(Map<String, Object?> payload) async {
+  Future<void> _sendThreadControlMessage(AgentMessage message) async {
     final agent = _agentParticipant();
     if (agent == null) {
       throw StateError("Unable to find an agent that supports thread messages.");
     }
-    await widget.room.messaging.sendMessage(to: agent, type: _agentRoomMessageType, message: payload);
+    await widget.room.messaging.sendMessage(to: agent, type: agentRoomMessageType, message: message.toJson());
   }
 
   void _onStoreChanged() {

@@ -6,6 +6,57 @@ import 'dart:typed_data';
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:meshagent_agents/meshagent_agents.dart'
+    show
+        ToolkitCapabilities,
+        agentAudioGenerationCompletedType,
+        agentAudioGenerationDeltaType,
+        agentAudioGenerationFailedType,
+        agentAudioGenerationStartedType,
+        agentAudioInputSpeechStartedType,
+        agentAudioTranscriptionCompletedType,
+        agentAudioTranscriptionDeltaType,
+        agentAudioTranscriptionFailedType,
+        agentAudioTranscriptionStartedType,
+        agentContextCompactedType,
+        agentFileContentDeltaType,
+        agentFileContentEndedType,
+        agentFileContentStartedType,
+        agentImageGenerationCompletedType,
+        agentImageGenerationFailedType,
+        agentImageGenerationPartialType,
+        agentImageGenerationStartedType,
+        agentModelChangedType,
+        agentModelChangeType,
+        agentModelsRequestType,
+        agentModelsResponseType,
+        agentReasoningContentDeltaType,
+        agentReasoningContentEndedType,
+        agentReasoningContentStartedType,
+        agentRealtimeAudioCommitType,
+        agentRoomMessageType,
+        agentTextContentDeltaType,
+        agentTextContentEndedType,
+        agentTextContentStartedType,
+        agentToolCallArgumentsDeltaType,
+        agentToolCallEndedType,
+        agentToolCallInProgressType,
+        agentToolCallLogDeltaType,
+        agentToolCallPendingType,
+        agentToolCallStartedType,
+        agentTurnEndedType,
+        agentTurnInterruptedType,
+        agentTurnInterruptAcceptedType,
+        agentTurnInterruptType,
+        agentTurnStartedType,
+        agentTurnStartAcceptedType,
+        agentTurnStartRejectedType,
+        agentTurnStartType,
+        agentTurnSteeredType,
+        agentTurnSteerAcceptedType,
+        agentTurnSteerRejectedType,
+        agentTurnSteerType,
+        agentUsageUpdatedType;
 import 'package:meshagent_agents/meshagent_agents.dart' as agent_sessions;
 import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_flutter_shadcn/chat_bubble_markdown_config.dart';
@@ -19,54 +70,6 @@ import 'realtime_audio_output.dart';
 import 'tool_call_summary.dart';
 import 'usage_footer_tooltip.dart';
 
-const String _agentRoomMessageType = 'agent-message';
-const String _agentTurnStartType = 'meshagent.agent.turn.start';
-const String _agentTurnSteerType = 'meshagent.agent.turn.steer';
-const String _agentTurnInterruptType = 'meshagent.agent.turn.interrupt';
-const String _agentRealtimeAudioCommitType = 'meshagent.agent.realtime_audio.commit';
-const String _agentTurnStartAcceptedType = 'meshagent.agent.turn.start.accepted';
-const String _agentTurnStartRejectedType = 'meshagent.agent.turn.start.rejected';
-const String _agentTurnSteerAcceptedType = 'meshagent.agent.turn.steer.accepted';
-const String _agentTurnSteerRejectedType = 'meshagent.agent.turn.steer.rejected';
-const String _agentTurnInterruptAcceptedType = 'meshagent.agent.turn.interrupt.accepted';
-const String _agentTurnInterruptedType = 'meshagent.agent.turn.interrupted';
-const String _agentTurnStartedType = 'meshagent.agent.turn.started';
-const String _agentTurnSteeredType = 'meshagent.agent.turn.steered';
-const String _agentTurnEndedType = 'meshagent.agent.turn.ended';
-const String _agentAudioInputSpeechStartedType = 'meshagent.agent.audio_input.speech_started';
-const String _agentTextContentStartedType = 'meshagent.agent.text_content.started';
-const String _agentTextContentDeltaType = 'meshagent.agent.text_content.delta';
-const String _agentTextContentEndedType = 'meshagent.agent.text_content.ended';
-const String _agentReasoningContentStartedType = 'meshagent.agent.reasoning_content.started';
-const String _agentReasoningContentDeltaType = 'meshagent.agent.reasoning_content.delta';
-const String _agentReasoningContentEndedType = 'meshagent.agent.reasoning_content.ended';
-const String _agentFileContentStartedType = 'meshagent.agent.file_content.started';
-const String _agentFileContentDeltaType = 'meshagent.agent.file_content.delta';
-const String _agentFileContentEndedType = 'meshagent.agent.file_content.ended';
-const String _agentToolCallPendingType = 'meshagent.agent.tool_call.pending';
-const String _agentToolCallInProgressType = 'meshagent.agent.tool_call.in_progress';
-const String _agentToolCallStartedType = 'meshagent.agent.tool_call.started';
-const String _agentToolCallArgumentsDeltaType = 'meshagent.agent.tool_call.arguments_delta';
-const String _agentToolCallLogDeltaType = 'meshagent.agent.tool_call.log_delta';
-const String _agentToolCallEndedType = 'meshagent.agent.tool_call.ended';
-const String _agentImageGenerationStartedType = 'meshagent.agent.image_generation.started';
-const String _agentImageGenerationPartialType = 'meshagent.agent.image_generation.partial';
-const String _agentImageGenerationCompletedType = 'meshagent.agent.image_generation.completed';
-const String _agentImageGenerationFailedType = 'meshagent.agent.image_generation.failed';
-const String _agentAudioGenerationStartedType = 'meshagent.agent.audio_generation.started';
-const String _agentAudioGenerationDeltaType = 'meshagent.agent.audio_generation.delta';
-const String _agentAudioGenerationCompletedType = 'meshagent.agent.audio_generation.completed';
-const String _agentAudioGenerationFailedType = 'meshagent.agent.audio_generation.failed';
-const String _agentAudioTranscriptionStartedType = 'meshagent.agent.audio_transcription.started';
-const String _agentAudioTranscriptionDeltaType = 'meshagent.agent.audio_transcription.delta';
-const String _agentAudioTranscriptionCompletedType = 'meshagent.agent.audio_transcription.completed';
-const String _agentAudioTranscriptionFailedType = 'meshagent.agent.audio_transcription.failed';
-const String _agentContextCompactedType = 'meshagent.agent.context.compacted';
-const String _agentUsageUpdatedType = 'meshagent.agent.usage.updated';
-const String _agentModelsRequestType = 'meshagent.agent.models.request';
-const String _agentModelsResponseType = 'meshagent.agent.models.response';
-const String _agentModelChangeType = 'meshagent.agent.model.change';
-const String _agentModelChangedType = 'meshagent.agent.model.changed';
 const double _datasetDiffPreviewHorizontalPadding = 16;
 
 class DatasetChatAudioFormat {
@@ -717,7 +720,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         continue;
       }
       final rawType = data['type']?.toString();
-      final message = rawType == _agentUsageUpdatedType
+      final message = rawType == agentUsageUpdatedType
           ? data
           : data['kind'] == 'usage'
           ? _mapValue(data['message'])
@@ -884,7 +887,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       final event = messages[_threadSessionMessageCursor];
       _threadSessionMessageCursor += 1;
       final payload = event.payload;
-      trackAgentThreadStatusPayload(room: widget.room, payload: payload);
+      trackAgentThreadStatusMessage(room: widget.room, message: event.message);
       if (_shouldBufferAgentPayload(payload)) {
         _bufferedAgentPayloads.add(Map<String, dynamic>.from(payload));
       } else {
@@ -908,7 +911,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (event is! RoomMessageEvent) {
       return;
     }
-    if (event.message.type == _agentRoomMessageType) {
+    if (event.message.type == agentRoomMessageType) {
       _refreshStatus(notify: true);
     }
   }
@@ -922,10 +925,10 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
 
   bool _isModelPayload(Map<String, dynamic> payload) {
     final type = payload['type'];
-    return type == _agentModelsRequestType ||
-        type == _agentModelsResponseType ||
-        type == _agentModelChangeType ||
-        type == _agentModelChangedType;
+    return type == agentModelsRequestType ||
+        type == agentModelsResponseType ||
+        type == agentModelChangeType ||
+        type == agentModelChangedType;
   }
 
   bool _agentPayloadBelongsToThread(Map<String, dynamic> payload) {
@@ -945,7 +948,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       return;
     }
     final changed = _applyAgentMessagePayload(payload, attachment: attachment);
-    _controller.handleAgentMessagePayload(payload);
+    try {
+      _controller.handleAgentMessage(agent_sessions.AgentMessage.fromJson(payload));
+    } catch (_) {}
     if (changed && notify && mounted) {
       setState(() {});
       if (scroll) {
@@ -990,25 +995,25 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (type is! String) {
       return false;
     }
-    if (type == _agentTurnStartRejectedType || type == _agentTurnSteerRejectedType) {
+    if (type == agentTurnStartRejectedType || type == agentTurnSteerRejectedType) {
       return false;
     }
 
     var changed = false;
 
     switch (type) {
-      case _agentTurnStartType:
-      case _agentTurnSteerType:
-      case _agentTurnInterruptType:
+      case agentTurnStartType:
+      case agentTurnSteerType:
+      case agentTurnInterruptType:
         unawaited(_audioPlayer.stopAll());
         break;
-      case _agentModelsRequestType:
-      case _agentModelsResponseType:
-      case _agentModelChangeType:
-      case _agentModelChangedType:
+      case agentModelsRequestType:
+      case agentModelsResponseType:
+      case agentModelChangeType:
+      case agentModelChangedType:
         break;
-      case _agentTurnStartAcceptedType:
-      case _agentTurnSteerAcceptedType:
+      case agentTurnStartAcceptedType:
+      case agentTurnSteerAcceptedType:
         final sourceMessageId = payload['source_message_id']?.toString().trim();
         final turnId = _payloadTurnId(payload);
         if (sourceMessageId != null && sourceMessageId.isNotEmpty && turnId != null && turnId.trim().isNotEmpty) {
@@ -1023,7 +1028,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
           }
         }
         break;
-      case _agentTurnStartedType:
+      case agentTurnStartedType:
         changed =
             _upsertAgentRow(
               itemId: _turnApplicationItemId(payload, 'started'),
@@ -1034,12 +1039,12 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             changed;
         changed = _materializePendingMessage(payload['source_message_id']?.toString()) || changed;
         break;
-      case _agentTurnInterruptAcceptedType:
-      case _agentTurnInterruptedType:
-      case _agentAudioInputSpeechStartedType:
+      case agentTurnInterruptAcceptedType:
+      case agentTurnInterruptedType:
+      case agentAudioInputSpeechStartedType:
         unawaited(_audioPlayer.stopAll());
         break;
-      case _agentTurnSteeredType:
+      case agentTurnSteeredType:
         changed =
             _upsertAgentRow(
               itemId: _turnApplicationItemId(payload, 'steered'),
@@ -1050,7 +1055,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             changed;
         changed = _materializePendingMessage(payload['source_message_id']?.toString()) || changed;
         break;
-      case _agentRealtimeAudioCommitType:
+      case agentRealtimeAudioCommitType:
         final turnId = _payloadTurnId(payload);
         final itemId = _payloadItemId(payload);
         if (turnId != null && turnId.trim().isNotEmpty) {
@@ -1072,12 +1077,12 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         break;
-      case _agentTextContentStartedType:
-      case _agentAudioTranscriptionStartedType:
+      case agentTextContentStartedType:
+      case agentAudioTranscriptionStartedType:
         _liveTextContent.upsert(itemId: _transcriptionItemId(payload), turnId: _payloadTurnId(payload), phase: _agentMessagePhase(payload));
         break;
-      case _agentTextContentDeltaType:
-      case _agentAudioTranscriptionDeltaType:
+      case agentTextContentDeltaType:
+      case agentAudioTranscriptionDeltaType:
         final contentRole = _textContentRoleFromPayload(payload);
         changed =
             _appendAgentRowText(
@@ -1091,8 +1096,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         break;
-      case _agentTextContentEndedType:
-      case _agentAudioTranscriptionCompletedType:
+      case agentTextContentEndedType:
+      case agentAudioTranscriptionCompletedType:
         final contentRole = _textContentRoleFromPayload(payload);
         final itemId = _transcriptionItemId(payload);
         final accumulatedText = _liveTextContent.complete(itemId);
@@ -1113,13 +1118,13 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         break;
-      case _agentAudioTranscriptionFailedType:
+      case agentAudioTranscriptionFailedType:
         _liveTextContent.remove(_transcriptionItemId(payload));
         break;
-      case _agentAudioGenerationStartedType:
+      case agentAudioGenerationStartedType:
         unawaited(_audioPlayer.start(_audioPlaybackStreamItemId(payload)));
         break;
-      case _agentAudioGenerationDeltaType:
+      case agentAudioGenerationDeltaType:
         unawaited(
           _audioPlayer.append(
             itemId: _audioPlaybackStreamItemId(payload),
@@ -1129,13 +1134,13 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
           ),
         );
         break;
-      case _agentAudioGenerationCompletedType:
+      case agentAudioGenerationCompletedType:
         unawaited(_audioPlayer.complete(_audioPlaybackStreamItemId(payload)));
         break;
-      case _agentAudioGenerationFailedType:
+      case agentAudioGenerationFailedType:
         unawaited(_audioPlayer.stop(_audioPlaybackStreamItemId(payload)));
         break;
-      case _agentReasoningContentStartedType:
+      case agentReasoningContentStartedType:
         _liveReasoningContent.upsert(itemId: _payloadItemId(payload), turnId: _payloadTurnId(payload));
         changed =
             _upsertAgentRow(
@@ -1145,7 +1150,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         break;
-      case _agentReasoningContentDeltaType:
+      case agentReasoningContentDeltaType:
         changed =
             _appendAgentRowText(
               itemId: _payloadItemId(payload),
@@ -1158,7 +1163,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         break;
-      case _agentReasoningContentEndedType:
+      case agentReasoningContentEndedType:
         final accumulatedReasoning = _liveReasoningContent.complete(_payloadItemId(payload));
         _liveReasoningContent.remove(_payloadItemId(payload));
         changed =
@@ -1176,7 +1181,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         break;
-      case _agentFileContentStartedType:
+      case agentFileContentStartedType:
         _liveFileContent.upsert(itemId: _payloadItemId(payload), turnId: _payloadTurnId(payload));
         changed =
             _upsertAgentRow(
@@ -1186,7 +1191,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         break;
-      case _agentFileContentDeltaType:
+      case agentFileContentDeltaType:
         changed =
             _appendAgentRowUrl(
               itemId: _payloadItemId(payload),
@@ -1196,7 +1201,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         break;
-      case _agentFileContentEndedType:
+      case agentFileContentEndedType:
         final endUrl = payload['url']?.toString();
         if (endUrl != null && endUrl.trim().isNotEmpty) {
           _liveFileContent.appendUrl(
@@ -1223,10 +1228,10 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         break;
-      case _agentToolCallPendingType:
-      case _agentToolCallInProgressType:
-      case _agentToolCallStartedType:
-      case _agentToolCallEndedType:
+      case agentToolCallPendingType:
+      case agentToolCallInProgressType:
+      case agentToolCallStartedType:
+      case agentToolCallEndedType:
         final itemId = _payloadItemId(payload);
         final existingData = _mapValue(_agentRowsByItemId[itemId]?['data']);
         final tool = payload['tool']?.toString() ?? payload['tool_name']?.toString() ?? payload['name']?.toString() ?? '';
@@ -1246,10 +1251,10 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         final errorData = errorMessage == null ? const <String, Object?>{} : <String, Object?>{'error_message': errorMessage};
         final logs = _stringList(existingData?['logs']);
         final isImageGeneration = tool.trim().toLowerCase() == 'image_generation';
-        final status = type == _agentToolCallEndedType
+        final status = type == agentToolCallEndedType
             ? (errorMessage == null ? 'completed' : 'failed')
-            : (type == _agentToolCallPendingType ? 'pending' : 'running');
-        if (isImageGeneration && type == _agentToolCallEndedType && payload['error'] == null) {
+            : (type == agentToolCallPendingType ? 'pending' : 'running');
+        if (isImageGeneration && type == agentToolCallEndedType && payload['error'] == null) {
           break;
         }
         changed =
@@ -1283,7 +1288,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                         arguments: arguments,
                         logs: logs,
                         errorMessage: errorMessage,
-                        completed: type == _agentToolCallEndedType,
+                        completed: type == agentToolCallEndedType,
                         pending: _toolCallStatusIsPending(status),
                         argumentDeltaBytes: _intValue(existingData?['argument_delta_bytes']),
                       ),
@@ -1292,7 +1297,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         break;
-      case _agentToolCallArgumentsDeltaType:
+      case agentToolCallArgumentsDeltaType:
         changed =
             _appendAgentToolArgumentDelta(
               itemId: _payloadItemId(payload),
@@ -1302,7 +1307,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         break;
-      case _agentToolCallLogDeltaType:
+      case agentToolCallLogDeltaType:
         changed =
             _appendAgentToolLogs(
               itemId: _payloadItemId(payload),
@@ -1312,10 +1317,10 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         break;
-      case _agentImageGenerationStartedType:
-      case _agentImageGenerationPartialType:
-      case _agentImageGenerationCompletedType:
-      case _agentImageGenerationFailedType:
+      case agentImageGenerationStartedType:
+      case agentImageGenerationPartialType:
+      case agentImageGenerationCompletedType:
+      case agentImageGenerationFailedType:
         changed =
             _upsertAgentRow(
               itemId: _payloadItemId(payload),
@@ -1333,7 +1338,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         break;
-      case _agentContextCompactedType:
+      case agentContextCompactedType:
         changed =
             _upsertAgentRow(
               itemId: _payloadItemId(payload),
@@ -1349,7 +1354,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         break;
-      case _agentTurnEndedType:
+      case agentTurnEndedType:
         final errorMessage = agentTurnEndedErrorMessage(payload);
         if (errorMessage == null) {
           break;
@@ -1422,10 +1427,10 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
 
   String _transcriptionItemId(Map<String, dynamic> payload) {
     final type = payload['type']?.toString();
-    if (type != _agentAudioTranscriptionStartedType &&
-        type != _agentAudioTranscriptionDeltaType &&
-        type != _agentAudioTranscriptionCompletedType &&
-        type != _agentAudioTranscriptionFailedType) {
+    if (type != agentAudioTranscriptionStartedType &&
+        type != agentAudioTranscriptionDeltaType &&
+        type != agentAudioTranscriptionCompletedType &&
+        type != agentAudioTranscriptionFailedType) {
       return _payloadItemId(payload);
     }
     if (_textContentRoleFromPayload(payload) != 'user') {
@@ -1688,17 +1693,17 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
 
   bool _handleModelPayload(Map<String, dynamic> payload) {
     final type = payload['type'];
-    if (type == _agentModelsResponseType) {
+    if (type == agentModelsResponseType) {
       _modelController.applyModelsResponse(payload);
       return true;
     }
     if (payload['thread_id'] != widget.path) {
       return false;
     }
-    if (type == _agentModelChangedType) {
+    if (type == agentModelChangedType) {
       _modelController.applyModelChanged(payload);
       return true;
-    } else if (type == _agentModelsRequestType || type == _agentModelChangeType) {
+    } else if (type == agentModelsRequestType || type == agentModelChangeType) {
       return true;
     }
     return false;
@@ -1740,40 +1745,38 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       final data = _rowData(row);
       final type = data?['type']?.toString();
       final itemId = _datasetThreadContentItemId(row: row, payload: data, type: type);
-      if (type == _agentTextContentStartedType ||
-          type == _agentAudioTranscriptionStartedType ||
-          type == _agentReasoningContentStartedType) {
+      if (type == agentTextContentStartedType || type == agentAudioTranscriptionStartedType || type == agentReasoningContentStartedType) {
         if (data != null) {
-          final statesByItemId = type == _agentReasoningContentStartedType ? reasoningContentByItemId : textContentByItemId;
+          final statesByItemId = type == agentReasoningContentStartedType ? reasoningContentByItemId : textContentByItemId;
           statesByItemId[itemId] = _DatasetTextContentState.fromPayload(
             row: row,
             payload: data,
-            kind: type == _agentReasoningContentStartedType ? 'reasoning' : 'message',
-            role: type == _agentAudioTranscriptionStartedType ? _textContentRoleFromPayload(data) : 'assistant',
+            kind: type == agentReasoningContentStartedType ? 'reasoning' : 'message',
+            role: type == agentAudioTranscriptionStartedType ? _textContentRoleFromPayload(data) : 'assistant',
           );
         }
         continue;
       }
-      if (type == _agentTextContentDeltaType || type == _agentAudioTranscriptionDeltaType || type == _agentReasoningContentDeltaType) {
-        final statesByItemId = type == _agentReasoningContentDeltaType ? reasoningContentByItemId : textContentByItemId;
+      if (type == agentTextContentDeltaType || type == agentAudioTranscriptionDeltaType || type == agentReasoningContentDeltaType) {
+        final statesByItemId = type == agentReasoningContentDeltaType ? reasoningContentByItemId : textContentByItemId;
         final state = statesByItemId.putIfAbsent(
           itemId,
           () => _DatasetTextContentState.fromPayload(
             row: row,
             payload: data ?? const <String, Object?>{},
-            kind: type == _agentReasoningContentDeltaType ? 'reasoning' : 'message',
-            role: type == _agentAudioTranscriptionDeltaType ? _textContentRoleFromPayload(data) : 'assistant',
+            kind: type == agentReasoningContentDeltaType ? 'reasoning' : 'message',
+            role: type == agentAudioTranscriptionDeltaType ? _textContentRoleFromPayload(data) : 'assistant',
           ),
         );
         state.appendDelta(row: row, payload: data ?? const <String, Object?>{});
         continue;
       }
-      if (type == _agentTextContentEndedType || type == _agentAudioTranscriptionCompletedType || type == _agentReasoningContentEndedType) {
-        final statesByItemId = type == _agentReasoningContentEndedType ? reasoningContentByItemId : textContentByItemId;
+      if (type == agentTextContentEndedType || type == agentAudioTranscriptionCompletedType || type == agentReasoningContentEndedType) {
+        final statesByItemId = type == agentReasoningContentEndedType ? reasoningContentByItemId : textContentByItemId;
         final state = statesByItemId.remove(itemId);
         final message =
             state?.complete(row: row, payload: data ?? const <String, Object?>{}) ??
-            (type == _agentAudioTranscriptionCompletedType && data != null
+            (type == agentAudioTranscriptionCompletedType && data != null
                 ? _DatasetTextContentState.fromPayload(
                     row: row,
                     payload: data,
@@ -1796,14 +1799,14 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         }
         continue;
       }
-      if (type == _agentToolCallLogDeltaType) {
+      if (type == agentToolCallLogDeltaType) {
         final state = toolCallsByItemId[itemId];
         if (state != null) {
           state.logs.addAll(_agentToolCallLogLines(data?['lines']));
         }
         continue;
       }
-      if (type == _agentToolCallArgumentsDeltaType) {
+      if (type == agentToolCallArgumentsDeltaType) {
         final delta = data?['delta']?.toString() ?? '';
         final deltaBytes = utf8.encode(delta).length;
         final state = toolCallsByItemId[itemId];
@@ -1816,7 +1819,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         }
         continue;
       }
-      if (type == _agentToolCallEndedType) {
+      if (type == agentToolCallEndedType) {
         final state = toolCallsByItemId.remove(itemId);
         final message = _messageForToolCallEndRow(row: row, payload: data, state: state);
         messages.add((row: row, message: message));
@@ -1836,7 +1839,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     for (final row in rows) {
       final data = _rowData(row);
       final type = data?['type']?.toString();
-      if (type != _agentTurnStartType && type != _agentTurnSteerType) {
+      if (type != agentTurnStartType && type != agentTurnSteerType) {
         continue;
       }
       final messageId = data?['message_id']?.toString().trim();
@@ -1892,14 +1895,14 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     for (final row in rows) {
       final data = _rowData(row);
       final type = data?['type']?.toString();
-      if (type == _agentTurnSteeredType || type == _agentTurnSteerRejectedType) {
+      if (type == agentTurnSteeredType || type == agentTurnSteerRejectedType) {
         final sourceMessageId = data?['source_message_id']?.toString();
         if (sourceMessageId != null && sourceMessageId.trim().isNotEmpty) {
           pendingByMessageId.remove(sourceMessageId.trim());
         }
         continue;
       }
-      if (type == _agentTurnSteerAcceptedType) {
+      if (type == agentTurnSteerAcceptedType) {
         final sourceMessageId = data?['source_message_id']?.toString();
         final existing = sourceMessageId == null ? null : pendingByMessageId[sourceMessageId.trim()];
         if (existing != null && existing.awaitingAcceptance) {
@@ -1917,7 +1920,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         }
         continue;
       }
-      if (type != _agentTurnSteerType || data == null) {
+      if (type != agentTurnSteerType || data == null) {
         continue;
       }
       final sourceMessageId = data['message_id']?.toString() ?? row['item_id']?.toString();
@@ -1934,7 +1937,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       }
       pendingByMessageId[sourceMessageId.trim()] = PendingAgentMessage(
         messageId: sourceMessageId.trim(),
-        messageType: _agentTurnSteerType,
+        messageType: agentTurnSteerType,
         threadPath: widget.path,
         text: extracted.text,
         attachments: extracted.attachments,
@@ -2003,7 +2006,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     _controller.markPendingAgentMessage(
       PendingAgentMessage(
         messageId: messageId,
-        messageType: isSteer ? _agentTurnSteerType : _agentTurnStartType,
+        messageType: isSteer ? agentTurnSteerType : agentTurnStartType,
         threadPath: threadPath,
         text: value,
         attachments: attachmentPaths,
@@ -2062,7 +2065,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       threadStatusLinesRemoved: _status.linesRemoved,
       supportsAgentMessages: agent != null,
       supportsMcp: agent?.getAttribute('supports_mcp') == true,
-      toolkits: const <String, AgentToolkitCapabilities>{},
+      toolkits: const <String, ToolkitCapabilities>{},
       threadTurnId: _status.turnId,
       pendingMessages: pendingMessages,
       pendingItemId: _status.pendingItemId,
@@ -2454,7 +2457,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       }
     }
     final pendingFeedMessages = pendingMessages.where((pending) {
-      if (pending.messageType == _agentTurnSteerType || pending.matchByContentOnly) {
+      if (pending.messageType == agentTurnSteerType || pending.matchByContentOnly) {
         return false;
       }
       return pending.awaitingApplication || !messages.any((message) => message.id == pending.messageId);
@@ -2918,7 +2921,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     final queuedPendingMessages = pendingMessages
         .where(
           (pending) =>
-              (pending.messageType == _agentTurnStartType || pending.messageType == _agentTurnSteerType) &&
+              (pending.messageType == agentTurnStartType || pending.messageType == agentTurnSteerType) &&
               !_pendingDatasetMessageIsOptimisticallyRendered(pending: pending, messages: messages),
         )
         .toList(growable: false);
@@ -3934,8 +3937,8 @@ _DatasetThreadMessage? _messageForAgentPayload(
   final turnId = row['turn_id']?.toString() ?? payload['turn_id']?.toString();
   final phase = _agentMessagePhase(payload);
   switch (type) {
-    case _agentTurnStartType:
-    case _agentTurnSteerType:
+    case agentTurnStartType:
+    case agentTurnSteerType:
       final content = payload['content'];
       if (content is! List) {
         return null;
@@ -3954,12 +3957,12 @@ _DatasetThreadMessage? _messageForAgentPayload(
         createdAt: createdAt,
         turnId: turnId,
       );
-    case _agentModelsRequestType:
-    case _agentModelsResponseType:
-    case _agentModelChangeType:
-    case _agentModelChangedType:
+    case agentModelsRequestType:
+    case agentModelsResponseType:
+    case agentModelChangeType:
+    case agentModelChangedType:
       return null;
-    case _agentRealtimeAudioCommitType:
+    case agentRealtimeAudioCommitType:
       final text = payload['text']?.toString() ?? '';
       if (text.trim().isEmpty) {
         return null;
@@ -3974,8 +3977,8 @@ _DatasetThreadMessage? _messageForAgentPayload(
         createdAt: createdAt,
         turnId: turnId,
       );
-    case _agentTurnStartedType:
-    case _agentTurnSteeredType:
+    case agentTurnStartedType:
+    case agentTurnSteeredType:
       final sourceMessageId = payload['source_message_id']?.toString().trim();
       if (sourceMessageId == null || sourceMessageId.isEmpty) {
         return null;
@@ -3999,14 +4002,14 @@ _DatasetThreadMessage? _messageForAgentPayload(
         createdAt: createdAt,
         turnId: turnId,
       );
-    case _agentTurnStartAcceptedType:
-    case _agentTurnSteerAcceptedType:
+    case agentTurnStartAcceptedType:
+    case agentTurnSteerAcceptedType:
       return null;
-    case _agentTextContentDeltaType:
-    case _agentAudioTranscriptionDeltaType:
-    case _agentAudioTranscriptionCompletedType:
+    case agentTextContentDeltaType:
+    case agentAudioTranscriptionDeltaType:
+    case agentAudioTranscriptionCompletedType:
       final text = payload['text']?.toString() ?? '';
-      final role = type == _agentAudioTranscriptionDeltaType || type == _agentAudioTranscriptionCompletedType
+      final role = type == agentAudioTranscriptionDeltaType || type == agentAudioTranscriptionCompletedType
           ? _textContentRoleFromPayload(payload)
           : 'assistant';
       return text.trim().isEmpty
@@ -4022,14 +4025,14 @@ _DatasetThreadMessage? _messageForAgentPayload(
               phase: phase,
               turnId: turnId,
             );
-    case _agentAudioGenerationStartedType:
-    case _agentAudioGenerationDeltaType:
-    case _agentAudioGenerationCompletedType:
-    case _agentAudioGenerationFailedType:
-    case _agentAudioTranscriptionStartedType:
-    case _agentAudioTranscriptionFailedType:
+    case agentAudioGenerationStartedType:
+    case agentAudioGenerationDeltaType:
+    case agentAudioGenerationCompletedType:
+    case agentAudioGenerationFailedType:
+    case agentAudioTranscriptionStartedType:
+    case agentAudioTranscriptionFailedType:
       return null;
-    case _agentReasoningContentDeltaType:
+    case agentReasoningContentDeltaType:
       final text = payload['text']?.toString() ?? '';
       return text.trim().isEmpty
           ? null
@@ -4043,7 +4046,7 @@ _DatasetThreadMessage? _messageForAgentPayload(
               createdAt: createdAt,
               turnId: turnId,
             );
-    case _agentFileContentDeltaType:
+    case agentFileContentDeltaType:
       final url = payload['url']?.toString();
       return url == null || url.trim().isEmpty
           ? null
@@ -4057,10 +4060,10 @@ _DatasetThreadMessage? _messageForAgentPayload(
               createdAt: createdAt,
               turnId: turnId,
             );
-    case _agentImageGenerationStartedType:
-    case _agentImageGenerationPartialType:
-    case _agentImageGenerationCompletedType:
-    case _agentImageGenerationFailedType:
+    case agentImageGenerationStartedType:
+    case agentImageGenerationPartialType:
+    case agentImageGenerationCompletedType:
+    case agentImageGenerationFailedType:
       final image = _firstGeneratedImage(payload);
       final dimensions = _imageGenerationDimensions(data: const <String, Object?>{}, message: payload, image: image);
       final imageUri = _stringValue(image?['uri']);
@@ -4083,13 +4086,13 @@ _DatasetThreadMessage? _messageForAgentPayload(
           height: dimensions.$2,
         ),
       );
-    case _agentToolCallStartedType:
-    case _agentToolCallArgumentsDeltaType:
-    case _agentToolCallLogDeltaType:
+    case agentToolCallStartedType:
+    case agentToolCallArgumentsDeltaType:
+    case agentToolCallLogDeltaType:
       return null;
-    case _agentToolCallEndedType:
+    case agentToolCallEndedType:
       return _messageForToolCallEndRow(row: row, payload: payload, state: null);
-    case _agentContextCompactedType:
+    case agentContextCompactedType:
       return _DatasetThreadMessage(
         id: itemId,
         kind: 'compaction',
@@ -4100,7 +4103,7 @@ _DatasetThreadMessage? _messageForAgentPayload(
         createdAt: createdAt,
         turnId: turnId,
       );
-    case _agentTurnEndedType:
+    case agentTurnEndedType:
       final errorMessage = agentTurnEndedErrorMessage(payload);
       return errorMessage == null
           ? null
@@ -4120,7 +4123,7 @@ _DatasetThreadMessage? _messageForAgentPayload(
 }
 
 bool _isDatasetToolCallStartType(String? type) {
-  return type == _agentToolCallPendingType || type == _agentToolCallInProgressType || type == _agentToolCallStartedType;
+  return type == agentToolCallPendingType || type == agentToolCallInProgressType || type == agentToolCallStartedType;
 }
 
 bool _toolCallStatusIsRunning(String? status) {
@@ -4182,7 +4185,7 @@ _DatasetThreadMessage _messageForToolCallEndRow({
 
 @visibleForTesting
 String? agentTurnEndedErrorMessage(Map<String, Object?> payload) {
-  if (payload['type'] != _agentTurnEndedType) {
+  if (payload['type'] != agentTurnEndedType) {
     return null;
   }
   final error = payload['error'];
@@ -4305,7 +4308,7 @@ bool _pendingDatasetMessageIsOptimisticallyRendered({
   required PendingAgentMessage pending,
   required Iterable<_DatasetThreadMessage> messages,
 }) {
-  if (pending.messageType == _agentTurnSteerType || pending.matchByContentOnly) {
+  if (pending.messageType == agentTurnSteerType || pending.matchByContentOnly) {
     return false;
   }
   return pending.awaitingApplication || !messages.any((message) => message.id == pending.messageId);
@@ -4402,15 +4405,15 @@ String _datasetThreadContentItemId({required Map<String, Object?> row, required 
 }
 
 bool _isAgentStreamContentType(String? type) {
-  return type == _agentTextContentStartedType ||
-      type == _agentTextContentDeltaType ||
-      type == _agentTextContentEndedType ||
-      type == _agentAudioTranscriptionStartedType ||
-      type == _agentAudioTranscriptionDeltaType ||
-      type == _agentAudioTranscriptionCompletedType ||
-      type == _agentReasoningContentStartedType ||
-      type == _agentReasoningContentDeltaType ||
-      type == _agentReasoningContentEndedType;
+  return type == agentTextContentStartedType ||
+      type == agentTextContentDeltaType ||
+      type == agentTextContentEndedType ||
+      type == agentAudioTranscriptionStartedType ||
+      type == agentAudioTranscriptionDeltaType ||
+      type == agentAudioTranscriptionCompletedType ||
+      type == agentReasoningContentStartedType ||
+      type == agentReasoningContentDeltaType ||
+      type == agentReasoningContentEndedType;
 }
 
 String? _payloadTurnId(Map<String, dynamic> payload) {
@@ -4440,9 +4443,9 @@ String? _agentMessagePhase(Map<String, dynamic> payload) {
     }
   }
   final type = payload['type']?.toString();
-  if ((type == _agentAudioTranscriptionStartedType ||
-          type == _agentAudioTranscriptionDeltaType ||
-          type == _agentAudioTranscriptionCompletedType) &&
+  if ((type == agentAudioTranscriptionStartedType ||
+          type == agentAudioTranscriptionDeltaType ||
+          type == agentAudioTranscriptionCompletedType) &&
       _textContentRoleFromPayload(payload) != 'user') {
     return 'final_answer';
   }
@@ -4560,10 +4563,10 @@ bool _isImageGenerationRow(Map<String, Object?> row) {
     return true;
   }
   final type = data['type']?.toString();
-  return type == _agentImageGenerationStartedType ||
-      type == _agentImageGenerationPartialType ||
-      type == _agentImageGenerationCompletedType ||
-      type == _agentImageGenerationFailedType;
+  return type == agentImageGenerationStartedType ||
+      type == agentImageGenerationPartialType ||
+      type == agentImageGenerationCompletedType ||
+      type == agentImageGenerationFailedType;
 }
 
 Set<String> _imageGenerationCorrelationKeys(Map<String, Object?> row) {
@@ -4575,10 +4578,10 @@ Set<String> _imageGenerationCorrelationKeys(Map<String, Object?> row) {
   final data = _rowData(row);
   final rawType = data?['type']?.toString();
   final message =
-      rawType == _agentImageGenerationStartedType ||
-          rawType == _agentImageGenerationPartialType ||
-          rawType == _agentImageGenerationCompletedType ||
-          rawType == _agentImageGenerationFailedType
+      rawType == agentImageGenerationStartedType ||
+          rawType == agentImageGenerationPartialType ||
+          rawType == agentImageGenerationCompletedType ||
+          rawType == agentImageGenerationFailedType
       ? data
       : _mapValue(data?['message']);
   for (final value in <Object?>[data?['call_id'], message?['call_id']]) {
@@ -4667,11 +4670,11 @@ Set<String> _datasetThreadImageReferenceKeys(_DatasetThreadImage image) {
 
 String _imageGenerationStatusFromType(String? type) {
   switch (type) {
-    case _agentImageGenerationCompletedType:
+    case agentImageGenerationCompletedType:
       return 'completed';
-    case _agentImageGenerationFailedType:
+    case agentImageGenerationFailedType:
       return 'failed';
-    case _agentImageGenerationPartialType:
+    case agentImageGenerationPartialType:
       return 'in_progress';
     default:
       return 'pending';

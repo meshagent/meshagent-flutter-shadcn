@@ -14,6 +14,54 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:interactive_viewer_2/interactive_viewer_2.dart';
 import 'package:meshagent/meshagent.dart';
+import 'package:meshagent_agents/meshagent_agents.dart'
+    show
+        AgentMessage,
+        AgentThreadMessage,
+        AgentThreadStatus,
+        AgentToolCallArgumentsDelta,
+        AgentToolCallEnded,
+        AgentToolCallPending,
+        AgentUsageUpdated,
+        CapabilitiesRequest,
+        CapabilitiesResponse,
+        CloseThread,
+        OpenThread,
+        ToolChoice,
+        ToolkitCapabilities,
+        TurnStart,
+        TurnStartAccepted,
+        TurnStartRejected,
+        TurnStarted,
+        TurnSteer,
+        TurnSteerAccepted,
+        TurnSteerRejected,
+        TurnSteered,
+        TurnToolkitConfig,
+        agentRoomMessageType,
+        agentThreadClearType,
+        agentThreadClearedType,
+        agentThreadStatusType,
+        agentToolApproveType,
+        agentToolCallArgumentsDeltaType,
+        agentToolCallEndedType,
+        agentToolCallInProgressType,
+        agentToolCallPendingType,
+        agentToolCallStartedType,
+        agentToolRejectType,
+        agentTurnEndedType,
+        agentTurnInterruptedType,
+        agentTurnInterruptAcceptedType,
+        agentTurnInterruptType,
+        agentTurnStartedType,
+        agentTurnStartAcceptedType,
+        agentTurnStartRejectedType,
+        agentTurnStartType,
+        agentTurnSteeredType,
+        agentTurnSteerAcceptedType,
+        agentTurnSteerRejectedType,
+        agentTurnSteerType,
+        agentUsageUpdatedType;
 import 'package:meshagent_flutter_shadcn/chat_bubble_markdown_config.dart';
 import 'package:meshagent_flutter_shadcn/code_language_resolver.dart';
 import 'package:meshagent_flutter_shadcn/markdown_viewer.dart';
@@ -72,34 +120,6 @@ const EdgeInsets _chatBubbleContentPadding = EdgeInsets.only(
 
 enum UploadStatus { initial, uploading, completed, failed }
 
-const String _agentRoomMessageType = "agent-message";
-const String _agentTurnStartType = "meshagent.agent.turn.start";
-const String _agentTurnSteerType = "meshagent.agent.turn.steer";
-const String _agentTurnInterruptType = "meshagent.agent.turn.interrupt";
-const String _agentThreadClearType = "meshagent.agent.thread.clear";
-const String _agentThreadOpenType = "meshagent.agent.thread.open";
-const String _agentThreadCloseType = "meshagent.agent.thread.close";
-const String _agentCapabilitiesRequestType = "meshagent.agent.capabilities_request";
-const String _agentCapabilitiesResponseType = "meshagent.agent.capabilities_response";
-const String _agentToolApproveType = "meshagent.agent.tool_call.approve";
-const String _agentToolRejectType = "meshagent.agent.tool_call.reject";
-const String _agentTurnStartAcceptedType = "meshagent.agent.turn.start.accepted";
-const String _agentTurnStartRejectedType = "meshagent.agent.turn.start.rejected";
-const String _agentTurnInterruptAcceptedType = "meshagent.agent.turn.interrupt.accepted";
-const String _agentTurnInterruptedType = "meshagent.agent.turn.interrupted";
-const String _agentTurnSteerAcceptedType = "meshagent.agent.turn.steer.accepted";
-const String _agentTurnSteerRejectedType = "meshagent.agent.turn.steer.rejected";
-const String _agentTurnStartedType = "meshagent.agent.turn.started";
-const String _agentTurnSteeredType = "meshagent.agent.turn.steered";
-const String _agentTurnEndedType = "meshagent.agent.turn.ended";
-const String _agentThreadClearedType = "meshagent.agent.thread.cleared";
-const String _agentThreadStatusType = "meshagent.agent.thread.status";
-const String _agentToolCallPendingType = "meshagent.agent.tool_call.pending";
-const String _agentToolCallInProgressType = "meshagent.agent.tool_call.in_progress";
-const String _agentToolCallStartedType = "meshagent.agent.tool_call.started";
-const String _agentToolCallArgumentsDeltaType = "meshagent.agent.tool_call.arguments_delta";
-const String _agentToolCallEndedType = "meshagent.agent.tool_call.ended";
-const String _agentUsageUpdatedType = "meshagent.agent.usage.updated";
 const double _mobileScreenWidthMax = 600;
 const double _mobileComposerPillCornerRadius = 999;
 const double _mobileComposerCornerRadius = 18;
@@ -447,8 +467,50 @@ bool _threadMessageHasId(MeshElement message, String id) {
   return false;
 }
 
+AgentMessage? _agentMessageFromRoomPayload(Object? message) {
+  final rawPayload = message is Map && message["type"] is String ? message : (message is Map ? message["payload"] : null);
+  if (rawPayload is! Map) {
+    return null;
+  }
+  try {
+    return AgentMessage.fromJson(Map<String, dynamic>.from(rawPayload));
+  } catch (_) {
+    return _legacyAgentStatusMessageFromPayload(Map<String, dynamic>.from(rawPayload));
+  }
+}
+
+AgentMessage? _legacyAgentStatusMessageFromPayload(Map<String, dynamic> payload) {
+  final type = payload["type"];
+  if (type is! String) {
+    return null;
+  }
+  final hydrated = Map<String, dynamic>.from(payload);
+  switch (type) {
+    case agentToolCallArgumentsDeltaType:
+      hydrated.putIfAbsent("turn_id", () => "");
+      break;
+    case agentToolCallPendingType:
+    case agentToolCallInProgressType:
+    case agentToolCallStartedType:
+      hydrated.putIfAbsent("turn_id", () => "");
+      hydrated.putIfAbsent("toolkit", () => "");
+      hydrated.putIfAbsent("tool", () => "");
+      break;
+    case agentToolCallEndedType:
+      hydrated.putIfAbsent("turn_id", () => "");
+      break;
+    default:
+      return null;
+  }
+  try {
+    return AgentMessage.fromJson(hydrated);
+  } catch (_) {
+    return null;
+  }
+}
+
 bool _pendingAgentMessageIsOptimisticallyRendered({required PendingAgentMessage pending, required Iterable<MeshElement> messages}) {
-  if (pending.messageType == _agentTurnSteerType || pending.matchByContentOnly) {
+  if (pending.messageType == agentTurnSteerType || pending.matchByContentOnly) {
     return false;
   }
   return pending.awaitingApplication || !messages.any((message) => _threadMessageHasId(message, pending.messageId));
@@ -662,10 +724,10 @@ String _connectorSelectionKey(Connector connector) {
   });
 }
 
-List<Map<String, dynamic>> _agentInputContentFromMessage(ChatMessage message) {
-  final content = <Map<String, dynamic>>[];
+List<AgentInputContent> _agentInputContentFromMessage(ChatMessage message) {
+  final content = <AgentInputContent>[];
   if (message.text.trim().isNotEmpty) {
-    content.add({"type": "text", "text": message.text});
+    content.add(AgentTextContent(text: message.text));
   }
 
   for (final attachment in message.attachments) {
@@ -673,7 +735,7 @@ List<Map<String, dynamic>> _agentInputContentFromMessage(ChatMessage message) {
     if (normalizedUrl == null) {
       continue;
     }
-    content.add({"type": "file", "url": normalizedUrl});
+    content.add(AgentFileContent(url: normalizedUrl));
   }
 
   return content;
@@ -697,99 +759,6 @@ class AgentToolChoice {
 
   Map<String, dynamic> toJson() {
     return {"toolkit_name": toolkitName, "tool_name": toolName};
-  }
-}
-
-class AgentToolCapabilities {
-  const AgentToolCapabilities({required this.name, this.title, this.description});
-
-  final String name;
-  final String? title;
-  final String? description;
-
-  factory AgentToolCapabilities.fromJson(Map<String, dynamic> json) {
-    return AgentToolCapabilities(
-      name: json["name"] as String,
-      title: json["title"] as String?,
-      description: json["description"] as String?,
-    );
-  }
-}
-
-class AgentToolkitCapabilities {
-  const AgentToolkitCapabilities({
-    required this.name,
-    this.title,
-    this.description,
-    this.thumbnailUrl,
-    this.rules = const [],
-    this.clientOptions,
-    this.hidden = false,
-    this.tools = const [],
-  });
-
-  final String name;
-  final String? title;
-  final String? description;
-  final String? thumbnailUrl;
-  final List<String> rules;
-  final Map<String, dynamic>? clientOptions;
-  final bool hidden;
-  final List<AgentToolCapabilities> tools;
-
-  factory AgentToolkitCapabilities.fromJson(Map<String, dynamic> json) {
-    final rawRules = json["rules"];
-    final rawTools = json["tools"];
-    final rawClientOptions = json["client_options"];
-    return AgentToolkitCapabilities(
-      name: json["name"] as String,
-      title: json["title"] as String?,
-      description: json["description"] as String?,
-      thumbnailUrl: json["thumbnail_url"] as String?,
-      rules: rawRules is List ? rawRules.whereType<String>().toList() : const [],
-      clientOptions: rawClientOptions is Map ? Map<String, dynamic>.from(rawClientOptions) : null,
-      hidden: json["hidden"] == true,
-      tools: rawTools is List
-          ? [
-              for (final tool in rawTools)
-                if (tool is Map<String, dynamic>)
-                  AgentToolCapabilities.fromJson(tool)
-                else if (tool is Map)
-                  AgentToolCapabilities.fromJson(Map<String, dynamic>.from(tool)),
-            ]
-          : const [],
-    );
-  }
-}
-
-class AgentCapabilitiesResponse {
-  const AgentCapabilitiesResponse({required this.threadId, required this.sourceMessageId, required this.version, required this.toolkits});
-
-  final String threadId;
-  final String sourceMessageId;
-  final String version;
-  final List<AgentToolkitCapabilities> toolkits;
-
-  Map<String, AgentToolkitCapabilities> get toolkitsByName {
-    return {for (final toolkit in toolkits) toolkit.name: toolkit};
-  }
-
-  factory AgentCapabilitiesResponse.fromJson(Map<String, dynamic> json) {
-    final rawToolkits = json["toolkits"];
-    return AgentCapabilitiesResponse(
-      threadId: json["thread_id"] as String,
-      sourceMessageId: json["source_message_id"] as String,
-      version: json["version"] as String,
-      toolkits: rawToolkits is List
-          ? [
-              for (final toolkit in rawToolkits)
-                if (toolkit is Map<String, dynamic>)
-                  AgentToolkitCapabilities.fromJson(toolkit)
-                else if (toolkit is Map)
-                  AgentToolkitCapabilities.fromJson(Map<String, dynamic>.from(toolkit)),
-            ]
-          : const [],
-    );
   }
 }
 
@@ -847,6 +816,10 @@ class PendingAgentMessage {
     return (text: textParts.join("\n\n"), attachments: attachments);
   }
 
+  static ({String text, List<String> attachments}) _parseAgentContent(List<AgentInputContent> content) {
+    return _parseContent(content.map((item) => item.toJson()).toList());
+  }
+
   factory PendingAgentMessage.fromQueueJson(Map<String, dynamic> json) {
     final parsedContent = _parseContent(json["content"]);
     final senderName = json["sender_name"];
@@ -856,7 +829,7 @@ class PendingAgentMessage {
     final createdAt = json["created_at"];
     return PendingAgentMessage(
       messageId: messageId is String ? messageId : const Uuid().v4(),
-      messageType: messageType is String ? messageType : _agentTurnSteerType,
+      messageType: messageType is String ? messageType : agentTurnSteerType,
       threadPath: threadPath is String ? threadPath : "",
       text: parsedContent.text,
       attachments: parsedContent.attachments,
@@ -868,21 +841,15 @@ class PendingAgentMessage {
     );
   }
 
-  factory PendingAgentMessage.fromAcceptedPayload(Map<String, dynamic> payload) {
-    final parsedContent = _parseContent(payload["content"]);
-    final type = payload["type"];
-    final senderName = payload["sender_name"];
-    final sourceMessageId = payload["source_message_id"];
-    final threadPath = payload["thread_id"];
-    final createdAt = payload["created_at"];
+  factory PendingAgentMessage.fromAcceptedMessage(TurnStartAccepted message) {
+    final parsedContent = _parseAgentContent(message.content);
     return PendingAgentMessage(
-      messageId: sourceMessageId is String && sourceMessageId.trim().isNotEmpty ? sourceMessageId.trim() : const Uuid().v4(),
-      messageType: type == _agentTurnStartAcceptedType ? _agentTurnStartType : _agentTurnSteerType,
-      threadPath: threadPath is String ? threadPath : "",
+      messageId: message.sourceMessageId.trim().isNotEmpty ? message.sourceMessageId.trim() : const Uuid().v4(),
+      messageType: message is TurnSteerAccepted ? agentTurnSteerType : agentTurnStartType,
+      threadPath: message.threadId,
       text: parsedContent.text,
       attachments: parsedContent.attachments,
-      senderName: senderName is String && senderName.trim().isNotEmpty ? senderName.trim() : null,
-      createdAt: createdAt is String ? DateTime.tryParse(createdAt) : null,
+      senderName: message.senderName?.trim().isNotEmpty == true ? message.senderName!.trim() : null,
       matchByContentOnly: false,
       awaitingAcceptance: false,
       awaitingApplication: true,
@@ -890,21 +857,20 @@ class PendingAgentMessage {
     );
   }
 
-  factory PendingAgentMessage.fromTurnInputPayload(Map<String, dynamic> payload) {
-    final parsedContent = _parseContent(payload["content"]);
-    final type = payload["type"];
-    final senderName = payload["sender_name"];
-    final messageId = payload["message_id"];
-    final threadPath = payload["thread_id"];
-    final createdAt = payload["created_at"];
+  factory PendingAgentMessage.fromTurnInputMessage(AgentThreadMessage message) {
+    final content = switch (message) {
+      TurnStart() => message.content,
+      TurnSteer() => message.content,
+      _ => const <AgentInputContent>[],
+    };
+    final parsedContent = _parseAgentContent(content);
     return PendingAgentMessage(
-      messageId: messageId is String && messageId.trim().isNotEmpty ? messageId.trim() : const Uuid().v4(),
-      messageType: type is String ? type : _agentTurnStartType,
-      threadPath: threadPath is String ? threadPath : "",
+      messageId: message.messageId.trim().isNotEmpty ? message.messageId.trim() : const Uuid().v4(),
+      messageType: message.type,
+      threadPath: message.threadId,
       text: parsedContent.text,
       attachments: parsedContent.attachments,
-      senderName: senderName is String && senderName.trim().isNotEmpty ? senderName.trim() : null,
-      createdAt: createdAt is String ? DateTime.tryParse(createdAt) : null,
+      senderName: message.senderName?.trim().isNotEmpty == true ? message.senderName!.trim() : null,
       matchByContentOnly: false,
       awaitingAcceptance: true,
       awaitingApplication: true,
@@ -949,8 +915,13 @@ _AgentThreadMessageStatusStore _agentThreadMessageStatusStore(RoomClient room) {
   return created;
 }
 
+bool trackAgentThreadStatusMessage({required RoomClient room, required AgentMessage message}) {
+  return _agentThreadMessageStatusStore(room).apply(message);
+}
+
 bool trackAgentThreadStatusPayload({required RoomClient room, required Map<String, dynamic> payload}) {
-  return _agentThreadMessageStatusStore(room).apply(payload);
+  final message = _agentMessageFromRoomPayload(payload);
+  return message != null && trackAgentThreadStatusMessage(room: room, message: message);
 }
 
 int? _positiveIntValue(Object? value) {
@@ -1004,49 +975,52 @@ class _AgentThreadMessageStatusStore {
       <String, LinkedHashMap<String, PendingAgentMessage>>{};
   final Map<String, LiveToolCallAccumulator> _toolCallAccumulatorsByThreadPath = <String, LiveToolCallAccumulator>{};
 
-  bool apply(Map<String, dynamic> payload) {
-    final type = payload["type"];
-    final threadPath = payload["thread_id"];
-    if (type is! String || threadPath is! String || threadPath.trim().isEmpty) {
+  bool apply(AgentMessage message) {
+    if (message is! AgentThreadMessage || message.threadId.trim().isEmpty) {
       return false;
     }
-    final normalizedThreadPath = threadPath.trim();
+    final normalizedThreadPath = message.threadId.trim();
 
-    switch (type) {
-      case _agentThreadStatusType:
+    switch (message.type) {
+      case agentThreadStatusType:
         _touchedThreadPaths.add(normalizedThreadPath);
-        return _applyStatus(normalizedThreadPath, payload);
-      case _agentTurnStartType:
-      case _agentTurnSteerType:
+        return message is AgentThreadStatus && _applyStatus(normalizedThreadPath, message);
+      case agentTurnStartType:
+      case agentTurnSteerType:
         _touchedThreadPaths.add(normalizedThreadPath);
-        return _applyTurnInput(normalizedThreadPath, payload);
-      case _agentTurnStartAcceptedType:
-      case _agentTurnSteerAcceptedType:
+        return _applyTurnInput(normalizedThreadPath, message);
+      case agentTurnStartAcceptedType:
+      case agentTurnSteerAcceptedType:
         _touchedThreadPaths.add(normalizedThreadPath);
-        return _applyAccepted(normalizedThreadPath, payload);
-      case _agentTurnStartedType:
+        return message is TurnStartAccepted && _applyAccepted(normalizedThreadPath, message);
+      case agentTurnStartedType:
         _touchedThreadPaths.add(normalizedThreadPath);
-        return _markPendingApplied(normalizedThreadPath, payload["source_message_id"], turnId: payload["turn_id"]);
-      case _agentTurnSteeredType:
+        return message is TurnStarted && _markPendingApplied(normalizedThreadPath, message.sourceMessageId, turnId: message.turnId);
+      case agentTurnSteeredType:
         _touchedThreadPaths.add(normalizedThreadPath);
-        return _markPendingApplied(normalizedThreadPath, payload["source_message_id"]);
-      case _agentToolCallArgumentsDeltaType:
+        return message is TurnSteered && _markPendingApplied(normalizedThreadPath, message.sourceMessageId);
+      case agentToolCallArgumentsDeltaType:
         _touchedThreadPaths.add(normalizedThreadPath);
-        return _applyToolCallArgumentsDelta(normalizedThreadPath, payload);
-      case _agentToolCallPendingType:
-      case _agentToolCallInProgressType:
-      case _agentToolCallStartedType:
+        return message is AgentToolCallArgumentsDelta && _applyToolCallArgumentsDelta(normalizedThreadPath, message);
+      case agentToolCallPendingType:
+      case agentToolCallInProgressType:
+      case agentToolCallStartedType:
         _touchedThreadPaths.add(normalizedThreadPath);
-        return _applyToolCallLifecycle(normalizedThreadPath, payload);
-      case _agentToolCallEndedType:
+        return message is AgentToolCallPending && _applyToolCallLifecycle(normalizedThreadPath, message);
+      case agentToolCallEndedType:
         _touchedThreadPaths.add(normalizedThreadPath);
-        return _clearToolCallBytes(normalizedThreadPath, payload);
-      case _agentTurnStartRejectedType:
-      case _agentTurnSteerRejectedType:
+        return message is AgentToolCallEnded && _clearToolCallBytes(normalizedThreadPath, message);
+      case agentTurnStartRejectedType:
+      case agentTurnSteerRejectedType:
         _touchedThreadPaths.add(normalizedThreadPath);
-        return _removePending(normalizedThreadPath, payload["source_message_id"]);
-      case _agentTurnEndedType:
-      case _agentThreadClearedType:
+        final sourceMessageId = switch (message) {
+          TurnStartRejected() => message.sourceMessageId,
+          TurnSteerRejected() => message.sourceMessageId,
+          _ => null,
+        };
+        return sourceMessageId != null && _removePending(normalizedThreadPath, sourceMessageId);
+      case agentTurnEndedType:
+      case agentThreadClearedType:
         _touchedThreadPaths.add(normalizedThreadPath);
         final hadPending = _pendingMessagesByThreadPath.remove(normalizedThreadPath)?.isNotEmpty == true;
         final hadStatus = _statusByThreadPath.remove(normalizedThreadPath) != null;
@@ -1089,15 +1063,15 @@ class _AgentThreadMessageStatusStore {
     );
   }
 
-  bool _applyStatus(String threadPath, Map<String, dynamic> payload) {
-    final rawStatus = payload["status"];
-    final rawMode = payload["mode"];
-    final rawStartedAt = payload["started_at"];
-    final rawTurnId = payload["turn_id"];
-    final rawPendingItemId = payload["pending_item_id"];
-    final rawTotalBytes = payload["total_bytes"];
-    final rawLinesAdded = payload["lines_added"];
-    final rawLinesRemoved = payload["lines_removed"];
+  bool _applyStatus(String threadPath, AgentThreadStatus message) {
+    final rawStatus = message.status;
+    final rawMode = message.mode;
+    final rawStartedAt = message.startedAt;
+    final rawTurnId = message.turnId;
+    final rawPendingItemId = message.pendingItemId;
+    final rawTotalBytes = message.totalBytes;
+    final rawLinesAdded = message.linesAdded;
+    final rawLinesRemoved = message.linesRemoved;
     final previous = _statusByThreadPath[threadPath];
 
     final text = rawStatus is String && rawStatus.trim().isNotEmpty ? rawStatus.trim() : null;
@@ -1109,15 +1083,13 @@ class _AgentThreadMessageStatusStore {
     final pendingItemId = rawPendingItemId is String && rawPendingItemId.trim().isNotEmpty ? rawPendingItemId.trim() : null;
     final parsedTotalBytes = _positiveIntValue(rawTotalBytes);
     final linesAdded =
-        _nonNegativeIntValue(rawLinesAdded) ??
-        (!payload.containsKey("lines_added") && previous?.text == text ? previous?.linesAdded : null);
+        _nonNegativeIntValue(rawLinesAdded) ?? (rawLinesAdded == null && previous?.text == text ? previous?.linesAdded : null);
     final linesRemoved =
-        _nonNegativeIntValue(rawLinesRemoved) ??
-        (!payload.containsKey("lines_removed") && previous?.text == text ? previous?.linesRemoved : null);
+        _nonNegativeIntValue(rawLinesRemoved) ?? (rawLinesRemoved == null && previous?.text == text ? previous?.linesRemoved : null);
     final totalBytes =
         parsedTotalBytes ??
         _toolArgumentBytes(threadPath, pendingItemId) ??
-        (!payload.containsKey("total_bytes") && previous?.text == text ? previous?.totalBytes : null);
+        (rawTotalBytes == null && previous?.text == text ? previous?.totalBytes : null);
     final totalBytesFromStatus = parsedTotalBytes != null;
 
     if (text == null &&
@@ -1160,14 +1132,14 @@ class _AgentThreadMessageStatusStore {
     return true;
   }
 
-  bool _applyToolCallArgumentsDelta(String threadPath, Map<String, dynamic> payload) {
-    final itemId = payload["item_id"];
-    if (itemId is! String || itemId.trim().isEmpty) {
+  bool _applyToolCallArgumentsDelta(String threadPath, AgentToolCallArgumentsDelta message) {
+    final itemId = message.itemId;
+    if (itemId.trim().isEmpty) {
       return false;
     }
     final normalizedItemId = itemId.trim();
 
-    final delta = payload["delta"]?.toString() ?? "";
+    final delta = message.delta;
     final deltaBytes = utf8.encode(delta).length;
     if (deltaBytes <= 0) {
       return false;
@@ -1215,18 +1187,15 @@ class _AgentThreadMessageStatusStore {
     return true;
   }
 
-  bool _applyToolCallLifecycle(String threadPath, Map<String, dynamic> payload) {
-    final rawItemId = payload["item_id"];
-    final itemId = rawItemId is String && rawItemId.trim().isNotEmpty ? rawItemId.trim() : null;
+  bool _applyToolCallLifecycle(String threadPath, AgentToolCallPending message) {
+    final itemId = message.itemId.trim().isNotEmpty ? message.itemId.trim() : null;
     if (itemId == null) {
       return false;
     }
-    final rawTool = payload["tool"] ?? payload["tool_name"] ?? payload["name"];
     final accumulator = _toolCallAccumulatorsByThreadPath.putIfAbsent(threadPath, () => LiveToolCallAccumulator());
     final existing = accumulator[itemId];
-    final tool = rawTool is String && rawTool.trim().isNotEmpty ? rawTool.trim() : existing?.tool ?? "";
-    final rawArguments = payload["arguments"];
-    final arguments = rawArguments is Map ? Map<String, dynamic>.from(rawArguments) : existing?.arguments;
+    final tool = message.tool.trim().isNotEmpty ? message.tool.trim() : existing?.tool ?? "";
+    final arguments = message.arguments ?? existing?.arguments;
 
     final status = _statusByThreadPath[threadPath];
     final snapshot = accumulator.upsert(itemId: itemId, tool: tool, arguments: arguments, fallbackText: status?.text);
@@ -1268,9 +1237,8 @@ class _AgentThreadMessageStatusStore {
     return bytes != null && bytes > 0 ? bytes : null;
   }
 
-  bool _clearToolCallBytes(String threadPath, Map<String, dynamic> payload) {
-    final rawItemId = payload["item_id"];
-    final itemId = rawItemId is String && rawItemId.trim().isNotEmpty ? rawItemId.trim() : null;
+  bool _clearToolCallBytes(String threadPath, AgentToolCallEnded message) {
+    final itemId = message.itemId.trim().isNotEmpty ? message.itemId.trim() : null;
     var hadBytes = false;
     if (itemId != null) {
       final accumulator = _toolCallAccumulatorsByThreadPath[threadPath];
@@ -1294,16 +1262,16 @@ class _AgentThreadMessageStatusStore {
     return true;
   }
 
-  bool _applyTurnInput(String threadPath, Map<String, dynamic> payload) {
-    final parsedMessage = PendingAgentMessage.fromTurnInputPayload(payload);
+  bool _applyTurnInput(String threadPath, AgentThreadMessage message) {
+    final parsedMessage = PendingAgentMessage.fromTurnInputMessage(message);
     if (parsedMessage.messageId.trim().isEmpty) {
       return false;
     }
     return _upsertPendingMessage(threadPath, parsedMessage);
   }
 
-  bool _applyAccepted(String threadPath, Map<String, dynamic> payload) {
-    final parsedMessage = PendingAgentMessage.fromAcceptedPayload(payload);
+  bool _applyAccepted(String threadPath, TurnStartAccepted message) {
+    final parsedMessage = PendingAgentMessage.fromAcceptedMessage(message);
     if (parsedMessage.messageId.trim().isEmpty) {
       return false;
     }
@@ -1315,7 +1283,7 @@ class _AgentThreadMessageStatusStore {
       }
       return false;
     }
-    final message = existing == null
+    final nextMessage = existing == null
         ? parsedMessage
         : PendingAgentMessage(
             messageId: existing.messageId,
@@ -1330,7 +1298,7 @@ class _AgentThreadMessageStatusStore {
             awaitingApplication: existing.awaitingApplication,
             awaitingOnline: existing.awaitingOnline,
           );
-    return _upsertPendingMessage(threadPath, message);
+    return _upsertPendingMessage(threadPath, nextMessage);
   }
 
   bool _upsertPendingMessage(String threadPath, PendingAgentMessage message) {
@@ -1363,7 +1331,7 @@ class _AgentThreadMessageStatusStore {
     if (normalizedSourceMessageId.isNotEmpty) {
       final existing = pendingMessages?[normalizedSourceMessageId];
       if (existing != null && existing.awaitingApplication) {
-        if (existing.messageType == _agentTurnSteerType) {
+        if (existing.messageType == agentTurnSteerType) {
           pendingMessages!.remove(normalizedSourceMessageId);
           if (pendingMessages.isEmpty) {
             _pendingMessagesByThreadPath.remove(threadPath);
@@ -1840,7 +1808,7 @@ class ChatThreadController extends ChangeNotifier {
       return;
     }
 
-    if (existing.messageType == _agentTurnSteerType) {
+    if (existing.messageType == agentTurnSteerType) {
       _pendingAgentMessages.remove(messageId);
       notifyListeners();
       return;
@@ -1915,30 +1883,34 @@ class ChatThreadController extends ChangeNotifier {
     }
   }
 
-  void handleAgentMessagePayload(Map<String, dynamic> payload) {
-    final type = payload["type"];
-    if (type is! String) {
-      return;
-    }
+  void handleAgentMessage(AgentMessage message) {
+    final type = message.type;
+    final normalizedSourceMessageId = switch (message) {
+      TurnStartAccepted() => message.sourceMessageId,
+      TurnStartRejected() => message.sourceMessageId,
+      TurnSteerRejected() => message.sourceMessageId,
+      TurnStarted() => message.sourceMessageId,
+      TurnSteered() => message.sourceMessageId,
+      _ => null,
+    };
+    final normalizedThreadPath = message is AgentThreadMessage ? message.threadId.trim() : "";
 
-    final sourceMessageId = payload["source_message_id"];
-    final normalizedSourceMessageId = sourceMessageId is String ? sourceMessageId : null;
-    final threadPath = payload["thread_id"];
-    final normalizedThreadPath = threadPath is String ? threadPath.trim() : "";
-
-    if (type == _agentTurnStartType || type == _agentTurnSteerType) {
-      final pendingMessage = PendingAgentMessage.fromTurnInputPayload(payload);
+    if (type == agentTurnStartType || type == agentTurnSteerType) {
+      if (message is! AgentThreadMessage) {
+        return;
+      }
+      final pendingMessage = PendingAgentMessage.fromTurnInputMessage(message);
       if (pendingMessage.threadPath.trim().isNotEmpty) {
         _markPendingAgentMessage(message: pendingMessage);
       }
       return;
     }
 
-    if (type == _agentTurnStartAcceptedType || type == _agentTurnSteerAcceptedType) {
+    if (type == agentTurnStartAcceptedType || type == agentTurnSteerAcceptedType) {
       if (normalizedSourceMessageId != null && _pendingAgentMessages.containsKey(normalizedSourceMessageId)) {
         _markPendingAgentMessageAccepted(normalizedSourceMessageId);
-      } else {
-        final pendingMessage = PendingAgentMessage.fromAcceptedPayload(payload);
+      } else if (message is TurnStartAccepted) {
+        final pendingMessage = PendingAgentMessage.fromAcceptedMessage(message);
         if (pendingMessage.threadPath.trim().isNotEmpty && pendingMessage.hasVisibleContent) {
           _markPendingAgentMessage(message: pendingMessage);
         }
@@ -1946,30 +1918,38 @@ class ChatThreadController extends ChangeNotifier {
       return;
     }
 
-    if (type == _agentTurnStartedType || type == _agentTurnSteeredType) {
+    if (type == agentTurnStartedType || type == agentTurnSteeredType) {
       _markPendingAgentMessageApplied(normalizedSourceMessageId);
       return;
     }
 
-    if (type == _agentTurnInterruptAcceptedType || type == _agentTurnInterruptedType) {
+    if (type == agentTurnInterruptAcceptedType || type == agentTurnInterruptedType) {
       return;
     }
 
-    if (type == _agentTurnStartRejectedType || type == _agentTurnSteerRejectedType) {
-      final sourceMessageId = payload["source_message_id"];
-      final normalizedSourceMessageId = sourceMessageId is String ? sourceMessageId : null;
+    if (type == agentTurnStartRejectedType || type == agentTurnSteerRejectedType) {
       _clearPendingAgentMessage(normalizedSourceMessageId);
-      final error = payload["error"];
-      final message = error is Map ? error["message"] : null;
+      final errorMessage = switch (message) {
+        TurnStartRejected() => message.error.message,
+        TurnSteerRejected() => message.error.message,
+        _ => null,
+      };
       outboundStatus.markFailed(
         normalizedSourceMessageId ?? "",
-        message is String && message.trim().isNotEmpty ? message.trim() : "Message rejected",
+        errorMessage != null && errorMessage.trim().isNotEmpty ? errorMessage.trim() : "Message rejected",
       );
       return;
     }
 
-    if (type == _agentTurnEndedType || type == _agentThreadClearedType) {
+    if (type == agentTurnEndedType || type == agentThreadClearedType) {
       clearPendingAgentMessagesForThread(normalizedThreadPath);
+    }
+  }
+
+  void handleAgentMessagePayload(Map<String, dynamic> payload) {
+    final message = _agentMessageFromRoomPayload(payload);
+    if (message != null) {
+      handleAgentMessage(message);
     }
   }
 
@@ -2085,8 +2065,8 @@ class ChatThreadController extends ChangeNotifier {
         for (final participant in getAgentParticipants(thread, participantName: participantName))
           room.messaging.sendMessage(
             to: participant,
-            type: _agentRoomMessageType,
-            message: {"type": _agentTurnInterruptType, "thread_id": path, "turn_id": turnId},
+            type: agentRoomMessageType,
+            message: {"type": agentTurnInterruptType, "thread_id": path, "turn_id": turnId},
           ),
       ]);
       return;
@@ -2111,8 +2091,8 @@ class ChatThreadController extends ChangeNotifier {
         for (final participant in getAgentParticipants(thread, participantName: participantName))
           room.messaging.sendMessage(
             to: participant,
-            type: _agentRoomMessageType,
-            message: {"type": _agentThreadClearType, "thread_id": path},
+            type: agentRoomMessageType,
+            message: {"type": agentThreadClearType, "thread_id": path},
           ),
       ]);
       return;
@@ -2240,22 +2220,23 @@ class ChatThreadController extends ChangeNotifier {
     if (message.text.trim().isNotEmpty || message.attachments.isNotEmpty) {
       if (useAgentMessages) {
         final isSteer = messageType == "steer";
-        final payload = <String, dynamic>{
-          "type": isSteer ? _agentTurnSteerType : _agentTurnStartType,
-          "thread_id": path,
-          "message_id": message.id,
-          "content": _agentInputContentFromMessage(message),
-        };
-        if (isSteer && turnId != null && turnId.trim().isNotEmpty) {
-          payload["turn_id"] = turnId;
-        }
-        if (!isSteer && toolkits != null && toolkits.isNotEmpty) {
-          payload["toolkits"] = {for (final entry in toolkits.entries) entry.key: entry.value.toJson()};
-        }
-        if (!isSteer && toolChoice != null) {
-          payload["tool_choice"] = toolChoice.toJson();
-        }
-        await room.messaging.sendMessage(to: participant, type: _agentRoomMessageType, message: payload);
+        final payload = isSteer
+            ? TurnSteer(
+                threadId: path,
+                messageId: message.id,
+                turnId: turnId != null && turnId.trim().isNotEmpty ? turnId.trim() : message.id,
+                content: _agentInputContentFromMessage(message),
+              )
+            : TurnStart(
+                threadId: path,
+                messageId: message.id,
+                content: _agentInputContentFromMessage(message),
+                toolkits: toolkits != null && toolkits.isNotEmpty
+                    ? {for (final entry in toolkits.entries) entry.key: TurnToolkitConfig(clientOptions: entry.value.clientOptions)}
+                    : null,
+                toolChoice: toolChoice == null ? null : ToolChoice(toolkitName: toolChoice.toolkitName, toolName: toolChoice.toolName),
+              );
+        await room.messaging.sendMessage(to: participant, type: agentRoomMessageType, message: payload.toJson());
         return;
       }
 
@@ -2324,7 +2305,7 @@ class ChatThreadController extends ChangeNotifier {
         _markPendingAgentMessage(
           message: PendingAgentMessage(
             messageId: message.id,
-            messageType: messageType == "steer" ? _agentTurnSteerType : _agentTurnStartType,
+            messageType: messageType == "steer" ? agentTurnSteerType : agentTurnStartType,
             threadPath: path,
             text: message.text,
             attachments: List<String>.from(message.attachments),
@@ -4842,7 +4823,7 @@ class AgentUsageSnapshot {
   final Map<String, double> usage;
 
   static AgentUsageSnapshot? fromPayload(Map<String, Object?> payload) {
-    if (payload["type"] != _agentUsageUpdatedType) {
+    if (payload["type"] != agentUsageUpdatedType) {
       return null;
     }
 
@@ -5046,7 +5027,7 @@ class _ChatThreadState extends State<ChatThread> {
       return false;
     }
 
-    return pendingMessages.any((message) => message.messageType == _agentTurnStartType);
+    return pendingMessages.any((message) => message.messageType == agentTurnStartType);
   }
 
   bool _canInterruptActiveTurn({required ChatThreadSnapshot state, required List<PendingAgentMessage> pendingMessages}) {
@@ -5600,7 +5581,7 @@ class _ChatThreadState extends State<ChatThread> {
                         ? pendingMessages
                               .where(
                                 (message) =>
-                                    (message.messageType == _agentTurnStartType || message.messageType == _agentTurnSteerType) &&
+                                    (message.messageType == agentTurnStartType || message.messageType == agentTurnSteerType) &&
                                     !_pendingAgentMessageIsOptimisticallyRendered(pending: message, messages: state.messages),
                               )
                               .toList(growable: false)
@@ -10108,7 +10089,7 @@ class ChatThreadSnapshot {
   final int? threadStatusLinesRemoved;
   final bool supportsAgentMessages;
   final bool supportsMcp;
-  final Map<String, AgentToolkitCapabilities> toolkits;
+  final Map<String, ToolkitCapabilities> toolkits;
   final String? threadTurnId;
   final List<PendingAgentMessage> pendingMessages;
   final String? pendingItemId;
@@ -10152,7 +10133,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
   int? threadStatusLinesAdded;
   int? threadStatusLinesRemoved;
   bool supportsAgentMessages = false;
-  Map<String, AgentToolkitCapabilities> toolkits = const {};
+  Map<String, ToolkitCapabilities> toolkits = const {};
   String? threadTurnId;
   List<PendingAgentMessage> pendingMessages = const [];
   String? pendingItemId;
@@ -10230,8 +10211,8 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
     try {
       await widget.room.messaging.sendMessage(
         to: agent,
-        type: _agentRoomMessageType,
-        message: {"type": _agentCapabilitiesRequestType, "thread_id": widget.path, "message_id": const Uuid().v4()},
+        type: agentRoomMessageType,
+        message: CapabilitiesRequest(threadId: widget.path, messageId: const Uuid().v4()).toJson(),
       );
     } catch (_) {
       if (_capabilitiesRequestKey == requestKey) {
@@ -10240,13 +10221,12 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
     }
   }
 
-  bool _handleCapabilitiesPayload({required RoomMessageEvent event, required Map<String, dynamic> payload}) {
-    final type = payload["type"];
-    if (type != _agentCapabilitiesResponseType) {
+  bool _handleCapabilitiesMessage({required RoomMessageEvent event, required AgentMessage message}) {
+    if (message is! CapabilitiesResponse) {
       return false;
     }
 
-    if (payload["thread_id"] != widget.path) {
+    if (message.threadId != widget.path) {
       return true;
     }
 
@@ -10257,21 +10237,21 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
       return true;
     }
 
-    try {
-      final response = AgentCapabilitiesResponse.fromJson(payload);
-      toolkits = response.toolkitsByName;
-      _capabilitiesRequestKey = null;
-      _capabilitiesResponseKey = "${currentAgent.id}:${response.threadId}";
-      if (mounted) {
-        setState(() {});
-      }
-    } catch (_) {}
+    toolkits = {for (final toolkit in message.toolkits) toolkit.name: toolkit};
+    _capabilitiesRequestKey = null;
+    _capabilitiesResponseKey = "${currentAgent.id}:${message.threadId}";
+    if (mounted) {
+      setState(() {});
+    }
 
     return true;
   }
 
-  bool _handleUsagePayload(Map<String, dynamic> payload) {
-    final nextUsage = AgentUsageSnapshot.fromPayload(payload);
+  bool _handleUsageMessage(AgentMessage message) {
+    if (message is! AgentUsageUpdated) {
+      return false;
+    }
+    final nextUsage = AgentUsageSnapshot.fromPayload(message.toJson());
     if (nextUsage == null) {
       return false;
     }
@@ -10321,7 +10301,11 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
     _openedAgentParticipantId = agent.id;
 
     if (_supportsAgentMessages(agent)) {
-      _sendThreadSubscriptionMessageNowait(room: widget.room, agent: agent, messageType: _agentThreadOpenType, path: widget.path);
+      _sendThreadSubscriptionMessageNowait(
+        room: widget.room,
+        agent: agent,
+        message: OpenThread(threadId: widget.path),
+      );
       return;
     }
 
@@ -10344,23 +10328,17 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
     if (agent == null || !_supportsAgentMessages(agent)) {
       return;
     }
-    _sendThreadSubscriptionMessageNowait(room: room, agent: agent, messageType: _agentThreadCloseType, path: openedPath);
+    _sendThreadSubscriptionMessageNowait(
+      room: room,
+      agent: agent,
+      message: CloseThread(threadId: openedPath),
+    );
   }
 
-  void _sendThreadSubscriptionMessageNowait({
-    required RoomClient room,
-    required RemoteParticipant agent,
-    required String messageType,
-    required String path,
-  }) {
+  void _sendThreadSubscriptionMessageNowait({required RoomClient room, required RemoteParticipant agent, required AgentMessage message}) {
     unawaited(() async {
       try {
-        await room.messaging.sendMessage(
-          to: agent,
-          type: _agentRoomMessageType,
-          ignoreOffline: true,
-          message: {"type": messageType, "thread_id": path},
-        );
+        await room.messaging.sendMessage(to: agent, type: agentRoomMessageType, ignoreOffline: true, message: message.toJson());
       } catch (_) {}
     }());
   }
@@ -10400,41 +10378,23 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
     }
 
     if (event is RoomMessageEvent) {
-      if (event.message.type == _agentRoomMessageType) {
-        final message = event.message.message;
-        final payload = message["type"] is String ? message : message["payload"];
-        if (payload is Map<String, dynamic>) {
-          final statusChanged = trackAgentThreadStatusPayload(room: widget.room, payload: payload);
-          if (_handleCapabilitiesPayload(event: event, payload: payload)) {
+      if (event.message.type == agentRoomMessageType) {
+        final message = _agentMessageFromRoomPayload(event.message.message);
+        if (message != null) {
+          final statusChanged = trackAgentThreadStatusMessage(room: widget.room, message: message);
+          if (_handleCapabilitiesMessage(event: event, message: message)) {
             if (statusChanged) {
               _getThreadStatus();
             }
             return;
           }
-          if (_handleUsagePayload(payload)) {
+          if (_handleUsageMessage(message)) {
             if (statusChanged) {
               _getThreadStatus();
             }
             return;
           }
-          widget.controller.handleAgentMessagePayload(payload);
-          _getThreadStatus();
-        } else if (payload is Map) {
-          final normalized = Map<String, dynamic>.from(payload);
-          final statusChanged = trackAgentThreadStatusPayload(room: widget.room, payload: normalized);
-          if (_handleCapabilitiesPayload(event: event, payload: normalized)) {
-            if (statusChanged) {
-              _getThreadStatus();
-            }
-            return;
-          }
-          if (_handleUsagePayload(normalized)) {
-            if (statusChanged) {
-              _getThreadStatus();
-            }
-            return;
-          }
-          widget.controller.handleAgentMessagePayload(normalized);
+          widget.controller.handleAgentMessage(message);
           _getThreadStatus();
         }
       } else {
@@ -11346,10 +11306,10 @@ class _EventLineState extends State<EventLine> {
         for (final participant in recipients)
           widget.room.messaging.sendMessage(
             to: participant,
-            type: useAgentMessages ? _agentRoomMessageType : (approve ? "approved" : "rejected"),
+            type: useAgentMessages ? agentRoomMessageType : (approve ? "approved" : "rejected"),
             message: useAgentMessages
                 ? {
-                    "type": approve ? _agentToolApproveType : _agentToolRejectType,
+                    "type": approve ? agentToolApproveType : agentToolRejectType,
                     "thread_id": widget.path,
                     "turn_id": turnId,
                     "item_id": approvalId,
