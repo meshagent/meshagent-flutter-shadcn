@@ -122,6 +122,10 @@ String? _threadListPathFromThreadDir(String? threadDir) {
     return null;
   }
 
+  if (normalized.startsWith('dataset://')) {
+    return "$normalized/index";
+  }
+
   return "$normalized/index.threadl";
 }
 

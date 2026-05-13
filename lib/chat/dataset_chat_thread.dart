@@ -3119,10 +3119,11 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }) {
     final showStatus = shouldShowChatThreadStatus(_status);
     final feedImages = _collectThreadImages(messages);
+    const loadingContent = CircularProgressIndicator();
     final threadView = ChatThreadViewportBody(
       scrollController: _controller.threadScrollController,
       bottomAlign: true,
-      centerContent: loading ? const CircularProgressIndicator() : null,
+      centerContent: loading ? loadingContent : null,
       bottomSpacer: showStatus ? 20 : 0,
       overlays: [
         if (showStatus)
@@ -3147,7 +3148,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ),
           ),
       ],
-      children: loading ? const <Widget>[] : _buildMessageWidgets(context, messages, pendingMessages, feedImages: feedImages),
+      children: loading && pendingMessages.isEmpty
+          ? const <Widget>[]
+          : _buildMessageWidgets(context, messages, pendingMessages, feedImages: feedImages),
     );
 
     return OverlayPortal(
@@ -3182,7 +3185,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       builder: (context, _) {
         final loading = !_ready;
         final messages = loading ? const <_DatasetThreadMessage>[] : _messages();
-        final pendingMessages = loading ? const <PendingAgentMessage>[] : _combinedPendingMessages(messages);
+        final pendingMessages = loading ? _pendingAgentMessagesForThread() : _combinedPendingMessages(messages);
         final snapshot = _snapshot(messages, pendingMessages);
         return FileDropArea(
           onFileDrop: (name, dataStream, size) async {

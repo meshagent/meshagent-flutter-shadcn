@@ -1186,6 +1186,9 @@ class _AgentThreadMessageStatusStore {
     if (!isStatusItem) {
       return false;
     }
+    final nextPendingItemId = status.pendingItemId == null || status.pendingItemId == normalizedItemId
+        ? status.pendingItemId ?? normalizedItemId
+        : normalizedItemId;
 
     final nextStatusText = snapshot.text ?? status.text;
     final nextTotalBytesForStatus = snapshot.totalBytes == null
@@ -1203,7 +1206,7 @@ class _AgentThreadMessageStatusStore {
       startedAt: status.startedAt,
       mode: status.mode,
       turnId: status.turnId,
-      pendingItemId: status.pendingItemId ?? normalizedItemId,
+      pendingItemId: nextPendingItemId,
       totalBytes: nextTotalBytesForStatus,
       totalBytesFromStatus: false,
       linesAdded: snapshot.linesAdded ?? status.linesAdded,
@@ -1230,10 +1233,14 @@ class _AgentThreadMessageStatusStore {
     if (status == null || status.text == null || status.text!.trim().isEmpty) {
       return false;
     }
+    final nextPendingItemId = status.pendingItemId == null || status.pendingItemId == itemId || accumulator.hasSingleItem(itemId)
+        ? itemId
+        : status.pendingItemId;
     final nextTotalBytesForStatus = snapshot.totalBytes == null
         ? status.totalBytes
         : math.max(status.totalBytes ?? 0, snapshot.totalBytes!);
-    if (snapshot.text == status.text &&
+    if (nextPendingItemId == status.pendingItemId &&
+        snapshot.text == status.text &&
         snapshot.linesAdded == null &&
         snapshot.linesRemoved == null &&
         nextTotalBytesForStatus == status.totalBytes) {
@@ -1244,7 +1251,7 @@ class _AgentThreadMessageStatusStore {
       startedAt: status.startedAt,
       mode: status.mode,
       turnId: status.turnId,
-      pendingItemId: status.pendingItemId ?? itemId,
+      pendingItemId: nextPendingItemId,
       totalBytes: nextTotalBytesForStatus,
       totalBytesFromStatus: false,
       linesAdded: snapshot.linesAdded ?? status.linesAdded,
