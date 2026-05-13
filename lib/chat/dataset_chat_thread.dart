@@ -479,6 +479,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   final TextStreamAccumulator _liveReasoningContent = TextStreamAccumulator();
   final FileStreamAccumulator _liveFileContent = FileStreamAccumulator();
   final Map<String, String> _realtimeAudioCommitItemIdsByTurnId = <String, String>{};
+  final Map<String, _DatasetPendingAgentWait> _pendingAgentWaits = <String, _DatasetPendingAgentWait>{};
   final _DatasetThreadRealtimeAudioPlayer _audioPlayer = _DatasetThreadRealtimeAudioPlayer();
   late ChatThreadController _controller;
   late bool _ownsController;
@@ -547,6 +548,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       _modelController.bindVoiceChangeHandler(_changeVoice);
     }
     if (oldWidget.path != widget.path || oldWidget.agentName != widget.agentName || oldWidget.room != widget.room) {
+      _cancelPendingAgentWaits(oldWidget.path);
       _usage = null;
       _refreshStatus();
       _syncOpenSubscription();
@@ -566,6 +568,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     _imageViewerHistoryEntry = null;
     historyEntry?.remove();
     widget.room.messaging.removeListener(_onMessagingChanged);
+    _cancelPendingAgentWaits(widget.path);
     if (_ownsController) {
       _controller.dispose();
     }
@@ -1639,6 +1642,92 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     _sendModelsRequestNowait(agent: agent);
   }
 
+  bool _hasPendingAgentWait(String threadPath) {
+    return _pendingAgentWaits.values.any((wait) => wait.threadPath == threadPath);
+  }
+
+  void _cancelPendingAgentWaits(String threadPath) {
+    final waits = _pendingAgentWaits.values.where((wait) => wait.threadPath == threadPath).toList(growable: false);
+    for (final wait in waits) {
+      wait.cancel();
+    }
+  }
+
+  void _setPendingAgentMessageAwaitingOnline({required String threadPath, required String messageId, required bool awaitingOnline}) {
+    for (final existing in _controller.pendingAgentMessagesForPath(threadPath)) {
+      if (existing.messageId != messageId || existing.awaitingOnline == awaitingOnline) {
+        continue;
+      }
+      _controller.markPendingAgentMessage(
+        PendingAgentMessage(
+          messageId: existing.messageId,
+          messageType: existing.messageType,
+          threadPath: existing.threadPath,
+          text: existing.text,
+          attachments: existing.attachments,
+          senderName: existing.senderName,
+          createdAt: existing.createdAt,
+          matchByContentOnly: existing.matchByContentOnly,
+          awaitingAcceptance: existing.awaitingAcceptance,
+          awaitingApplication: existing.awaitingApplication,
+          awaitingOnline: awaitingOnline,
+        ),
+      );
+      return;
+    }
+  }
+
+  Future<RemoteParticipant> _waitForAgentParticipant({required String threadPath, required String messageId}) async {
+    final agent = _agentParticipant();
+    if (agent != null) {
+      return agent;
+    }
+
+    final existing = _pendingAgentWaits.remove(messageId);
+    existing?.cancel();
+
+    final wait = _DatasetPendingAgentWait(messageId: messageId, threadPath: threadPath);
+    final completer = Completer<RemoteParticipant>();
+    _pendingAgentWaits[messageId] = wait;
+    _setPendingAgentMessageAwaitingOnline(threadPath: threadPath, messageId: messageId, awaitingOnline: true);
+    if (mounted) {
+      setState(() {});
+    }
+
+    void listener() {
+      if (completer.isCompleted) {
+        return;
+      }
+      final nextAgent = _agentParticipant();
+      if (nextAgent != null) {
+        completer.complete(nextAgent);
+      }
+    }
+
+    wait.detach = () {
+      widget.room.messaging.removeListener(listener);
+      wait.detach = null;
+    };
+    widget.room.messaging.addListener(listener);
+    listener();
+
+    try {
+      return await Future.any([
+        completer.future,
+        wait.cancelled.future.then<RemoteParticipant>((_) => throw const ChatSendCancelledException()),
+      ]);
+    } finally {
+      final removed = _pendingAgentWaits.remove(messageId);
+      if (identical(removed, wait)) {
+        wait.detach?.call();
+      }
+      _setPendingAgentMessageAwaitingOnline(threadPath: threadPath, messageId: messageId, awaitingOnline: false);
+      if (mounted) {
+        setState(() {});
+      }
+    }
+  }
+
   void _closeOpenSubscription() {
     final openedPath = _openedPath;
     final openedAgentParticipantId = _openedAgentParticipantId;
@@ -2005,10 +2094,6 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   Future<void> _sendRealtimeAudioChunk(Uint8List chunk, {required bool finalChunk}) async {
-    final agent = _agentParticipant();
-    if (agent == null) {
-      throw StateError('No online agent supports agent messages for this thread.');
-    }
     final activeModel = _modelController.activeModel;
     final activeVoice = _modelController.activeVoice;
     final inputFormat = _modelController.activeInputFormat;
@@ -2018,6 +2103,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       }
       final messageId = const Uuid().v4();
       final turnId = const Uuid().v4();
+      final agent = _agentParticipant() ?? await _waitForAgentParticipant(threadPath: widget.path, messageId: messageId);
       await widget.room.messaging.sendMessage(
         to: agent,
         type: _agentRoomMessageType,
@@ -2039,25 +2125,18 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       );
       return;
     }
+    final messageId = const Uuid().v4();
+    final agent = _agentParticipant() ?? await _waitForAgentParticipant(threadPath: widget.path, messageId: messageId);
     await widget.room.messaging.sendMessage(
       to: agent,
       type: _agentRoomMessageType,
-      message: {
-        'type': _agentRealtimeAudioChunkType,
-        'thread_id': widget.path,
-        'message_id': const Uuid().v4(),
-        'format': inputFormat.toJson(),
-      },
+      message: {'type': _agentRealtimeAudioChunkType, 'thread_id': widget.path, 'message_id': messageId, 'format': inputFormat.toJson()},
       attachment: chunk,
     );
   }
 
   Future<void> _send(String value, List<FileAttachment> attachments) async {
-    final agent = _agentParticipant();
-    if (agent == null) {
-      throw StateError('No online agent supports agent messages for this thread.');
-    }
-
+    final threadPath = widget.path;
     final isSteer = _status.mode == 'steerable' && _status.turnId != null;
     final messageId = const Uuid().v4();
     final attachmentPaths = attachments.map((attachment) => attachment.path).toList(growable: false);
@@ -2066,7 +2145,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       PendingAgentMessage(
         messageId: messageId,
         messageType: isSteer ? _agentTurnSteerType : _agentTurnStartType,
-        threadPath: widget.path,
+        threadPath: threadPath,
         text: value,
         attachments: attachmentPaths,
         senderName: senderName is String && senderName.trim().isNotEmpty ? senderName.trim() : null,
@@ -2077,9 +2156,10 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     _controller.outboundStatus.markSending(messageId);
 
     try {
+      final agent = _agentParticipant() ?? await _waitForAgentParticipant(threadPath: threadPath, messageId: messageId);
       final payload = <String, dynamic>{
         'type': isSteer ? _agentTurnSteerType : _agentTurnStartType,
-        'thread_id': widget.path,
+        'thread_id': threadPath,
         'message_id': messageId,
         'content': _agentInputContent(text: value, attachments: attachmentPaths),
       };
@@ -2097,9 +2177,12 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       await widget.room.messaging.sendMessage(to: agent, type: _agentRoomMessageType, message: payload);
       _controller.outboundStatus.markDelivered(messageId);
       _controller.clear();
+    } on ChatSendCancelledException {
+      _controller.outboundStatus.clear(messageId);
+      _controller.clearPendingAgentMessagesForThread(threadPath);
     } catch (error, stackTrace) {
       _controller.outboundStatus.markFailed(messageId, error, stackTrace);
-      _controller.clearPendingAgentMessagesForThread(widget.path);
+      _controller.clearPendingAgentMessagesForThread(threadPath);
       rethrow;
     }
   }
@@ -2309,8 +2392,11 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       builder: (context, _) => ChatThreadInput(
         key: _composerInputKey,
         focusTrigger: _controller,
-        sendEnabled: snapshot.supportsAgentMessages,
-        sendDisabledReason: !snapshot.supportsAgentMessages ? 'This thread requires an online agent that supports agent messages.' : null,
+        sendEnabled: waitingForOnlineMessage == null,
+        sendDisabledReason: waitingForOnlineMessage == null
+            ? null
+            : 'Waiting for ${_displayAgentName(widget.agentName ?? "agent")} to come online.',
+        onCancelSend: _hasPendingAgentWait(widget.path) ? () => _cancelPendingAgentWaits(widget.path) : null,
         onInterrupt: _canInterruptActiveTurn() ? _cancelTurn : null,
         sendPendingText: waitingForOnlineMessage == null
             ? null
@@ -4403,6 +4489,22 @@ List<Map<String, dynamic>> _agentInputContent({required String text, required Li
 
 bool _isTmpThreadPath(String path) {
   return path.trim().startsWith('tmp://');
+}
+
+class _DatasetPendingAgentWait {
+  _DatasetPendingAgentWait({required this.messageId, required this.threadPath});
+
+  final String messageId;
+  final String threadPath;
+  final Completer<void> cancelled = Completer<void>();
+  VoidCallback? detach;
+
+  void cancel() {
+    if (!cancelled.isCompleted) {
+      cancelled.complete();
+    }
+    detach?.call();
+  }
 }
 
 bool _isDatasetTableNotFoundError(Object error) {

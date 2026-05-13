@@ -380,7 +380,7 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
     if (rows.isEmpty) {
       return;
     }
-    _applyBatchSchemaDisplay(controller, batch.schema, _columns);
+    _applyBatchSchemaDisplay(controller, batch.schema, _columns, displaySchema: widget.displaySchema);
     var nextLoadedRowCount = _loadedRowCount;
     for (final row in rows) {
       if (!_rowMatchesNormalizedFilter(row)) {
@@ -546,7 +546,7 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
               return;
             }
 
-            _applyBatchSchemaDisplay(controller, batch.schema, columns);
+            _applyBatchSchemaDisplay(controller, batch.schema, columns, displaySchema: widget.displaySchema);
             _putRows(controller: controller, rows: rows, columns: columns, rowOffset: rowOffset);
 
             rowOffset += rows.length;
@@ -774,8 +774,13 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
     rows.updateState((state) => state.copyWith(count: rowCount, elasticCount: math.max(state.elasticCount, rowCount)));
   }
 
-  void _applyBatchSchemaDisplay(_SharedSwayzeController controller, ArrowSchema schema, List<String> columns) {
-    final columnDisplays = _columnDisplaysForSchema(schema, columns);
+  void _applyBatchSchemaDisplay(
+    _SharedSwayzeController controller,
+    ArrowSchema schema,
+    List<String> columns, {
+    ArrowSchema? displaySchema,
+  }) {
+    final columnDisplays = _columnDisplaysForSchema(schema, columns, displaySchema: displaySchema);
     if (columnDisplays.isEmpty || _columnDisplaysEqual(controller.columnDisplays, columnDisplays)) {
       return;
     }
@@ -1859,7 +1864,9 @@ class _SharedSwayzeCellData extends SwayzeCellData {
       final bytes = _imageBytesFromValue(value);
       return bytes == null ? '' : '[image ${_formatBytes(bytes.length)}]';
     }
-    final text = _stringifyTableValue(value, pretty: false);
+    final text = display == _ColumnDisplay.json
+        ? _jsonCompactTextForCellValue(value) ?? _stringifyTableValue(value, pretty: false)
+        : _stringifyTableValue(value, pretty: false);
     if (text.length <= 160) {
       return text;
     }
@@ -1910,6 +1917,10 @@ Object? _jsonValueFromCellValue(Object? value, {required bool parseText}) {
     final text = utf8.decode(value, allowMalformed: true);
     return parseText ? jsonDecode(text) : text;
   }
+  if (value is List<int>) {
+    final text = utf8.decode(value, allowMalformed: true);
+    return parseText ? jsonDecode(text) : text;
+  }
   if (parseText && value is String) {
     return jsonDecode(value);
   }
@@ -1928,6 +1939,14 @@ String? _jsonTextForCell(_SharedSwayzeCellData cell) {
   }
 }
 
+String? _jsonCompactTextForCellValue(Object? value) {
+  try {
+    return const JsonEncoder().convert(_jsonValueFromCellValue(value, parseText: true));
+  } catch (_) {
+    return _rawJsonTextForCellValue(value);
+  }
+}
+
 String? _rawJsonTextForCellValue(Object? value) {
   if (value == null) {
     return 'null';
@@ -1937,6 +1956,10 @@ String? _rawJsonTextForCellValue(Object? value) {
     return trimmed.isEmpty ? null : value;
   }
   if (value is Uint8List) {
+    final text = utf8.decode(value, allowMalformed: true);
+    return text.trim().isEmpty ? null : text;
+  }
+  if (value is List<int>) {
     final text = utf8.decode(value, allowMalformed: true);
     return text.trim().isEmpty ? null : text;
   }
