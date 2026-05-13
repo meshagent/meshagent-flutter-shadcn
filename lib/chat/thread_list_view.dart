@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:meshagent/meshagent.dart';
+import 'package:meshagent_agents/meshagent_agents.dart' hide defaultThreadDisplayNameFromPath, defaultUntitledThreadName;
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import 'conversation_descriptor.dart';
@@ -63,7 +64,7 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
     return parsed.toUtc();
   }
 
-  DateTime _sortDate(_ChatThreadListEntry entry) {
+  DateTime _sortDate(ThreadListEntry entry) {
     if (entry.modifiedAt.trim().isNotEmpty) {
       return _parseDate(entry.modifiedAt);
     }
@@ -73,14 +74,14 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
     return DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
   }
 
-  DateTime _createdSortDate(_ChatThreadListEntry entry) {
+  DateTime _createdSortDate(ThreadListEntry entry) {
     if (entry.createdAt.trim().isNotEmpty) {
       return _parseDate(entry.createdAt);
     }
     return DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
   }
 
-  int _compareEntries(_ChatThreadListEntry a, _ChatThreadListEntry b) {
+  int _compareEntries(ThreadListEntry a, ThreadListEntry b) {
     final dateComparison = _sortDate(b).compareTo(_sortDate(a));
     if (dateComparison != 0) {
       return dateComparison;
@@ -94,10 +95,10 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
     return a.path.compareTo(b.path);
   }
 
-  List<_ChatThreadListEntry> _entries() {
+  List<ThreadListEntry> _entries() {
     final store = _store;
     if (store == null) {
-      return const <_ChatThreadListEntry>[];
+      return const <ThreadListEntry>[];
     }
     final entries = store.entries().where((entry) => !_optimisticDeletedPaths.contains(entry.path)).map((entry) {
       final optimisticName = _optimisticNames[entry.path];
@@ -162,7 +163,7 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
     );
   }
 
-  Future<void> _renameThread(_ChatThreadListEntry entry) async {
+  Future<void> _renameThread(ThreadListEntry entry) async {
     final nextName = await _showRenameDialog(entry.name);
     if (nextName == null) {
       return;
@@ -188,7 +189,7 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
     }
   }
 
-  Future<bool> _confirmDeleteThread(_ChatThreadListEntry entry) async {
+  Future<bool> _confirmDeleteThread(ThreadListEntry entry) async {
     final result = await showShadDialog<bool>(
       context: context,
       builder: (dialogContext) {
@@ -205,7 +206,7 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
     return result ?? false;
   }
 
-  Future<void> _deleteThread(_ChatThreadListEntry entry) async {
+  Future<void> _deleteThread(ThreadListEntry entry) async {
     if (!await _confirmDeleteThread(entry)) {
       return;
     }
@@ -252,7 +253,7 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
 
   void _onStoreChanged() {
     if (mounted) {
-      final storeEntries = _store?.entries() ?? const <_ChatThreadListEntry>[];
+      final storeEntries = _store?.entries() ?? const <ThreadListEntry>[];
       final storePaths = storeEntries.map((entry) => entry.path).toSet();
       _optimisticNames.removeWhere((path, name) {
         return storeEntries.any((entry) => entry.path == path && entry.name == name);
@@ -462,25 +463,12 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
   }
 }
 
-class _ChatThreadListEntry {
-  const _ChatThreadListEntry({required this.path, required this.name, required this.createdAt, required this.modifiedAt});
-
-  final String path;
-  final String name;
-  final String createdAt;
-  final String modifiedAt;
-
-  _ChatThreadListEntry renamed(String name, String modifiedAt) {
-    return _ChatThreadListEntry(path: path, name: name, createdAt: createdAt, modifiedAt: modifiedAt);
-  }
-}
-
 abstract class _ChatThreadListStore {
   Future<void> open();
 
   Future<void> close();
 
-  List<_ChatThreadListEntry> entries();
+  List<ThreadListEntry> entries();
 }
 
 class _MeshDocumentChatThreadListStore implements _ChatThreadListStore {
@@ -511,13 +499,13 @@ class _MeshDocumentChatThreadListStore implements _ChatThreadListStore {
   }
 
   @override
-  List<_ChatThreadListEntry> entries() {
+  List<ThreadListEntry> entries() {
     final document = _document;
     if (document == null) {
-      return const <_ChatThreadListEntry>[];
+      return const <ThreadListEntry>[];
     }
 
-    final entries = <_ChatThreadListEntry>[];
+    final entries = <ThreadListEntry>[];
     for (final child in document.root.getChildren()) {
       if (child is! MeshElement || child.tagName != "thread") {
         continue;
@@ -533,7 +521,7 @@ class _MeshDocumentChatThreadListStore implements _ChatThreadListStore {
       final createdAt = child.getAttribute("created_at");
       final modifiedAt = child.getAttribute("modified_at");
       entries.add(
-        _ChatThreadListEntry(
+        ThreadListEntry(
           path: threadPath,
           name: rawName is String && rawName.trim().isNotEmpty ? rawName.trim() : defaultThreadDisplayNameFromPath(threadPath),
           createdAt: createdAt is String ? createdAt : "",
@@ -546,157 +534,26 @@ class _MeshDocumentChatThreadListStore implements _ChatThreadListStore {
 }
 
 class _DatasetChatThreadListStore implements _ChatThreadListStore {
-  _DatasetChatThreadListStore({required this.room, required this.path, required this.onChanged});
+  _DatasetChatThreadListStore({required RoomClient room, required String path, required this.onChanged})
+    : storage = DatasetThreadStorage(room: room, path: path);
 
-  final RoomClient room;
-  final String path;
+  final DatasetThreadStorage storage;
   final VoidCallback onChanged;
-  final Map<String, _ChatThreadListEntry> _entriesByPath = <String, _ChatThreadListEntry>{};
-  StreamSubscription<DatasetTableWatchEvent>? _subscription;
-  late final _DatasetThreadListRef _ref = _DatasetThreadListRef.parse(path);
-  bool _initialSnapshotReady = false;
 
   @override
   Future<void> open() async {
-    await _ensureTable();
-    final ready = Completer<void>();
-    _subscription = room.datasets
-        .watchTable(table: _ref.table, namespace: _ref.namespace)
-        .listen(
-          (event) {
-            final initialSnapshotCompleted = _handleWatchEvent(event);
-            if (initialSnapshotCompleted && !ready.isCompleted) {
-              ready.complete();
-            }
-          },
-          onError: (Object error, StackTrace stackTrace) {
-            if (!ready.isCompleted) {
-              ready.completeError(error, stackTrace);
-            } else {
-              Zone.current.handleUncaughtError(error, stackTrace);
-            }
-          },
-          onDone: () {
-            if (!ready.isCompleted) {
-              ready.completeError(StateError("Dataset thread list watch closed before initial snapshot."));
-            }
-          },
-        );
-    await ready.future;
+    storage.addListener(onChanged);
+    await storage.open();
   }
 
   @override
   Future<void> close() async {
-    final subscription = _subscription;
-    _subscription = null;
-    _initialSnapshotReady = false;
-    await subscription?.cancel();
+    storage.removeListener(onChanged);
+    await storage.close();
   }
 
   @override
-  List<_ChatThreadListEntry> entries() {
-    return _entriesByPath.values.toList(growable: false);
-  }
-
-  Future<void> _ensureTable() async {
-    const schema = ArrowSchema([
-      ArrowField(name: "path", type: ArrowUtf8Type(), nullable: false),
-      ArrowField(name: "name", type: ArrowUtf8Type()),
-      ArrowField(name: "created_at", type: ArrowUtf8Type()),
-      ArrowField(name: "modified_at", type: ArrowUtf8Type()),
-    ]);
-    await room.datasets.createTableWithSchema(
-      name: _ref.table,
-      schema: schema,
-      mode: CreateMode.createIfNotExists,
-      namespace: _ref.namespace,
-    );
-  }
-
-  bool _handleWatchEvent(DatasetTableWatchEvent event) {
-    final rows = event.batch?.toRows() ?? const <DatasetRecord>[];
-    if (event.phase == DatasetTableWatchPhase.initial) {
-      for (final row in rows) {
-        final entry = _entryFromRow(row);
-        if (entry != null) {
-          _entriesByPath[entry.path] = entry;
-        }
-      }
-      if (event.kind == "ready") {
-        _initialSnapshotReady = true;
-        return true;
-      }
-      if (_initialSnapshotReady && rows.isNotEmpty) {
-        onChanged();
-      }
-      return false;
-    }
-
-    if (event.kind == "ready") {
-      return false;
-    }
-
-    final changeType = event.changeType?.trim().toLowerCase() ?? "";
-    if (changeType == "deleted" || changeType == "delete" || changeType == "removed" || changeType == "remove") {
-      for (final row in rows) {
-        final entry = _entryFromRow(row);
-        if (entry != null) {
-          _entriesByPath.remove(entry.path);
-        }
-      }
-      onChanged();
-      return false;
-    }
-
-    for (final row in rows) {
-      final entry = _entryFromRow(row);
-      if (entry != null) {
-        _entriesByPath[entry.path] = entry;
-      }
-    }
-    onChanged();
-    return false;
-  }
-
-  _ChatThreadListEntry? _entryFromRow(Map<String, Object?> row) {
-    final rawPath = row["path"];
-    if (rawPath is! String || rawPath.trim().isEmpty) {
-      return null;
-    }
-    final threadPath = rawPath.trim();
-    final rawName = row["name"];
-    final rawCreatedAt = row["created_at"];
-    final rawModifiedAt = row["modified_at"];
-    return _ChatThreadListEntry(
-      path: threadPath,
-      name: rawName is String && rawName.trim().isNotEmpty ? rawName.trim() : defaultThreadDisplayNameFromPath(threadPath),
-      createdAt: rawCreatedAt is String ? rawCreatedAt : "",
-      modifiedAt: rawModifiedAt is String ? rawModifiedAt : "",
-    );
-  }
-}
-
-class _DatasetThreadListRef {
-  const _DatasetThreadListRef({required this.namespace, required this.table});
-
-  final List<String>? namespace;
-  final String table;
-
-  static _DatasetThreadListRef parse(String url) {
-    var path = url.trim();
-    if (!path.startsWith("dataset://")) {
-      throw ArgumentError.value(url, "url", "dataset thread list URL must start with dataset://");
-    }
-    path = path.substring("dataset://".length);
-    if (path.startsWith("/")) {
-      throw ArgumentError.value(url, "url", "dataset thread list URL must use dataset://path");
-    }
-    final parts = path.split("/").map((part) => part.trim()).where((part) => part.isNotEmpty).toList(growable: false);
-    if (parts.isEmpty) {
-      throw ArgumentError.value(url, "url", "dataset thread list URL must include a table name");
-    }
-    return _DatasetThreadListRef(namespace: parts.length == 1 ? null : parts.sublist(0, parts.length - 1), table: parts.last);
-  }
+  List<ThreadListEntry> entries() => storage.entries();
 }
 
 class _ChatThreadListMenuButton extends StatefulWidget {

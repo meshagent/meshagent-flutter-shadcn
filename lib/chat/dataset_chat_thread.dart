@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:meshagent_agents/meshagent_agents.dart' as agent_sessions;
 import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_flutter_shadcn/chat_bubble_markdown_config.dart';
 import 'package:re_highlight/styles/monokai-sublime.dart';
@@ -22,10 +23,7 @@ const String _agentRoomMessageType = 'agent-message';
 const String _agentTurnStartType = 'meshagent.agent.turn.start';
 const String _agentTurnSteerType = 'meshagent.agent.turn.steer';
 const String _agentTurnInterruptType = 'meshagent.agent.turn.interrupt';
-const String _agentRealtimeAudioChunkType = 'meshagent.agent.realtime_audio.chunk';
 const String _agentRealtimeAudioCommitType = 'meshagent.agent.realtime_audio.commit';
-const String _agentThreadOpenType = 'meshagent.agent.thread.open';
-const String _agentThreadCloseType = 'meshagent.agent.thread.close';
 const String _agentTurnStartAcceptedType = 'meshagent.agent.turn.start.accepted';
 const String _agentTurnStartRejectedType = 'meshagent.agent.turn.start.rejected';
 const String _agentTurnSteerAcceptedType = 'meshagent.agent.turn.steer.accepted';
@@ -472,6 +470,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   StreamSubscription<ArrowRecordBatch>? _tableLoadSubscription;
   StreamSubscription<RoomEvent>? _roomSubscription;
   Timer? _tableLoadRetryTimer;
+  agent_sessions.MessagingChatClient? _chatClient;
+  agent_sessions.ChatThreadSession? _threadSession;
   final Map<String, Map<String, Object?>> _rowsByItemId = {};
   final Map<String, Map<String, Object?>> _agentRowsByItemId = {};
   final List<Map<String, dynamic>> _bufferedAgentPayloads = <Map<String, dynamic>>[];
@@ -479,7 +479,6 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   final TextStreamAccumulator _liveReasoningContent = TextStreamAccumulator();
   final FileStreamAccumulator _liveFileContent = FileStreamAccumulator();
   final Map<String, String> _realtimeAudioCommitItemIdsByTurnId = <String, String>{};
-  final Map<String, _DatasetPendingAgentWait> _pendingAgentWaits = <String, _DatasetPendingAgentWait>{};
   final _DatasetThreadRealtimeAudioPlayer _audioPlayer = _DatasetThreadRealtimeAudioPlayer();
   late ChatThreadController _controller;
   late bool _ownsController;
@@ -493,8 +492,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   ChatThreadStatusState _status = const ChatThreadStatusState();
   AgentUsageSnapshot? _usage;
   int _nextAgentSequence = 0;
-  String? _openedPath;
-  String? _openedAgentParticipantId;
+  int _threadSessionMessageCursor = 0;
   final OverlayPortalController _imageViewerController = OverlayPortalController();
   LocalHistoryEntry? _imageViewerHistoryEntry;
   List<ChatThreadFeedImage> _overlayImages = const <ChatThreadFeedImage>[];
@@ -514,9 +512,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     _composerInputKey = widget.composerKey ?? GlobalObjectKey(_controller);
     _roomSubscription = widget.room.listen(_onRoomEvent);
     widget.room.messaging.addListener(_onMessagingChanged);
+    _bindChatSession();
     _refreshStatus();
     _startWatch();
-    _syncOpenSubscription();
   }
 
   @override
@@ -548,10 +546,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       _modelController.bindVoiceChangeHandler(_changeVoice);
     }
     if (oldWidget.path != widget.path || oldWidget.agentName != widget.agentName || oldWidget.room != widget.room) {
-      _cancelPendingAgentWaits(oldWidget.path);
       _usage = null;
       _refreshStatus();
-      _syncOpenSubscription();
+      _bindChatSession();
     }
     if (oldWidget.path != widget.path || oldWidget.room != widget.room) {
       _startWatch();
@@ -562,13 +559,13 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   void dispose() {
     _tableLoadRetryTimer?.cancel();
     _tableLoadSubscription?.cancel();
-    _closeOpenSubscription();
+    _closeChatSession();
+    unawaited(_chatClient?.stop());
     _roomSubscription?.cancel();
     final historyEntry = _imageViewerHistoryEntry;
     _imageViewerHistoryEntry = null;
     historyEntry?.remove();
     widget.room.messaging.removeListener(_onMessagingChanged);
-    _cancelPendingAgentWaits(widget.path);
     if (_ownsController) {
       _controller.dispose();
     }
@@ -831,7 +828,77 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       return;
     }
     _refreshStatus(notify: true);
-    _syncOpenSubscription();
+    _bindChatSession();
+  }
+
+  void _bindChatSession() {
+    final existingClient = _chatClient;
+    if (existingClient == null || existingClient.room != widget.room || existingClient.agentName != widget.agentName) {
+      _threadSession?.removeListener(_onThreadSessionChanged);
+      _threadSession = null;
+      _threadSessionMessageCursor = 0;
+      if (existingClient != null) {
+        unawaited(existingClient.stop());
+      }
+      _chatClient = agent_sessions.MessagingChatClient(room: widget.room, agentName: widget.agentName);
+      unawaited(_chatClient!.start());
+    }
+
+    final currentSession = _threadSession;
+    if (currentSession != null && currentSession.threadPath == widget.path) {
+      return;
+    }
+
+    currentSession?.removeListener(_onThreadSessionChanged);
+    _threadSession = _chatClient!.openThread(widget.path);
+    _threadSessionMessageCursor = 0;
+    _threadSession!.addListener(_onThreadSessionChanged);
+    _drainThreadSessionMessages(notify: false, scroll: false);
+  }
+
+  void _closeChatSession() {
+    final session = _threadSession;
+    _threadSession = null;
+    _threadSessionMessageCursor = 0;
+    session?.removeListener(_onThreadSessionChanged);
+    if (session != null) {
+      unawaited(session.close());
+    }
+  }
+
+  void _onThreadSessionChanged() {
+    if (!mounted) {
+      return;
+    }
+    _drainThreadSessionMessages();
+  }
+
+  void _drainThreadSessionMessages({bool notify = true, bool scroll = true}) {
+    final session = _threadSession;
+    if (session == null) {
+      return;
+    }
+    final messages = session.messages;
+    var changed = false;
+    while (_threadSessionMessageCursor < messages.length) {
+      final event = messages[_threadSessionMessageCursor];
+      _threadSessionMessageCursor += 1;
+      final payload = event.payload;
+      trackAgentThreadStatusPayload(room: widget.room, payload: payload);
+      if (_shouldBufferAgentPayload(payload)) {
+        _bufferedAgentPayloads.add(Map<String, dynamic>.from(payload));
+      } else {
+        _handleAgentMessagePayload(payload, attachment: event.attachment, notify: false, scroll: false);
+      }
+      changed = true;
+    }
+    _refreshStatus();
+    if (changed && notify && mounted) {
+      setState(() {});
+      if (scroll) {
+        _controller.scrollThreadToBottom(animated: false);
+      }
+    }
   }
 
   void _onRoomEvent(RoomEvent event) {
@@ -842,27 +909,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       return;
     }
     if (event.message.type == _agentRoomMessageType) {
-      final attachment = event.message.attachment;
-      final message = event.message.message;
-      final payload = message['type'] is String ? message : message['payload'];
-      if (payload is Map<String, dynamic>) {
-        trackAgentThreadStatusPayload(room: widget.room, payload: payload);
-        if (_shouldBufferAgentPayload(payload)) {
-          _bufferedAgentPayloads.add(Map<String, dynamic>.from(payload));
-        } else {
-          _handleAgentMessagePayload(payload, attachment: attachment);
-        }
-      } else if (payload is Map) {
-        final normalized = Map<String, dynamic>.from(payload);
-        trackAgentThreadStatusPayload(room: widget.room, payload: normalized);
-        if (_shouldBufferAgentPayload(normalized)) {
-          _bufferedAgentPayloads.add(normalized);
-        } else {
-          _handleAgentMessagePayload(normalized, attachment: attachment);
-        }
-      }
+      _refreshStatus(notify: true);
     }
-    _refreshStatus(notify: true);
   }
 
   bool _shouldBufferAgentPayload(Map<String, dynamic> payload) {
@@ -1615,199 +1663,27 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   RemoteParticipant? _agentParticipant() {
-    final normalizedAgentName = widget.agentName?.trim();
-    for (final participant in widget.room.messaging.remoteParticipants) {
-      if (normalizedAgentName != null && normalizedAgentName.isNotEmpty && participant.getAttribute('name') != normalizedAgentName) {
-        continue;
-      }
-      if (participant.getAttribute('supports_agent_messages') == true) {
-        return participant;
-      }
-    }
-    return null;
-  }
-
-  void _syncOpenSubscription() {
-    final agent = _agentParticipant();
-    if (agent == null) {
-      return;
-    }
-    if (_openedPath == widget.path && _openedAgentParticipantId == agent.id) {
-      return;
-    }
-    _closeOpenSubscription();
-    _openedPath = widget.path;
-    _openedAgentParticipantId = agent.id;
-    _sendThreadSubscriptionMessageNowait(agent: agent, messageType: _agentThreadOpenType, path: widget.path);
-    _sendModelsRequestNowait(agent: agent);
-  }
-
-  bool _hasPendingAgentWait(String threadPath) {
-    return _pendingAgentWaits.values.any((wait) => wait.threadPath == threadPath);
-  }
-
-  void _cancelPendingAgentWaits(String threadPath) {
-    final waits = _pendingAgentWaits.values.where((wait) => wait.threadPath == threadPath).toList(growable: false);
-    for (final wait in waits) {
-      wait.cancel();
-    }
-  }
-
-  void _setPendingAgentMessageAwaitingOnline({required String threadPath, required String messageId, required bool awaitingOnline}) {
-    for (final existing in _controller.pendingAgentMessagesForPath(threadPath)) {
-      if (existing.messageId != messageId || existing.awaitingOnline == awaitingOnline) {
-        continue;
-      }
-      _controller.markPendingAgentMessage(
-        PendingAgentMessage(
-          messageId: existing.messageId,
-          messageType: existing.messageType,
-          threadPath: existing.threadPath,
-          text: existing.text,
-          attachments: existing.attachments,
-          senderName: existing.senderName,
-          createdAt: existing.createdAt,
-          matchByContentOnly: existing.matchByContentOnly,
-          awaitingAcceptance: existing.awaitingAcceptance,
-          awaitingApplication: existing.awaitingApplication,
-          awaitingOnline: awaitingOnline,
-        ),
-      );
-      return;
-    }
-  }
-
-  Future<RemoteParticipant> _waitForAgentParticipant({required String threadPath, required String messageId}) async {
-    final agent = _agentParticipant();
-    if (agent != null) {
-      return agent;
-    }
-
-    final existing = _pendingAgentWaits.remove(messageId);
-    existing?.cancel();
-
-    final wait = _DatasetPendingAgentWait(messageId: messageId, threadPath: threadPath);
-    final completer = Completer<RemoteParticipant>();
-    _pendingAgentWaits[messageId] = wait;
-    _setPendingAgentMessageAwaitingOnline(threadPath: threadPath, messageId: messageId, awaitingOnline: true);
-    if (mounted) {
-      setState(() {});
-    }
-
-    void listener() {
-      if (completer.isCompleted) {
-        return;
-      }
-      final nextAgent = _agentParticipant();
-      if (nextAgent != null) {
-        completer.complete(nextAgent);
-      }
-    }
-
-    wait.detach = () {
-      widget.room.messaging.removeListener(listener);
-      wait.detach = null;
-    };
-    widget.room.messaging.addListener(listener);
-    listener();
-
-    try {
-      return await Future.any([
-        completer.future,
-        wait.cancelled.future.then<RemoteParticipant>((_) => throw const ChatSendCancelledException()),
-      ]);
-    } finally {
-      final removed = _pendingAgentWaits.remove(messageId);
-      if (identical(removed, wait)) {
-        wait.detach?.call();
-      }
-      _setPendingAgentMessageAwaitingOnline(threadPath: threadPath, messageId: messageId, awaitingOnline: false);
-      if (mounted) {
-        setState(() {});
-      }
-    }
-  }
-
-  void _closeOpenSubscription() {
-    final openedPath = _openedPath;
-    final openedAgentParticipantId = _openedAgentParticipantId;
-    _openedPath = null;
-    _openedAgentParticipantId = null;
-    if (openedPath == null || openedAgentParticipantId == null) {
-      return;
-    }
-    final agent = widget.room.messaging.remoteParticipants.firstWhereOrNull((participant) => participant.id == openedAgentParticipantId);
-    if (agent == null) {
-      return;
-    }
-    _sendThreadSubscriptionMessageNowait(agent: agent, messageType: _agentThreadCloseType, path: openedPath);
-  }
-
-  void _sendThreadSubscriptionMessageNowait({required RemoteParticipant agent, required String messageType, required String path}) {
-    unawaited(() async {
-      try {
-        await widget.room.messaging.sendMessage(
-          to: agent,
-          type: _agentRoomMessageType,
-          ignoreOffline: true,
-          message: {'type': messageType, 'thread_id': path},
-        );
-      } catch (_) {}
-    }());
-  }
-
-  void _sendModelsRequestNowait({required RemoteParticipant agent}) {
-    unawaited(() async {
-      try {
-        await widget.room.messaging.sendMessage(
-          to: agent,
-          type: _agentRoomMessageType,
-          ignoreOffline: true,
-          message: {'type': _agentModelsRequestType, 'message_id': const Uuid().v4()},
-        );
-      } catch (_) {}
-    }());
+    return _chatClient?.agentParticipant();
   }
 
   Future<void> _changeModel(DatasetChatModelOption option) async {
-    final agent = _agentParticipant();
-    if (agent == null) {
+    final session = _threadSession;
+    if (session == null || _agentParticipant() == null) {
       throw StateError('No online agent supports agent messages for this thread.');
     }
-    await widget.room.messaging.sendMessage(
-      to: agent,
-      type: _agentRoomMessageType,
-      message: {
-        'type': _agentModelChangeType,
-        'thread_id': widget.path,
-        'message_id': const Uuid().v4(),
-        'provider': option.provider,
-        'model': option.model,
-      },
-    );
+    await session.changeModel(provider: option.provider, model: option.model);
   }
 
   Future<void> _changeVoice(String voice) async {
-    final agent = _agentParticipant();
+    final session = _threadSession;
     final activeModel = _modelController.activeModel;
-    if (agent == null) {
+    if (session == null || _agentParticipant() == null) {
       throw StateError('No online agent supports agent messages for this thread.');
     }
     if (activeModel == null) {
       throw StateError('No model selected for this thread.');
     }
-    await widget.room.messaging.sendMessage(
-      to: agent,
-      type: _agentRoomMessageType,
-      message: {
-        'type': _agentModelChangeType,
-        'thread_id': widget.path,
-        'message_id': const Uuid().v4(),
-        'provider': activeModel.provider,
-        'model': activeModel.model,
-        'voice': voice,
-      },
-    );
+    await session.changeModel(provider: activeModel.provider, model: activeModel.model, voice: voice);
   }
 
   bool _handleModelPayload(Map<String, dynamic> payload) {
@@ -2082,15 +1958,11 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       return;
     }
     await _audioPlayer.stopAll();
-    final agent = _agentParticipant();
-    if (agent == null) {
+    final session = _threadSession;
+    if (session == null || _agentParticipant() == null) {
       return;
     }
-    await widget.room.messaging.sendMessage(
-      to: agent,
-      type: _agentRoomMessageType,
-      message: {'type': _agentTurnInterruptType, 'thread_id': widget.path, 'turn_id': turnId},
-    );
+    await session.interruptTurn(turnId);
   }
 
   Future<void> _sendRealtimeAudioChunk(Uint8List chunk, {required bool finalChunk}) async {
@@ -2101,38 +1973,25 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       if (_modelController.activeTurnDetection == 'automatic') {
         return;
       }
-      final messageId = const Uuid().v4();
       final turnId = const Uuid().v4();
-      final agent = _agentParticipant() ?? await _waitForAgentParticipant(threadPath: widget.path, messageId: messageId);
-      await widget.room.messaging.sendMessage(
-        to: agent,
-        type: _agentRoomMessageType,
-        message: {'type': _agentRealtimeAudioCommitType, 'thread_id': widget.path, 'message_id': messageId, 'turn_id': turnId},
-      );
-      await widget.room.messaging.sendMessage(
-        to: agent,
-        type: _agentRoomMessageType,
-        message: {
-          'type': _agentTurnStartType,
-          'thread_id': widget.path,
-          'message_id': const Uuid().v4(),
-          'turn_id': turnId,
-          if (activeModel != null) 'provider': activeModel.provider,
-          if (activeModel != null) 'model': activeModel.model,
-          if (activeVoice != null && activeVoice.trim().isNotEmpty) 'voice': activeVoice.trim(),
-          'output_modalities': [_modelController.activeModality],
-        },
+      final session = _threadSession;
+      if (session == null) {
+        throw StateError('No thread session is open.');
+      }
+      await session.commitRealtimeAudio(
+        turnId: turnId,
+        provider: activeModel?.provider,
+        model: activeModel?.model,
+        voice: activeVoice,
+        outputModalities: [_modelController.activeModality],
       );
       return;
     }
-    final messageId = const Uuid().v4();
-    final agent = _agentParticipant() ?? await _waitForAgentParticipant(threadPath: widget.path, messageId: messageId);
-    await widget.room.messaging.sendMessage(
-      to: agent,
-      type: _agentRoomMessageType,
-      message: {'type': _agentRealtimeAudioChunkType, 'thread_id': widget.path, 'message_id': messageId, 'format': inputFormat.toJson()},
-      attachment: chunk,
-    );
+    final session = _threadSession;
+    if (session == null) {
+      throw StateError('No thread session is open.');
+    }
+    await session.sendRealtimeAudioChunk(chunk: chunk, format: inputFormat.toJson());
   }
 
   Future<void> _send(String value, List<FileAttachment> attachments) async {
@@ -2156,25 +2015,22 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     _controller.outboundStatus.markSending(messageId);
 
     try {
-      final agent = _agentParticipant() ?? await _waitForAgentParticipant(threadPath: threadPath, messageId: messageId);
-      final payload = <String, dynamic>{
-        'type': isSteer ? _agentTurnSteerType : _agentTurnStartType,
-        'thread_id': threadPath,
-        'message_id': messageId,
-        'content': _agentInputContent(text: value, attachments: attachmentPaths),
-      };
-      if (isSteer && _status.turnId != null) {
-        payload['turn_id'] = _status.turnId;
-      }
       final activeModel = _modelController.activeModel;
-      if (!isSteer && activeModel != null) {
-        payload['provider'] = activeModel.provider;
-        payload['model'] = activeModel.model;
+      final session = _threadSession;
+      if (session == null) {
+        throw StateError('No thread session is open.');
       }
-      if (!isSteer) {
-        payload['output_modalities'] = [_modelController.activeModality];
-      }
-      await widget.room.messaging.sendMessage(to: agent, type: _agentRoomMessageType, message: payload);
+      await session.sendText(
+        messageId: messageId,
+        text: value,
+        attachments: attachmentPaths,
+        steer: isSteer,
+        turnId: _status.turnId,
+        provider: activeModel?.provider,
+        model: activeModel?.model,
+        outputModalities: isSteer ? null : [_modelController.activeModality],
+        senderName: senderName is String && senderName.trim().isNotEmpty ? senderName.trim() : null,
+      );
       _controller.outboundStatus.markDelivered(messageId);
       _controller.clear();
     } on ChatSendCancelledException {
@@ -2396,7 +2252,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         sendDisabledReason: waitingForOnlineMessage == null
             ? null
             : 'Waiting for ${_displayAgentName(widget.agentName ?? "agent")} to come online.',
-        onCancelSend: _hasPendingAgentWait(widget.path) ? () => _cancelPendingAgentWaits(widget.path) : null,
+        onCancelSend: null,
         onInterrupt: _canInterruptActiveTurn() ? _cancelTurn : null,
         sendPendingText: waitingForOnlineMessage == null
             ? null
@@ -4476,38 +4332,8 @@ bool _datasetThreadMessageContentMatchesPendingAgentMessage(_DatasetThreadMessag
   return const ListEquality<String>().equals(messageAttachments, pendingAttachments);
 }
 
-List<Map<String, dynamic>> _agentInputContent({required String text, required List<String> attachments}) {
-  final content = <Map<String, dynamic>>[];
-  if (text.trim().isNotEmpty) {
-    content.add({'type': 'text', 'text': text});
-  }
-  for (final attachment in attachments) {
-    final url = _normalizeAgentAttachmentUrl(attachment);
-    if (url != null) {
-      content.add({'type': 'file', 'url': url});
-    }
-  }
-  return content;
-}
-
 bool _isTmpThreadPath(String path) {
   return path.trim().startsWith('tmp://');
-}
-
-class _DatasetPendingAgentWait {
-  _DatasetPendingAgentWait({required this.messageId, required this.threadPath});
-
-  final String messageId;
-  final String threadPath;
-  final Completer<void> cancelled = Completer<void>();
-  VoidCallback? detach;
-
-  void cancel() {
-    if (!cancelled.isCompleted) {
-      cancelled.complete();
-    }
-    detach?.call();
-  }
 }
 
 bool _isDatasetTableNotFoundError(Object error) {
