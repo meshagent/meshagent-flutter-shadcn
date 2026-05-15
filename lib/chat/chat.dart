@@ -17,6 +17,7 @@ import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_agents/meshagent_agents.dart'
     show
         AgentMessage,
+        AgentConnectionStatus,
         AgentThreadMessage,
         AgentThreadStatus,
         AgentToolCallArgumentsDelta,
@@ -71,6 +72,7 @@ import 'package:meshagent_flutter_shadcn/ui/ui.dart';
 import 'package:meshagent_flutter_shadcn/src/web_context_menu_manager/enable_web_context_menu.dart';
 import 'package:meshagent_flutter_shadcn/chat/thread_attachment_share.dart';
 import 'package:meshagent_flutter_shadcn/chat/tool_call_status_accumulator.dart';
+import 'package:mime/mime.dart';
 import 'package:re_highlight/styles/monokai-sublime.dart';
 import 'package:record/record.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
@@ -145,12 +147,48 @@ String _defaultSuggestedFileNameFromPath(String path) {
     return "file";
   }
 
+  final dataUrlName = _dataUrlFileName(trimmed);
+  if (dataUrlName != null) {
+    return dataUrlName;
+  }
+
   final slash = trimmed.lastIndexOf("/");
   if (slash < 0 || slash == trimmed.length - 1) {
     return trimmed.isEmpty ? "file" : trimmed;
   }
 
   return trimmed.substring(slash + 1);
+}
+
+String? _dataUrlFileName(String value) {
+  final trimmed = value.trim();
+  if (!trimmed.startsWith("data:")) {
+    return null;
+  }
+  final commaIndex = trimmed.indexOf(",");
+  final header = commaIndex == -1 ? trimmed.substring(5) : trimmed.substring(5, commaIndex);
+  for (final part in header.split(";")) {
+    final separator = part.indexOf("=");
+    if (separator == -1) {
+      continue;
+    }
+    final key = part.substring(0, separator).trim().toLowerCase();
+    if (key != "name" && key != "filename") {
+      continue;
+    }
+    final rawValue = part.substring(separator + 1).trim().replaceAll(RegExp(r'^"|"$'), "");
+    try {
+      final decoded = Uri.decodeComponent(rawValue).trim();
+      if (decoded.isNotEmpty) {
+        return decoded;
+      }
+    } catch (_) {
+      if (rawValue.isNotEmpty) {
+        return rawValue;
+      }
+    }
+  }
+  return null;
 }
 
 String _applySuggestedFileExtension(String rawPath, {required String suggestedFileName}) {
@@ -902,21 +940,25 @@ class _PendingSendWait {
   }
 }
 
-final Expando<_AgentThreadMessageStatusStore> _agentThreadMessageStatusStores = Expando<_AgentThreadMessageStatusStore>();
+final Expando<AgentThreadMessageStatusStore> _agentThreadMessageStatusStores = Expando<AgentThreadMessageStatusStore>();
 
-_AgentThreadMessageStatusStore _agentThreadMessageStatusStore(RoomClient room) {
+AgentThreadMessageStatusStore _agentThreadMessageStatusStore(RoomClient room) {
   final existing = _agentThreadMessageStatusStores[room];
   if (existing != null) {
     return existing;
   }
 
-  final created = _AgentThreadMessageStatusStore();
+  final created = AgentThreadMessageStatusStore();
   _agentThreadMessageStatusStores[room] = created;
   return created;
 }
 
 bool trackAgentThreadStatusMessage({required RoomClient room, required AgentMessage message}) {
   return _agentThreadMessageStatusStore(room).apply(message);
+}
+
+bool trackAgentThreadStatusMessageInStore({required AgentThreadMessageStatusStore store, required AgentMessage message, String? path}) {
+  return store.apply(message, path: path);
 }
 
 bool trackAgentThreadStatusPayload({required RoomClient room, required Map<String, dynamic> payload}) {
@@ -968,14 +1010,23 @@ class _AgentThreadMessageStatus {
   final int? linesRemoved;
 }
 
-class _AgentThreadMessageStatusStore {
+class AgentThreadMessageStatusStore {
   final Set<String> _touchedThreadPaths = <String>{};
   final Map<String, _AgentThreadMessageStatus> _statusByThreadPath = <String, _AgentThreadMessageStatus>{};
+  final Map<String, _AgentThreadMessageStatus> _connectionStatusByThreadPath = <String, _AgentThreadMessageStatus>{};
   final Map<String, LinkedHashMap<String, PendingAgentMessage>> _pendingMessagesByThreadPath =
       <String, LinkedHashMap<String, PendingAgentMessage>>{};
   final Map<String, LiveToolCallAccumulator> _toolCallAccumulatorsByThreadPath = <String, LiveToolCallAccumulator>{};
 
-  bool apply(AgentMessage message) {
+  bool apply(AgentMessage message, {String? path}) {
+    if (message is AgentConnectionStatus) {
+      final normalizedPath = path?.trim();
+      if (normalizedPath == null || normalizedPath.isEmpty) {
+        return false;
+      }
+      _touchedThreadPaths.add(normalizedPath);
+      return _applyConnectionStatus(normalizedPath, message);
+    }
     if (message is! AgentThreadMessage || message.threadId.trim().isEmpty) {
       return false;
     }
@@ -1033,9 +1084,21 @@ class _AgentThreadMessageStatusStore {
 
   bool hasThread(String path) => _touchedThreadPaths.contains(path.trim());
 
+  void clearThread(String path) {
+    final normalizedPath = path.trim();
+    if (normalizedPath.isEmpty) {
+      return;
+    }
+    _touchedThreadPaths.remove(normalizedPath);
+    _statusByThreadPath.remove(normalizedPath);
+    _connectionStatusByThreadPath.remove(normalizedPath);
+    _pendingMessagesByThreadPath.remove(normalizedPath);
+    _toolCallAccumulatorsByThreadPath.remove(normalizedPath);
+  }
+
   ChatThreadStatusState state({required String path, ChatThreadStatusState? previous, required bool supportsAgentMessages}) {
     final normalizedPath = path.trim();
-    final status = _statusByThreadPath[normalizedPath];
+    final status = _connectionStatusByThreadPath[normalizedPath] ?? _statusByThreadPath[normalizedPath];
     final pendingMessages = List<PendingAgentMessage>.unmodifiable(
       _pendingMessagesByThreadPath[normalizedPath]?.values ?? const <PendingAgentMessage>[],
     );
@@ -1129,6 +1192,34 @@ class _AgentThreadMessageStatusStore {
     }
 
     _statusByThreadPath[threadPath] = next;
+    return true;
+  }
+
+  bool _applyConnectionStatus(String threadPath, AgentConnectionStatus message) {
+    final status = message.status.trim().toLowerCase();
+    if (status == "connected" || status == "reconnected") {
+      return _connectionStatusByThreadPath.remove(threadPath) != null;
+    }
+
+    final text = switch (status) {
+      "reconnecting" => "Reconnecting",
+      "disconnected" => "Disconnected",
+      _ => message.message?.trim().isNotEmpty == true ? message.message!.trim() : null,
+    };
+    if (text == null || text.isEmpty) {
+      return false;
+    }
+
+    final previous = _connectionStatusByThreadPath[threadPath];
+    final next = _AgentThreadMessageStatus(
+      text: message.message?.trim().isNotEmpty == true ? message.message!.trim() : text,
+      startedAt: DateTime.now(),
+      mode: "busy",
+    );
+    if (previous != null && previous.text == next.text && previous.mode == next.mode) {
+      return false;
+    }
+    _connectionStatusByThreadPath[threadPath] = next;
     return true;
   }
 
@@ -1449,8 +1540,22 @@ ChatThreadStatusState resolveChatThreadStatus({
       ...room.messaging.remoteParticipants,
   ];
   final messageStatusStore = _agentThreadMessageStatusStore(room);
-  final hasMessageStatus = messageStatusStore.hasThread(path);
-  final messageState = messageStatusStore.state(path: path, previous: previous, supportsAgentMessages: hasMessageStatus);
+  return resolveChatThreadStatusFromStore(
+    store: messageStatusStore,
+    path: path,
+    previous: previous,
+    supportsAgentMessages: candidates.any(_supportsAgentMessages),
+  );
+}
+
+ChatThreadStatusState resolveChatThreadStatusFromStore({
+  required AgentThreadMessageStatusStore store,
+  required String path,
+  ChatThreadStatusState? previous,
+  bool supportsAgentMessages = true,
+}) {
+  final hasMessageStatus = store.hasThread(path);
+  final messageState = store.state(path: path, previous: previous, supportsAgentMessages: hasMessageStatus || supportsAgentMessages);
 
   String? nextStatus = messageState.text;
   String? nextMode = messageState.mode;
@@ -1462,12 +1567,6 @@ ChatThreadStatusState resolveChatThreadStatus({
   int? nextLinesAdded = messageState.linesAdded;
   int? nextLinesRemoved = messageState.linesRemoved;
   bool nextSupportsAgentMessages = messageState.supportsAgentMessages;
-
-  for (final participant in candidates) {
-    if (_supportsAgentMessages(participant)) {
-      nextSupportsAgentMessages = true;
-    }
-  }
 
   if (nextStatus != null) {
     nextMode ??= "busy";
@@ -1634,7 +1733,7 @@ class ChatThreadController extends ChangeNotifier {
     textFieldController.addListener(notifyListeners);
   }
 
-  final RoomClient room;
+  final RoomClient? room;
   final TextEditingController textFieldController = ShadTextEditingController();
   final ScrollController threadScrollController = ScrollController();
   final List<FileAttachment> _attachmentUploads = [];
@@ -1643,6 +1742,14 @@ class ChatThreadController extends ChangeNotifier {
   final LinkedHashMap<String, _PendingSendWait> _pendingSendWaits = LinkedHashMap<String, _PendingSendWait>();
   final Set<String> _enabledToolkits = <String>{};
   final LinkedHashMap<String, Connector> _selectedMcpConnectors = LinkedHashMap<String, Connector>();
+
+  RoomClient _requireRoom(String operation) {
+    final room = this.room;
+    if (room == null) {
+      throw StateError('$operation requires a room.');
+    }
+    return room;
+  }
 
   bool isToolkitEnabled(String toolkitName) {
     return _enabledToolkits.contains(toolkitName);
@@ -2002,6 +2109,7 @@ class ChatThreadController extends ChangeNotifier {
     required bool useAgentMessages,
     required String? participantName,
   }) async {
+    final room = _requireRoom('Waiting for recipients');
     final existing = _pendingSendWaits.remove(messageId);
     existing?.cancel();
 
@@ -2057,6 +2165,7 @@ class ChatThreadController extends ChangeNotifier {
     }
 
     if (useAgentMessages) {
+      final room = _requireRoom('Canceling an agent turn');
       if (turnId == null || turnId.trim().isEmpty) {
         return;
       }
@@ -2072,6 +2181,7 @@ class ChatThreadController extends ChangeNotifier {
       return;
     }
 
+    final room = _requireRoom('Canceling a thread');
     for (final participant in getOnlineParticipants(thread).whereType<RemoteParticipant>()) {
       final normalizedParticipantName = participantName?.trim();
       if (normalizedParticipantName != null &&
@@ -2087,6 +2197,7 @@ class ChatThreadController extends ChangeNotifier {
 
   Future<void> clearThread(String path, MeshDocument thread, {bool useAgentMessages = false, String? participantName}) async {
     if (useAgentMessages) {
+      final room = _requireRoom('Clearing an agent thread');
       await Future.wait([
         for (final participant in getAgentParticipants(thread, participantName: participantName))
           room.messaging.sendMessage(
@@ -2098,6 +2209,7 @@ class ChatThreadController extends ChangeNotifier {
       return;
     }
 
+    final room = _requireRoom('Clearing a thread');
     final normalizedParticipantName = participantName?.trim();
     final participant = room.messaging.remoteParticipants.firstWhereOrNull((x) {
       if (normalizedParticipantName == null || normalizedParticipantName.isEmpty) {
@@ -2111,6 +2223,10 @@ class ChatThreadController extends ChangeNotifier {
   }
 
   Future<FileAttachment> uploadFile(String path, Stream<Uint8List> dataStream, int size, {String? mimeType}) async {
+    final room = this.room;
+    if (room == null) {
+      throw StateError('File uploads require a room storage provider.');
+    }
     final uploader = MeshagentFileUpload(room: room, path: path, dataStream: dataStream, size: size, mimeType: mimeType);
     uploader.addListener(notifyListeners);
 
@@ -2121,6 +2237,10 @@ class ChatThreadController extends ChangeNotifier {
   }
 
   Future<FileAttachment> uploadFileDeferred(String path, Stream<Uint8List> dataStream, int size, {String? mimeType}) async {
+    final room = this.room;
+    if (room == null) {
+      throw StateError('File uploads require a room storage provider.');
+    }
     final uploader = MeshagentFileUpload.deferred(room: room, path: path, dataStream: dataStream, size: size, mimeType: mimeType);
 
     uploader.addListener(notifyListeners);
@@ -2131,8 +2251,8 @@ class ChatThreadController extends ChangeNotifier {
     return uploader;
   }
 
-  FileAttachment attachFile(String path) {
-    final attachment = FileAttachment(path: path, initialStatus: UploadStatus.completed);
+  FileAttachment attachFile(String path, {String? mimeType}) {
+    final attachment = FileAttachment(path: path, mimeType: mimeType, initialStatus: UploadStatus.completed);
     attachment.addListener(notifyListeners);
     _attachmentUploads.add(attachment);
     notifyListeners();
@@ -2177,6 +2297,7 @@ class ChatThreadController extends ChangeNotifier {
   }
 
   Iterable<String> getOfflineParticipants(MeshDocument document) sync* {
+    final room = _requireRoom('Resolving offline participants');
     for (final participantName in getParticipantNames(document)) {
       bool found = false;
       if (room.messaging.remoteParticipants.where((x) => x.getAttribute("name") == participantName).isNotEmpty ||
@@ -2190,6 +2311,7 @@ class ChatThreadController extends ChangeNotifier {
   }
 
   Iterable<Participant> getOnlineParticipants(MeshDocument document) sync* {
+    final room = _requireRoom('Resolving online participants');
     final seenParticipantIds = <String>{};
     for (final participantName in getParticipantNames(document)) {
       if (participantName == room.localParticipant?.getAttribute("name")) {
@@ -2218,6 +2340,7 @@ class ChatThreadController extends ChangeNotifier {
     bool store = false,
   }) async {
     if (message.text.trim().isNotEmpty || message.attachments.isNotEmpty) {
+      final room = _requireRoom('Sending a participant message');
       if (useAgentMessages) {
         final isSteer = messageType == "steer";
         final payload = isSteer
@@ -2254,6 +2377,7 @@ class ChatThreadController extends ChangeNotifier {
   }
 
   void insertMessage({required MeshDocument thread, required ChatMessage message}) {
+    final room = _requireRoom('Inserting a local message');
     final messages = thread.root.getChildren().whereType<MeshElement>().firstWhere((x) => x.tagName == "messages");
 
     final m = messages.createChildElement("message", {
@@ -2301,6 +2425,7 @@ class ChatThreadController extends ChangeNotifier {
 
       final normalizedParticipantName = remoteStoreParticipantName?.trim();
       if (useAgentMessages) {
+        final room = _requireRoom('Sending an agent message');
         final senderName = room.localParticipant?.getAttribute("name");
         _markPendingAgentMessage(
           message: PendingAgentMessage(
@@ -2608,6 +2733,9 @@ ChatThreadToolArea resolveChatThreadToolArea(Widget? tools) {
   return ChatThreadToolArea(leading: tools);
 }
 
+typedef ChatThreadAttachmentMenuItemsBuilder =
+    List<ShadContextMenuItem> Function(BuildContext context, ChatThreadController controller, ShadPopoverController popoverController);
+
 class ChatThreadAttachButton extends StatefulWidget {
   const ChatThreadAttachButton({
     required this.controller,
@@ -2617,6 +2745,9 @@ class ChatThreadAttachButton extends StatefulWidget {
     this.connectRoomClient,
     this.agentName,
     this.showMcpConnectors = false,
+    this.menuItemsBuilder,
+    this.inlineAttachments = false,
+    this.acceptedMimeTypes = const <String>[],
   });
 
   final bool? alwaysShowAttachFiles;
@@ -2625,6 +2756,9 @@ class ChatThreadAttachButton extends StatefulWidget {
   final Future<RoomClient> Function(String roomName)? connectRoomClient;
   final String? agentName;
   final bool showMcpConnectors;
+  final ChatThreadAttachmentMenuItemsBuilder? menuItemsBuilder;
+  final bool inlineAttachments;
+  final List<String> acceptedMimeTypes;
 
   @override
   State createState() => _ChatThreadAttachButton();
@@ -2638,14 +2772,85 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
     return widget.showMcpConnectors && normalizedAgentName != null && normalizedAgentName.isNotEmpty;
   }
 
+  bool get _canUseInlineAttachments => widget.inlineAttachments && widget.controller.room == null;
+
+  bool get _canUseInlinePhotoPicker {
+    if (!_canUseInlineAttachments || kIsWeb) {
+      return false;
+    }
+    final accepted = widget.acceptedMimeTypes;
+    if (accepted.isEmpty) {
+      return true;
+    }
+    return accepted.any((value) {
+      final normalized = value.trim().toLowerCase();
+      return normalized == "*" || normalized == "*/*" || normalized == "image/*" || normalized.startsWith("image/");
+    });
+  }
+
+  bool _acceptsMimeType(String mimeType) {
+    final normalizedMimeType = mimeType.split(";").first.trim().toLowerCase();
+    if (normalizedMimeType.isEmpty) {
+      return widget.acceptedMimeTypes.isEmpty;
+    }
+    if (widget.acceptedMimeTypes.isEmpty) {
+      return true;
+    }
+    return widget.acceptedMimeTypes.any((value) {
+      final normalized = value.trim().toLowerCase();
+      if (normalized == "*" || normalized == "*/*") {
+        return true;
+      }
+      if (normalized.endsWith("/*")) {
+        return normalizedMimeType.startsWith(normalized.substring(0, normalized.length - 1));
+      }
+      return normalized == normalizedMimeType;
+    });
+  }
+
+  String _guessMimeType(String name, {List<int>? headerBytes}) {
+    final guessed = lookupMimeType(name, headerBytes: headerBytes);
+    if (guessed != null && guessed.isNotEmpty) {
+      return guessed;
+    }
+    return "application/octet-stream";
+  }
+
+  Future<Uint8List> _readByteStream(Stream<List<int>> stream) async {
+    final builder = BytesBuilder(copy: false);
+    await for (final chunk in stream) {
+      builder.add(chunk);
+    }
+    return builder.takeBytes();
+  }
+
+  void _showUnsupportedAttachmentToast(String name, String mimeType) {
+    if (!mounted) {
+      return;
+    }
+    ShadToaster.of(context).show(
+      ShadToast.destructive(
+        title: const Text("Attachment not supported"),
+        description: Text("$name uses $mimeType, which the selected model does not accept."),
+      ),
+    );
+  }
+
+  void _attachInlineData({required String name, required String mimeType, required Uint8List data}) {
+    final encodedName = Uri.encodeComponent(name);
+    final encodedData = base64Encode(data);
+    widget.controller.attachFile("data:$mimeType;name=$encodedName;base64,$encodedData", mimeType: mimeType);
+  }
+
   Future<String> _resolveImportedPath(String requestedPath) async {
+    final room = widget.controller._requireRoom('Resolving imported attachment path');
     String candidate = requestedPath.split("/").last;
     final dotIndex = candidate.lastIndexOf('.');
     final stem = dotIndex > 0 ? candidate.substring(0, dotIndex) : candidate;
     final extension = dotIndex > 0 ? candidate.substring(dotIndex) : '';
 
     for (var i = 1; ; i++) {
-      final candidateExists = await widget.controller.room.storage.exists(candidate);
+      final candidateExists = await room.storage.exists(candidate);
       if (!candidateExists) {
         return candidate;
       }
@@ -2656,15 +2861,11 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
   }
 
   Future<String> _importFile({required RoomClient sourceRoom, required String sourcePath}) async {
+    final room = widget.controller._requireRoom('Importing attachment from room');
     final content = await sourceRoom.storage.download(sourcePath);
     final destinationPath = await _resolveImportedPath(sourcePath);
 
-    await widget.controller.room.storage.uploadStream(
-      destinationPath,
-      Stream.value(content.data),
-      overwrite: true,
-      size: content.data.length,
-    );
+    await room.storage.uploadStream(destinationPath, Stream.value(content.data), overwrite: true, size: content.data.length);
 
     return destinationPath;
   }
@@ -2677,6 +2878,20 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
     }
 
     for (final file in picked.files) {
+      if (_canUseInlineAttachments) {
+        final readStream = file.readStream;
+        if (readStream == null) {
+          continue;
+        }
+        final data = await _readByteStream(readStream);
+        final mimeType = _guessMimeType(file.name, headerBytes: data);
+        if (!_acceptsMimeType(mimeType)) {
+          _showUnsupportedAttachmentToast(file.name, mimeType);
+          continue;
+        }
+        _attachInlineData(name: file.name, mimeType: mimeType, data: data);
+        continue;
+      }
       await widget.controller.uploadFile(file.name, file.readStream!.map(Uint8List.fromList), file.size);
     }
   }
@@ -2706,6 +2921,16 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
     for (var i = 0; i < picked.length; i++) {
       final file = picked[i];
       final fileName = names[i];
+      if (_canUseInlineAttachments) {
+        final data = await file.readAsBytes();
+        final mimeType = _guessMimeType(fileName, headerBytes: data);
+        if (!_acceptsMimeType(mimeType)) {
+          _showUnsupportedAttachmentToast(fileName, mimeType);
+          continue;
+        }
+        _attachInlineData(name: fileName, mimeType: mimeType, data: data);
+        continue;
+      }
       final size = await file.length();
       final stream = file.openRead();
 
@@ -2714,9 +2939,10 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
   }
 
   Future<void> _onBrowseFiles() async {
-    final currentRoomName = widget.controller.room.roomName?.trim() ?? "";
+    final room = widget.controller._requireRoom('Browsing room attachments');
+    final currentRoomName = room.roomName?.trim() ?? "";
     String selectedRoomName = currentRoomName;
-    RoomClient selectedRoomClient = widget.controller.room;
+    RoomClient selectedRoomClient = room;
     bool resolvingRoom = false;
     bool resolveError = false;
     List<String> picked = [];
@@ -2784,7 +3010,7 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
 
                           RoomClient? nextRoomClient;
                           if (value == currentRoomName) {
-                            nextRoomClient = widget.controller.room;
+                            nextRoomClient = room;
                           } else {
                             try {
                               nextRoomClient = await widget.connectRoomClient!(value);
@@ -2797,7 +3023,7 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
                               resolveError = true;
                             });
                           } else {
-                            if (!identical(widget.controller.room, selectedRoomClient) && !identical(nextRoomClient, selectedRoomClient)) {
+                            if (!identical(room, selectedRoomClient) && !identical(nextRoomClient, selectedRoomClient)) {
                               selectedRoomClient.dispose();
                             }
 
@@ -2836,7 +3062,7 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
     );
 
     for (final f in picked) {
-      if (identical(selectedRoomClient, widget.controller.room)) {
+      if (identical(selectedRoomClient, room)) {
         widget.controller.attachFile(f);
       } else {
         final importedPath = await _importFile(sourceRoom: selectedRoomClient, sourcePath: f);
@@ -2846,7 +3072,16 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
   }
 
   Widget _buildAttachButton(BuildContext context) {
-    final attachMenuItemCount = (kIsWeb ? 1 : 2) + 1;
+    final customItems = widget.menuItemsBuilder?.call(context, widget.controller, popoverController);
+    final canUseRoomAttachments = widget.controller.room != null;
+    final canUseInlineAttachments = _canUseInlineAttachments;
+    final attachMenuItemCount =
+        customItems?.length ??
+        (canUseRoomAttachments
+            ? (kIsWeb ? 1 : 2) + 1
+            : canUseInlineAttachments
+            ? (_canUseInlinePhotoPicker ? 2 : 1)
+            : 0);
     final showMcpMenuItem = _canShowMcpConnectors;
     final attachMenuHeight = (attachMenuItemCount + (showMcpMenuItem ? 1 : 0)) * 40.0;
 
@@ -2859,22 +3094,27 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
           estimatedMenuWidth: 175,
           estimatedMenuHeight: attachMenuHeight,
           items: [
-            if (!kIsWeb)
+            if (customItems != null)
+              ...customItems
+            else if (canUseRoomAttachments || canUseInlineAttachments) ...[
+              if (canUseRoomAttachments && !kIsWeb || canUseInlineAttachments && _canUseInlinePhotoPicker)
+                ShadContextMenuItem(
+                  leading: const Icon(LucideIcons.imageUp),
+                  onPressed: _onSelectPhoto,
+                  child: const Text("Upload a photo..."),
+                ),
               ShadContextMenuItem(
-                leading: const Icon(LucideIcons.imageUp),
-                onPressed: _onSelectPhoto,
-                child: const Text("Upload a photo..."),
+                leading: const Icon(LucideIcons.paperclip),
+                onPressed: _onSelectAttachment,
+                child: const Text("Upload a file..."),
               ),
-            ShadContextMenuItem(
-              leading: const Icon(LucideIcons.paperclip),
-              onPressed: _onSelectAttachment,
-              child: const Text("Upload a file..."),
-            ),
-            ShadContextMenuItem(
-              leading: const Icon(LucideIcons.download),
-              onPressed: _onBrowseFiles,
-              child: const Text("Add from room..."),
-            ),
+              if (canUseRoomAttachments)
+                ShadContextMenuItem(
+                  leading: const Icon(LucideIcons.download),
+                  onPressed: _onBrowseFiles,
+                  child: const Text("Add from room..."),
+                ),
+            ],
             if (showMcpMenuItem)
               ShadContextMenuItem(
                 leading: const Icon(LucideIcons.plug),
@@ -2908,7 +3148,8 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
 
   @override
   Widget build(BuildContext context) {
-    final showAttachFiles = widget.alwaysShowAttachFiles != false;
+    final canShowAttachmentMenu = widget.menuItemsBuilder != null || widget.controller.room != null || _canUseInlineAttachments;
+    final showAttachFiles = widget.alwaysShowAttachFiles != false && canShowAttachmentMenu;
 
     if (!showAttachFiles && !_canShowMcpConnectors) {
       return const SizedBox(width: 0, height: 22);
@@ -3060,10 +3301,24 @@ class _ChatThreadMcpFooterState extends State<ChatThreadMcpFooter> {
     });
 
     final normalizedAgentName = widget.agentName!.trim();
+    final room = widget.controller.room;
+    if (room == null) {
+      if (!mounted || refreshEpoch != _connectorRefreshEpoch) {
+        return;
+      }
+      setState(() {
+        _availableConnectors = connectors;
+        _availableConnectorsError = null;
+        _loadingAvailableConnectors = false;
+        _loadingConnectorState = false;
+        _connectedConnectors.clear();
+      });
+      return;
+    }
     final statuses = await Future.wait(
       connectors.map((connector) async {
         try {
-          final connected = await connector.isConnected(widget.controller.room, normalizedAgentName);
+          final connected = await connector.isConnected(room, normalizedAgentName);
           return MapEntry(_connectorSelectionKey(connector), connected);
         } catch (_) {
           return MapEntry(_connectorSelectionKey(connector), false);
@@ -3324,9 +3579,9 @@ class _AudioWaveformPainter extends CustomPainter {
 class ChatThreadInput extends StatefulWidget {
   const ChatThreadInput({
     super.key,
-    required this.room,
     required this.onSend,
     required this.controller,
+    this.room,
     this.autoFocus = true,
     this.focusTrigger,
     this.sendEnabled = true,
@@ -3336,6 +3591,7 @@ class ChatThreadInput extends StatefulWidget {
     this.placeholder,
     this.onChanged,
     this.attachmentBuilder,
+    this.onFileDrop,
     this.leading,
     this.trailing,
     this.header,
@@ -3363,7 +3619,7 @@ class ChatThreadInput extends StatefulWidget {
   final bool readOnly;
   final bool clearOnSend;
 
-  final RoomClient room;
+  final RoomClient? room;
   final Future<void> Function(String, List<FileAttachment>) onSend;
   final void Function(String, List<FileAttachment>)? onChanged;
   final void Function()? onClear;
@@ -3372,6 +3628,7 @@ class ChatThreadInput extends StatefulWidget {
   final String? sendPendingText;
   final ChatThreadController controller;
   final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
+  final Future<void> Function(String name, Stream<Uint8List> dataStream, int size)? onFileDrop;
   final Widget? leading;
   final Widget? trailing;
   final Widget? header;
@@ -3950,7 +4207,15 @@ class _ChatThreadInput extends State<ChatThreadInput> {
     if (widget.readOnly) {
       return;
     }
-    widget.controller.uploadFile(name, dataStream, size);
+    final onFileDrop = widget.onFileDrop;
+    if (onFileDrop != null) {
+      await onFileDrop(name, dataStream, size);
+      return;
+    }
+    if (widget.room == null) {
+      return;
+    }
+    await widget.controller.uploadFile(name, dataStream, size);
   }
 
   void onPasteEvent(ClipboardReadEvent event) async {
@@ -4201,6 +4466,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
             ),
           )
         : null;
+    const reservedControlSlot = SizedBox(width: 32, height: 32);
     final composerLeading = () {
       final controls = <Widget>[];
       if (widget.leading != null) {
@@ -4228,9 +4494,13 @@ class _ChatThreadInput extends State<ChatThreadInput> {
           controls.add(const SizedBox(width: 4));
         }
         controls.add(primaryTrailer);
-      }
-      if (controls.isEmpty) {
-        return null;
+      } else {
+        if (controls.isNotEmpty) {
+          controls.add(const SizedBox(width: 4));
+        }
+        controls.add(
+          const Visibility(visible: false, maintainState: true, maintainAnimation: true, maintainSize: true, child: reservedControlSlot),
+        );
       }
       if (controls.length == 1) {
         return controls.single;
@@ -4238,7 +4508,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
       return Row(mainAxisSize: MainAxisSize.min, children: controls);
     }();
     final inputTrailer = widget.footer == null ? trailer : null;
-    final reservedFooterTrailer = trailer ?? const SizedBox(width: 32, height: 32);
+    final reservedFooterTrailer = trailer;
     if (recordingAudio) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -4352,13 +4622,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
                     child: Row(
                       children: [
                         Expanded(child: _wrapAccessoryTapRegion(wrapReadOnlyControls(widget.footer!))),
-                        Visibility(
-                          visible: trailer != null,
-                          maintainState: true,
-                          maintainAnimation: true,
-                          maintainSize: true,
-                          child: _wrapAccessoryTapRegion(reservedFooterTrailer),
-                        ),
+                        _wrapAccessoryTapRegion(reservedFooterTrailer),
                       ],
                     ),
                   ),
@@ -5800,7 +6064,7 @@ class ChatThreadMessages extends StatefulWidget {
 
   final Map<String, MessageBuilder>? messageBuilders;
 
-  final RoomClient room;
+  final RoomClient? room;
   final String path;
   final ScrollController scrollController;
   final Object? composerTapRegionGroupId;
@@ -5955,14 +6219,14 @@ class PendingChatThreadMessage extends StatelessWidget {
     this.mobileStorageSaveSurfacePresenter,
   });
 
-  final RoomClient room;
+  final RoomClient? room;
   final PendingAgentMessage message;
   final bool shouldShowAuthorNames;
   final ThreadStorageSaveSurfacePresenter? mobileStorageSaveSurfacePresenter;
 
   @override
   Widget build(BuildContext context) {
-    final localParticipantName = room.localParticipant?.getAttribute("name");
+    final localParticipantName = room?.localParticipant?.getAttribute("name");
     final authorName = message.senderName ?? (localParticipantName is String ? localParticipantName : "");
     final createdAt = message.createdAt ?? DateTime.now();
     final opacity = message.awaitingOnline ? 0.72 : 1.0;
@@ -5980,17 +6244,22 @@ class PendingChatThreadMessage extends StatelessWidget {
           createdAt: createdAt,
           shouldShowHeader: shouldShowAuthorNames,
           mobileStorageSaveSurfacePresenter: mobileStorageSaveSurfacePresenter,
-          attachmentWidgets: [
-            for (final attachment in message.attachments)
-              Align(
-                alignment: Alignment.centerRight,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 312.5),
-                  child: FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: _defaultSuggestedFileNameFromPath(attachment)),
-                ),
-              ),
-          ],
+          attachmentWidgets: [for (final attachment in message.attachments) _buildAttachmentPreview(attachment)],
         ),
+      ),
+    );
+  }
+
+  Widget _buildAttachmentPreview(String attachment) {
+    final trimmed = attachment.trim();
+    final isInlineImage = trimmed.startsWith("data:image/");
+    return Align(
+      alignment: Alignment.centerRight,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 312.5),
+        child: isInlineImage
+            ? ChatThreadImageAttachment(room: room, imageId: null, imageUri: trimmed)
+            : FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: _defaultSuggestedFileNameFromPath(attachment)),
       ),
     );
   }
@@ -6078,7 +6347,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   static const String _reactionTargetAttachment = "attachment";
   static const Map<String, String> _reactionEmojiCanonicalByKey = <String, String>{"❤": "❤️", "♥": "❤️", "⚠": "⚠️", "🛠": "🛠️"};
 
-  RoomClient get room => widget.room;
+  RoomClient get room => widget.room!;
   String get path => widget.path;
   String? get agentName => widget.agentName;
   bool get startChatCentered => widget.startChatCentered;
@@ -8170,13 +8439,17 @@ Future<_ThreadImageRecord?> _loadGeneratedThreadImageRecord(RoomClient room, {re
 }
 
 Future<_ThreadImageRecord?> _loadGeneratedThreadImageRecordFromUri(
-  RoomClient room, {
+  RoomClient? room, {
   required String imageUri,
   String? fallbackMimeType,
 }) async {
   final dataUriRecord = _threadImageRecordFromDataUri(imageUri, fallbackMimeType: fallbackMimeType);
   if (dataUriRecord != null) {
     return dataUriRecord;
+  }
+
+  if (room == null) {
+    return null;
   }
 
   final parsed = Uri.tryParse(imageUri.trim());
@@ -8302,7 +8575,7 @@ class ChatThreadFeedImage {
 class ChatThreadImageAttachment extends StatefulWidget {
   const ChatThreadImageAttachment({
     super.key,
-    required this.room,
+    this.room,
     required this.imageId,
     this.imageUri,
     this.fallbackMimeType,
@@ -8314,7 +8587,7 @@ class ChatThreadImageAttachment extends StatefulWidget {
     this.onOpenFullscreen,
   });
 
-  final RoomClient room;
+  final RoomClient? room;
   final String? imageId;
   final String? imageUri;
   final String? fallbackMimeType;
@@ -8364,7 +8637,12 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
       return null;
     }
 
-    return _loadGeneratedThreadImageRecord(widget.room, imageId: imageId, fallbackMimeType: widget.fallbackMimeType);
+    final room = widget.room;
+    if (room == null) {
+      return null;
+    }
+
+    return _loadGeneratedThreadImageRecord(room, imageId: imageId, fallbackMimeType: widget.fallbackMimeType);
   }
 
   bool _isGeneratingStatus(String? status) {
@@ -8447,6 +8725,10 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
   }
 
   Future<void> _onSaveImage(_ThreadImageRecord image) async {
+    final room = widget.room;
+    if (room == null) {
+      return;
+    }
     final fileNameController = TextEditingController(text: _ImageMime.suggestedFileName(image.mimeType));
     String selectedFolder = "";
 
@@ -8478,7 +8760,7 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
                 }
                 fullPath = _ensureFileNameExtension(fullPath, image.mimeType);
 
-                final exists = await widget.room.storage.exists(fullPath);
+                final exists = await room.storage.exists(fullPath);
                 if (exists && context.mounted) {
                   final overwrite = await showShadDialog<bool>(
                     context: context,
@@ -8507,7 +8789,7 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
                   }
                 }
 
-                await widget.room.storage.uploadStream(fullPath, Stream.value(image.data), overwrite: true, size: image.data.length);
+                await room.storage.uploadStream(fullPath, Stream.value(image.data), overwrite: true, size: image.data.length);
 
                 if (context.mounted) {
                   Navigator.of(context).pop();
@@ -8525,7 +8807,7 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
                   onSelectionChanged: (selection) {
                     selectedFolder = selection.join("/");
                   },
-                  room: widget.room,
+                  room: room,
                   multiple: false,
                   selectionMode: FileBrowserSelectionMode.folders,
                   rootLabel: "Files",
@@ -8554,7 +8836,7 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
 
     return CoordinatedShadContextMenuRegion(
       items: [
-        ShadContextMenuItem(height: 40, onPressed: () => _onSaveImage(image), child: const Text("Save As...")),
+        if (widget.room != null) ShadContextMenuItem(height: 40, onPressed: () => _onSaveImage(image), child: const Text("Save As...")),
         ShadContextMenuItem(height: 40, onPressed: () => _onCopyImage(image), child: const Text("Copy")),
       ],
       child: child,
@@ -8688,15 +8970,9 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
 }
 
 class ChatThreadImageGalleryPage extends StatefulWidget {
-  const ChatThreadImageGalleryPage({
-    super.key,
-    required this.room,
-    required this.images,
-    required this.initialIndex,
-    required this.onClose,
-  });
+  const ChatThreadImageGalleryPage({super.key, this.room, required this.images, required this.initialIndex, required this.onClose});
 
-  final RoomClient room;
+  final RoomClient? room;
   final List<ChatThreadFeedImage> images;
   final int initialIndex;
   final VoidCallback onClose;
@@ -8752,9 +9028,10 @@ class _ThreadImageGalleryPageState extends State<ChatThreadImageGalleryPage> {
 
   Future<_ThreadImageRecord?> _loadCurrentImage() async {
     final entry = widget.images[_currentIndex];
+    final room = widget.room;
     final path = entry.path?.trim();
-    if (path != null && path.isNotEmpty) {
-      final file = await widget.room.storage.download(path);
+    if (room != null && path != null && path.isNotEmpty) {
+      final file = await room.storage.download(path);
       final mimeType = file.mimeType.trim().isNotEmpty ? file.mimeType.trim() : (entry.mimeType ?? "image/png");
       return _ThreadImageRecord(data: file.data, mimeType: mimeType);
     }
@@ -8769,7 +9046,10 @@ class _ThreadImageGalleryPageState extends State<ChatThreadImageGalleryPage> {
     if (entry.imageId.trim().isEmpty) {
       return null;
     }
-    return _loadGeneratedThreadImageRecord(widget.room, imageId: entry.imageId, fallbackMimeType: entry.mimeType);
+    if (room == null) {
+      return null;
+    }
+    return _loadGeneratedThreadImageRecord(room, imageId: entry.imageId, fallbackMimeType: entry.mimeType);
   }
 
   Future<void> _copyImageRecord(_ThreadImageRecord image) async {
@@ -8800,6 +9080,10 @@ class _ThreadImageGalleryPageState extends State<ChatThreadImageGalleryPage> {
 
   Future<void> _saveImageRecord(_ThreadImageRecord image) async {
     if (!mounted) {
+      return;
+    }
+    final room = widget.room;
+    if (room == null) {
       return;
     }
     final fileNameController = TextEditingController(text: _ImageMime.suggestedFileName(image.mimeType));
@@ -8833,7 +9117,7 @@ class _ThreadImageGalleryPageState extends State<ChatThreadImageGalleryPage> {
                 }
                 fullPath = _ensureFileNameExtension(fullPath, image.mimeType);
 
-                final exists = await widget.room.storage.exists(fullPath);
+                final exists = await room.storage.exists(fullPath);
                 if (exists && context.mounted) {
                   final overwrite = await showShadDialog<bool>(
                     context: context,
@@ -8862,7 +9146,7 @@ class _ThreadImageGalleryPageState extends State<ChatThreadImageGalleryPage> {
                   }
                 }
 
-                await widget.room.storage.uploadStream(fullPath, Stream.value(image.data), overwrite: true, size: image.data.length);
+                await room.storage.uploadStream(fullPath, Stream.value(image.data), overwrite: true, size: image.data.length);
 
                 if (context.mounted) {
                   Navigator.of(context).pop();
@@ -8880,7 +9164,7 @@ class _ThreadImageGalleryPageState extends State<ChatThreadImageGalleryPage> {
                   onSelectionChanged: (selection) {
                     selectedFolder = selection.join("/");
                   },
-                  room: widget.room,
+                  room: room,
                   multiple: false,
                   selectionMode: FileBrowserSelectionMode.folders,
                   rootLabel: "Files",
@@ -8941,7 +9225,7 @@ class _ThreadImageGalleryPageState extends State<ChatThreadImageGalleryPage> {
                       status: image.status,
                       statusDetail: image.statusDetail,
                       onCopyImage: _copyImageRecord,
-                      onSaveImage: _saveImageRecord,
+                      onSaveImage: widget.room == null ? null : _saveImageRecord,
                     );
                   },
                 ),
@@ -8967,7 +9251,7 @@ class _ThreadImageGalleryPageState extends State<ChatThreadImageGalleryPage> {
                       child: Text("Copy", style: ShadTheme.of(context).textTheme.small.copyWith(color: Colors.white)),
                     ),
                     ShadButton.ghost(
-                      onPressed: _onSaveCurrentImage,
+                      onPressed: widget.room == null ? null : _onSaveCurrentImage,
                       leading: const Icon(LucideIcons.save, size: 16, color: Colors.white),
                       child: Text("Save As...", style: ShadTheme.of(context).textTheme.small.copyWith(color: Colors.white)),
                     ),
@@ -9028,7 +9312,7 @@ class _ThreadFullscreenImage extends StatelessWidget {
     this.onSaveImage,
   });
 
-  final RoomClient room;
+  final RoomClient? room;
   final String imageId;
   final String? path;
   final String? imageUri;
@@ -9039,9 +9323,10 @@ class _ThreadFullscreenImage extends StatelessWidget {
   final Future<void> Function(_ThreadImageRecord image)? onSaveImage;
 
   Future<_ThreadImageRecord?> _loadImage() async {
+    final roomClient = room;
     final imagePath = path?.trim();
-    if (imagePath != null && imagePath.isNotEmpty) {
-      final file = await room.storage.download(imagePath);
+    if (roomClient != null && imagePath != null && imagePath.isNotEmpty) {
+      final file = await roomClient.storage.download(imagePath);
       final mimeType = file.mimeType.trim().isNotEmpty ? file.mimeType.trim() : (fallbackMimeType ?? "image/png");
       return _ThreadImageRecord(data: file.data, mimeType: mimeType);
     }
@@ -9056,7 +9341,10 @@ class _ThreadFullscreenImage extends StatelessWidget {
     if (imageId.trim().isEmpty) {
       return null;
     }
-    return _loadGeneratedThreadImageRecord(room, imageId: imageId, fallbackMimeType: fallbackMimeType);
+    if (roomClient == null) {
+      return null;
+    }
+    return _loadGeneratedThreadImageRecord(roomClient, imageId: imageId, fallbackMimeType: fallbackMimeType);
   }
 
   bool _isGeneratingStatus(String? value) {

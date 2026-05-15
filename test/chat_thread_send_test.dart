@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:meshagent/meshagent.dart';
+import 'package:meshagent_agents/meshagent_agents.dart';
 import 'package:meshagent_flutter_shadcn/chat/chat.dart';
 import 'package:meshagent_flutter_shadcn/chat/agent_stream_accumulator.dart';
 import 'package:meshagent_flutter_shadcn/chat/tool_call_status_accumulator.dart';
@@ -353,6 +354,28 @@ void main() {
     expect(state.pendingItemId, 'image-1');
     expect(state.totalBytes, isNull);
     expect(state.startedAt, DateTime.parse('2026-05-04T12:00:00Z'));
+  });
+
+  test('resolveChatThreadStatusFromStore reads websocket status without a room', () async {
+    const threadPath = 'dataset://agents/dataset/threads/thread-1';
+    final store = AgentThreadMessageStatusStore();
+    trackAgentThreadStatusMessageInStore(
+      store: store,
+      message: AgentMessage.fromJson({
+        'type': 'meshagent.agent.thread.status',
+        'thread_id': threadPath,
+        'status': 'Working',
+        'mode': 'busy',
+        'turn_id': 'turn-1',
+      }),
+    );
+
+    final state = resolveChatThreadStatusFromStore(store: store, path: threadPath);
+
+    expect(state.text, 'Working');
+    expect(state.mode, 'busy');
+    expect(state.turnId, 'turn-1');
+    expect(state.supportsAgentMessages, isTrue);
   });
 
   test('resolveChatThreadStatus ignores stale participant status attributes', () async {

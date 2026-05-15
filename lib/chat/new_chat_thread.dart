@@ -7,6 +7,8 @@ import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_agents/meshagent_agents.dart'
     show
         AgentMessage,
+        AgentMessageEvent,
+        BaseChatClient,
         ModelsRequest,
         StartThread,
         ThreadStarted,
@@ -32,9 +34,11 @@ typedef NewChatThreadWrapperBuilder = Widget Function(BuildContext context, Widg
 class NewChatThread extends StatefulWidget {
   const NewChatThread({
     super.key,
-    required this.room,
     required this.agentName,
     required this.builder,
+    this.room,
+    this.chatClient,
+    this.disposeChatClient = false,
     this.controller,
     this.composerKey,
     this.toolkit = "chat",
@@ -53,7 +57,9 @@ class NewChatThread extends StatefulWidget {
     this.newThreadWrapperBuilder,
   });
 
-  final RoomClient room;
+  final RoomClient? room;
+  final BaseChatClient? chatClient;
+  final bool disposeChatClient;
   final String agentName;
   final NewChatThreadBuilder builder;
   final ChatThreadController? controller;
@@ -84,6 +90,7 @@ class _NewChatThreadState extends State<NewChatThread> {
   late DatasetChatModelController _modelController;
   late bool _ownsModelController;
   StreamSubscription<RoomEvent>? _roomSubscription;
+  StreamSubscription<AgentMessageEvent>? _chatClientSubscription;
   RemoteParticipant? _agent;
   bool _creatingNewThread = false;
   bool _waitingForAgent = false;
@@ -99,6 +106,8 @@ class _NewChatThreadState extends State<NewChatThread> {
   Completer<void>? _waitForAgentReadyCompleter;
 
   bool get _composerLocked => _creatingNewThread || _waitingForAgent;
+
+  bool get _usesInjectedChatClient => widget.chatClient != null;
 
   String? get _activeThreadPath {
     final externalPath = widget.selectedThreadPath?.trim();
@@ -159,8 +168,8 @@ class _NewChatThreadState extends State<NewChatThread> {
     _modelController.bindChangeHandler(_selectModelForNewThread);
     _modelController.bindVoiceChangeHandler(_selectVoiceForNewThread);
     _composerInputKey = widget.composerKey ?? GlobalObjectKey(_controller);
-    _roomSubscription = widget.room.listen(_onRoomEvent);
-    widget.room.messaging.addListener(_onMessagingChanged);
+    _bindRoom();
+    _bindChatClient();
     _onMessagingChanged();
   }
 
@@ -171,12 +180,12 @@ class _NewChatThreadState extends State<NewChatThread> {
       _composerInputKey = widget.composerKey ?? GlobalObjectKey(_controller);
     }
 
-    if (oldWidget.room != widget.room || oldWidget.controller != widget.controller) {
+    if (oldWidget.room != widget.room || oldWidget.controller != widget.controller || oldWidget.chatClient != widget.chatClient) {
       _newThreadOperationId++;
       _roomSubscription?.cancel();
-      _roomSubscription = widget.room.listen(_onRoomEvent);
-      oldWidget.room.messaging.removeListener(_onMessagingChanged);
-      widget.room.messaging.addListener(_onMessagingChanged);
+      oldWidget.room?.messaging.removeListener(_onMessagingChanged);
+      _bindRoom();
+      _bindChatClient();
 
       if (_ownsController) {
         _controller.dispose();
@@ -222,7 +231,11 @@ class _NewChatThreadState extends State<NewChatThread> {
   @override
   void dispose() {
     _roomSubscription?.cancel();
-    widget.room.messaging.removeListener(_onMessagingChanged);
+    _chatClientSubscription?.cancel();
+    widget.room?.messaging.removeListener(_onMessagingChanged);
+    if (widget.disposeChatClient) {
+      unawaited(widget.chatClient?.stop());
+    }
     unawaited(_realtimeWebrtcSession.stop());
     _resetRealtimeAudioThreadState();
     _cancelWaitingForAgent();
@@ -235,6 +248,38 @@ class _NewChatThreadState extends State<NewChatThread> {
       _modelController.dispose();
     }
     super.dispose();
+  }
+
+  void _bindRoom() {
+    final room = widget.room;
+    if (room == null) {
+      _roomSubscription = null;
+      _agent = null;
+      return;
+    }
+    _roomSubscription = room.listen(_onRoomEvent);
+    room.messaging.addListener(_onMessagingChanged);
+  }
+
+  void _bindChatClient() {
+    _chatClientSubscription?.cancel();
+    _chatClientSubscription = null;
+    final chatClient = widget.chatClient;
+    if (chatClient == null) {
+      return;
+    }
+    _agent = null;
+    unawaited(chatClient.start());
+    _chatClientSubscription = chatClient.events.listen((event) {
+      final payload = event.payload;
+      if (payload["type"] == agentModelsResponseType) {
+        _modelController.applyModelsResponse(payload);
+      } else if (payload["type"] == agentModelChangedType && payload["thread_id"] == null) {
+        _modelController.applyModelChanged(payload);
+      }
+      _signalWaitingForAgentReady();
+    });
+    _requestModels();
   }
 
   void _resetRealtimeAudioThreadState() {
@@ -274,8 +319,13 @@ class _NewChatThreadState extends State<NewChatThread> {
     if (!mounted) {
       return;
     }
+    final room = widget.room;
+    if (room == null) {
+      _signalWaitingForAgentReady();
+      return;
+    }
 
-    final nextAgent = widget.room.messaging.remoteParticipants.firstWhereOrNull(
+    final nextAgent = room.messaging.remoteParticipants.firstWhereOrNull(
       (participant) => participant.getAttribute("name") == widget.agentName,
     );
     if (nextAgent == _agent) {
@@ -343,13 +393,26 @@ class _NewChatThreadState extends State<NewChatThread> {
   }
 
   void _requestModels() {
+    final chatClient = widget.chatClient;
+    if (chatClient != null) {
+      unawaited(() async {
+        try {
+          await chatClient.sendAgentMessage(ModelsRequest(messageId: const Uuid().v4()), ignoreOffline: true);
+        } catch (_) {}
+      }());
+      return;
+    }
+    final room = widget.room;
+    if (room == null) {
+      return;
+    }
     final agent = _agent;
     if (agent == null) {
       return;
     }
     unawaited(() async {
       try {
-        await widget.room.messaging.sendMessage(
+        await room.messaging.sendMessage(
           to: agent,
           type: agentRoomMessageType,
           ignoreOffline: true,
@@ -360,15 +423,39 @@ class _NewChatThreadState extends State<NewChatThread> {
   }
 
   Future<String> _sendStartThreadMessage({
-    required RemoteParticipant agent,
+    required RemoteParticipant? agent,
     required String messageId,
     required String text,
     required List<String> attachments,
     required String? senderName,
   }) async {
+    final chatClient = widget.chatClient;
+    if (chatClient != null) {
+      final activeModel = _modelController.activeModel;
+      final activeVoice = _modelController.activeVoice;
+      final result = await chatClient.startThread(
+        message: text,
+        attachments: attachments,
+        provider: activeModel?.provider,
+        model: activeModel?.model,
+        realtimeProtocol: null,
+        voice: activeVoice != null && activeVoice.trim().isNotEmpty ? activeVoice.trim() : null,
+        outputModalities: [_modelController.activeModality],
+        senderName: senderName,
+      );
+      _realtimeAudioConnection = RealtimeConnectionInfo.fromJson(result.realtimeConnection);
+      return result.threadPath;
+    }
+    final room = widget.room;
+    if (room == null) {
+      throw StateError('Starting a room-backed thread requires a room.');
+    }
+    if (agent == null) {
+      throw StateError('No online agent supports agent messages.');
+    }
     final completer = Completer<String>();
     late final StreamSubscription<RoomEvent> subscription;
-    subscription = widget.room.listen((event) {
+    subscription = room.listen((event) {
       if (event is! RoomMessageEvent || event.message.fromParticipantId != agent.id || event.message.type != agentRoomMessageType) {
         return;
       }
@@ -404,7 +491,7 @@ class _NewChatThreadState extends State<NewChatThread> {
         outputModalities: [_modelController.activeModality],
         senderName: senderName != null && senderName.trim().isNotEmpty ? senderName.trim() : null,
       );
-      await widget.room.messaging.sendMessage(to: agent, type: agentRoomMessageType, message: payload.toJson());
+      await room.messaging.sendMessage(to: agent, type: agentRoomMessageType, message: payload.toJson());
       return await completer.future.timeout(const Duration(seconds: 30));
     } on TimeoutException {
       throw RoomServerException("Timed out waiting for thread to start.");
@@ -414,13 +501,39 @@ class _NewChatThreadState extends State<NewChatThread> {
   }
 
   Future<String> _sendRealtimeAudioThreadStartMessage({
-    required RemoteParticipant agent,
+    required RemoteParticipant? agent,
     required String messageId,
     required String? senderName,
   }) async {
+    final chatClient = widget.chatClient;
+    if (chatClient != null) {
+      final activeModel = _modelController.activeModel;
+      final activeVoice = _modelController.activeVoice;
+      final result = await chatClient.startThread(
+        message: "",
+        attachments: const [],
+        name: "Audio message",
+        provider: activeModel?.provider,
+        model: activeModel?.model,
+        realtimeProtocol: _modelController.activeTurnDetection == "automatic" && _modelController.prefersWebrtcRealtime ? "webrtc" : null,
+        voice: activeVoice != null && activeVoice.trim().isNotEmpty ? activeVoice.trim() : null,
+        outputModalities: [_modelController.activeModality],
+        senderName: senderName,
+        omitContent: true,
+      );
+      _realtimeAudioConnection = RealtimeConnectionInfo.fromJson(result.realtimeConnection);
+      return result.threadPath;
+    }
+    final room = widget.room;
+    if (room == null) {
+      throw StateError('Realtime audio requires a room.');
+    }
+    if (agent == null) {
+      throw StateError('No online agent supports agent messages.');
+    }
     final completer = Completer<String>();
     late final StreamSubscription<RoomEvent> subscription;
-    subscription = widget.room.listen((event) {
+    subscription = room.listen((event) {
       if (event is! RoomMessageEvent || event.message.fromParticipantId != agent.id || event.message.type != agentRoomMessageType) {
         return;
       }
@@ -455,7 +568,7 @@ class _NewChatThreadState extends State<NewChatThread> {
         outputModalities: [_modelController.activeModality],
         senderName: senderName != null && senderName.trim().isNotEmpty ? senderName.trim() : null,
       );
-      await widget.room.messaging.sendMessage(to: agent, type: agentRoomMessageType, message: payload.toJson());
+      await room.messaging.sendMessage(to: agent, type: agentRoomMessageType, message: payload.toJson());
       return await completer.future.timeout(const Duration(seconds: 30));
     } on TimeoutException {
       throw RoomServerException("Timed out waiting for thread to start.");
@@ -484,8 +597,8 @@ class _NewChatThreadState extends State<NewChatThread> {
     final completer = Completer<String>();
     _realtimeAudioThreadCompleter = completer;
     try {
-      final agent = _agent ?? await _waitForAgentOnline();
-      final senderName = widget.room.localParticipant?.getAttribute("name");
+      final agent = _usesInjectedChatClient ? null : _agent ?? await _waitForAgentOnline();
+      final senderName = widget.room?.localParticipant?.getAttribute("name");
       final path = await _sendRealtimeAudioThreadStartMessage(
         agent: agent,
         messageId: const Uuid().v4(),
@@ -547,10 +660,11 @@ class _NewChatThreadState extends State<NewChatThread> {
   Future<void> _sendRealtimeAudioChunk(Uint8List chunk, {required bool finalChunk}) async {
     try {
       final path = await _ensureRealtimeAudioThread();
-      final agent = _agent ?? await _waitForAgentOnline();
       final activeModel = _modelController.activeModel;
       final activeVoice = _modelController.activeVoice;
       final inputFormat = _modelController.activeInputFormat;
+      final chatClient = widget.chatClient;
+      final session = chatClient?.openThread(path);
       if (finalChunk) {
         if (_modelController.activeTurnDetection == "automatic") {
           if (!mounted) {
@@ -572,12 +686,42 @@ class _NewChatThreadState extends State<NewChatThread> {
         }
         final messageId = const Uuid().v4();
         final turnId = const Uuid().v4();
-        await widget.room.messaging.sendMessage(
+        if (session != null) {
+          await session.commitRealtimeAudio(
+            turnId: turnId,
+            provider: activeModel?.provider,
+            model: activeModel?.model,
+            voice: activeVoice,
+            outputModalities: [_modelController.activeModality],
+          );
+          if (!mounted) {
+            return;
+          }
+          _realtimeAudioThreadPath = null;
+          setState(() {
+            _threadPath = path;
+            _newThreadError = null;
+            _creatingNewThread = false;
+            _waitingForAgent = false;
+            _pendingFirstMessage = null;
+          });
+          _modelController.setLocked(false);
+          _notifyThreadResolved(path, null);
+          _notifyThreadPathChanged(path);
+          _controller.clear();
+          return;
+        }
+        final room = widget.room;
+        if (room == null) {
+          throw StateError('Realtime audio requires a room or chat client.');
+        }
+        final agent = _agent ?? await _waitForAgentOnline();
+        await room.messaging.sendMessage(
           to: agent,
           type: agentRoomMessageType,
           message: {"type": agentRealtimeAudioCommitType, "thread_id": path, "message_id": messageId, "turn_id": turnId},
         );
-        await widget.room.messaging.sendMessage(
+        await room.messaging.sendMessage(
           to: agent,
           type: agentRoomMessageType,
           message: {
@@ -608,7 +752,16 @@ class _NewChatThreadState extends State<NewChatThread> {
         _controller.clear();
         return;
       }
-      await widget.room.messaging.sendMessage(
+      if (session != null) {
+        await session.sendRealtimeAudioChunk(chunk: chunk, format: inputFormat.toJson());
+        return;
+      }
+      final room = widget.room;
+      if (room == null) {
+        throw StateError('Realtime audio requires a room or chat client.');
+      }
+      final agent = _agent ?? await _waitForAgentOnline();
+      await room.messaging.sendMessage(
         to: agent,
         type: agentRoomMessageType,
         message: {"type": agentRealtimeAudioChunkType, "thread_id": path, "message_id": const Uuid().v4(), "format": inputFormat.toJson()},
@@ -640,8 +793,8 @@ class _NewChatThreadState extends State<NewChatThread> {
     }
 
     final operationId = ++_newThreadOperationId;
-    final waitingForAgent = _agent == null;
-    final senderName = widget.room.localParticipant?.getAttribute("name");
+    final waitingForAgent = !_usesInjectedChatClient && _agent == null;
+    final senderName = widget.room?.localParticipant?.getAttribute("name");
     final pendingFirstMessage = PendingAgentMessage(
       messageId: pendingMessageId,
       messageType: agentTurnStartType,
@@ -664,8 +817,8 @@ class _NewChatThreadState extends State<NewChatThread> {
     _controller.scrollThreadToBottom(animated: false);
 
     try {
-      final agent = _agent ?? await _waitForAgentOnline();
-      final readyAgent = _agent ?? agent;
+      final agent = _usesInjectedChatClient ? null : _agent ?? await _waitForAgentOnline();
+      final readyAgent = agent;
       if (!mounted || operationId != _newThreadOperationId) {
         return;
       }
@@ -821,6 +974,9 @@ class _NewChatThreadState extends State<NewChatThread> {
   }
 
   Widget _buildComposerDropArea({required Widget child}) {
+    if (widget.room == null) {
+      return child;
+    }
     return FileDropArea(
       onFileDrop: (name, dataStream, fileSize) async {
         if (_composerLocked) {
@@ -837,9 +993,21 @@ class _NewChatThreadState extends State<NewChatThread> {
     if (pendingMessage == null) {
       return Expanded(child: Center(child: widget.emptyState ?? const SizedBox.shrink()));
     }
+    final room = widget.room;
+    if (room == null) {
+      return ChatThreadMessages(
+        room: null,
+        path: pendingMessage.threadPath,
+        scrollController: _controller.threadScrollController,
+        messages: const [],
+        online: const [],
+        showCompletedToolCalls: false,
+        pendingMessages: [pendingMessage],
+      );
+    }
 
     return ChatThreadMessages(
-      room: widget.room,
+      room: room,
       path: pendingMessage.threadPath,
       scrollController: _controller.threadScrollController,
       messages: const [],
@@ -870,15 +1038,21 @@ class _NewChatThreadState extends State<NewChatThread> {
         placeholder: widget.inputPlaceholder,
         leading: toolArea.leading,
         footer: toolArea.footer,
-        audioInputEnabled: _modelController.supportsAudioInput,
+        audioInputEnabled: (widget.room != null || widget.chatClient != null) && _modelController.supportsAudioInput,
         automaticAudioTurnDetection: _modelController.activeTurnDetection == "automatic",
-        onExternalAudioRecordingStart: _modelController.activeTurnDetection == "automatic" && _modelController.prefersWebrtcRealtime
+        onExternalAudioRecordingStart:
+            (widget.room != null || widget.chatClient != null) &&
+                _modelController.activeTurnDetection == "automatic" &&
+                _modelController.prefersWebrtcRealtime
             ? _startWebrtcRealtimeAudioThread
             : null,
-        onExternalAudioRecordingStop: _modelController.activeTurnDetection == "automatic" && _modelController.prefersWebrtcRealtime
+        onExternalAudioRecordingStop:
+            (widget.room != null || widget.chatClient != null) &&
+                _modelController.activeTurnDetection == "automatic" &&
+                _modelController.prefersWebrtcRealtime
             ? _stopWebrtcRealtimeAudioThread
             : null,
-        onAudioRecordingStart: _modelController.activeTurnDetection == "automatic"
+        onAudioRecordingStart: (widget.room != null || widget.chatClient != null) && _modelController.activeTurnDetection == "automatic"
             ? () => _ensureRealtimeAudioThread(resolveWhenStarted: true)
             : null,
         onAudioChunk: _sendRealtimeAudioChunk,
