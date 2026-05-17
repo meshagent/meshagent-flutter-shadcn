@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:meshagent_agents/meshagent_agents.dart'
     show
@@ -187,6 +188,8 @@ class DatasetChatModelController extends ChangeNotifier {
   Future<void> Function(String voice)? _voiceChangeHandler;
   bool _locked = false;
   bool _changing = false;
+  bool _disposed = false;
+  bool _notifyScheduled = false;
 
   List<DatasetChatModelOption> get models => _models;
   DatasetChatModelOption? get activeModel => _activeModel;
@@ -263,7 +266,7 @@ class DatasetChatModelController extends ChangeNotifier {
       return;
     }
     _locked = locked;
-    notifyListeners();
+    _notifyChanged();
   }
 
   void replaceModelsFrom(DatasetChatModelController other) {
@@ -271,7 +274,7 @@ class DatasetChatModelController extends ChangeNotifier {
     _activeModel = other.activeModel?.copyWith();
     _activeModality = other.activeModality;
     _activeVoice = other.activeVoice;
-    notifyListeners();
+    _notifyChanged();
   }
 
   Future<void> changeModel(DatasetChatModelOption option) async {
@@ -279,12 +282,12 @@ class DatasetChatModelController extends ChangeNotifier {
       return;
     }
     _changing = true;
-    notifyListeners();
+    _notifyChanged();
     try {
       await _changeHandler!(option);
     } finally {
       _changing = false;
-      notifyListeners();
+      _notifyChanged();
     }
   }
 
@@ -294,12 +297,12 @@ class DatasetChatModelController extends ChangeNotifier {
       return;
     }
     _changing = true;
-    notifyListeners();
+    _notifyChanged();
     try {
       await _voiceChangeHandler!(normalized);
     } finally {
       _changing = false;
-      notifyListeners();
+      _notifyChanged();
     }
   }
 
@@ -312,7 +315,7 @@ class DatasetChatModelController extends ChangeNotifier {
       return;
     }
     _activeVoice = normalized;
-    notifyListeners();
+    _notifyChanged();
   }
 
   void selectModelLocally(DatasetChatModelOption option) {
@@ -325,7 +328,7 @@ class DatasetChatModelController extends ChangeNotifier {
     _activeModel = option.copyWith(active: true);
     _activeModality = _resolvedOutputModality(_activeModel, _activeModality);
     _activeVoice = _resolvedVoice(_activeModel, option.defaultOutputVoice);
-    notifyListeners();
+    _notifyChanged();
   }
 
   void selectOutputModality(String modality) {
@@ -335,7 +338,7 @@ class DatasetChatModelController extends ChangeNotifier {
     }
     _activeModality = normalized;
     _activeVoice = _resolvedVoice(_activeModel, _activeVoice);
-    notifyListeners();
+    _notifyChanged();
   }
 
   void applyModelsResponse(Map<String, dynamic> payload) {
@@ -408,7 +411,7 @@ class DatasetChatModelController extends ChangeNotifier {
     _activeModel = active?.copyWith(active: true);
     _activeModality = _resolvedOutputModality(_activeModel, _activeModality);
     _activeVoice = _resolvedVoice(_activeModel, _activeVoice);
-    notifyListeners();
+    _notifyChanged();
   }
 
   void applyModelChanged(Map<String, dynamic> payload) {
@@ -459,7 +462,33 @@ class DatasetChatModelController extends ChangeNotifier {
     _activeModality = _resolvedOutputModality(_activeModel, _activeModality);
     final payloadVoice = payload['voice']?.toString().trim();
     _activeVoice = _resolvedVoice(_activeModel, payloadVoice == null || payloadVoice.isEmpty ? active.defaultOutputVoice : payloadVoice);
-    notifyListeners();
+    _notifyChanged();
+  }
+
+  void _notifyChanged() {
+    if (_disposed) {
+      return;
+    }
+    if (SchedulerBinding.instance.schedulerPhase == SchedulerPhase.idle) {
+      notifyListeners();
+      return;
+    }
+    if (_notifyScheduled) {
+      return;
+    }
+    _notifyScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _notifyScheduled = false;
+      if (!_disposed) {
+        notifyListeners();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
   }
 }
 
@@ -719,9 +748,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     _modelController.bindChangeHandler(_changeModel);
     _modelController.bindVoiceChangeHandler(_changeVoice);
     _composerInputKey = widget.composerKey ?? GlobalObjectKey(_controller);
-    _bindChatSession();
     _refreshStatus();
     _startWatch();
+    _bindChatSession();
   }
 
   @override
@@ -754,10 +783,15 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         oldWidget.chatClient != widget.chatClient) {
       _usage = null;
       _refreshStatus();
-      _bindChatSession();
     }
     if (oldWidget.path != widget.path || oldWidget.rowsLoader != widget.rowsLoader) {
       _startWatch();
+    }
+    if (oldWidget.path != widget.path ||
+        oldWidget.agentName != widget.agentName ||
+        oldWidget.rowsLoader != widget.rowsLoader ||
+        oldWidget.chatClient != widget.chatClient) {
+      _bindChatSession();
     }
   }
 
@@ -1099,13 +1133,16 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (!mounted) {
       return;
     }
-    _drainThreadSessionMessages();
+    final changed = _drainThreadSessionMessages();
+    if (!changed && mounted) {
+      setState(() {});
+    }
   }
 
-  void _drainThreadSessionMessages({bool notify = true, bool scroll = true}) {
+  bool _drainThreadSessionMessages({bool notify = true, bool scroll = true}) {
     final session = _threadSession;
     if (session == null) {
-      return;
+      return false;
     }
     final messages = session.messages;
     var changed = false;
@@ -1128,6 +1165,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         _controller.scrollThreadToBottom(animated: false);
       }
     }
+    return changed;
   }
 
   bool _shouldBufferAgentPayload(Map<String, dynamic> payload) {
@@ -2309,6 +2347,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   Future<void> _send(String value, List<FileAttachment> attachments) async {
+    if (_threadSession?.isLoading == true) {
+      throw StateError('Thread is loading.');
+    }
     final threadPath = widget.path;
     final isSteer = _status.mode == 'steerable' && _status.turnId != null;
     final messageId = const Uuid().v4();
@@ -2638,7 +2679,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return imagesInThread;
   }
 
-  Widget _buildInput(BuildContext context, ChatThreadSnapshot snapshot, List<PendingAgentMessage> pendingMessages) {
+  Widget _buildInput(BuildContext context, ChatThreadSnapshot snapshot, List<PendingAgentMessage> pendingMessages, {bool loading = false}) {
     PendingAgentMessage? waitingForOnlineMessage;
     for (final pending in pendingMessages) {
       if (pending.awaitingOnline) {
@@ -2646,16 +2687,20 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         break;
       }
     }
+    final sendEnabled = !loading && waitingForOnlineMessage == null;
+    final sendDisabledReason = loading
+        ? 'Thread is loading.'
+        : waitingForOnlineMessage == null
+        ? null
+        : 'Waiting for ${_displayAgentName(widget.agentName ?? "agent")} to come online.';
     final toolArea = resolveChatThreadToolArea(widget.toolsBuilder == null ? null : widget.toolsBuilder!(context, _controller, snapshot));
     return AnimatedBuilder(
       animation: _modelController,
       builder: (context, _) => ChatThreadInput(
         key: _composerInputKey,
         focusTrigger: _controller,
-        sendEnabled: waitingForOnlineMessage == null,
-        sendDisabledReason: waitingForOnlineMessage == null
-            ? null
-            : 'Waiting for ${_displayAgentName(widget.agentName ?? "agent")} to come online.',
+        sendEnabled: sendEnabled,
+        sendDisabledReason: sendDisabledReason,
         onCancelSend: null,
         onInterrupt: _canInterruptActiveTurn() ? _cancelTurn : null,
         sendPendingText: waitingForOnlineMessage == null
@@ -3377,13 +3422,14 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     List<PendingAgentMessage> pendingMessages, {
     bool loading = false,
   }) {
-    final showStatus = shouldShowChatThreadStatus(_status);
+    final showStatus = !loading && shouldShowChatThreadStatus(_status);
     final feedImages = _collectThreadImages(messages);
-    const loadingContent = CircularProgressIndicator();
+    final children = loading
+        ? const <Widget>[_DatasetThreadLoadingRow()]
+        : _buildMessageWidgets(context, messages, pendingMessages, feedImages: feedImages);
     final threadView = ChatThreadViewportBody(
       scrollController: _controller.threadScrollController,
       bottomAlign: true,
-      centerContent: loading ? loadingContent : null,
       bottomSpacer: showStatus ? 20 : 0,
       overlays: [
         if (showStatus)
@@ -3408,9 +3454,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ),
           ),
       ],
-      children: loading && pendingMessages.isEmpty
-          ? const <Widget>[]
-          : _buildMessageWidgets(context, messages, pendingMessages, feedImages: feedImages),
+      children: children,
     );
 
     return OverlayPortal(
@@ -3439,11 +3483,11 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return ListenableBuilder(
       listenable: _controller,
       builder: (context, _) {
-        final loading = !_ready;
-        final messages = loading ? const <_DatasetThreadMessage>[] : _messages();
-        final debugRows = loading ? const <DatasetChatDebugRow>[] : _debugRows();
+        final loading = _threadSession?.isLoading ?? false;
+        final messages = _messages();
+        final debugRows = _debugRows();
         _notifyDebugRowsChanged(debugRows);
-        final pendingMessages = loading ? _pendingAgentMessagesForThread() : _combinedPendingMessages(messages);
+        final pendingMessages = loading ? const <PendingAgentMessage>[] : _combinedPendingMessages(messages);
         final snapshot = _snapshot(messages, pendingMessages);
         return FileDropArea(
           onFileDrop: widget.onFileDrop ?? _attachInlineFile,
@@ -3457,7 +3501,11 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     ?_buildQueuedPendingMessages(context, messages, pendingMessages),
-                    _buildComposerWithUsageFooter(context, input: _buildInput(context, snapshot, pendingMessages), usage: snapshot.usage),
+                    _buildComposerWithUsageFooter(
+                      context,
+                      input: _buildInput(context, snapshot, pendingMessages, loading: loading),
+                      usage: snapshot.usage,
+                    ),
                   ],
                 ),
               ),
@@ -3621,6 +3669,18 @@ class _DatasetThreadDetailGroupFeedItem extends _DatasetThreadFeedItem {
   final String collapsedText;
   final String authorName;
   final DateTime createdAt;
+}
+
+class _DatasetThreadLoadingRow extends StatelessWidget {
+  const _DatasetThreadLoadingRow();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.symmetric(vertical: 16),
+      child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
+    );
+  }
 }
 
 class _DatasetDetailLine extends StatelessWidget {

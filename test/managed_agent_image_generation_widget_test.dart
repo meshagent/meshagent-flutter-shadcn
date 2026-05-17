@@ -12,9 +12,10 @@ import 'package:meshagent_flutter_shadcn/chat/new_chat_thread.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 class _FakeManagedAgentChatClient extends agent_sessions.BaseChatClient {
-  _FakeManagedAgentChatClient({this.participantName});
+  _FakeManagedAgentChatClient({this.participantName, this.autoCompleteThreadLoad = true});
 
   final String? participantName;
+  final bool autoCompleteThreadLoad;
   final List<agent_sessions.AgentMessage> sentMessages = <agent_sessions.AgentMessage>[];
   int _threadCounter = 0;
 
@@ -41,6 +42,12 @@ class _FakeManagedAgentChatClient extends agent_sessions.BaseChatClient {
             sourceMessageId: message.messageId,
             messageId: 'thread-started-${message.messageId}',
           ),
+        );
+      });
+    } else if (autoCompleteThreadLoad && message is agent_sessions.OpenThread && message.load != false) {
+      scheduleMicrotask(() {
+        handleAgentMessage(
+          agent_sessions.ThreadLoaded(threadId: message.threadId, sourceMessageId: message.messageId, sinceTurn: message.sinceTurn),
         );
       });
     }
@@ -108,6 +115,120 @@ class _ManagedAgentThreadHarnessState extends State<_ManagedAgentThreadHarness> 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   GoogleFonts.config.allowRuntimeFetching = false;
+
+  testWidgets('managed agent thread shows a loading indicator until replay completes', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const ui.Size(1200, 1000);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final chatClient = _FakeManagedAgentChatClient(autoCompleteThreadLoad: false);
+    final debugRows = <List<DatasetChatDebugRow>>[];
+    addTearDown(chatClient.stop);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 900,
+            height: 820,
+            child: DatasetChatThread(
+              chatClient: chatClient,
+              path: 'thread-loading',
+              agentName: 'image-gen',
+              inputPlaceholder: const Text('Message agent'),
+              onDebugRowsChanged: debugRows.add,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+    final openThread = chatClient.sentMessages.whereType<agent_sessions.OpenThread>().single;
+    chatClient.emit(agent_sessions.ThreadLoaded(threadId: 'thread-loading', sourceMessageId: openThread.messageId));
+    await tester.pump();
+
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets('managed agent thread suppresses replayed pending state and sends while loading', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const ui.Size(1200, 1000);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final chatClient = _FakeManagedAgentChatClient(autoCompleteThreadLoad: false);
+    addTearDown(chatClient.stop);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 900,
+            height: 820,
+            child: DatasetChatThread(
+              chatClient: chatClient,
+              path: 'thread-loading',
+              agentName: 'image-gen',
+              inputPlaceholder: const Text('Message agent'),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+    chatClient.emit(
+      agent_sessions.TurnStart(
+        threadId: 'thread-loading',
+        messageId: 'replayed-input-1',
+        senderName: 'jesse.ezell',
+        content: agent_sessions.agentInputContent(text: 'old replayed prompt', attachments: const []),
+      ),
+    );
+    chatClient.emit(
+      agent_sessions.TurnStarted(
+        threadId: 'thread-loading',
+        turnId: 'replayed-turn-1',
+        sourceMessageId: 'replayed-input-1',
+        messageId: 'replayed-turn-started-1',
+        senderName: 'image-gen',
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Pending messages:'), findsNothing);
+    expect(find.text('old replayed prompt'), findsNothing);
+    expect(find.byType(ChatThreadProcessingStatusRow), findsNothing);
+
+    final sentCountWhileLoading = chatClient.sentMessages.length;
+    final editableText = find.byType(EditableText);
+    expect(editableText, findsOneWidget);
+    await tester.tap(editableText);
+    await tester.enterText(editableText, 'do not send yet');
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+
+    expect(chatClient.sentMessages, hasLength(sentCountWhileLoading));
+
+    final openThread = chatClient.sentMessages.whereType<agent_sessions.OpenThread>().single;
+    chatClient.emit(agent_sessions.ThreadLoaded(threadId: 'thread-loading', sourceMessageId: openThread.messageId));
+    await tester.pump();
+
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 2));
+  });
 
   testWidgets('managed agent widget renders non-dataset image generation completion and clears status', (tester) async {
     tester.view.devicePixelRatio = 1;

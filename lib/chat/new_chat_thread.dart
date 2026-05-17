@@ -1141,6 +1141,15 @@ class _NewChatThreadState extends State<NewChatThread> {
             ),
           );
 
-    return _buildComposerDropArea(child: content);
+    return _buildComposerDropArea(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.hasBoundedHeight && constraints.maxHeight < 72) {
+            return const SizedBox.shrink();
+          }
+          return content;
+        },
+      ),
+    );
   }
 }
