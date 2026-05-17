@@ -12,6 +12,9 @@ import 'package:meshagent_flutter_shadcn/chat/new_chat_thread.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 class _FakeManagedAgentChatClient extends agent_sessions.BaseChatClient {
+  _FakeManagedAgentChatClient({this.participantName});
+
+  final String? participantName;
   final List<agent_sessions.AgentMessage> sentMessages = <agent_sessions.AgentMessage>[];
   int _threadCounter = 0;
 
@@ -22,6 +25,9 @@ class _FakeManagedAgentChatClient extends agent_sessions.BaseChatClient {
 
   @override
   Future<void> stop() async {}
+
+  @override
+  String? localParticipantName() => participantName;
 
   @override
   Future<void> sendAgentMessage(agent_sessions.AgentMessage message, {Uint8List? attachment, bool ignoreOffline = false}) async {
@@ -204,6 +210,109 @@ void main() {
     expect(finalDebugRows.map((row) => row.type), contains(agent_sessions.agentImageGenerationCompletedType));
     expect(finalDebugRows.map((row) => row.type), isNot(contains('message')));
     expect(find.byKey(const Key('rendered-generated-image')), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets('managed agent widget treats local websocket participant messages as mine', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const ui.Size(1200, 1000);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final chatClient = _FakeManagedAgentChatClient(participantName: 'jesse.ezell@timu.com');
+    final debugRows = <List<DatasetChatDebugRow>>[];
+    addTearDown(chatClient.stop);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 900,
+            height: 820,
+            child: _ManagedAgentThreadHarness(chatClient: chatClient, debugRows: debugRows),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final editableText = find.byType(EditableText);
+    expect(editableText, findsOneWidget);
+    await tester.tap(editableText);
+    await tester.enterText(editableText, 'hello from me');
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await tester.pump();
+
+    final started = chatClient.sentMessages.whereType<agent_sessions.StartThread>().single;
+    expect(started.senderName, 'jesse.ezell@timu.com');
+    expect(
+      find.byWidgetPredicate((widget) => widget is ChatThreadMessageView && widget.text == 'hello from me' && widget.mine),
+      findsOneWidget,
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets('managed agent inline file attachments render filename and open inline preview', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const ui.Size(1200, 1000);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final chatClient = _FakeManagedAgentChatClient(participantName: 'jesse.ezell');
+    final debugRows = <List<DatasetChatDebugRow>>[];
+    addTearDown(chatClient.stop);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 900,
+            height: 820,
+            child: _ManagedAgentThreadHarness(chatClient: chatClient, debugRows: debugRows),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final editableText = find.byType(EditableText);
+    await tester.tap(editableText);
+    await tester.enterText(editableText, 'hello');
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await tester.pump();
+
+    final threadId = chatClient.sessions.single.threadPath;
+    chatClient.emit(
+      agent_sessions.TurnStart(
+        threadId: threadId,
+        messageId: 'file-message-1',
+        senderName: 'jesse.ezell',
+        content: agent_sessions.agentInputContent(
+          text: "what's in this file",
+          attachments: const <agent_sessions.AgentFileContent>[
+            agent_sessions.AgentFileContent(url: 'data:application/pdf;base64,JVBERi0xLjQKJcfsj6IK', name: 'timu domain.pdf'),
+          ],
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Inline attachment (application/pdf)'), findsNothing);
+    expect(find.text('timu domain.pdf'), findsOneWidget);
+
+    await tester.tap(find.text('timu domain.pdf'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.text('timu domain.pdf'), findsAtLeastNWidgets(2));
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 2));

@@ -158,6 +158,14 @@ class _NewChatThreadState extends State<NewChatThread> {
     widget.onThreadResolved?.call(path, displayName);
   }
 
+  String? _localSenderName() {
+    final roomName = widget.room?.localParticipant?.getAttribute("name");
+    if (roomName is String && roomName.trim().isNotEmpty) {
+      return roomName.trim();
+    }
+    return widget.chatClient?.localParticipantName();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -426,7 +434,7 @@ class _NewChatThreadState extends State<NewChatThread> {
     required RemoteParticipant? agent,
     required String messageId,
     required String text,
-    required List<String> attachments,
+    required List<AgentFileContent> attachments,
     required String? senderName,
   }) async {
     final chatClient = widget.chatClient;
@@ -434,6 +442,7 @@ class _NewChatThreadState extends State<NewChatThread> {
       final activeModel = _modelController.activeModel;
       final activeVoice = _modelController.activeVoice;
       final result = await chatClient.startThread(
+        messageId: messageId,
         message: text,
         attachments: attachments,
         provider: activeModel?.provider,
@@ -510,8 +519,9 @@ class _NewChatThreadState extends State<NewChatThread> {
       final activeModel = _modelController.activeModel;
       final activeVoice = _modelController.activeVoice;
       final result = await chatClient.startThread(
+        messageId: messageId,
         message: "",
-        attachments: const [],
+        attachments: const <AgentFileContent>[],
         name: "Audio message",
         provider: activeModel?.provider,
         model: activeModel?.model,
@@ -598,7 +608,7 @@ class _NewChatThreadState extends State<NewChatThread> {
     _realtimeAudioThreadCompleter = completer;
     try {
       final agent = _usesInjectedChatClient ? null : _agent ?? await _waitForAgentOnline();
-      final senderName = widget.room?.localParticipant?.getAttribute("name");
+      final senderName = _localSenderName();
       final path = await _sendRealtimeAudioThreadStartMessage(
         agent: agent,
         messageId: const Uuid().v4(),
@@ -781,7 +791,14 @@ class _NewChatThreadState extends State<NewChatThread> {
   Future<void> _startNewThread() async {
     final prompt = _controller.text.trim();
     final attachments = _controller.attachmentUploads;
-    final attachmentPaths = [for (final attachment in attachments) attachment.path];
+    final agentAttachments = attachments
+        .map(
+          (attachment) => AgentFileContent(
+            url: attachment.path,
+            name: attachment.displayName?.trim().isNotEmpty == true ? attachment.displayName!.trim() : null,
+          ),
+        )
+        .toList(growable: false);
     final pendingMessageId = const Uuid().v4();
     final pendingCreatedAt = DateTime.now();
     final hasPendingUploads = attachments.any((attachment) => attachment.status != UploadStatus.completed);
@@ -794,13 +811,13 @@ class _NewChatThreadState extends State<NewChatThread> {
 
     final operationId = ++_newThreadOperationId;
     final waitingForAgent = !_usesInjectedChatClient && _agent == null;
-    final senderName = widget.room?.localParticipant?.getAttribute("name");
+    final senderName = _localSenderName();
     final pendingFirstMessage = PendingAgentMessage(
       messageId: pendingMessageId,
       messageType: agentTurnStartType,
       threadPath: "",
       text: prompt,
-      attachments: attachmentPaths,
+      attachments: agentAttachments,
       senderName: senderName is String && senderName.trim().isNotEmpty ? senderName.trim() : null,
       createdAt: pendingCreatedAt,
       matchByContentOnly: true,
@@ -834,7 +851,7 @@ class _NewChatThreadState extends State<NewChatThread> {
         agent: readyAgent,
         messageId: pendingFirstMessage.messageId,
         text: prompt,
-        attachments: attachmentPaths,
+        attachments: agentAttachments,
         senderName: pendingFirstMessage.senderName,
       );
       final messageId = pendingFirstMessage.messageId;

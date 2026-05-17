@@ -73,6 +73,7 @@ import 'package:meshagent_flutter_shadcn/src/web_context_menu_manager/enable_web
 import 'package:meshagent_flutter_shadcn/chat/thread_attachment_share.dart';
 import 'package:meshagent_flutter_shadcn/chat/tool_call_status_accumulator.dart';
 import 'package:mime/mime.dart';
+import 'package:pdfrx/pdfrx.dart';
 import 'package:re_highlight/styles/monokai-sublime.dart';
 import 'package:record/record.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
@@ -147,9 +148,12 @@ String _defaultSuggestedFileNameFromPath(String path) {
     return "file";
   }
 
-  final dataUrlName = _dataUrlFileName(trimmed);
-  if (dataUrlName != null) {
-    return dataUrlName;
+  if (trimmed.startsWith("data:")) {
+    final commaIndex = trimmed.indexOf(",");
+    final header = commaIndex == -1 ? trimmed.substring(5) : trimmed.substring(5, commaIndex);
+    final mimeType = header.split(";").first.trim().toLowerCase();
+    final extension = extensionFromMime(mimeType);
+    return extension == null || extension.isEmpty ? "attachment" : "attachment.$extension";
   }
 
   final slash = trimmed.lastIndexOf("/");
@@ -158,37 +162,6 @@ String _defaultSuggestedFileNameFromPath(String path) {
   }
 
   return trimmed.substring(slash + 1);
-}
-
-String? _dataUrlFileName(String value) {
-  final trimmed = value.trim();
-  if (!trimmed.startsWith("data:")) {
-    return null;
-  }
-  final commaIndex = trimmed.indexOf(",");
-  final header = commaIndex == -1 ? trimmed.substring(5) : trimmed.substring(5, commaIndex);
-  for (final part in header.split(";")) {
-    final separator = part.indexOf("=");
-    if (separator == -1) {
-      continue;
-    }
-    final key = part.substring(0, separator).trim().toLowerCase();
-    if (key != "name" && key != "filename") {
-      continue;
-    }
-    final rawValue = part.substring(separator + 1).trim().replaceAll(RegExp(r'^"|"$'), "");
-    try {
-      final decoded = Uri.decodeComponent(rawValue).trim();
-      if (decoded.isNotEmpty) {
-        return decoded;
-      }
-    } catch (_) {
-      if (rawValue.isNotEmpty) {
-        return rawValue;
-      }
-    }
-  }
-  return null;
 }
 
 String _applySuggestedFileExtension(String rawPath, {required String suggestedFileName}) {
@@ -573,7 +546,10 @@ bool _threadMessageContentMatchesPendingAgentMessage(MeshElement message, Pendin
     return false;
   }
 
-  final pendingAttachments = pending.attachments.map((path) => path.trim()).where((path) => path.isNotEmpty).toList(growable: false);
+  final pendingAttachments = pending.attachments
+      .map((attachment) => attachment.url.trim())
+      .where((path) => path.isNotEmpty)
+      .toList(growable: false);
   if (pendingAttachments.isEmpty) {
     return true;
   }
@@ -819,7 +795,7 @@ class PendingAgentMessage {
   final String messageType;
   final String threadPath;
   final String text;
-  final List<String> attachments;
+  final List<AgentFileContent> attachments;
   final String? senderName;
   final DateTime? createdAt;
   final bool matchByContentOnly;
@@ -829,9 +805,9 @@ class PendingAgentMessage {
 
   bool get hasVisibleContent => text.trim().isNotEmpty || attachments.isNotEmpty;
 
-  static ({String text, List<String> attachments}) _parseContent(Object? content) {
+  static ({String text, List<AgentFileContent> attachments}) _parseContent(Object? content) {
     final textParts = <String>[];
-    final attachments = <String>[];
+    final attachments = <AgentFileContent>[];
     if (content is List) {
       for (final item in content) {
         if (item is! Map) {
@@ -846,7 +822,8 @@ class PendingAgentMessage {
         } else if (type == "file") {
           final url = item["url"];
           if (url is String && url.trim().isNotEmpty) {
-            attachments.add(url);
+            final name = item["name"];
+            attachments.add(AgentFileContent(url: url.trim(), name: name is String && name.trim().isNotEmpty ? name.trim() : null));
           }
         }
       }
@@ -854,7 +831,7 @@ class PendingAgentMessage {
     return (text: textParts.join("\n\n"), attachments: attachments);
   }
 
-  static ({String text, List<String> attachments}) _parseAgentContent(List<AgentInputContent> content) {
+  static ({String text, List<AgentFileContent> attachments}) _parseAgentContent(List<AgentInputContent> content) {
     return _parseContent(content.map((item) => item.toJson()).toList());
   }
 
@@ -1011,6 +988,8 @@ class _AgentThreadMessageStatus {
 }
 
 class AgentThreadMessageStatusStore {
+  static const Duration _maxRemoteStatusClockSkew = Duration(minutes: 2);
+
   final Set<String> _touchedThreadPaths = <String>{};
   final Map<String, _AgentThreadMessageStatus> _statusByThreadPath = <String, _AgentThreadMessageStatus>{};
   final Map<String, _AgentThreadMessageStatus> _connectionStatusByThreadPath = <String, _AgentThreadMessageStatus>{};
@@ -1108,9 +1087,7 @@ class AgentThreadMessageStatusStore {
     }
 
     var startedAt = status?.startedAt;
-    if (status?.text != null) {
-      startedAt ??= previous?.hasStatus == true ? previous?.startedAt : DateTime.now();
-    }
+    if (status?.text != null) startedAt ??= DateTime.now();
 
     return ChatThreadStatusState(
       text: status?.text,
@@ -1141,9 +1118,14 @@ class AgentThreadMessageStatusStore {
     final mode = rawMode is String && (rawMode.trim().toLowerCase() == "busy" || rawMode.trim().toLowerCase() == "steerable")
         ? rawMode.trim().toLowerCase()
         : null;
-    final startedAt = rawStartedAt is String && rawStartedAt.trim().isNotEmpty ? DateTime.tryParse(rawStartedAt.trim()) : null;
+    final parsedStartedAt = rawStartedAt is String && rawStartedAt.trim().isNotEmpty ? DateTime.tryParse(rawStartedAt.trim()) : null;
     final turnId = rawTurnId is String && rawTurnId.trim().isNotEmpty ? rawTurnId.trim() : null;
     final pendingItemId = rawPendingItemId is String && rawPendingItemId.trim().isNotEmpty ? rawPendingItemId.trim() : null;
+    final sameStatusOperation =
+        previous != null && previous.text == text && previous.turnId == turnId && previous.pendingItemId == pendingItemId;
+    final startedAt = text == null
+        ? null
+        : _statusStartedAt(parsedStartedAt: parsedStartedAt, previousStartedAt: sameStatusOperation ? previous.startedAt : null);
     final parsedTotalBytes = _positiveIntValue(rawTotalBytes);
     final linesAdded =
         _nonNegativeIntValue(rawLinesAdded) ?? (rawLinesAdded == null && previous?.text == text ? previous?.linesAdded : null);
@@ -1221,6 +1203,22 @@ class AgentThreadMessageStatusStore {
     }
     _connectionStatusByThreadPath[threadPath] = next;
     return true;
+  }
+
+  DateTime _statusStartedAt({required DateTime? parsedStartedAt, required DateTime? previousStartedAt}) {
+    if (previousStartedAt != null) {
+      return previousStartedAt;
+    }
+    final now = DateTime.now();
+    if (parsedStartedAt == null) {
+      return now;
+    }
+    final localStartedAt = parsedStartedAt.toLocal();
+    final skew = now.difference(localStartedAt).abs();
+    if (skew > _maxRemoteStatusClockSkew) {
+      return now;
+    }
+    return localStartedAt;
   }
 
   bool _applyToolCallArgumentsDelta(String threadPath, AgentToolCallArgumentsDelta message) {
@@ -1405,7 +1403,10 @@ class AgentThreadMessageStatusStore {
     if (existing != null &&
         existing.messageType == message.messageType &&
         existing.text == message.text &&
-        const DeepCollectionEquality().equals(existing.attachments, message.attachments) &&
+        const DeepCollectionEquality().equals(
+          existing.attachments.map((attachment) => attachment.toJson()).toList(growable: false),
+          message.attachments.map((attachment) => attachment.toJson()).toList(growable: false),
+        ) &&
         existing.senderName == message.senderName &&
         existing.awaitingAcceptance == message.awaitingAcceptance &&
         existing.awaitingApplication == message.awaitingApplication) {
@@ -1448,12 +1449,14 @@ class AgentThreadMessageStatusStore {
 
     if (turnId is String && turnId.trim().isNotEmpty) {
       final previous = _statusByThreadPath[threadPath];
-      if (previous?.turnId != turnId.trim()) {
+      final normalizedTurnId = turnId.trim();
+      if (previous?.turnId != normalizedTurnId) {
+        final startedAt = previous?.text != null && previous?.turnId != null ? DateTime.now() : previous?.startedAt;
         _statusByThreadPath[threadPath] = _AgentThreadMessageStatus(
           text: previous?.text,
-          startedAt: previous?.startedAt,
+          startedAt: startedAt,
           mode: previous?.mode,
-          turnId: turnId.trim(),
+          turnId: normalizedTurnId,
           pendingItemId: previous?.pendingItemId,
           totalBytes: previous?.totalBytes,
           linesAdded: previous?.linesAdded,
@@ -1476,12 +1479,14 @@ class AgentThreadMessageStatusStore {
 
     if (turnId is String && turnId.trim().isNotEmpty) {
       final previous = _statusByThreadPath[threadPath];
-      if (previous?.turnId != turnId.trim()) {
+      final normalizedTurnId = turnId.trim();
+      if (previous?.turnId != normalizedTurnId) {
+        final startedAt = previous?.text != null && previous?.turnId != null ? DateTime.now() : previous?.startedAt;
         _statusByThreadPath[threadPath] = _AgentThreadMessageStatus(
           text: previous?.text,
-          startedAt: previous?.startedAt,
+          startedAt: startedAt,
           mode: previous?.mode,
-          turnId: turnId.trim(),
+          turnId: normalizedTurnId,
           pendingItemId: previous?.pendingItemId,
           totalBytes: previous?.totalBytes,
           linesAdded: previous?.linesAdded,
@@ -1570,7 +1575,7 @@ ChatThreadStatusState resolveChatThreadStatusFromStore({
 
   if (nextStatus != null) {
     nextMode ??= "busy";
-    nextStartedAt ??= previous?.hasStatus == true ? previous?.startedAt : DateTime.now();
+    nextStartedAt ??= DateTime.now();
   }
 
   return ChatThreadStatusState(
@@ -1642,7 +1647,8 @@ class ChatThreadStatusIndicator extends StatelessWidget {
 }
 
 class FileAttachment extends ChangeNotifier {
-  FileAttachment({required this.path, this.mimeType, UploadStatus initialStatus = UploadStatus.initial}) : _status = initialStatus;
+  FileAttachment({required this.path, this.mimeType, this.displayName, UploadStatus initialStatus = UploadStatus.initial})
+    : _status = initialStatus;
 
   UploadStatus _status;
 
@@ -1658,7 +1664,15 @@ class FileAttachment extends ChangeNotifier {
 
   String path;
   final String? mimeType;
-  String get filename => path.split("/").last;
+  final String? displayName;
+  String get filename {
+    final explicitName = displayName?.trim();
+    if (explicitName != null && explicitName.isNotEmpty) {
+      return explicitName;
+    }
+
+    return _defaultSuggestedFileNameFromPath(path);
+  }
 }
 
 class MeshagentFileUpload extends FileAttachment {
@@ -2251,8 +2265,8 @@ class ChatThreadController extends ChangeNotifier {
     return uploader;
   }
 
-  FileAttachment attachFile(String path, {String? mimeType}) {
-    final attachment = FileAttachment(path: path, mimeType: mimeType, initialStatus: UploadStatus.completed);
+  FileAttachment attachFile(String path, {String? mimeType, String? displayName}) {
+    final attachment = FileAttachment(path: path, mimeType: mimeType, displayName: displayName, initialStatus: UploadStatus.completed);
     attachment.addListener(notifyListeners);
     _attachmentUploads.add(attachment);
     notifyListeners();
@@ -2433,7 +2447,7 @@ class ChatThreadController extends ChangeNotifier {
             messageType: messageType == "steer" ? agentTurnSteerType : agentTurnStartType,
             threadPath: path,
             text: message.text,
-            attachments: List<String>.from(message.attachments),
+            attachments: [for (final attachment in message.attachments) AgentFileContent(url: attachment)],
             senderName: senderName is String && senderName.trim().isNotEmpty ? senderName.trim() : null,
             createdAt: DateTime.now(),
             matchByContentOnly: false,
@@ -2837,9 +2851,8 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
   }
 
   void _attachInlineData({required String name, required String mimeType, required Uint8List data}) {
-    final encodedName = Uri.encodeComponent(name);
     final encodedData = base64Encode(data);
-    widget.controller.attachFile("data:$mimeType;name=$encodedName;base64,$encodedData", mimeType: mimeType);
+    widget.controller.attachFile("data:$mimeType;base64,$encodedData", mimeType: mimeType, displayName: name);
   }
 
   Future<String> _resolveImportedPath(String requestedPath) async {
@@ -6195,12 +6208,7 @@ class ChatThreadMessageView extends StatelessWidget {
         for (var i = 0; i < attachmentWidgets.length; i++) ...[
           if (hasText || i > 0) const SizedBox(height: chatBubbleSiblingSpacing),
           Padding(
-            padding: const EdgeInsets.only(
-              left: attachmentInset,
-              right: attachmentInset,
-              top: _chatBubbleContentTopPadding,
-              bottom: _chatBubbleContentBottomPadding,
-            ),
+            padding: const EdgeInsets.only(left: attachmentInset, right: attachmentInset),
             child: Align(alignment: mine ? Alignment.centerRight : Alignment.centerLeft, child: attachmentWidgets[i]),
           ),
         ],
@@ -6244,24 +6252,131 @@ class PendingChatThreadMessage extends StatelessWidget {
           createdAt: createdAt,
           shouldShowHeader: shouldShowAuthorNames,
           mobileStorageSaveSurfacePresenter: mobileStorageSaveSurfacePresenter,
-          attachmentWidgets: [for (final attachment in message.attachments) _buildAttachmentPreview(attachment)],
+          attachmentWidgets: [for (final attachment in message.attachments) _buildAttachmentPreview(context, attachment)],
         ),
       ),
     );
   }
 
-  Widget _buildAttachmentPreview(String attachment) {
-    final trimmed = attachment.trim();
+  Widget _buildAttachmentPreview(BuildContext context, AgentFileContent attachment) {
+    final trimmed = attachment.url.trim();
     final isInlineImage = trimmed.startsWith("data:image/");
+    final displayName = attachment.name?.trim().isNotEmpty == true ? attachment.name!.trim() : _defaultSuggestedFileNameFromPath(trimmed);
+    final canOpenInline = trimmed.startsWith("data:");
+    final preview = isInlineImage
+        ? ChatThreadImageAttachment(
+            room: room,
+            imageId: null,
+            imageUri: trimmed,
+            onOpenFullscreen: canOpenInline ? () => unawaited(_showPendingAttachmentPreview(context, attachment)) : null,
+          )
+        : FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: displayName);
+    final child = canOpenInline && !isInlineImage
+        ? MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(onTap: () => unawaited(_showPendingAttachmentPreview(context, attachment)), child: preview),
+          )
+        : preview;
     return Align(
       alignment: Alignment.centerRight,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 312.5),
-        child: isInlineImage
-            ? ChatThreadImageAttachment(room: room, imageId: null, imageUri: trimmed)
-            : FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: _defaultSuggestedFileNameFromPath(attachment)),
+      child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 312.5), child: child),
+    );
+  }
+
+  Future<void> _showPendingAttachmentPreview(BuildContext context, AgentFileContent attachment) {
+    return showDialog<void>(
+      context: context,
+      useSafeArea: false,
+      builder: (context) => _PendingAgentAttachmentViewer(attachment: attachment),
+    );
+  }
+}
+
+class _PendingAgentAttachmentViewer extends StatelessWidget {
+  const _PendingAgentAttachmentViewer({required this.attachment});
+
+  final AgentFileContent attachment;
+
+  @override
+  Widget build(BuildContext context) {
+    final displayName = attachment.name?.trim().isNotEmpty == true
+        ? attachment.name!.trim()
+        : _defaultSuggestedFileNameFromPath(attachment.url);
+    final decoded = _decodePendingDataUrl(attachment.url);
+    final colorScheme = ShadTheme.of(context).colorScheme;
+    return Dialog.fullscreen(
+      backgroundColor: colorScheme.background,
+      child: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      displayName,
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  ShadButton.ghost(onPressed: () => Navigator.of(context).pop(), child: const Icon(LucideIcons.x)),
+                ],
+              ),
+            ),
+            Expanded(
+              child: decoded == null
+                  ? Center(
+                      child: FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: displayName),
+                    )
+                  : _PendingAgentAttachmentPreview(mimeType: decoded.mimeType, data: decoded.data, displayName: displayName),
+            ),
+          ],
+        ),
       ),
     );
+  }
+}
+
+class _PendingAgentAttachmentPreview extends StatelessWidget {
+  const _PendingAgentAttachmentPreview({required this.mimeType, required this.data, required this.displayName});
+
+  final String mimeType;
+  final Uint8List data;
+  final String displayName;
+
+  @override
+  Widget build(BuildContext context) {
+    if (mimeType.startsWith('image/')) {
+      return InteractiveViewer(child: Center(child: Image.memory(data)));
+    }
+    if (mimeType == 'application/pdf') {
+      return PdfViewer.data(data, sourceName: displayName);
+    }
+    if (mimeType.startsWith('text/') || mimeType == 'application/json' || mimeType == 'application/yaml') {
+      return SingleChildScrollView(padding: const EdgeInsets.all(24), child: SelectableText(utf8.decode(data, allowMalformed: true)));
+    }
+    return Center(
+      child: FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: displayName),
+    );
+  }
+}
+
+({String mimeType, Uint8List data})? _decodePendingDataUrl(String url) {
+  final match = RegExp(r'^data:([^;,]+)?(;base64)?,(.*)$', dotAll: true).firstMatch(url.trim());
+  if (match == null) {
+    return null;
+  }
+  final mimeType = match.group(1)?.trim();
+  final body = match.group(3);
+  if (body == null) {
+    return null;
+  }
+  try {
+    final data = match.group(2) == ';base64' ? base64Decode(body) : Uint8List.fromList(utf8.encode(Uri.decodeComponent(body)));
+    return (mimeType: mimeType == null || mimeType.isEmpty ? 'application/octet-stream' : mimeType, data: Uint8List.fromList(data));
+  } catch (_) {
+    return null;
   }
 }
 

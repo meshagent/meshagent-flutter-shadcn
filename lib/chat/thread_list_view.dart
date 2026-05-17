@@ -12,6 +12,7 @@ class ChatThreadListView extends StatefulWidget {
   const ChatThreadListView({
     super.key,
     required this.room,
+    this.chatClient,
     required this.threadListPath,
     required this.selectedThreadPath,
     required this.onSelectedThreadPathChanged,
@@ -22,7 +23,8 @@ class ChatThreadListView extends StatefulWidget {
     this.newThreadResetVersion = 0,
   });
 
-  final RoomClient room;
+  final RoomClient? room;
+  final BaseChatClient? chatClient;
   final String threadListPath;
   final String? agentName;
   final String? selectedThreadPath;
@@ -227,8 +229,12 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
   }
 
   RemoteParticipant? _agentParticipant() {
+    final room = widget.room;
+    if (room == null) {
+      return null;
+    }
     final normalizedAgentName = widget.agentName?.trim();
-    for (final participant in widget.room.messaging.remoteParticipants) {
+    for (final participant in room.messaging.remoteParticipants) {
       if (normalizedAgentName != null && normalizedAgentName.isNotEmpty && participant.getAttribute("name") != normalizedAgentName) {
         continue;
       }
@@ -240,11 +246,20 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
   }
 
   Future<void> _sendThreadControlMessage(AgentMessage message) async {
+    final chatClient = widget.chatClient;
+    if (chatClient != null) {
+      await chatClient.sendAgentMessage(message);
+      return;
+    }
+    final room = widget.room;
+    if (room == null) {
+      throw StateError("Unable to send thread message without a room or agent chat client.");
+    }
     final agent = _agentParticipant();
     if (agent == null) {
       throw StateError("Unable to find an agent that supports thread messages.");
     }
-    await widget.room.messaging.sendMessage(to: agent, type: agentRoomMessageType, message: message.toJson());
+    await room.messaging.sendMessage(to: agent, type: agentRoomMessageType, message: message.toJson());
   }
 
   void _onStoreChanged() {
@@ -272,10 +287,21 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
   }
 
   _ChatThreadListStore _createStore(String path) {
-    if (path.startsWith("dataset://")) {
-      return _DatasetChatThreadListStore(room: widget.room, path: path, onChanged: _onStoreChanged);
+    if (path.startsWith("agent://")) {
+      final chatClient = widget.chatClient;
+      if (chatClient == null) {
+        throw StateError("Agent thread lists require an agent chat client.");
+      }
+      return _AgentChatThreadListStore(chatClient: chatClient, onChanged: _onStoreChanged);
     }
-    return _MeshDocumentChatThreadListStore(room: widget.room, path: path, onChanged: _onStoreChanged);
+    final room = widget.room;
+    if (room == null) {
+      throw StateError("Room thread lists require a room client.");
+    }
+    if (path.startsWith("dataset://")) {
+      return _DatasetChatThreadListStore(room: room, path: path, onChanged: _onStoreChanged);
+    }
+    return _MeshDocumentChatThreadListStore(room: room, path: path, onChanged: _onStoreChanged);
   }
 
   Future<void> _rebindStore() async {
@@ -336,7 +362,7 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
   @override
   void didUpdateWidget(covariant ChatThreadListView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.room != widget.room || oldWidget.threadListPath != widget.threadListPath) {
+    if (oldWidget.room != widget.room || oldWidget.chatClient != widget.chatClient || oldWidget.threadListPath != widget.threadListPath) {
       _optimisticNames.clear();
       _optimisticDeletedPaths.clear();
       unawaited(_rebindStore());
@@ -534,6 +560,29 @@ class _DatasetChatThreadListStore implements _ChatThreadListStore {
     : storage = DatasetThreadStorage(room: room, path: path);
 
   final DatasetThreadStorage storage;
+  final VoidCallback onChanged;
+
+  @override
+  Future<void> open() async {
+    storage.addListener(onChanged);
+    await storage.open();
+  }
+
+  @override
+  Future<void> close() async {
+    storage.removeListener(onChanged);
+    await storage.close();
+  }
+
+  @override
+  List<ThreadListEntry> entries() => storage.entries();
+}
+
+class _AgentChatThreadListStore implements _ChatThreadListStore {
+  _AgentChatThreadListStore({required BaseChatClient chatClient, required this.onChanged})
+    : storage = AgentThreadStorageRepository(chatClient: chatClient);
+
+  final AgentThreadStorageRepository storage;
   final VoidCallback onChanged;
 
   @override

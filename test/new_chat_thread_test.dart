@@ -79,6 +79,24 @@ void main() {
     expect(controller.attachmentUploads, isEmpty);
   });
 
+  test('inline data attachments keep the original file name in pending uploads', () {
+    final controller = ChatThreadController(room: null);
+    addTearDown(controller.dispose);
+
+    controller.attachFile('data:text/plain;base64,aGVsbG8=', mimeType: 'text/plain', displayName: 'readme.md');
+
+    expect(controller.attachmentUploads.single.filename, 'readme.md');
+  });
+
+  test('inline data attachments without display names use a generated pending upload file name', () {
+    final controller = ChatThreadController(room: null);
+    addTearDown(controller.dispose);
+
+    controller.attachFile('data:text/plain;base64,aGVsbG8=', mimeType: 'text/plain');
+
+    expect(controller.attachmentUploads.single.filename, 'attachment.txt');
+  });
+
   testWidgets('wraps the new thread composer in a file drop area', (tester) async {
     final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     addTearDown(room.dispose);

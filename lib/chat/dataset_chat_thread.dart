@@ -65,6 +65,7 @@ import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_flutter_shadcn/chat_bubble_markdown_config.dart';
 import 'package:meshagent_flutter_shadcn/file_preview/file_preview.dart';
 import 'package:mime/mime.dart';
+import 'package:pdfrx/pdfrx.dart';
 import 'package:re_highlight/styles/monokai-sublime.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:uuid/uuid.dart';
@@ -483,6 +484,7 @@ class DatasetChatThread extends StatefulWidget {
     this.rowsLoader,
     this.onFileDrop,
     this.localParticipant,
+    this.localParticipantName,
     this.generatedImageAttachmentRenderer,
     this.imageGalleryBuilder,
     this.secretRequestHandler,
@@ -510,6 +512,7 @@ class DatasetChatThread extends StatefulWidget {
   final DatasetChatRowsLoader? rowsLoader;
   final DatasetChatFileDropHandler? onFileDrop;
   final Participant? localParticipant;
+  final String? localParticipantName;
   final DatasetChatGeneratedImageAttachmentRenderer? generatedImageAttachmentRenderer;
   final DatasetChatImageGalleryBuilder? imageGalleryBuilder;
   final DatasetChatSecretRequestHandler? secretRequestHandler;
@@ -1070,10 +1073,16 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     }
 
     currentSession?.removeListener(_onThreadSessionChanged);
-    _threadSession = chatClient.openThread(widget.path);
+    final nextSession = chatClient.openThread(widget.path);
+    _threadSession = nextSession;
     _threadSessionMessageCursor = 0;
-    _threadSession!.addListener(_onThreadSessionChanged);
-    _drainThreadSessionMessages(notify: false, scroll: false);
+    nextSession.addListener(_onThreadSessionChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !identical(_threadSession, nextSession)) {
+        return;
+      }
+      _drainThreadSessionMessages(notify: true, scroll: false);
+    });
   }
 
   void _closeChatSession() {
@@ -1670,7 +1679,11 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (pending == null) {
       return false;
     }
-    final attachments = pending.attachments.map(_normalizeAgentAttachmentUrl).whereType<String>().toList(growable: false);
+    final attachments = [
+      for (final attachment in pending.attachments)
+        if (_normalizeAgentAttachmentUrl(attachment.url) case final normalizedUrl?)
+          {'url': normalizedUrl, if (attachment.name?.trim().isNotEmpty == true) 'name': attachment.name!.trim()},
+    ];
     return _upsertAgentRow(
       itemId: pending.messageId,
       turnId: null,
@@ -2238,7 +2251,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         messageType: agentTurnSteerType,
         threadPath: widget.path,
         text: extracted.text,
-        attachments: extracted.attachments,
+        attachments: [for (final attachment in extracted.attachments) AgentFileContent(url: attachment.url, name: attachment.name)],
         senderName: data['sender_name']?.toString(),
         createdAt: _rowTimestamp(row),
         awaitingAcceptance: true,
@@ -2299,16 +2312,23 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     final threadPath = widget.path;
     final isSteer = _status.mode == 'steerable' && _status.turnId != null;
     final messageId = const Uuid().v4();
-    final attachmentPaths = attachments.map((attachment) => attachment.path).toList(growable: false);
-    final senderName = widget.localParticipant?.getAttribute('name');
+    final agentAttachments = attachments
+        .map(
+          (attachment) => AgentFileContent(
+            url: attachment.path,
+            name: attachment.displayName?.trim().isNotEmpty == true ? attachment.displayName!.trim() : null,
+          ),
+        )
+        .toList(growable: false);
+    final senderName = _localParticipantName();
     _controller.markPendingAgentMessage(
       PendingAgentMessage(
         messageId: messageId,
         messageType: isSteer ? agentTurnSteerType : agentTurnStartType,
         threadPath: threadPath,
         text: value,
-        attachments: attachmentPaths,
-        senderName: senderName is String && senderName.trim().isNotEmpty ? senderName.trim() : null,
+        attachments: agentAttachments,
+        senderName: senderName,
         createdAt: DateTime.now(),
         awaitingAcceptance: true,
       ),
@@ -2324,13 +2344,13 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       await session.sendText(
         messageId: messageId,
         text: value,
-        attachments: attachmentPaths,
+        attachments: agentAttachments,
         steer: isSteer,
         turnId: _status.turnId,
         provider: activeModel?.provider,
         model: activeModel?.model,
         outputModalities: isSteer ? null : [_modelController.activeModality],
-        senderName: senderName is String && senderName.trim().isNotEmpty ? senderName.trim() : null,
+        senderName: senderName,
       );
       _controller.outboundStatus.markDelivered(messageId);
       _controller.clear();
@@ -2344,21 +2364,54 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     }
   }
 
-  Widget _buildAttachmentWidget(BuildContext context, String attachment, {required bool mine}) {
-    final previewPath = _previewPath(attachment);
+  Widget _buildAttachmentWidget(BuildContext context, _DatasetThreadAttachment attachment, {required bool mine}) {
+    final previewPath = _previewPath(attachment.url);
     final attachmentRenderer = widget.attachmentRenderer;
+    final canOpen = widget.openFile != null || _isDataUrl(previewPath);
     if (attachmentRenderer != null) {
       return GestureDetector(
-        onTap: widget.openFile == null ? null : () => widget.openFile!(previewPath),
+        onTap: canOpen ? () => unawaited(_openAttachment(context, attachment)) : null,
         child: attachmentRenderer.call(context, previewPath),
       );
     }
-    return Align(
-      alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 312.5),
-        child: FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: _inlineAttachmentDisplayName(previewPath)),
-      ),
+    final isInlineImage = previewPath.startsWith('data:image/');
+    final card = ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 312.5),
+      child: isInlineImage
+          ? ChatThreadImageAttachment(
+              room: null,
+              imageId: null,
+              imageUri: previewPath,
+              onOpenFullscreen: canOpen ? () => unawaited(_openAttachment(context, attachment)) : null,
+            )
+          : FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: attachment.displayName),
+    );
+    if (!canOpen) {
+      return card;
+    }
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(onTap: () => unawaited(_openAttachment(context, attachment)), child: card),
+    );
+  }
+
+  Future<void> _openAttachment(BuildContext context, _DatasetThreadAttachment attachment) async {
+    final previewPath = _previewPath(attachment.url);
+    if (_isDataUrl(previewPath)) {
+      await _showInlineAttachmentViewer(context, attachment.copyWith(url: previewPath));
+      return;
+    }
+    final openFile = widget.openFile;
+    if (openFile != null) {
+      await openFile(previewPath);
+    }
+  }
+
+  Future<void> _showInlineAttachmentViewer(BuildContext context, _DatasetThreadAttachment attachment) {
+    return showDialog<void>(
+      context: context,
+      useSafeArea: false,
+      builder: (context) => _InlineAttachmentViewer(attachment: attachment),
     );
   }
 
@@ -2370,9 +2423,27 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     final data = bytes.takeBytes();
     final filename = name.trim().isEmpty ? 'attachment' : name.trim();
     final mimeType = _guessInlineAttachmentMimeType(filename, headerBytes: data);
-    final encodedName = Uri.encodeComponent(filename);
-    final dataUrl = 'data:$mimeType;name=$encodedName;base64,${base64Encode(data)}';
-    _controller.attachFile(dataUrl, mimeType: mimeType);
+    final dataUrl = 'data:$mimeType;base64,${base64Encode(data)}';
+    _controller.attachFile(dataUrl, mimeType: mimeType, displayName: filename);
+  }
+
+  String? _localParticipantName() {
+    final explicit = widget.localParticipantName?.trim();
+    if (explicit != null && explicit.isNotEmpty) {
+      return explicit;
+    }
+    final participantName = widget.localParticipant?.getAttribute('name');
+    if (participantName is String) {
+      final trimmed = participantName.trim();
+      if (trimmed.isNotEmpty) {
+        return trimmed;
+      }
+    }
+    final clientName = widget.chatClient?.localParticipantName()?.trim();
+    if (clientName != null && clientName.isNotEmpty) {
+      return clientName;
+    }
+    return null;
   }
 
   ChatThreadSnapshot _snapshot(List<_DatasetThreadMessage> messages, List<PendingAgentMessage> pendingMessages) {
@@ -2681,13 +2752,14 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       );
     }
 
-    final localParticipantName = widget.localParticipant?.getAttribute('name');
+    final localParticipantName = _localParticipantName();
     final isAgentMessage = message.role == 'agent';
     final rawAuthorName = message.authorName;
-    final authorName = rawAuthorName == null || rawAuthorName.trim().isEmpty ? null : rawAuthorName;
+    final authorName = rawAuthorName == null || rawAuthorName.trim().isEmpty ? null : rawAuthorName.trim();
     final mine =
         !isAgentMessage &&
-        (rawAuthorName == localParticipantName || ((rawAuthorName == null || rawAuthorName.trim().isEmpty) && message.role == 'user'));
+        ((authorName != null && localParticipantName != null && authorName == localParticipantName) ||
+            (authorName == null && message.role == 'user'));
     final imageAttachmentId = message.id;
     final imageInitialIndex = feedImages.indexWhere((entry) => entry.attachmentElementId == imageAttachmentId);
 
@@ -3418,7 +3490,7 @@ class _DatasetThreadMessage {
   final String kind;
   final String role;
   final String text;
-  final List<String> attachments;
+  final List<_DatasetThreadAttachment> attachments;
   final DateTime createdAt;
   final DatasetThreadImage? image;
   final ToolCallEntryDisplay? toolCallEntry;
@@ -3427,6 +3499,93 @@ class _DatasetThreadMessage {
   final String? authorName;
   final String? phase;
   final String? turnId;
+}
+
+class _DatasetThreadAttachment {
+  const _DatasetThreadAttachment({required this.url, this.name});
+
+  final String url;
+  final String? name;
+
+  String get displayName {
+    final explicit = name?.trim();
+    if (explicit != null && explicit.isNotEmpty) {
+      return explicit;
+    }
+    return _inlineAttachmentDisplayName(_previewPath(url));
+  }
+
+  _DatasetThreadAttachment copyWith({String? url, String? name}) {
+    return _DatasetThreadAttachment(url: url ?? this.url, name: name ?? this.name);
+  }
+
+  Map<String, Object?> toJson() {
+    return <String, Object?>{'url': url, if (name != null && name!.trim().isNotEmpty) 'name': name!.trim()};
+  }
+}
+
+class _InlineAttachmentViewer extends StatelessWidget {
+  const _InlineAttachmentViewer({required this.attachment});
+
+  final _DatasetThreadAttachment attachment;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final decoded = _decodeDataUrl(attachment.url);
+    return Material(
+      color: theme.colorScheme.background,
+      child: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 10, 12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(attachment.displayName, style: theme.textTheme.h4, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ),
+                  ShadIconButton.ghost(icon: const Icon(LucideIcons.x), onPressed: () => Navigator.of(context).maybePop()),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: decoded == null
+                  ? Center(child: Text('Unable to preview attachment', style: theme.textTheme.muted))
+                  : _InlineAttachmentPreview(data: decoded.data, mimeType: decoded.mimeType, displayName: attachment.displayName),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _InlineAttachmentPreview extends StatelessWidget {
+  const _InlineAttachmentPreview({required this.data, required this.mimeType, required this.displayName});
+
+  final Uint8List data;
+  final String mimeType;
+  final String displayName;
+
+  @override
+  Widget build(BuildContext context) {
+    if (mimeType.startsWith('image/')) {
+      return InteractiveViewer(
+        child: Center(child: Image.memory(data, fit: BoxFit.contain)),
+      );
+    }
+    if (mimeType == 'application/pdf') {
+      return PdfViewer.data(data, sourceName: displayName);
+    }
+    if (mimeType.startsWith('text/') || mimeType == 'application/json' || mimeType == 'application/yaml') {
+      return SingleChildScrollView(padding: const EdgeInsets.all(24), child: SelectableText(utf8.decode(data, allowMalformed: true)));
+    }
+    return Center(
+      child: FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: displayName),
+    );
+  }
 }
 
 class _DatasetDiffPreviewBlock {
@@ -3725,8 +3884,8 @@ bool _datasetThreadMessageReconcilesLiveMessage({
   }
 
   if (liveMessage.attachments.isNotEmpty) {
-    final datasetAttachments = datasetMessage.attachments.map(_comparableThreadAttachmentPath).toSet();
-    return liveMessage.attachments.map(_comparableThreadAttachmentPath).every(datasetAttachments.contains);
+    final datasetAttachments = datasetMessage.attachments.map((attachment) => _comparableThreadAttachmentPath(attachment.url)).toSet();
+    return liveMessage.attachments.map((attachment) => _comparableThreadAttachmentPath(attachment.url)).every(datasetAttachments.contains);
   }
 
   final liveText = liveMessage.text.trim();
@@ -3946,7 +4105,7 @@ _DatasetThreadMessage? _messageForRow(
   switch (kind) {
     case 'message':
       final text = data['text']?.toString() ?? '';
-      final attachments = _stringList(data['attachments']);
+      final attachments = _datasetThreadAttachments(data['attachments']);
       if (text.trim().isEmpty && attachments.isEmpty) {
         return null;
       }
@@ -3962,7 +4121,7 @@ _DatasetThreadMessage? _messageForRow(
         turnId: turnId,
       );
     case 'file':
-      final urls = _stringList(data['urls']);
+      final urls = _stringList(data['urls']).map((url) => _DatasetThreadAttachment(url: url)).toList(growable: false);
       if (urls.isEmpty) {
         return null;
       }
@@ -4373,6 +4532,7 @@ _DatasetThreadMessage? _messageForAgentPayload(
             );
     case agentFileContentDeltaType:
       final url = payload['url']?.toString();
+      final name = payload['name']?.toString().trim();
       return url == null || url.trim().isEmpty
           ? null
           : _DatasetThreadMessage(
@@ -4381,7 +4541,7 @@ _DatasetThreadMessage? _messageForAgentPayload(
               role: 'agent',
               text: '',
               authorName: payload['sender_name']?.toString(),
-              attachments: [url.trim()],
+              attachments: [_DatasetThreadAttachment(url: url.trim(), name: name == null || name.isEmpty ? null : name)],
               createdAt: createdAt,
               turnId: turnId,
             );
@@ -4589,9 +4749,36 @@ List<String> _agentToolCallLogLines(Object? lines) {
   return output;
 }
 
-({String text, List<String> attachments}) _agentInputContentParts(List<Object?> content) {
+List<_DatasetThreadAttachment> _datasetThreadAttachments(Object? value) {
+  if (value is! List) {
+    return const [];
+  }
+  final attachments = <_DatasetThreadAttachment>[];
+  for (final item in value) {
+    if (item is String) {
+      final url = item.trim();
+      if (url.isNotEmpty) {
+        attachments.add(_DatasetThreadAttachment(url: url));
+      }
+      continue;
+    }
+    final map = item is Map<String, dynamic> ? item : (item is Map ? Map<String, dynamic>.from(item) : null);
+    if (map == null) {
+      continue;
+    }
+    final url = map['url']?.toString().trim();
+    if (url == null || url.isEmpty) {
+      continue;
+    }
+    final name = map['name']?.toString().trim();
+    attachments.add(_DatasetThreadAttachment(url: url, name: name == null || name.isEmpty ? null : name));
+  }
+  return attachments;
+}
+
+({String text, List<_DatasetThreadAttachment> attachments}) _agentInputContentParts(List<Object?> content) {
   final textParts = <String>[];
-  final attachments = <String>[];
+  final attachments = <_DatasetThreadAttachment>[];
   for (final item in content) {
     final contentItem = item is Map<String, dynamic> ? item : (item is Map ? Map<String, dynamic>.from(item) : null);
     if (contentItem == null) {
@@ -4606,7 +4793,8 @@ List<String> _agentToolCallLogLines(Object? lines) {
     } else if (contentType == 'file') {
       final url = contentItem['url']?.toString();
       if (url != null && url.trim().isNotEmpty) {
-        attachments.add(url.trim());
+        final name = contentItem['name']?.toString().trim();
+        attachments.add(_DatasetThreadAttachment(url: url.trim(), name: name == null || name.isEmpty ? null : name));
       }
     }
   }
@@ -4646,7 +4834,7 @@ bool _datasetThreadMessageContentMatchesPendingAgentMessage(_DatasetThreadMessag
   }
 
   final pendingAttachments = pending.attachments
-      .map(_comparableThreadAttachmentPath)
+      .map((attachment) => _comparableThreadAttachmentPath(attachment.url))
       .where((path) => path.isNotEmpty)
       .toList(growable: false);
   if (pendingAttachments.isEmpty) {
@@ -4654,7 +4842,7 @@ bool _datasetThreadMessageContentMatchesPendingAgentMessage(_DatasetThreadMessag
   }
 
   final messageAttachments = message.attachments
-      .map(_comparableThreadAttachmentPath)
+      .map((attachment) => _comparableThreadAttachmentPath(attachment.url))
       .where((path) => path.isNotEmpty)
       .toList(growable: false);
   return const ListEquality<String>().equals(messageAttachments, pendingAttachments);
@@ -4853,6 +5041,32 @@ String _previewPath(String path) {
   return path.startsWith(prefix) ? path.substring(prefix.length) : path;
 }
 
+bool _isDataUrl(String path) {
+  return path.trimLeft().startsWith('data:');
+}
+
+({String mimeType, Uint8List data})? _decodeDataUrl(String value) {
+  final trimmed = value.trim();
+  if (!trimmed.startsWith('data:')) {
+    return null;
+  }
+  final commaIndex = trimmed.indexOf(',');
+  if (commaIndex == -1) {
+    return null;
+  }
+  final header = trimmed.substring(5, commaIndex);
+  final body = trimmed.substring(commaIndex + 1);
+  final headerParts = header.split(';');
+  final mimeType = headerParts.firstOrNull?.trim();
+  final isBase64 = headerParts.any((part) => part.trim().toLowerCase() == 'base64');
+  try {
+    final data = isBase64 ? base64Decode(body) : Uint8List.fromList(utf8.encode(Uri.decodeComponent(body)));
+    return (mimeType: mimeType == null || mimeType.isEmpty ? 'application/octet-stream' : mimeType, data: Uint8List.fromList(data));
+  } on FormatException {
+    return null;
+  }
+}
+
 String _guessInlineAttachmentMimeType(String filename, {List<int>? headerBytes}) {
   return lookupMimeType(filename, headerBytes: headerBytes) ?? 'application/octet-stream';
 }
@@ -4865,20 +5079,6 @@ String _inlineAttachmentDisplayName(String path) {
   }
   final commaIndex = trimmed.indexOf(',');
   final header = commaIndex == -1 ? trimmed.substring(5) : trimmed.substring(5, commaIndex);
-  for (final part in header.split(';')) {
-    final separator = part.indexOf('=');
-    if (separator == -1) {
-      continue;
-    }
-    final key = part.substring(0, separator).trim().toLowerCase();
-    if (key != 'name' && key != 'filename') {
-      continue;
-    }
-    final value = Uri.decodeComponent(part.substring(separator + 1).trim().replaceAll(RegExp(r'^"|"$'), ''));
-    if (value.isNotEmpty) {
-      return value;
-    }
-  }
   final mimeType = header.split(';').firstOrNull?.trim();
   return mimeType == null || mimeType.isEmpty ? 'Inline attachment' : 'Inline attachment ($mimeType)';
 }

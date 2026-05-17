@@ -217,7 +217,10 @@ Future<String> _sendStartThreadMessage({
     final senderName = room.localParticipant?.getAttribute("name");
     final payload = StartThread(
       messageId: messageId,
-      content: agentInputContent(text: prompt, attachments: attachmentPaths),
+      content: agentInputContent(
+        text: prompt,
+        attachments: [for (final attachmentPath in attachmentPaths) AgentFileContent(url: attachmentPath)],
+      ),
       senderName: senderName is String && senderName.trim().isNotEmpty ? senderName.trim() : null,
     );
     await room.messaging.sendMessage(to: agent, type: agentRoomMessageType, message: payload.toJson());
