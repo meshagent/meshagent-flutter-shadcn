@@ -273,9 +273,18 @@ MarkdownConfig buildChatBubbleMarkdownConfig(
       ),
       ListConfig(
         marker: (isOrdered, depth, index) {
-          return Padding(
-            padding: const EdgeInsets.only(right: 5),
-            child: Text("${index + 1}.", textAlign: TextAlign.right),
+          if (!isOrdered) {
+            return null;
+          }
+
+          return Align(
+            alignment: Alignment.topRight,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 5),
+              child: SelectionContainer.disabled(
+                child: Text("${index + 1}.", style: paragraphStyle, textAlign: TextAlign.right),
+              ),
+            ),
           );
         },
       ),
