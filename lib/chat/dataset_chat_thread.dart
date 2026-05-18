@@ -21,6 +21,7 @@ import 'package:meshagent_agents/meshagent_agents.dart'
         agentAudioTranscriptionStartedType,
         agentConnectionStatusType,
         agentContextCompactedType,
+        agentClientToolCallRequestedType,
         agentFileContentDeltaType,
         agentFileContentEndedType,
         agentFileContentStartedType,
@@ -37,6 +38,7 @@ import 'package:meshagent_agents/meshagent_agents.dart'
         agentReasoningContentStartedType,
         agentRealtimeAudioCommitType,
         agentSecretRequestedType,
+        AgentClientToolCallRequested,
         AgentSecretRequested,
         AgentSecretResponse,
         agentTextContentDeltaType,
@@ -1202,6 +1204,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (payload['type'] == agentSecretRequestedType) {
       unawaited(_handleSecretRequestPayload(payload));
     }
+    if (payload['type'] == agentClientToolCallRequestedType) {
+      unawaited(_handleClientToolCallRequestPayload(payload));
+    }
     final changed = _applyAgentMessagePayload(payload, attachment: attachment);
     try {
       _controller.handleAgentMessage(agent_sessions.AgentMessage.fromJson(payload));
@@ -1248,6 +1253,23 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       }
     }
     await chatClient.sendAgentMessage(response);
+  }
+
+  Future<void> _handleClientToolCallRequestPayload(Map<String, dynamic> payload) async {
+    final session = _threadSession;
+    if (session == null) {
+      return;
+    }
+    AgentClientToolCallRequested request;
+    try {
+      request = AgentClientToolCallRequested.fromJson(payload);
+    } catch (_) {
+      return;
+    }
+
+    final response = await _controller.executeClientToolCall(request);
+
+    await session.respondToClientToolCall(turnId: request.turnId, requestId: request.requestId, response: response);
   }
 
   bool _handleUsagePayload(Map<String, dynamic> payload, {bool notify = true}) {
@@ -2382,6 +2404,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       if (session == null) {
         throw StateError('No thread session is open.');
       }
+      final clientToolkits = _controller.clientToolkitDescriptions;
       await session.sendText(
         messageId: messageId,
         text: value,
@@ -2392,6 +2415,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         model: activeModel?.model,
         outputModalities: isSteer ? null : [_modelController.activeModality],
         senderName: senderName,
+        clientToolkits: isSteer || clientToolkits.isEmpty ? null : clientToolkits,
       );
       _controller.outboundStatus.markDelivered(messageId);
       _controller.clear();
@@ -2693,32 +2717,36 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         : waitingForOnlineMessage == null
         ? null
         : 'Waiting for ${_displayAgentName(widget.agentName ?? "agent")} to come online.';
-    final toolArea = resolveChatThreadToolArea(widget.toolsBuilder == null ? null : widget.toolsBuilder!(context, _controller, snapshot));
     return AnimatedBuilder(
-      animation: _modelController,
-      builder: (context, _) => ChatThreadInput(
-        key: _composerInputKey,
-        focusTrigger: _controller,
-        sendEnabled: sendEnabled,
-        sendDisabledReason: sendDisabledReason,
-        onCancelSend: null,
-        onInterrupt: _canInterruptActiveTurn() ? _cancelTurn : null,
-        sendPendingText: waitingForOnlineMessage == null
-            ? null
-            : 'Waiting for ${_displayAgentName(widget.agentName ?? "agent")} to come online.',
-        placeholder: widget.inputPlaceholder,
-        leading: toolArea.leading,
-        footer: toolArea.footer,
-        audioInputEnabled: widget.chatClient != null && _modelController.supportsAudioInput,
-        automaticAudioTurnDetection: _modelController.activeTurnDetection == 'automatic',
-        onAudioChunk: _sendRealtimeAudioChunk,
-        room: null,
-        controller: _controller,
-        attachmentBuilder: widget.attachmentBuilder,
-        contextMenuBuilder: widget.inputContextMenuBuilder,
-        onPressedOutside: widget.inputOnPressedOutside,
-        onSend: _send,
-      ),
+      animation: Listenable.merge([_modelController, _controller]),
+      builder: (context, _) {
+        final toolArea = resolveChatThreadToolArea(
+          widget.toolsBuilder == null ? null : widget.toolsBuilder!(context, _controller, snapshot),
+        );
+        return ChatThreadInput(
+          key: _composerInputKey,
+          focusTrigger: _controller,
+          sendEnabled: sendEnabled,
+          sendDisabledReason: sendDisabledReason,
+          onCancelSend: null,
+          onInterrupt: _canInterruptActiveTurn() ? _cancelTurn : null,
+          sendPendingText: waitingForOnlineMessage == null
+              ? null
+              : 'Waiting for ${_displayAgentName(widget.agentName ?? "agent")} to come online.',
+          placeholder: widget.inputPlaceholder,
+          leading: toolArea.leading,
+          footer: toolArea.footer,
+          audioInputEnabled: widget.chatClient != null && _modelController.supportsAudioInput,
+          automaticAudioTurnDetection: _modelController.activeTurnDetection == 'automatic',
+          onAudioChunk: _sendRealtimeAudioChunk,
+          room: null,
+          controller: _controller,
+          attachmentBuilder: widget.attachmentBuilder,
+          contextMenuBuilder: widget.inputContextMenuBuilder,
+          onPressedOutside: widget.inputOnPressedOutside,
+          onSend: _send,
+        );
+      },
     );
   }
 

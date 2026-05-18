@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_agents/meshagent_agents.dart' as agent_sessions;
 import 'package:meshagent_flutter_shadcn/chat/chat.dart';
 import 'package:meshagent_flutter_shadcn/chat/dataset_chat_thread.dart';
@@ -56,6 +57,33 @@ class _FakeManagedAgentChatClient extends agent_sessions.BaseChatClient {
   void emit(agent_sessions.AgentMessage message) {
     handleAgentMessage(message);
   }
+}
+
+class _TestClientTool extends FunctionTool {
+  _TestClientTool() : super(name: 'ask_user', title: 'Ask User', description: 'Ask the user a question', inputSchema: _schema);
+
+  static const Map<String, dynamic> _schema = {
+    'type': 'object',
+    'additionalProperties': false,
+    'required': ['prompt'],
+    'properties': {
+      'prompt': {'type': 'string'},
+    },
+  };
+
+  final List<Map<String, dynamic>> calls = <Map<String, dynamic>>[];
+
+  @override
+  Future<Content> execute(ToolContext context, Map<String, dynamic> arguments) async {
+    calls.add(arguments);
+    return JsonContent(json: <String, dynamic>{'answer': 'test response'});
+  }
+}
+
+class _TestClientToolkit extends Toolkit {
+  _TestClientToolkit(this.tool) : super(name: 'test-client-tools', tools: [tool]);
+
+  final _TestClientTool tool;
 }
 
 class _ManagedAgentThreadHarness extends StatefulWidget {
@@ -374,6 +402,67 @@ void main() {
       find.byWidgetPredicate((widget) => widget is ChatThreadMessageView && widget.text == 'hello from me' && widget.mine),
       findsOneWidget,
     );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets('managed agent widget invokes registered client toolkit and sends response', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const ui.Size(1200, 1000);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final chatClient = _FakeManagedAgentChatClient(participantName: 'jesse.ezell');
+    final controller = ChatThreadController(room: null);
+    final tool = _TestClientTool();
+    addTearDown(chatClient.stop);
+    addTearDown(controller.dispose);
+
+    controller.addClientToolkit(_TestClientToolkit(tool));
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 900,
+            height: 820,
+            child: DatasetChatThread(
+              chatClient: chatClient,
+              path: 'thread-client-tools',
+              agentName: 'agent',
+              controller: controller,
+              inputPlaceholder: const Text('Message agent'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    chatClient.emit(
+      agent_sessions.AgentClientToolCallRequested(
+        threadId: 'thread-client-tools',
+        turnId: 'turn-client-tools',
+        requestId: 'request-client-tools',
+        toolkit: 'client',
+        tool: 'ask_user',
+        arguments: const <String, dynamic>{'prompt': 'What should I ask?'},
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(tool.calls, [
+      {'prompt': 'What should I ask?'},
+    ]);
+    final responses = chatClient.sentMessages.whereType<agent_sessions.AgentClientToolCallResponse>().toList(growable: false);
+    expect(responses, hasLength(1));
+    expect(responses.single.threadId, 'thread-client-tools');
+    expect(responses.single.turnId, 'turn-client-tools');
+    expect(responses.single.requestId, 'request-client-tools');
+    expect(responses.single.response, isA<JsonContent>());
+    expect((responses.single.response as JsonContent).json, {'answer': 'test response'});
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 2));

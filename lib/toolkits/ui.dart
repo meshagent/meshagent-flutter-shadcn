@@ -423,9 +423,8 @@ class GetLocalTime extends FunctionTool {
   Future<Content> execute(ToolContext context, Map<String, dynamic> arguments) async {
     final zone = await FlutterTimezone.getLocalTimezone();
     final now = DateTime.now();
-    return TextContent(
-      text: "${context.room.localParticipant!.getAttribute("name")}'s time info:\ntime: ${now.toIso8601String()}\nzone: ${zone.identifier}",
-    );
+    final callerName = context.caller?.getAttribute("name")?.toString() ?? "user";
+    return TextContent(text: "$callerName's time info:\ntime: ${now.toIso8601String()}\nzone: ${zone.identifier}");
   }
 }
 

@@ -437,6 +437,7 @@ class _NewChatThreadState extends State<NewChatThread> {
     required List<AgentFileContent> attachments,
     required String? senderName,
   }) async {
+    final clientToolkits = _controller.clientToolkitDescriptions;
     final chatClient = widget.chatClient;
     if (chatClient != null) {
       final activeModel = _modelController.activeModel;
@@ -451,6 +452,7 @@ class _NewChatThreadState extends State<NewChatThread> {
         voice: activeVoice != null && activeVoice.trim().isNotEmpty ? activeVoice.trim() : null,
         outputModalities: [_modelController.activeModality],
         senderName: senderName,
+        clientToolkits: clientToolkits.isEmpty ? null : clientToolkits,
       );
       _realtimeAudioConnection = RealtimeConnectionInfo.fromJson(result.realtimeConnection);
       return result.threadPath;
@@ -498,6 +500,7 @@ class _NewChatThreadState extends State<NewChatThread> {
         realtimeProtocol: _modelController.activeTurnDetection == "automatic" && _modelController.prefersWebrtcRealtime ? "webrtc" : null,
         voice: activeVoice != null && activeVoice.trim().isNotEmpty ? activeVoice.trim() : null,
         outputModalities: [_modelController.activeModality],
+        clientToolkits: clientToolkits.isEmpty ? null : clientToolkits,
         senderName: senderName != null && senderName.trim().isNotEmpty ? senderName.trim() : null,
       );
       await room.messaging.sendMessage(to: agent, type: agentRoomMessageType, message: payload.toJson());
@@ -1036,54 +1039,56 @@ class _NewChatThreadState extends State<NewChatThread> {
 
   Widget _buildNewThreadComposer(BuildContext context) {
     final snapshot = _buildSnapshot();
-    final toolsBuilder = widget.toolsBuilder;
-    final toolArea = resolveChatThreadToolArea(toolsBuilder == null ? null : toolsBuilder(context, _controller, snapshot));
     final headingStyle = ShadTheme.of(context).textTheme.h4;
     final input = AnimatedBuilder(
-      animation: _modelController,
-      builder: (context, _) => ChatThreadInput(
-        key: _composerInputKey,
-        focusTrigger: _controller,
-        room: widget.room,
-        controller: _controller,
-        sendEnabled: !_composerLocked,
-        sendDisabledReason: _waitingForAgent ? "Waiting for ${widget.agentName} to be ready." : "Wait for the message to be accepted.",
-        sendPendingText: _waitingForAgent ? "Waiting for ${widget.agentName} to be ready." : "Wait for the message to be accepted.",
-        onCancelSend: _composerLocked ? _cancelPendingNewThread : null,
-        readOnly: false,
-        clearOnSend: false,
-        placeholder: widget.inputPlaceholder,
-        leading: toolArea.leading,
-        footer: toolArea.footer,
-        audioInputEnabled: (widget.room != null || widget.chatClient != null) && _modelController.supportsAudioInput,
-        automaticAudioTurnDetection: _modelController.activeTurnDetection == "automatic",
-        onExternalAudioRecordingStart:
-            (widget.room != null || widget.chatClient != null) &&
-                _modelController.activeTurnDetection == "automatic" &&
-                _modelController.prefersWebrtcRealtime
-            ? _startWebrtcRealtimeAudioThread
-            : null,
-        onExternalAudioRecordingStop:
-            (widget.room != null || widget.chatClient != null) &&
-                _modelController.activeTurnDetection == "automatic" &&
-                _modelController.prefersWebrtcRealtime
-            ? _stopWebrtcRealtimeAudioThread
-            : null,
-        onAudioRecordingStart: (widget.room != null || widget.chatClient != null) && _modelController.activeTurnDetection == "automatic"
-            ? () => _ensureRealtimeAudioThread(resolveWhenStarted: true)
-            : null,
-        onAudioChunk: _sendRealtimeAudioChunk,
-        onSend: (value, attachments) async {
-          if (value.isEmpty && attachments.isEmpty) {
-            return;
-          }
-          if (!_creatingNewThread && !_waitingForAgent) {
-            await _startNewThread();
-          }
-        },
-        contextMenuBuilder: widget.inputContextMenuBuilder,
-        onPressedOutside: widget.inputOnPressedOutside,
-      ),
+      animation: Listenable.merge([_modelController, _controller]),
+      builder: (context, _) {
+        final toolsBuilder = widget.toolsBuilder;
+        final toolArea = resolveChatThreadToolArea(toolsBuilder == null ? null : toolsBuilder(context, _controller, snapshot));
+        return ChatThreadInput(
+          key: _composerInputKey,
+          focusTrigger: _controller,
+          room: widget.room,
+          controller: _controller,
+          sendEnabled: !_composerLocked,
+          sendDisabledReason: _waitingForAgent ? "Waiting for ${widget.agentName} to be ready." : "Wait for the message to be accepted.",
+          sendPendingText: _waitingForAgent ? "Waiting for ${widget.agentName} to be ready." : "Wait for the message to be accepted.",
+          onCancelSend: _composerLocked ? _cancelPendingNewThread : null,
+          readOnly: false,
+          clearOnSend: false,
+          placeholder: widget.inputPlaceholder,
+          leading: toolArea.leading,
+          footer: toolArea.footer,
+          audioInputEnabled: (widget.room != null || widget.chatClient != null) && _modelController.supportsAudioInput,
+          automaticAudioTurnDetection: _modelController.activeTurnDetection == "automatic",
+          onExternalAudioRecordingStart:
+              (widget.room != null || widget.chatClient != null) &&
+                  _modelController.activeTurnDetection == "automatic" &&
+                  _modelController.prefersWebrtcRealtime
+              ? _startWebrtcRealtimeAudioThread
+              : null,
+          onExternalAudioRecordingStop:
+              (widget.room != null || widget.chatClient != null) &&
+                  _modelController.activeTurnDetection == "automatic" &&
+                  _modelController.prefersWebrtcRealtime
+              ? _stopWebrtcRealtimeAudioThread
+              : null,
+          onAudioRecordingStart: (widget.room != null || widget.chatClient != null) && _modelController.activeTurnDetection == "automatic"
+              ? () => _ensureRealtimeAudioThread(resolveWhenStarted: true)
+              : null,
+          onAudioChunk: _sendRealtimeAudioChunk,
+          onSend: (value, attachments) async {
+            if (value.isEmpty && attachments.isEmpty) {
+              return;
+            }
+            if (!_creatingNewThread && !_waitingForAgent) {
+              await _startNewThread();
+            }
+          },
+          contextMenuBuilder: widget.inputContextMenuBuilder,
+          onPressedOutside: widget.inputOnPressedOutside,
+        );
+      },
     );
     final composer = _buildComposerWithUsageFooter(context, input);
 

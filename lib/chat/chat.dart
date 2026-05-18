@@ -17,6 +17,7 @@ import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_agents/meshagent_agents.dart'
     show
         AgentMessage,
+        AgentClientToolCallRequested,
         AgentConnectionStatus,
         AgentThreadMessage,
         AgentThreadStatus,
@@ -27,6 +28,7 @@ import 'package:meshagent_agents/meshagent_agents.dart'
         CapabilitiesRequest,
         CapabilitiesResponse,
         CloseThread,
+        ClientToolkitDescription,
         OpenThread,
         ToolChoice,
         ToolkitCapabilities,
@@ -38,7 +40,7 @@ import 'package:meshagent_agents/meshagent_agents.dart'
         TurnSteerAccepted,
         TurnSteerRejected,
         TurnSteered,
-        TurnToolkitConfig,
+        TurnMcpConfig,
         agentRoomMessageType,
         agentThreadClearType,
         agentThreadClearedType,
@@ -64,6 +66,7 @@ import 'package:meshagent_agents/meshagent_agents.dart'
         agentTurnSteerType,
         agentUsageUpdatedType;
 import 'package:meshagent_flutter_shadcn/chat_bubble_markdown_config.dart';
+import 'package:meshagent_flutter_shadcn/code_editor.dart';
 import 'package:meshagent_flutter_shadcn/code_language_resolver.dart';
 import 'package:meshagent_flutter_shadcn/markdown_viewer.dart';
 import 'package:meshagent_flutter_shadcn/storage/file_browser.dart';
@@ -74,6 +77,7 @@ import 'package:meshagent_flutter_shadcn/chat/thread_attachment_share.dart';
 import 'package:meshagent_flutter_shadcn/chat/tool_call_status_accumulator.dart';
 import 'package:mime/mime.dart';
 import 'package:pdfrx/pdfrx.dart';
+import 'package:re_highlight/languages/json.dart';
 import 'package:re_highlight/styles/monokai-sublime.dart';
 import 'package:record/record.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
@@ -753,16 +757,6 @@ List<AgentInputContent> _agentInputContentFromMessage(ChatMessage message) {
   }
 
   return content;
-}
-
-class AgentTurnToolkitConfig {
-  const AgentTurnToolkitConfig({this.clientOptions});
-
-  final Map<String, dynamic>? clientOptions;
-
-  Map<String, dynamic> toJson() {
-    return {if (clientOptions != null) "client_options": clientOptions};
-  }
 }
 
 class AgentToolChoice {
@@ -1756,6 +1750,7 @@ class ChatThreadController extends ChangeNotifier {
   final LinkedHashMap<String, _PendingSendWait> _pendingSendWaits = LinkedHashMap<String, _PendingSendWait>();
   final Set<String> _enabledToolkits = <String>{};
   final LinkedHashMap<String, Connector> _selectedMcpConnectors = LinkedHashMap<String, Connector>();
+  final LinkedHashMap<String, Toolkit> _clientToolkits = LinkedHashMap<String, Toolkit>();
 
   RoomClient _requireRoom(String operation) {
     final room = this.room;
@@ -1811,6 +1806,70 @@ class ChatThreadController extends ChangeNotifier {
     if (notify) {
       notifyListeners();
     }
+  }
+
+  List<Toolkit> get clientToolkits {
+    return List<Toolkit>.unmodifiable(_clientToolkits.values);
+  }
+
+  List<ClientToolkitDescription> get clientToolkitDescriptions {
+    final descriptions = <ClientToolkitDescription>[];
+    for (final toolkit in _clientToolkits.values) {
+      for (final tool in toolkit.tools) {
+        if (tool is! FunctionTool) {
+          continue;
+        }
+        final title = tool.title?.trim();
+        final description = tool.description?.trim();
+        descriptions.add(
+          ClientToolkitDescription(
+            name: tool.name,
+            title: title != null && title.isNotEmpty ? title : null,
+            description: description != null && description.isNotEmpty ? description : null,
+            inputSchema: Map<String, dynamic>.from(tool.inputSchema),
+          ),
+        );
+      }
+    }
+    return descriptions;
+  }
+
+  void addClientToolkit(Toolkit toolkit) {
+    final normalizedName = toolkit.name.trim();
+    if (normalizedName.isEmpty) {
+      throw ArgumentError.value(toolkit.name, 'toolkit.name', 'Client toolkit name is required.');
+    }
+    _clientToolkits[normalizedName] = toolkit;
+    notifyListeners();
+  }
+
+  void removeClientToolkit(String toolkitName) {
+    if (_clientToolkits.remove(toolkitName.trim()) != null) {
+      notifyListeners();
+    }
+  }
+
+  Future<Content> executeClientToolCall(AgentClientToolCallRequested request) async {
+    for (final toolkit in _clientToolkits.values) {
+      final hasTool = toolkit.tools.any((tool) => tool.name == request.tool);
+      if (!hasTool) {
+        continue;
+      }
+      try {
+        final output = await toolkit.execute(
+          const ToolContext(),
+          request.tool,
+          ToolContentInput(JsonContent(json: Map<String, dynamic>.from(request.arguments))),
+        );
+        if (output is ToolContentOutput) {
+          return output.content;
+        }
+        return ErrorContent(text: "Client toolkit '${request.tool}' returned a streaming response, which is not supported.");
+      } catch (error) {
+        return ErrorContent(text: "Client toolkit '${request.tool}' failed: $error");
+      }
+    }
+    return ErrorContent(text: "Client toolkit '${request.tool}' is not registered.");
   }
 
   void scrollThreadToBottom({bool animated = true}) {
@@ -2349,7 +2408,8 @@ class ChatThreadController extends ChangeNotifier {
     String messageType = "chat",
     bool useAgentMessages = false,
     String? turnId,
-    Map<String, AgentTurnToolkitConfig>? toolkits,
+    TurnMcpConfig? mcp,
+    List<ClientToolkitDescription>? clientToolkits,
     AgentToolChoice? toolChoice,
     bool store = false,
   }) async {
@@ -2368,9 +2428,8 @@ class ChatThreadController extends ChangeNotifier {
                 threadId: path,
                 messageId: message.id,
                 content: _agentInputContentFromMessage(message),
-                toolkits: toolkits != null && toolkits.isNotEmpty
-                    ? {for (final entry in toolkits.entries) entry.key: TurnToolkitConfig(clientOptions: entry.value.clientOptions)}
-                    : null,
+                mcp: mcp,
+                clientToolkits: clientToolkits != null && clientToolkits.isNotEmpty ? clientToolkits : null,
                 toolChoice: toolChoice == null ? null : ToolChoice(toolkitName: toolChoice.toolkitName, toolName: toolChoice.toolName),
               );
         await room.messaging.sendMessage(to: participant, type: agentRoomMessageType, message: payload.toJson());
@@ -2428,7 +2487,8 @@ class ChatThreadController extends ChangeNotifier {
     bool storeLocally = true,
     bool useAgentMessages = false,
     String? turnId,
-    Map<String, AgentTurnToolkitConfig>? toolkits,
+    TurnMcpConfig? mcp,
+    List<ClientToolkitDescription>? clientToolkits,
     AgentToolChoice? toolChoice,
     void Function(ChatMessage)? onMessageSent,
   }) async {
@@ -2494,7 +2554,8 @@ class ChatThreadController extends ChangeNotifier {
                 messageType: messageType,
                 useAgentMessages: useAgentMessages,
                 turnId: turnId,
-                toolkits: toolkits,
+                mcp: mcp,
+                clientToolkits: messageType == "steer" ? null : clientToolkits,
                 toolChoice: toolChoice,
                 store: shouldStoreRemotely,
               ),
@@ -2733,7 +2794,18 @@ class ChatThreadToolArea extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return leading ?? footer ?? const SizedBox.shrink();
+    final leading = this.leading;
+    final footer = this.footer;
+    if (leading == null && footer == null) {
+      return const SizedBox.shrink();
+    }
+    if (leading == null) {
+      return footer!;
+    }
+    if (footer == null) {
+      return leading;
+    }
+    return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [leading, footer]);
   }
 }
 
@@ -2750,6 +2822,120 @@ ChatThreadToolArea resolveChatThreadToolArea(Widget? tools) {
 typedef ChatThreadAttachmentMenuItemsBuilder =
     List<ShadContextMenuItem> Function(BuildContext context, ChatThreadController controller, ShadPopoverController popoverController);
 
+class ClientResponseDialogToolkit extends Toolkit {
+  ClientResponseDialogToolkit({
+    required BuildContext context,
+    required super.name,
+    super.title,
+    super.description,
+    required Map<String, dynamic> inputSchema,
+  }) : super(
+         tools: [ClientResponseDialogTool(context: context, name: name, title: title, description: description, inputSchema: inputSchema)],
+       );
+}
+
+class ClientResponseDialogTool extends FunctionTool {
+  ClientResponseDialogTool({required BuildContext context, required super.name, super.title, super.description, required super.inputSchema})
+    : navigator = Navigator.of(context, rootNavigator: true);
+
+  final NavigatorState navigator;
+
+  @override
+  Future<Content> execute(ToolContext context, Map<String, dynamic> arguments) async {
+    if (!navigator.mounted) {
+      return ErrorContent(text: "Client toolkit request could not be shown because the chat view is no longer mounted.");
+    }
+
+    final responseController = CodeLineEditingController.fromText(
+      const JsonEncoder.withIndent('  ').convert(<String, Object?>{"answer": ""}),
+    );
+    Object? responseError;
+    final resolvedTitle = title?.trim().isNotEmpty == true ? title!.trim() : name;
+    final resolvedDescription = description?.trim().isNotEmpty == true
+        ? description!.trim()
+        : "The agent requested a response from this client-side tool.";
+
+    try {
+      final response = await showShadDialog<Content>(
+        context: navigator.context,
+        builder: (context) => StatefulBuilder(
+          builder: (context, setDialogState) => ShadDialog(
+            title: Text(resolvedTitle),
+            description: Text(resolvedDescription),
+            actions: [
+              ShadButton.secondary(
+                onPressed: () => Navigator.of(context).pop(ErrorContent(text: "Client toolkit request was cancelled.")),
+                child: const Text("Cancel"),
+              ),
+              ShadButton(
+                onPressed: () {
+                  try {
+                    final parsed = jsonDecode(responseController.text);
+                    if (parsed is! Map) {
+                      throw const FormatException("Response must be a JSON object.");
+                    }
+                    Navigator.of(context).pop(JsonContent(json: parsed.map((key, value) => MapEntry(key.toString(), value))));
+                  } catch (error) {
+                    setDialogState(() => responseError = error);
+                  }
+                },
+                child: const Text("Send"),
+              ),
+            ],
+            child: SizedBox(
+              width: 680,
+              height: 420,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (arguments.isNotEmpty) ...[
+                    Text("Arguments", style: ShadTheme.of(context).textTheme.small),
+                    const SizedBox(height: 6),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(color: ShadTheme.of(context).colorScheme.muted, borderRadius: BorderRadius.circular(8)),
+                      child: Text(const JsonEncoder.withIndent('  ').convert(arguments)),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  Text("Response", style: ShadTheme.of(context).textTheme.small),
+                  const SizedBox(height: 6),
+                  Expanded(
+                    child: CodeEditor(
+                      style: CodeEditorStyle(
+                        fontSize: 14,
+                        fontFamily: "SourceCodePro",
+                        codeTheme: CodeHighlightTheme(
+                          languages: {'default': CodeHighlightThemeMode(mode: langJson)},
+                          theme: monokaiSublimeTheme,
+                        ),
+                      ),
+                      controller: responseController,
+                      onChanged: (_) {
+                        if (responseError != null) {
+                          setDialogState(() => responseError = null);
+                        }
+                      },
+                    ),
+                  ),
+                  if (responseError != null) ...[
+                    const SizedBox(height: 8),
+                    ShadAlert.destructive(description: Text("$responseError", maxLines: 3)),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      return response ?? ErrorContent(text: "Client toolkit request was cancelled.");
+    } finally {
+      responseController.dispose();
+    }
+  }
+}
+
 class ChatThreadAttachButton extends StatefulWidget {
   const ChatThreadAttachButton({
     required this.controller,
@@ -2760,6 +2946,7 @@ class ChatThreadAttachButton extends StatefulWidget {
     this.agentName,
     this.showMcpConnectors = false,
     this.menuItemsBuilder,
+    this.additionalMenuItemsBuilder,
     this.inlineAttachments = false,
     this.acceptedMimeTypes = const <String>[],
   });
@@ -2771,6 +2958,7 @@ class ChatThreadAttachButton extends StatefulWidget {
   final String? agentName;
   final bool showMcpConnectors;
   final ChatThreadAttachmentMenuItemsBuilder? menuItemsBuilder;
+  final ChatThreadAttachmentMenuItemsBuilder? additionalMenuItemsBuilder;
   final bool inlineAttachments;
   final List<String> acceptedMimeTypes;
 
@@ -3086,15 +3274,15 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
 
   Widget _buildAttachButton(BuildContext context) {
     final customItems = widget.menuItemsBuilder?.call(context, widget.controller, popoverController);
+    final additionalItems = widget.additionalMenuItemsBuilder?.call(context, widget.controller, popoverController);
     final canUseRoomAttachments = widget.controller.room != null;
     final canUseInlineAttachments = _canUseInlineAttachments;
-    final attachMenuItemCount =
-        customItems?.length ??
-        (canUseRoomAttachments
-            ? (kIsWeb ? 1 : 2) + 1
-            : canUseInlineAttachments
-            ? (_canUseInlinePhotoPicker ? 2 : 1)
-            : 0);
+    final defaultItemCount = canUseRoomAttachments
+        ? (kIsWeb ? 1 : 2) + 1
+        : canUseInlineAttachments
+        ? (_canUseInlinePhotoPicker ? 2 : 1)
+        : 0;
+    final attachMenuItemCount = (customItems?.length ?? defaultItemCount) + (additionalItems?.length ?? 0);
     final showMcpMenuItem = _canShowMcpConnectors;
     final attachMenuHeight = (attachMenuItemCount + (showMcpMenuItem ? 1 : 0)) * 40.0;
 
@@ -3128,6 +3316,7 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
                   child: const Text("Add from room..."),
                 ),
             ],
+            if (additionalItems != null) ...additionalItems,
             if (showMcpMenuItem)
               ShadContextMenuItem(
                 leading: const Icon(LucideIcons.plug),
@@ -3161,7 +3350,11 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
 
   @override
   Widget build(BuildContext context) {
-    final canShowAttachmentMenu = widget.menuItemsBuilder != null || widget.controller.room != null || _canUseInlineAttachments;
+    final canShowAttachmentMenu =
+        widget.menuItemsBuilder != null ||
+        widget.additionalMenuItemsBuilder != null ||
+        widget.controller.room != null ||
+        _canUseInlineAttachments;
     final showAttachFiles = widget.alwaysShowAttachFiles != false && canShowAttachmentMenu;
 
     if (!showAttachFiles && !_canShowMcpConnectors) {
@@ -5420,6 +5613,7 @@ class _ChatThreadState extends State<ChatThread> {
     _initialMessageSent = true;
     final normalizedAgentName = widget.agentName?.trim();
     final hasConfiguredAgent = normalizedAgentName != null && normalizedAgentName.isNotEmpty;
+    final clientToolkits = controller.clientToolkitDescriptions;
     final useAgentMessages = hasConfiguredAgent
         ? controller.getAgentParticipants(document, participantName: normalizedAgentName).isNotEmpty
         : controller.getAgentParticipants(document).isNotEmpty;
@@ -5430,6 +5624,7 @@ class _ChatThreadState extends State<ChatThread> {
       remoteStoreParticipantName: hasConfiguredAgent ? normalizedAgentName : null,
       storeLocally: _shouldStoreLocally(hasConfiguredAgent: hasConfiguredAgent, useAgentMessages: useAgentMessages),
       useAgentMessages: useAgentMessages,
+      clientToolkits: clientToolkits.isEmpty ? null : clientToolkits,
       onMessageSent: widget.onMessageSent,
     );
   }
@@ -5469,7 +5664,7 @@ class _ChatThreadState extends State<ChatThread> {
     );
   }
 
-  Future<AgentTurnToolkitConfig?> _buildMcpTurnToolkitConfig({required ChatThreadSnapshot state}) async {
+  Future<TurnMcpConfig?> _buildMcpTurnConfig({required ChatThreadSnapshot state}) async {
     if (!state.supportsMcp || !controller.isToolkitEnabled("mcp")) {
       return null;
     }
@@ -5478,7 +5673,7 @@ class _ChatThreadState extends State<ChatThread> {
     if (servers.isEmpty) {
       return null;
     }
-    return AgentTurnToolkitConfig(clientOptions: {"servers": servers});
+    return TurnMcpConfig(servers: servers);
   }
 
   Widget? _buildUsageFooter(BuildContext context, AgentUsageSnapshot? usage) {
@@ -5709,8 +5904,8 @@ class _ChatThreadState extends State<ChatThread> {
         final messageType = state.threadStatusMode == "steerable" && state.threadTurnId != null ? "steer" : "chat";
         final normalizedAgentName = widget.agentName?.trim();
         final hasConfiguredAgent = normalizedAgentName != null && normalizedAgentName.isNotEmpty;
-        final mcpToolkitConfig = await _buildMcpTurnToolkitConfig(state: state);
-        final turnToolkits = <String, AgentTurnToolkitConfig>{"mcp": ?mcpToolkitConfig};
+        final mcp = await _buildMcpTurnConfig(state: state);
+        final clientToolkits = controller.clientToolkitDescriptions;
         await controller.send(
           thread: document,
           path: widget.path,
@@ -5720,7 +5915,8 @@ class _ChatThreadState extends State<ChatThread> {
           storeLocally: _shouldStoreLocally(hasConfiguredAgent: hasConfiguredAgent, useAgentMessages: state.supportsAgentMessages),
           useAgentMessages: state.supportsAgentMessages,
           turnId: state.threadTurnId,
-          toolkits: turnToolkits.isEmpty ? null : turnToolkits,
+          mcp: mcp,
+          clientToolkits: messageType == "steer" || clientToolkits.isEmpty ? null : clientToolkits,
           onMessageSent: widget.onMessageSent,
         );
       },
