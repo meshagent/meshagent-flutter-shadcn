@@ -713,6 +713,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   agent_sessions.ChatThreadSession? _threadSession;
   final Map<String, Map<String, Object?>> _rowsByItemId = {};
   final Map<String, Map<String, Object?>> _agentRowsByItemId = {};
+  final Map<String, Map<String, Object?>> _agentDebugRowsByKey = {};
   final List<Map<String, dynamic>> _bufferedAgentPayloads = <Map<String, dynamic>>[];
   final TextStreamAccumulator _liveTextContent = TextStreamAccumulator();
   final TextStreamAccumulator _liveReasoningContent = TextStreamAccumulator();
@@ -826,6 +827,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     _statusStore.clearThread(widget.path);
     _rowsByItemId.clear();
     _agentRowsByItemId.clear();
+    _agentDebugRowsByKey.clear();
     _bufferedAgentPayloads.clear();
     _liveTextContent.clear();
     _liveReasoningContent.clear();
@@ -998,6 +1000,34 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     for (final liveItemId in liveItemIds) {
       _agentRowsByItemId.remove(liveItemId);
     }
+    _removeReconciledAgentDebugRowsForDatasetRow(datasetRow);
+  }
+
+  void _removeReconciledAgentDebugRowsForDatasetRow(Map<String, Object?> datasetRow) {
+    final datasetData = _rowData(datasetRow);
+    final datasetMessageId = datasetData?['message_id']?.toString().trim();
+    final datasetItemId = datasetRow['item_id']?.toString().trim();
+    final datasetType = datasetData?['type']?.toString().trim();
+    final keys = _agentDebugRowsByKey.entries
+        .where((entry) {
+          final liveData = _rowData(entry.value);
+          final liveMessageId = liveData?['message_id']?.toString().trim();
+          if (datasetMessageId != null && datasetMessageId.isNotEmpty && liveMessageId == datasetMessageId) {
+            return true;
+          }
+          final liveItemId = entry.value['item_id']?.toString().trim();
+          final liveType = liveData?['type']?.toString().trim();
+          return datasetItemId != null &&
+              datasetItemId.isNotEmpty &&
+              liveItemId == datasetItemId &&
+              datasetType != null &&
+              datasetType == liveType;
+        })
+        .map((entry) => entry.key)
+        .toList(growable: false);
+    for (final key in keys) {
+      _agentDebugRowsByKey.remove(key);
+    }
   }
 
   void _advanceNextAgentSequencePastDatasetRows() {
@@ -1053,9 +1083,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   int _maxVisibleDatasetSequence() {
     var maxSequence = -1;
     final rows = _rowsByItemId.values.toList(growable: false);
-    final turnInputPayloadsById = _turnInputPayloadsById(rows);
     for (final row in rows) {
-      final message = _messageForRow(row, turnInputPayloadsById: turnInputPayloadsById);
+      final message = _messageForRow(row);
       if (message == null || !_shouldRenderDatasetThreadMessage(message)) {
         continue;
       }
@@ -1195,10 +1224,17 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   void _handleAgentMessagePayload(Map<String, dynamic> payload, {Uint8List? attachment, bool notify = true, bool scroll = true}) {
+    final debugChanged = _recordRawAgentDebugPayload(payload);
     if (_handleUsagePayload(payload, notify: notify)) {
+      if (debugChanged && notify && mounted) {
+        setState(() {});
+      }
       return;
     }
     if (_handleModelPayload(payload)) {
+      if (debugChanged && notify && mounted) {
+        setState(() {});
+      }
       return;
     }
     if (payload['type'] == agentSecretRequestedType) {
@@ -1207,7 +1243,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (payload['type'] == agentClientToolCallRequestedType) {
       unawaited(_handleClientToolCallRequestPayload(payload));
     }
-    final changed = _applyAgentMessagePayload(payload, attachment: attachment);
+    final changed = _applyAgentMessagePayload(payload, attachment: attachment) || debugChanged;
     try {
       _controller.handleAgentMessage(agent_sessions.AgentMessage.fromJson(payload));
     } catch (_) {}
@@ -1217,6 +1253,38 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         _controller.scrollThreadToBottom(animated: false);
       }
     }
+  }
+
+  bool _recordRawAgentDebugPayload(Map<String, dynamic> payload) {
+    if (!_agentPayloadBelongsToThread(payload)) {
+      return false;
+    }
+    final explicitItemId = _payloadExplicitItemId(payload);
+    final messageId = payload['message_id']?.toString().trim();
+    final itemId = explicitItemId ?? (messageId != null && messageId.isNotEmpty ? messageId : const Uuid().v4());
+    final key = messageId != null && messageId.isNotEmpty
+        ? 'message:$messageId'
+        : [
+            'live',
+            itemId,
+            payload['type']?.toString() ?? '',
+            payload['turn_id']?.toString() ?? '',
+            _agentDebugRowsByKey.length.toString(),
+          ].join(':');
+    final existing = _agentDebugRowsByKey[key];
+    final row = <String, Object?>{
+      'turn_id': _payloadTurnId(payload),
+      'item_id': itemId,
+      'type': payload['type']?.toString(),
+      'sequence': existing?['sequence'] ?? _nextAgentSequence++,
+      'timestamp': _timestampFromPayload(payload) ?? existing?['timestamp'] ?? DateTime.now().toUtc(),
+      'data': Map<String, Object?>.from(payload),
+    };
+    if (existing != null && const DeepCollectionEquality().equals(existing, row)) {
+      return false;
+    }
+    _agentDebugRowsByKey[key] = row;
+    return true;
   }
 
   Future<void> _handleSecretRequestPayload(Map<String, dynamic> payload) async {
@@ -1830,8 +1898,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     }
 
     final liveMessage = _messageForRow(liveRow);
-    final turnInputPayloadsById = _turnInputPayloadsById([..._rowsByItemId.values, datasetRow]);
-    final datasetMessage = _messageForRow(datasetRow, turnInputPayloadsById: turnInputPayloadsById);
+    final datasetMessage = _messageForRow(datasetRow);
     if (liveMessage == null || datasetMessage == null) {
       return false;
     }
@@ -2044,9 +2111,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       mergedRowsByItemId[entry.key] = liveRow == null ? entry.value : _mergeDatasetAndLiveRow(datasetRow: entry.value, liveRow: liveRow);
     }
     final rows = mergedRowsByItemId.values.toList(growable: false)..sort(_compareDatasetThreadRows);
-    final turnInputPayloadsById = _turnInputPayloadsById(rows);
     final messagesById = <String, _DatasetThreadMessage>{};
-    for (final parsed in _messagesForRows(rows, turnInputPayloadsById: turnInputPayloadsById)) {
+    for (final parsed in _messagesForRows(rows)) {
       final row = parsed.row;
       final message = parsed.message;
       if (message != null && _shouldRenderDatasetThreadMessage(message)) {
@@ -2058,29 +2124,19 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return messagesById.values.toList(growable: false);
   }
 
-  List<Map<String, Object?>> _mergedDebugRows() {
-    final mergedRowsByItemId = <String, Map<String, Object?>>{};
-    mergedRowsByItemId.addAll(_agentRowsByItemId);
-    for (final entry in _rowsByItemId.entries) {
-      final liveRow = mergedRowsByItemId[entry.key];
-      mergedRowsByItemId[entry.key] = liveRow == null ? entry.value : _mergeDatasetAndLiveRow(datasetRow: entry.value, liveRow: liveRow);
-    }
-    return mergedRowsByItemId.values.toList(growable: false)..sort(_compareDatasetThreadRows);
-  }
-
   List<DatasetChatDebugRow> _debugRows() {
+    final rows = [..._rowsByItemId.values, ..._agentDebugRowsByKey.values]..sort(_compareDatasetThreadRows);
     return [
-      for (final row in _mergedDebugRows())
-        if (_shouldIncludeDebugRow(row))
-          DatasetChatDebugRow(
-            sequence: _intValue(row['sequence']),
-            timestamp: _timestampFromObject(row['timestamp']),
-            itemId: row['item_id']?.toString(),
-            turnId: row['turn_id']?.toString(),
-            type: _debugRowType(row),
-            row: Map<String, Object?>.unmodifiable(row),
-            data: Map<String, Object?>.unmodifiable(_rowData(row) ?? const <String, Object?>{}),
-          ),
+      for (final row in rows)
+        DatasetChatDebugRow(
+          sequence: _intValue(row['sequence']),
+          timestamp: _timestampFromObject(row['timestamp']),
+          itemId: row['item_id']?.toString(),
+          turnId: row['turn_id']?.toString(),
+          type: _debugRowType(row),
+          row: Map<String, Object?>.unmodifiable(row),
+          data: Map<String, Object?>.unmodifiable(_rowData(row) ?? const <String, Object?>{}),
+        ),
     ];
   }
 
@@ -2102,10 +2158,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     });
   }
 
-  List<({Map<String, Object?> row, _DatasetThreadMessage? message})> _messagesForRows(
-    List<Map<String, Object?>> rows, {
-    required Map<String, Map<String, Object?>> turnInputPayloadsById,
-  }) {
+  List<({Map<String, Object?> row, _DatasetThreadMessage? message})> _messagesForRows(List<Map<String, Object?>> rows) {
     final messages = <({Map<String, Object?> row, _DatasetThreadMessage? message})>[];
     final toolCallsByItemId = <String, _DatasetToolCallState>{};
     final toolArgumentDeltaBytesByItemId = <String, int>{};
@@ -2196,31 +2249,13 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         messages.add((row: row, message: message));
         continue;
       }
-      final message = _messageForRow(row, turnInputPayloadsById: turnInputPayloadsById);
+      final message = _messageForRow(row);
       messages.add((row: row, message: message));
     }
     for (final state in [...textContentByItemId.values, ...reasoningContentByItemId.values]) {
       messages.add((row: state.latestRow, message: state.toMessage(row: state.latestRow)));
     }
     return messages;
-  }
-
-  Map<String, Map<String, Object?>> _turnInputPayloadsById(Iterable<Map<String, Object?>> rows) {
-    final payloadsById = <String, Map<String, Object?>>{};
-    for (final row in rows) {
-      final data = _rowData(row);
-      final type = data?['type']?.toString();
-      if (type != agentTurnStartType && type != agentTurnSteerType) {
-        continue;
-      }
-      final messageId = data?['message_id']?.toString().trim();
-      final rowItemId = row['item_id']?.toString().trim();
-      final inputId = messageId != null && messageId.isNotEmpty ? messageId : rowItemId;
-      if (inputId != null && inputId.isNotEmpty && data != null) {
-        payloadsById[inputId] = data;
-      }
-    }
-    return payloadsById;
   }
 
   bool _hasWireBackedContent() {
@@ -2914,20 +2949,24 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ),
           );
         case _DatasetThreadDetailGroupFeedItem():
-          messageWidgets.insert(
-            0,
-            _DatasetDetailLine(
-              key: ValueKey(feedItem.id),
-              text: feedItem.collapsedText,
-              authorName: feedItem.authorName,
-              createdAt: feedItem.createdAt,
-              onTap: () {
-                setState(() {
-                  _expandedDetailGroupIds.add(feedItem.id);
-                });
-              },
-            ),
-          );
+          if (feedItem.expanded) {
+            messageWidgets.insert(0, _buildExpandedDetailGroup(context, feedItem, feedImages: feedImages));
+          } else {
+            messageWidgets.insert(
+              0,
+              _DatasetDetailLine(
+                key: ValueKey(feedItem.id),
+                text: feedItem.collapsedText,
+                authorName: feedItem.authorName,
+                createdAt: feedItem.createdAt,
+                onTap: () {
+                  setState(() {
+                    _expandedDetailGroupIds.add(feedItem.id);
+                  });
+                },
+              ),
+            );
+          }
       }
     }
     final pendingFeedMessages = pendingMessages.where((pending) {
@@ -2968,7 +3007,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
           nextMessage: _nextNonDetailMessage(messages, detailIndexes, segmentIndex + 1, segmentEnd),
         );
         if (_expandedDetailGroupIds.contains(group.id)) {
-          items.addAll(group.messages.map(_DatasetThreadMessageFeedItem.new));
+          items.add(group.expandedCopy());
         } else {
           items.add(group);
         }
@@ -2977,6 +3016,38 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       index = segmentEnd;
     }
     return items;
+  }
+
+  Widget _buildExpandedDetailGroup(
+    BuildContext context,
+    _DatasetThreadDetailGroupFeedItem group, {
+    required List<ChatThreadFeedImage> feedImages,
+  }) {
+    final children = <Widget>[
+      ChatThreadMessageView(
+        room: null,
+        mine: false,
+        isAgentMessage: true,
+        text: null,
+        authorName: group.authorName,
+        createdAt: group.createdAt,
+        showBubbleActions: false,
+      ),
+    ];
+    for (final item in group.messages.indexed) {
+      if (item.$1 == 0) {
+        children.add(const SizedBox(height: 4));
+      } else {
+        children.add(SizedBox(height: _datasetThreadMessageSpacing(group.messages[item.$1 - 1], item.$2)));
+      }
+      children.add(_buildMessage(context, item.$2, feedImages: feedImages, shouldShowParticipantHeader: false));
+    }
+    return Column(
+      key: ValueKey(group.id),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: children,
+    );
   }
 
   _DatasetThreadMessage? _nextNonDetailMessage(List<_DatasetThreadMessage> messages, Set<int> detailIndexes, int start, int end) {
@@ -3690,6 +3761,7 @@ class _DatasetThreadDetailGroupFeedItem extends _DatasetThreadFeedItem {
     required this.collapsedText,
     required this.authorName,
     required this.createdAt,
+    this.expanded = false,
   });
 
   final String id;
@@ -3697,6 +3769,18 @@ class _DatasetThreadDetailGroupFeedItem extends _DatasetThreadFeedItem {
   final String collapsedText;
   final String authorName;
   final DateTime createdAt;
+  final bool expanded;
+
+  _DatasetThreadDetailGroupFeedItem expandedCopy() {
+    return _DatasetThreadDetailGroupFeedItem(
+      id: id,
+      messages: messages,
+      collapsedText: collapsedText,
+      authorName: authorName,
+      createdAt: createdAt,
+      expanded: true,
+    );
+  }
 }
 
 class _DatasetThreadLoadingRow extends StatelessWidget {
@@ -4172,15 +4256,12 @@ List<_DatasetDiffPreviewBlock> _toolCallDiffPreviewBlocks({required String tool,
   return _applyPatchDiffPreviewBlocks(patch);
 }
 
-_DatasetThreadMessage? _messageForRow(
-  Map<String, Object?> row, {
-  Map<String, Map<String, Object?>> turnInputPayloadsById = const <String, Map<String, Object?>>{},
-}) {
+_DatasetThreadMessage? _messageForRow(Map<String, Object?> row) {
   final data = _rowData(row);
   if (data == null) {
     return null;
   }
-  final agentMessage = _messageForAgentPayload(row, data, turnInputPayloadsById: turnInputPayloadsById);
+  final agentMessage = _messageForAgentPayload(row, data);
   if (agentMessage != null) {
     return agentMessage;
   }
@@ -4494,11 +4575,7 @@ Uint8List? _wavDataChunk(Uint8List bytes) {
   return null;
 }
 
-_DatasetThreadMessage? _messageForAgentPayload(
-  Map<String, Object?> row,
-  Map<String, Object?> payload, {
-  Map<String, Map<String, Object?>> turnInputPayloadsById = const <String, Map<String, Object?>>{},
-}) {
+_DatasetThreadMessage? _messageForAgentPayload(Map<String, Object?> row, Map<String, Object?> payload) {
   final type = payload['type']?.toString();
   if (type == null || type.trim().isEmpty) {
     return null;
@@ -4551,29 +4628,7 @@ _DatasetThreadMessage? _messageForAgentPayload(
       );
     case agentTurnStartedType:
     case agentTurnSteeredType:
-      final sourceMessageId = payload['source_message_id']?.toString().trim();
-      if (sourceMessageId == null || sourceMessageId.isEmpty) {
-        return null;
-      }
-      final inputPayload = turnInputPayloadsById[sourceMessageId] ?? payload;
-      final content = inputPayload['content'];
-      if (content is! List) {
-        return null;
-      }
-      final extracted = _agentInputContentParts(content);
-      if (extracted.text.trim().isEmpty && extracted.attachments.isEmpty) {
-        return null;
-      }
-      return _DatasetThreadMessage(
-        id: sourceMessageId,
-        kind: 'message',
-        role: 'user',
-        text: extracted.text,
-        authorName: inputPayload['sender_name']?.toString(),
-        attachments: extracted.attachments,
-        createdAt: createdAt,
-        turnId: turnId,
-      );
+      return null;
     case agentTurnStartAcceptedType:
     case agentTurnSteerAcceptedType:
       return null;
@@ -5085,11 +5140,6 @@ String? _debugRowType(Map<String, Object?> row) {
   }
   final kind = data?['kind']?.toString().trim();
   return kind == null || kind.isEmpty ? null : kind;
-}
-
-bool _shouldIncludeDebugRow(Map<String, Object?> row) {
-  final type = _debugRowType(row);
-  return type != null && type.isNotEmpty && type != 'message';
 }
 
 Object? _debugJsonValue(Object? value) {

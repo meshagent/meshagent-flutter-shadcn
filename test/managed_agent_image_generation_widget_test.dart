@@ -318,7 +318,6 @@ void main() {
     await tester.pump();
 
     expect(debugRows.last.map((row) => row.type), contains(agent_sessions.agentImageGenerationStartedType));
-    expect(debugRows.last.map((row) => row.type), isNot(contains('message')));
 
     chatClient.emit(
       agent_sessions.AgentConnectionStatus(
@@ -331,7 +330,6 @@ void main() {
     await tester.pump();
 
     expect(debugRows.last.map((row) => row.type), contains(agent_sessions.agentConnectionStatusType));
-    expect(debugRows.last.map((row) => row.type), isNot(contains('message')));
 
     chatClient.emit(
       agent_sessions.AgentImageGenerationCompleted(
@@ -357,7 +355,6 @@ void main() {
 
     final finalDebugRows = debugRows.last;
     expect(finalDebugRows.map((row) => row.type), contains(agent_sessions.agentImageGenerationCompletedType));
-    expect(finalDebugRows.map((row) => row.type), isNot(contains('message')));
     expect(find.byKey(const Key('rendered-generated-image')), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
