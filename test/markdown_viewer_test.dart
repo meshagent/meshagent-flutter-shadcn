@@ -150,4 +150,60 @@ void main() {
 
     expect(find.text('Show tool calls'), findsNothing);
   });
+
+  testWidgets('ordered list markers align with item text typography', (tester) async {
+    final previousVisibilityUpdateInterval = VisibilityDetectorController.instance.updateInterval;
+    addTearDown(() {
+      VisibilityDetectorController.instance.updateInterval = previousVisibilityUpdateInterval;
+    });
+    VisibilityDetectorController.instance.updateInterval = Duration.zero;
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: const Scaffold(
+          body: MarkdownViewer(
+            markdown: '''
+1. Overview
+2. Repository Structure
+''',
+            padding: EdgeInsets.zero,
+            threadTypography: true,
+            baseFontSize: 20,
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    final markerTop = tester.getTopLeft(find.text('1.')).dy;
+    final textTop = tester.getTopLeft(find.text('Overview')).dy;
+    expect((markerTop - textTop).abs(), lessThan(1));
+  });
+
+  testWidgets('unordered list keeps default bullet marker', (tester) async {
+    final previousVisibilityUpdateInterval = VisibilityDetectorController.instance.updateInterval;
+    addTearDown(() {
+      VisibilityDetectorController.instance.updateInterval = previousVisibilityUpdateInterval;
+    });
+    VisibilityDetectorController.instance.updateInterval = Duration.zero;
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: const Scaffold(
+          body: MarkdownViewer(
+            markdown: '''
+- Overview
+''',
+            padding: EdgeInsets.zero,
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    expect(find.text('Overview'), findsOneWidget);
+    expect(find.text('1.'), findsNothing);
+  });
 }

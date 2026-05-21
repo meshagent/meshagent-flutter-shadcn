@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:meshagent/meshagent.dart';
+import 'package:meshagent_agents/meshagent_agents.dart' hide defaultThreadDisplayNameFromPath, defaultUntitledThreadName;
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import 'conversation_descriptor.dart';
@@ -11,6 +12,7 @@ class ChatThreadListView extends StatefulWidget {
   const ChatThreadListView({
     super.key,
     required this.room,
+    this.chatClient,
     required this.threadListPath,
     required this.selectedThreadPath,
     required this.onSelectedThreadPathChanged,
@@ -21,7 +23,8 @@ class ChatThreadListView extends StatefulWidget {
     this.newThreadResetVersion = 0,
   });
 
-  final RoomClient room;
+  final RoomClient? room;
+  final BaseChatClient? chatClient;
   final String threadListPath;
   final String? agentName;
   final String? selectedThreadPath;
@@ -36,10 +39,12 @@ class ChatThreadListView extends StatefulWidget {
 }
 
 class _ChatThreadListViewState extends State<ChatThreadListView> {
-  MeshDocument? _document;
+  _ChatThreadListStore? _store;
   String? _openedPath;
   Object? _error;
   bool _loading = true;
+  final Map<String, String> _optimisticNames = <String, String>{};
+  final Set<String> _optimisticDeletedPaths = <String>{};
 
   String? _normalizePath(String? path) {
     final normalized = path?.trim();
@@ -57,7 +62,7 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
     return parsed.toUtc();
   }
 
-  DateTime _sortDate(_ChatThreadListEntry entry) {
+  DateTime _sortDate(ThreadListEntry entry) {
     if (entry.modifiedAt.trim().isNotEmpty) {
       return _parseDate(entry.modifiedAt);
     }
@@ -67,14 +72,14 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
     return DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
   }
 
-  DateTime _createdSortDate(_ChatThreadListEntry entry) {
+  DateTime _createdSortDate(ThreadListEntry entry) {
     if (entry.createdAt.trim().isNotEmpty) {
       return _parseDate(entry.createdAt);
     }
     return DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
   }
 
-  int _compareEntries(_ChatThreadListEntry a, _ChatThreadListEntry b) {
+  int _compareEntries(ThreadListEntry a, ThreadListEntry b) {
     final dateComparison = _sortDate(b).compareTo(_sortDate(a));
     if (dateComparison != 0) {
       return dateComparison;
@@ -88,39 +93,18 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
     return a.path.compareTo(b.path);
   }
 
-  List<_ChatThreadListEntry> _entries() {
-    final document = _document;
-    if (document == null) {
-      return const <_ChatThreadListEntry>[];
+  List<ThreadListEntry> _entries() {
+    final store = _store;
+    if (store == null) {
+      return const <ThreadListEntry>[];
     }
-
-    final entries = <_ChatThreadListEntry>[];
-    for (final child in document.root.getChildren()) {
-      if (child is! MeshElement || child.tagName != "thread") {
-        continue;
+    final entries = store.entries().where((entry) => !_optimisticDeletedPaths.contains(entry.path)).map((entry) {
+      final optimisticName = _optimisticNames[entry.path];
+      if (optimisticName == null) {
+        return entry;
       }
-
-      final rawPath = child.getAttribute("path");
-      if (rawPath is! String || rawPath.trim().isEmpty) {
-        continue;
-      }
-
-      final path = rawPath.trim();
-      final rawName = child.getAttribute("name");
-      final createdAt = child.getAttribute("created_at");
-      final modifiedAt = child.getAttribute("modified_at");
-
-      entries.add(
-        _ChatThreadListEntry(
-          element: child,
-          path: path,
-          name: rawName is String && rawName.trim().isNotEmpty ? rawName.trim() : defaultThreadDisplayNameFromPath(path),
-          createdAt: createdAt is String ? createdAt : "",
-          modifiedAt: modifiedAt is String ? modifiedAt : "",
-        ),
-      );
-    }
-
+      return entry.renamed(optimisticName, entry.modifiedAt);
+    }).toList();
     entries.sort(_compareEntries);
     return entries;
   }
@@ -177,7 +161,7 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
     );
   }
 
-  Future<void> _renameThread(_ChatThreadListEntry entry) async {
+  Future<void> _renameThread(ThreadListEntry entry) async {
     final nextName = await _showRenameDialog(entry.name);
     if (nextName == null) {
       return;
@@ -188,49 +172,145 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
       return;
     }
 
-    entry.element.setAttribute("name", trimmed);
+    setState(() {
+      _optimisticNames[entry.path] = trimmed;
+    });
+    try {
+      await _sendThreadControlMessage(RenameThread(threadId: entry.path, name: trimmed));
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _optimisticNames.remove(entry.path);
+        });
+      }
+      rethrow;
+    }
   }
 
-  void _onDocumentChanged() {
-    if (!mounted) {
+  Future<bool> _confirmDeleteThread(ThreadListEntry entry) async {
+    final result = await showShadDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return ShadDialog(
+          title: const Text("Delete thread"),
+          description: Text('Delete "${entry.name}"?'),
+          actions: [
+            ShadButton.outline(onPressed: () => Navigator.of(dialogContext).pop(false), child: const Text("Cancel")),
+            ShadButton.destructive(onPressed: () => Navigator.of(dialogContext).pop(true), child: const Text("Delete")),
+          ],
+        );
+      },
+    );
+    return result ?? false;
+  }
+
+  Future<void> _deleteThread(ThreadListEntry entry) async {
+    if (!await _confirmDeleteThread(entry)) {
       return;
     }
 
-    setState(() {});
+    setState(() {
+      _optimisticDeletedPaths.add(entry.path);
+    });
+    try {
+      await _sendThreadControlMessage(DeleteThread(threadId: entry.path));
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _optimisticDeletedPaths.remove(entry.path);
+        });
+      }
+      rethrow;
+    }
+    if (_normalizePath(widget.selectedThreadPath) == entry.path) {
+      widget.onSelectedThreadPathChanged(null);
+      widget.onSelectedThreadResolved?.call(null, null);
+    }
   }
 
-  void _onMessagingChanged() {
+  RemoteParticipant? _agentParticipant() {
+    final room = widget.room;
+    if (room == null) {
+      return null;
+    }
+    final normalizedAgentName = widget.agentName?.trim();
+    for (final participant in room.messaging.remoteParticipants) {
+      if (normalizedAgentName != null && normalizedAgentName.isNotEmpty && participant.getAttribute("name") != normalizedAgentName) {
+        continue;
+      }
+      if (participant.getAttribute("supports_agent_messages") == true) {
+        return participant;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _sendThreadControlMessage(AgentMessage message) async {
+    final chatClient = widget.chatClient;
+    if (chatClient != null) {
+      await chatClient.sendAgentMessage(message);
+      return;
+    }
+    final room = widget.room;
+    if (room == null) {
+      throw StateError("Unable to send thread message without a room or agent chat client.");
+    }
+    final agent = _agentParticipant();
+    if (agent == null) {
+      throw StateError("Unable to find an agent that supports thread messages.");
+    }
+    await room.messaging.sendMessage(to: agent, type: agentRoomMessageType, message: message.toJson());
+  }
+
+  void _onStoreChanged() {
     if (mounted) {
+      final storeEntries = _store?.entries() ?? const <ThreadListEntry>[];
+      final storePaths = storeEntries.map((entry) => entry.path).toSet();
+      _optimisticNames.removeWhere((path, name) {
+        return storeEntries.any((entry) => entry.path == path && entry.name == name);
+      });
+      _optimisticDeletedPaths.removeWhere((path) => !storePaths.contains(path));
       setState(() {});
     }
   }
 
-  Future<void> _closeDocument() async {
-    final document = _document;
-    final openedPath = _openedPath;
+  Future<void> _closeStore() async {
+    final store = _store;
 
-    if (document != null) {
-      document.removeListener(_onDocumentChanged);
-    }
-
-    _document = null;
+    _store = null;
     _openedPath = null;
     _loading = false;
 
-    if (openedPath != null) {
-      try {
-        await widget.room.sync.close(openedPath);
-      } catch (_) {}
+    if (store != null) {
+      await store.close();
     }
   }
 
-  Future<void> _rebindDocument() async {
+  _ChatThreadListStore _createStore(String path) {
+    if (path.startsWith("agent://")) {
+      final chatClient = widget.chatClient;
+      if (chatClient == null) {
+        throw StateError("Agent thread lists require an agent chat client.");
+      }
+      return _AgentChatThreadListStore(chatClient: chatClient, onChanged: _onStoreChanged);
+    }
+    final room = widget.room;
+    if (room == null) {
+      throw StateError("Room thread lists require a room client.");
+    }
+    if (path.startsWith("dataset://")) {
+      return _DatasetChatThreadListStore(room: room, path: path, onChanged: _onStoreChanged);
+    }
+    return _MeshDocumentChatThreadListStore(room: room, path: path, onChanged: _onStoreChanged);
+  }
+
+  Future<void> _rebindStore() async {
     final nextPath = _normalizePath(widget.threadListPath);
-    if (nextPath == _openedPath && _document != null) {
+    if (nextPath == _openedPath && _store != null) {
       return;
     }
 
-    await _closeDocument();
+    await _closeStore();
 
     if (!mounted || nextPath == null) {
       if (mounted) {
@@ -247,17 +327,15 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
     });
 
     try {
-      final document = await widget.room.sync.open(nextPath);
+      final store = _createStore(nextPath);
+      await store.open();
       if (!mounted || _normalizePath(widget.threadListPath) != nextPath) {
-        try {
-          await widget.room.sync.close(nextPath);
-        } catch (_) {}
+        await store.close();
         return;
       }
 
-      document.addListener(_onDocumentChanged);
       setState(() {
-        _document = document;
+        _store = store;
         _openedPath = nextPath;
         _loading = false;
         _error = null;
@@ -267,7 +345,7 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
         return;
       }
       setState(() {
-        _document = null;
+        _store = null;
         _openedPath = null;
         _loading = false;
         _error = error;
@@ -278,19 +356,16 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
   @override
   void initState() {
     super.initState();
-    widget.room.messaging.addListener(_onMessagingChanged);
-    unawaited(_rebindDocument());
+    unawaited(_rebindStore());
   }
 
   @override
   void didUpdateWidget(covariant ChatThreadListView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.room != widget.room) {
-      oldWidget.room.messaging.removeListener(_onMessagingChanged);
-      widget.room.messaging.addListener(_onMessagingChanged);
-    }
-    if (oldWidget.room != widget.room || oldWidget.threadListPath != widget.threadListPath) {
-      unawaited(_rebindDocument());
+    if (oldWidget.room != widget.room || oldWidget.chatClient != widget.chatClient || oldWidget.threadListPath != widget.threadListPath) {
+      _optimisticNames.clear();
+      _optimisticDeletedPaths.clear();
+      unawaited(_rebindStore());
     }
 
     if (oldWidget.newThreadResetVersion != widget.newThreadResetVersion && widget.selectedThreadPath != null) {
@@ -303,8 +378,7 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
 
   @override
   void dispose() {
-    widget.room.messaging.removeListener(_onMessagingChanged);
-    unawaited(_closeDocument());
+    unawaited(_closeStore());
     super.dispose();
   }
 
@@ -400,7 +474,7 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
             context,
             title: entry.name,
             selected: entry.path == selectedThreadPath,
-            trailing: _ChatThreadListMenuButton(onRename: () => _renameThread(entry)),
+            trailing: _ChatThreadListMenuButton(onRename: () => _renameThread(entry), onDelete: () => _deleteThread(entry)),
             onTap: () {
               widget.onSelectedThreadPathChanged(entry.path);
               widget.onSelectedThreadResolved?.call(entry.path, entry.name);
@@ -411,26 +485,127 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
   }
 }
 
-class _ChatThreadListEntry {
-  const _ChatThreadListEntry({
-    required this.element,
-    required this.path,
-    required this.name,
-    required this.createdAt,
-    required this.modifiedAt,
-  });
+abstract class _ChatThreadListStore {
+  Future<void> open();
 
-  final MeshElement element;
+  Future<void> close();
+
+  List<ThreadListEntry> entries();
+}
+
+class _MeshDocumentChatThreadListStore implements _ChatThreadListStore {
+  _MeshDocumentChatThreadListStore({required this.room, required this.path, required this.onChanged});
+
+  final RoomClient room;
   final String path;
-  final String name;
-  final String createdAt;
-  final String modifiedAt;
+  final VoidCallback onChanged;
+  MeshDocument? _document;
+
+  @override
+  Future<void> open() async {
+    final document = await room.sync.open(path);
+    _document = document;
+    document.addListener(onChanged);
+  }
+
+  @override
+  Future<void> close() async {
+    final document = _document;
+    _document = null;
+    if (document != null) {
+      document.removeListener(onChanged);
+    }
+    try {
+      await room.sync.close(path);
+    } catch (_) {}
+  }
+
+  @override
+  List<ThreadListEntry> entries() {
+    final document = _document;
+    if (document == null) {
+      return const <ThreadListEntry>[];
+    }
+
+    final entries = <ThreadListEntry>[];
+    for (final child in document.root.getChildren()) {
+      if (child is! MeshElement || child.tagName != "thread") {
+        continue;
+      }
+
+      final rawPath = child.getAttribute("path");
+      if (rawPath is! String || rawPath.trim().isEmpty) {
+        continue;
+      }
+
+      final threadPath = rawPath.trim();
+      final rawName = child.getAttribute("name");
+      final createdAt = child.getAttribute("created_at");
+      final modifiedAt = child.getAttribute("modified_at");
+      entries.add(
+        ThreadListEntry(
+          path: threadPath,
+          name: rawName is String && rawName.trim().isNotEmpty ? rawName.trim() : defaultThreadDisplayNameFromPath(threadPath),
+          createdAt: createdAt is String ? createdAt : "",
+          modifiedAt: modifiedAt is String ? modifiedAt : "",
+        ),
+      );
+    }
+    return entries;
+  }
+}
+
+class _DatasetChatThreadListStore implements _ChatThreadListStore {
+  _DatasetChatThreadListStore({required RoomClient room, required String path, required this.onChanged})
+    : storage = DatasetThreadStorage(room: room, path: path);
+
+  final DatasetThreadStorage storage;
+  final VoidCallback onChanged;
+
+  @override
+  Future<void> open() async {
+    storage.addListener(onChanged);
+    await storage.open();
+  }
+
+  @override
+  Future<void> close() async {
+    storage.removeListener(onChanged);
+    await storage.close();
+  }
+
+  @override
+  List<ThreadListEntry> entries() => storage.entries();
+}
+
+class _AgentChatThreadListStore implements _ChatThreadListStore {
+  _AgentChatThreadListStore({required BaseChatClient chatClient, required this.onChanged})
+    : storage = AgentThreadStorageRepository(chatClient: chatClient);
+
+  final AgentThreadStorageRepository storage;
+  final VoidCallback onChanged;
+
+  @override
+  Future<void> open() async {
+    storage.addListener(onChanged);
+    await storage.open();
+  }
+
+  @override
+  Future<void> close() async {
+    storage.removeListener(onChanged);
+    await storage.close();
+  }
+
+  @override
+  List<ThreadListEntry> entries() => storage.entries();
 }
 
 class _ChatThreadListMenuButton extends StatefulWidget {
-  const _ChatThreadListMenuButton({required this.onRename});
+  const _ChatThreadListMenuButton({required this.onRename, required this.onDelete});
 
   final VoidCallback onRename;
+  final VoidCallback onDelete;
 
   @override
   State<_ChatThreadListMenuButton> createState() => _ChatThreadListMenuButtonState();
@@ -451,13 +626,19 @@ class _ChatThreadListMenuButtonState extends State<_ChatThreadListMenuButton> {
       controller: _controller,
       constraints: const BoxConstraints(minWidth: 160),
       estimatedMenuWidth: 160,
-      estimatedMenuHeight: 48,
+      estimatedMenuHeight: 88,
       items: [
         ShadContextMenuItem(
           height: 40,
           leading: const Icon(LucideIcons.pencil, size: 16),
           onPressed: widget.onRename,
           child: const Text("Rename"),
+        ),
+        ShadContextMenuItem(
+          height: 40,
+          leading: const Icon(LucideIcons.trash2, size: 16),
+          onPressed: widget.onDelete,
+          child: const Text("Delete"),
         ),
       ],
       child: ShadButton.ghost(

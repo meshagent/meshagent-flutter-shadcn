@@ -2,12 +2,11 @@ import 'dart:async';
 
 import 'package:collection/collection.dart';
 import 'package:meshagent/meshagent.dart';
+import 'package:meshagent_agents/meshagent_agents.dart'
+    show AgentMessage, StartThread, ThreadStarted, agentInputContent, agentRoomMessageType;
 import 'package:uuid/uuid.dart';
 
 const String annotationFilePrompt = "meshagent.prompt.file.matches.regex";
-const String _agentRoomMessageType = "agent-message";
-const String _agentThreadStartType = "meshagent.agent.thread.start";
-const String _agentThreadStartedType = "meshagent.agent.thread.started";
 
 class ChatFilePromptAction {
   const ChatFilePromptAction({
@@ -185,14 +184,6 @@ Future<RemoteParticipant> _waitForNamedAgentOnline({
   }
 }
 
-List<Map<String, Object?>> _agentInputContent({required String text, required List<String> attachments}) {
-  return [
-    if (text.trim().isNotEmpty) {"type": "text", "text": text},
-    for (final path in attachments)
-      if (path.trim().isNotEmpty) {"type": "file", "url": path},
-  ];
-}
-
 Future<String> _sendStartThreadMessage({
   required RoomClient room,
   required RemoteParticipant agent,
@@ -204,7 +195,7 @@ Future<String> _sendStartThreadMessage({
   final completer = Completer<String>();
   late final StreamSubscription<RoomEvent> subscription;
   subscription = room.listen((event) {
-    if (event is! RoomMessageEvent || event.message.fromParticipantId != agent.id || event.message.type != _agentRoomMessageType) {
+    if (event is! RoomMessageEvent || event.message.fromParticipantId != agent.id || event.message.type != agentRoomMessageType) {
       return;
     }
     final rawMessage = event.message.message;
@@ -212,26 +203,27 @@ Future<String> _sendStartThreadMessage({
     if (rawPayload is! Map) {
       return;
     }
-    if (rawPayload["type"] != _agentThreadStartedType || rawPayload["source_message_id"] != messageId) {
+    final payload = AgentMessage.fromJson(Map<String, dynamic>.from(rawPayload));
+    if (payload is! ThreadStarted || payload.sourceMessageId != messageId) {
       return;
     }
-    final threadId = rawPayload["thread_id"];
-    if (threadId is String && threadId.trim().isNotEmpty && !completer.isCompleted) {
-      completer.complete(threadId.trim());
+    final threadId = payload.threadId.trim();
+    if (threadId.isNotEmpty && !completer.isCompleted) {
+      completer.complete(threadId);
     }
   });
 
   try {
     final senderName = room.localParticipant?.getAttribute("name");
-    final payload = <String, Object?>{
-      "type": _agentThreadStartType,
-      "message_id": messageId,
-      "content": _agentInputContent(text: prompt, attachments: attachmentPaths),
-    };
-    if (senderName is String && senderName.trim().isNotEmpty) {
-      payload["sender_name"] = senderName.trim();
-    }
-    await room.messaging.sendMessage(to: agent, type: _agentRoomMessageType, message: payload);
+    final payload = StartThread(
+      messageId: messageId,
+      content: agentInputContent(
+        text: prompt,
+        attachments: [for (final attachmentPath in attachmentPaths) AgentFileContent(url: attachmentPath)],
+      ),
+      senderName: senderName is String && senderName.trim().isNotEmpty ? senderName.trim() : null,
+    );
+    await room.messaging.sendMessage(to: agent, type: agentRoomMessageType, message: payload.toJson());
     return await completer.future.timeout(timeout);
   } on TimeoutException {
     throw RoomServerException("Timed out waiting for thread to start.");

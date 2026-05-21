@@ -3,10 +3,17 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:meshagent/meshagent.dart';
+import 'package:meshagent_agents/meshagent_agents.dart';
 import 'package:meshagent_flutter_shadcn/chat/chat.dart';
 import 'package:meshagent_flutter_shadcn/chat/agent_stream_accumulator.dart';
 import 'package:meshagent_flutter_shadcn/chat/tool_call_status_accumulator.dart';
 import 'package:meshagent/runtime.dart';
+
+void _expectRecentStartedAt(DateTime? startedAt) {
+  expect(startedAt, isNotNull);
+  final elapsed = DateTime.now().difference(startedAt!);
+  expect(elapsed.inSeconds.abs(), lessThan(5));
+}
 
 class _ProtocolPair {
   _ProtocolPair() {
@@ -352,7 +359,29 @@ void main() {
     expect(state.mode, 'busy');
     expect(state.pendingItemId, 'image-1');
     expect(state.totalBytes, isNull);
-    expect(state.startedAt, DateTime.parse('2026-05-04T12:00:00Z'));
+    _expectRecentStartedAt(state.startedAt);
+  });
+
+  test('resolveChatThreadStatusFromStore reads websocket status without a room', () async {
+    const threadPath = 'dataset://agents/dataset/threads/thread-1';
+    final store = AgentThreadMessageStatusStore();
+    trackAgentThreadStatusMessageInStore(
+      store: store,
+      message: AgentMessage.fromJson({
+        'type': 'meshagent.agent.thread.status',
+        'thread_id': threadPath,
+        'status': 'Working',
+        'mode': 'busy',
+        'turn_id': 'turn-1',
+      }),
+    );
+
+    final state = resolveChatThreadStatusFromStore(store: store, path: threadPath);
+
+    expect(state.text, 'Working');
+    expect(state.mode, 'busy');
+    expect(state.turnId, 'turn-1');
+    expect(state.supportsAgentMessages, isTrue);
   });
 
   test('resolveChatThreadStatus ignores stale participant status attributes', () async {
@@ -393,8 +422,99 @@ void main() {
     expect(state.turnId, 'turn-1');
     expect(state.totalBytes, 240);
     expect(state.pendingItemId, 'image-1');
-    expect(state.startedAt, DateTime.parse('2026-05-04T12:00:00Z'));
+    _expectRecentStartedAt(state.startedAt);
     expect(state.supportsAgentMessages, isTrue);
+  });
+
+  test('resolveChatThreadStatusFromStore preserves startedAt for the same status operation', () {
+    const threadPath = 'dataset://agents/dataset/threads/thread-1';
+    final store = AgentThreadMessageStatusStore();
+    final currentStartedAt = DateTime.now().toUtc().toIso8601String();
+    trackAgentThreadStatusMessageInStore(
+      store: store,
+      message: AgentMessage.fromJson({
+        'type': 'meshagent.agent.thread.status',
+        'thread_id': threadPath,
+        'status': 'Generating image',
+        'mode': 'busy',
+        'started_at': currentStartedAt,
+        'turn_id': 'turn-1',
+        'pending_item_id': 'image-1',
+      }),
+    );
+    final first = resolveChatThreadStatusFromStore(store: store, path: threadPath);
+
+    trackAgentThreadStatusMessageInStore(
+      store: store,
+      message: AgentMessage.fromJson({
+        'type': 'meshagent.agent.thread.status',
+        'thread_id': threadPath,
+        'status': 'Generating image',
+        'mode': 'busy',
+        'started_at': DateTime.now().add(const Duration(seconds: 1)).toUtc().toIso8601String(),
+        'turn_id': 'turn-1',
+        'pending_item_id': 'image-1',
+      }),
+    );
+    final second = resolveChatThreadStatusFromStore(store: store, path: threadPath);
+
+    expect(second.startedAt, first.startedAt);
+  });
+
+  test('resolveChatThreadStatusFromStore resets startedAt for a different turn status', () {
+    const threadPath = 'dataset://agents/dataset/threads/thread-1';
+    final store = AgentThreadMessageStatusStore();
+    trackAgentThreadStatusMessageInStore(
+      store: store,
+      message: AgentMessage.fromJson({
+        'type': 'meshagent.agent.thread.status',
+        'thread_id': threadPath,
+        'status': 'Generating image',
+        'mode': 'busy',
+        'started_at': DateTime.now().toUtc().toIso8601String(),
+        'turn_id': 'turn-1',
+        'pending_item_id': 'image-1',
+      }),
+    );
+    final first = resolveChatThreadStatusFromStore(store: store, path: threadPath);
+
+    trackAgentThreadStatusMessageInStore(
+      store: store,
+      message: AgentMessage.fromJson({
+        'type': 'meshagent.agent.thread.status',
+        'thread_id': threadPath,
+        'status': 'Generating image',
+        'mode': 'busy',
+        'started_at': DateTime.now().add(const Duration(seconds: 1)).toUtc().toIso8601String(),
+        'turn_id': 'turn-2',
+        'pending_item_id': 'image-1',
+      }),
+    );
+    final second = resolveChatThreadStatusFromStore(store: store, path: threadPath);
+
+    expect(second.startedAt, isNot(first.startedAt));
+    _expectRecentStartedAt(second.startedAt);
+  });
+
+  test('resolveChatThreadStatusFromStore clamps skewed remote startedAt', () {
+    const threadPath = 'dataset://agents/dataset/threads/thread-1';
+    final store = AgentThreadMessageStatusStore();
+    trackAgentThreadStatusMessageInStore(
+      store: store,
+      message: AgentMessage.fromJson({
+        'type': 'meshagent.agent.thread.status',
+        'thread_id': threadPath,
+        'status': 'Generating image',
+        'mode': 'busy',
+        'started_at': DateTime.now().subtract(const Duration(minutes: 10)).toUtc().toIso8601String(),
+        'turn_id': 'turn-1',
+        'pending_item_id': 'image-1',
+      }),
+    );
+
+    final state = resolveChatThreadStatusFromStore(store: store, path: threadPath);
+
+    _expectRecentStartedAt(state.startedAt);
   });
 
   test('resolveChatThreadStatus stays clear when only stale attributes remain', () async {

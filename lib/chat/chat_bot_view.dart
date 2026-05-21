@@ -202,7 +202,7 @@ class _ChatBotViewState extends State<ChatBotView> {
   Widget _buildThread(BuildContext context, String path, ChatThreadController controller, {GlobalKey? composerKey}) {
     if (path.startsWith('dataset://') || path.startsWith('tmp://')) {
       final modelController = _datasetModelControllerFor(path);
-      final thread = DatasetChatThread(
+      final thread = RoomDatasetChatThread(
         key: ValueKey(path),
         path: path,
         room: widget.room,

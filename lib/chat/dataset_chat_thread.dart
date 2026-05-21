@@ -5,9 +5,70 @@ import 'dart:typed_data';
 
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:meshagent_agents/meshagent_agents.dart'
+    show
+        ToolkitCapabilities,
+        agentAudioGenerationCompletedType,
+        agentAudioGenerationDeltaType,
+        agentAudioGenerationFailedType,
+        agentAudioGenerationStartedType,
+        agentAudioInputSpeechStartedType,
+        agentAudioTranscriptionCompletedType,
+        agentAudioTranscriptionDeltaType,
+        agentAudioTranscriptionFailedType,
+        agentAudioTranscriptionStartedType,
+        agentConnectionStatusType,
+        agentContextCompactedType,
+        agentClientToolCallRequestedType,
+        agentFileContentDeltaType,
+        agentFileContentEndedType,
+        agentFileContentStartedType,
+        agentImageGenerationCompletedType,
+        agentImageGenerationFailedType,
+        agentImageGenerationPartialType,
+        agentImageGenerationStartedType,
+        agentModelChangedType,
+        agentModelChangeType,
+        agentModelsRequestType,
+        agentModelsResponseType,
+        agentReasoningContentDeltaType,
+        agentReasoningContentEndedType,
+        agentReasoningContentStartedType,
+        agentRealtimeAudioCommitType,
+        agentSecretRequestedType,
+        AgentClientToolCallRequested,
+        AgentSecretRequested,
+        AgentSecretResponse,
+        agentTextContentDeltaType,
+        agentTextContentEndedType,
+        agentTextContentStartedType,
+        agentToolCallArgumentsDeltaType,
+        agentToolCallEndedType,
+        agentToolCallInProgressType,
+        agentToolCallLogDeltaType,
+        agentToolCallPendingType,
+        agentToolCallStartedType,
+        agentTurnEndedType,
+        agentTurnInterruptedType,
+        agentTurnInterruptAcceptedType,
+        agentTurnInterruptType,
+        agentTurnStartedType,
+        agentTurnStartAcceptedType,
+        agentTurnStartRejectedType,
+        agentTurnStartType,
+        agentTurnSteeredType,
+        agentTurnSteerAcceptedType,
+        agentTurnSteerRejectedType,
+        agentTurnSteerType,
+        agentUsageUpdatedType;
+import 'package:meshagent_agents/meshagent_agents.dart' as agent_sessions;
 import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_flutter_shadcn/chat_bubble_markdown_config.dart';
+import 'package:meshagent_flutter_shadcn/file_preview/file_preview.dart';
+import 'package:mime/mime.dart';
+import 'package:pdfrx/pdfrx.dart';
 import 'package:re_highlight/styles/monokai-sublime.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:uuid/uuid.dart';
@@ -18,58 +79,17 @@ import 'realtime_audio_output.dart';
 import 'tool_call_summary.dart';
 import 'usage_footer_tooltip.dart';
 
-const String _agentRoomMessageType = 'agent-message';
-const String _agentTurnStartType = 'meshagent.agent.turn.start';
-const String _agentTurnSteerType = 'meshagent.agent.turn.steer';
-const String _agentTurnInterruptType = 'meshagent.agent.turn.interrupt';
-const String _agentRealtimeAudioChunkType = 'meshagent.agent.realtime_audio.chunk';
-const String _agentRealtimeAudioCommitType = 'meshagent.agent.realtime_audio.commit';
-const String _agentThreadOpenType = 'meshagent.agent.thread.open';
-const String _agentThreadCloseType = 'meshagent.agent.thread.close';
-const String _agentTurnStartAcceptedType = 'meshagent.agent.turn.start.accepted';
-const String _agentTurnStartRejectedType = 'meshagent.agent.turn.start.rejected';
-const String _agentTurnSteerAcceptedType = 'meshagent.agent.turn.steer.accepted';
-const String _agentTurnSteerRejectedType = 'meshagent.agent.turn.steer.rejected';
-const String _agentTurnInterruptAcceptedType = 'meshagent.agent.turn.interrupt.accepted';
-const String _agentTurnInterruptedType = 'meshagent.agent.turn.interrupted';
-const String _agentTurnStartedType = 'meshagent.agent.turn.started';
-const String _agentTurnSteeredType = 'meshagent.agent.turn.steered';
-const String _agentTurnEndedType = 'meshagent.agent.turn.ended';
-const String _agentAudioInputSpeechStartedType = 'meshagent.agent.audio_input.speech_started';
-const String _agentTextContentStartedType = 'meshagent.agent.text_content.started';
-const String _agentTextContentDeltaType = 'meshagent.agent.text_content.delta';
-const String _agentTextContentEndedType = 'meshagent.agent.text_content.ended';
-const String _agentReasoningContentStartedType = 'meshagent.agent.reasoning_content.started';
-const String _agentReasoningContentDeltaType = 'meshagent.agent.reasoning_content.delta';
-const String _agentReasoningContentEndedType = 'meshagent.agent.reasoning_content.ended';
-const String _agentFileContentStartedType = 'meshagent.agent.file_content.started';
-const String _agentFileContentDeltaType = 'meshagent.agent.file_content.delta';
-const String _agentFileContentEndedType = 'meshagent.agent.file_content.ended';
-const String _agentToolCallPendingType = 'meshagent.agent.tool_call.pending';
-const String _agentToolCallInProgressType = 'meshagent.agent.tool_call.in_progress';
-const String _agentToolCallStartedType = 'meshagent.agent.tool_call.started';
-const String _agentToolCallArgumentsDeltaType = 'meshagent.agent.tool_call.arguments_delta';
-const String _agentToolCallLogDeltaType = 'meshagent.agent.tool_call.log_delta';
-const String _agentToolCallEndedType = 'meshagent.agent.tool_call.ended';
-const String _agentImageGenerationStartedType = 'meshagent.agent.image_generation.started';
-const String _agentImageGenerationPartialType = 'meshagent.agent.image_generation.partial';
-const String _agentImageGenerationCompletedType = 'meshagent.agent.image_generation.completed';
-const String _agentImageGenerationFailedType = 'meshagent.agent.image_generation.failed';
-const String _agentAudioGenerationStartedType = 'meshagent.agent.audio_generation.started';
-const String _agentAudioGenerationDeltaType = 'meshagent.agent.audio_generation.delta';
-const String _agentAudioGenerationCompletedType = 'meshagent.agent.audio_generation.completed';
-const String _agentAudioGenerationFailedType = 'meshagent.agent.audio_generation.failed';
-const String _agentAudioTranscriptionStartedType = 'meshagent.agent.audio_transcription.started';
-const String _agentAudioTranscriptionDeltaType = 'meshagent.agent.audio_transcription.delta';
-const String _agentAudioTranscriptionCompletedType = 'meshagent.agent.audio_transcription.completed';
-const String _agentAudioTranscriptionFailedType = 'meshagent.agent.audio_transcription.failed';
-const String _agentContextCompactedType = 'meshagent.agent.context.compacted';
-const String _agentUsageUpdatedType = 'meshagent.agent.usage.updated';
-const String _agentModelsRequestType = 'meshagent.agent.models.request';
-const String _agentModelsResponseType = 'meshagent.agent.models.response';
-const String _agentModelChangeType = 'meshagent.agent.model.change';
-const String _agentModelChangedType = 'meshagent.agent.model.changed';
 const double _datasetDiffPreviewHorizontalPadding = 16;
+
+typedef DatasetChatAttachmentRenderer = Widget Function(BuildContext context, String path);
+typedef DatasetChatRowsLoader = Stream<List<Map<String, Object?>>> Function({required List<String>? namespace, required String table});
+typedef DatasetChatFileDropHandler = Future<void> Function(String name, Stream<Uint8List> dataStream, int? size);
+typedef DatasetChatGeneratedImageAttachmentRenderer =
+    Widget Function(BuildContext context, DatasetThreadImage image, VoidCallback? onOpenFullscreen);
+typedef DatasetChatImageGalleryBuilder =
+    Widget Function(BuildContext context, List<ChatThreadFeedImage> images, int initialIndex, VoidCallback onClose);
+typedef DatasetChatSecretRequestHandler = Future<AgentSecretResponse> Function(BuildContext context, AgentSecretRequested request);
+typedef DatasetChatDebugRowsChanged = void Function(List<DatasetChatDebugRow> rows);
 
 class DatasetChatAudioFormat {
   const DatasetChatAudioFormat({this.type = 'audio/pcm', this.sampleRate = 24000, this.bitrate});
@@ -111,6 +131,8 @@ class DatasetChatModelOption {
     this.outputFormat,
     this.turnDetection,
     this.realtimeProtocols = const <String>[],
+    this.supportsAttachments = false,
+    this.accepts = const <String>[],
     this.active = false,
   });
 
@@ -126,6 +148,8 @@ class DatasetChatModelOption {
   final DatasetChatAudioFormat? outputFormat;
   final String? turnDetection;
   final List<String> realtimeProtocols;
+  final bool supportsAttachments;
+  final List<String> accepts;
   final bool active;
 
   String get key => '$provider/$model';
@@ -136,7 +160,7 @@ class DatasetChatModelOption {
     return '$displayProvider / $displayModel';
   }
 
-  DatasetChatModelOption copyWith({bool? active}) {
+  DatasetChatModelOption copyWith({bool? active, bool? supportsAttachments, List<String>? accepts}) {
     return DatasetChatModelOption(
       provider: provider,
       providerFriendlyName: providerFriendlyName,
@@ -150,6 +174,8 @@ class DatasetChatModelOption {
       outputFormat: outputFormat,
       turnDetection: turnDetection,
       realtimeProtocols: realtimeProtocols,
+      supportsAttachments: supportsAttachments ?? this.supportsAttachments,
+      accepts: accepts ?? this.accepts,
       active: active ?? this.active,
     );
   }
@@ -164,6 +190,8 @@ class DatasetChatModelController extends ChangeNotifier {
   Future<void> Function(String voice)? _voiceChangeHandler;
   bool _locked = false;
   bool _changing = false;
+  bool _disposed = false;
+  bool _notifyScheduled = false;
 
   List<DatasetChatModelOption> get models => _models;
   DatasetChatModelOption? get activeModel => _activeModel;
@@ -174,6 +202,8 @@ class DatasetChatModelController extends ChangeNotifier {
   List<String> get activeRealtimeProtocols => List<String>.unmodifiable(_activeModel?.realtimeProtocols ?? const <String>[]);
   String get preferredRealtimeProtocol => activeRealtimeProtocols.contains('webrtc') ? 'webrtc' : 'websocket';
   bool get prefersWebrtcRealtime => preferredRealtimeProtocol == 'webrtc';
+  bool get supportsAttachments => _activeModel?.supportsAttachments ?? false;
+  List<String> get acceptedAttachmentMimeTypes => List<String>.unmodifiable(_activeModel?.accepts ?? const <String>[]);
   List<String> get availableVoices =>
       _activeModality == 'audio' ? List<String>.unmodifiable(_activeModel?.availableVoices ?? const <String>[]) : const <String>[];
   List<String> get outputModalities {
@@ -238,7 +268,7 @@ class DatasetChatModelController extends ChangeNotifier {
       return;
     }
     _locked = locked;
-    notifyListeners();
+    _notifyChanged();
   }
 
   void replaceModelsFrom(DatasetChatModelController other) {
@@ -246,7 +276,7 @@ class DatasetChatModelController extends ChangeNotifier {
     _activeModel = other.activeModel?.copyWith();
     _activeModality = other.activeModality;
     _activeVoice = other.activeVoice;
-    notifyListeners();
+    _notifyChanged();
   }
 
   Future<void> changeModel(DatasetChatModelOption option) async {
@@ -254,12 +284,12 @@ class DatasetChatModelController extends ChangeNotifier {
       return;
     }
     _changing = true;
-    notifyListeners();
+    _notifyChanged();
     try {
       await _changeHandler!(option);
     } finally {
       _changing = false;
-      notifyListeners();
+      _notifyChanged();
     }
   }
 
@@ -269,12 +299,12 @@ class DatasetChatModelController extends ChangeNotifier {
       return;
     }
     _changing = true;
-    notifyListeners();
+    _notifyChanged();
     try {
       await _voiceChangeHandler!(normalized);
     } finally {
       _changing = false;
-      notifyListeners();
+      _notifyChanged();
     }
   }
 
@@ -287,7 +317,7 @@ class DatasetChatModelController extends ChangeNotifier {
       return;
     }
     _activeVoice = normalized;
-    notifyListeners();
+    _notifyChanged();
   }
 
   void selectModelLocally(DatasetChatModelOption option) {
@@ -300,7 +330,7 @@ class DatasetChatModelController extends ChangeNotifier {
     _activeModel = option.copyWith(active: true);
     _activeModality = _resolvedOutputModality(_activeModel, _activeModality);
     _activeVoice = _resolvedVoice(_activeModel, option.defaultOutputVoice);
-    notifyListeners();
+    _notifyChanged();
   }
 
   void selectOutputModality(String modality) {
@@ -310,7 +340,7 @@ class DatasetChatModelController extends ChangeNotifier {
     }
     _activeModality = normalized;
     _activeVoice = _resolvedVoice(_activeModel, _activeVoice);
-    notifyListeners();
+    _notifyChanged();
   }
 
   void applyModelsResponse(Map<String, dynamic> payload) {
@@ -361,6 +391,8 @@ class DatasetChatModelController extends ChangeNotifier {
           outputFormat: DatasetChatAudioFormat.fromJson(modelValue['output_format']),
           turnDetection: modelValue['turn_detection']?.toString(),
           realtimeProtocols: _stringList(modelValue['realtime_protocols']),
+          supportsAttachments: modelValue['supports_attachments'] == true,
+          accepts: _stringList(modelValue['accepts']),
           active: modelValue['active'] == true,
         );
         nextModels.add(option);
@@ -381,7 +413,7 @@ class DatasetChatModelController extends ChangeNotifier {
     _activeModel = active?.copyWith(active: true);
     _activeModality = _resolvedOutputModality(_activeModel, _activeModality);
     _activeVoice = _resolvedVoice(_activeModel, _activeVoice);
-    notifyListeners();
+    _notifyChanged();
   }
 
   void applyModelChanged(Map<String, dynamic> payload) {
@@ -391,6 +423,10 @@ class DatasetChatModelController extends ChangeNotifier {
       return;
     }
     final existing = _models.firstWhereOrNull((option) => option.provider == provider && option.model == model);
+    final payloadHasSupportsAttachments = payload.containsKey('supports_attachments');
+    final payloadHasAccepts = payload.containsKey('accepts');
+    final payloadSupportsAttachments = payload['supports_attachments'] == true;
+    final payloadAccepts = _stringList(payload['accepts']);
     final outputModalities = payload['output_modalities'];
     if (outputModalities is List && outputModalities.isNotEmpty) {
       final firstOutputModality = outputModalities.first?.toString().trim();
@@ -399,7 +435,11 @@ class DatasetChatModelController extends ChangeNotifier {
       }
     }
     final active =
-        existing?.copyWith(active: true) ??
+        existing?.copyWith(
+          active: true,
+          supportsAttachments: payloadHasSupportsAttachments ? payloadSupportsAttachments : null,
+          accepts: payloadHasAccepts ? payloadAccepts : null,
+        ) ??
         DatasetChatModelOption(
           provider: provider,
           providerFriendlyName: payload['provider_friendly_name']?.toString() ?? provider,
@@ -410,6 +450,8 @@ class DatasetChatModelController extends ChangeNotifier {
           outputFormat: DatasetChatAudioFormat.fromJson(payload['output_format']),
           turnDetection: payload['turn_detection']?.toString(),
           realtimeProtocols: _stringList(payload['realtime_protocols']),
+          supportsAttachments: payloadSupportsAttachments,
+          accepts: payloadAccepts,
           modalities: const <String>[],
           active: true,
         );
@@ -422,12 +464,122 @@ class DatasetChatModelController extends ChangeNotifier {
     _activeModality = _resolvedOutputModality(_activeModel, _activeModality);
     final payloadVoice = payload['voice']?.toString().trim();
     _activeVoice = _resolvedVoice(_activeModel, payloadVoice == null || payloadVoice.isEmpty ? active.defaultOutputVoice : payloadVoice);
-    notifyListeners();
+    _notifyChanged();
+  }
+
+  void _notifyChanged() {
+    if (_disposed) {
+      return;
+    }
+    if (SchedulerBinding.instance.schedulerPhase == SchedulerPhase.idle) {
+      notifyListeners();
+      return;
+    }
+    if (_notifyScheduled) {
+      return;
+    }
+    _notifyScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _notifyScheduled = false;
+      if (!_disposed) {
+        notifyListeners();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
   }
 }
 
 class DatasetChatThread extends StatefulWidget {
   const DatasetChatThread({
+    super.key,
+    required this.path,
+    this.chatClient,
+    this.disposeChatClient = false,
+    this.controller,
+    this.composerKey,
+    this.agentName,
+    this.emptyStateTitle,
+    this.emptyStateDescription,
+    this.openFile,
+    this.attachmentRenderer,
+    this.toolsBuilder,
+    this.inputPlaceholder,
+    this.attachmentBuilder,
+    this.inputContextMenuBuilder,
+    this.inputOnPressedOutside,
+    this.rowsLoader,
+    this.onFileDrop,
+    this.localParticipant,
+    this.localParticipantName,
+    this.generatedImageAttachmentRenderer,
+    this.imageGalleryBuilder,
+    this.secretRequestHandler,
+    this.onDebugRowsChanged,
+    this.modelController,
+    this.initialShowCompletedToolCalls = false,
+    this.showUsageFooter = false,
+  });
+
+  final agent_sessions.BaseChatClient? chatClient;
+  final bool disposeChatClient;
+  final String path;
+  final ChatThreadController? controller;
+  final GlobalKey? composerKey;
+  final String? agentName;
+  final String? emptyStateTitle;
+  final String? emptyStateDescription;
+  final FutureOr<void> Function(String path)? openFile;
+  final DatasetChatAttachmentRenderer? attachmentRenderer;
+  final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
+  final Widget? inputPlaceholder;
+  final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
+  final EditableTextContextMenuBuilder? inputContextMenuBuilder;
+  final TapRegionCallback? inputOnPressedOutside;
+  final DatasetChatRowsLoader? rowsLoader;
+  final DatasetChatFileDropHandler? onFileDrop;
+  final Participant? localParticipant;
+  final String? localParticipantName;
+  final DatasetChatGeneratedImageAttachmentRenderer? generatedImageAttachmentRenderer;
+  final DatasetChatImageGalleryBuilder? imageGalleryBuilder;
+  final DatasetChatSecretRequestHandler? secretRequestHandler;
+  final DatasetChatDebugRowsChanged? onDebugRowsChanged;
+  final DatasetChatModelController? modelController;
+  final bool initialShowCompletedToolCalls;
+  final bool showUsageFooter;
+
+  @override
+  State<DatasetChatThread> createState() => _DatasetChatThreadState();
+}
+
+class DatasetChatDebugRow {
+  const DatasetChatDebugRow({
+    required this.sequence,
+    required this.timestamp,
+    required this.itemId,
+    required this.turnId,
+    required this.type,
+    required this.row,
+    required this.data,
+  });
+
+  final int? sequence;
+  final DateTime? timestamp;
+  final String? itemId;
+  final String? turnId;
+  final String? type;
+  final Map<String, Object?> row;
+  final Map<String, Object?> data;
+
+  String get signature => jsonEncode(_debugJsonValue(row));
+}
+
+class RoomDatasetChatThread extends StatefulWidget {
+  const RoomDatasetChatThread({
     super.key,
     required this.room,
     required this.path,
@@ -437,6 +589,7 @@ class DatasetChatThread extends StatefulWidget {
     this.emptyStateTitle,
     this.emptyStateDescription,
     this.openFile,
+    this.attachmentRenderer,
     this.toolsBuilder,
     this.inputPlaceholder,
     this.attachmentBuilder,
@@ -455,6 +608,7 @@ class DatasetChatThread extends StatefulWidget {
   final String? emptyStateTitle;
   final String? emptyStateDescription;
   final FutureOr<void> Function(String path)? openFile;
+  final DatasetChatAttachmentRenderer? attachmentRenderer;
   final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
   final Widget? inputPlaceholder;
   final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
@@ -465,21 +619,106 @@ class DatasetChatThread extends StatefulWidget {
   final bool showUsageFooter;
 
   @override
-  State<DatasetChatThread> createState() => _DatasetChatThreadState();
+  State<RoomDatasetChatThread> createState() => _RoomDatasetChatThreadState();
+}
+
+class _RoomDatasetChatThreadState extends State<RoomDatasetChatThread> {
+  late ChatThreadController _controller;
+  late bool _ownsController;
+  late agent_sessions.MessagingChatClient _chatClient;
+
+  @override
+  void initState() {
+    super.initState();
+    _ownsController = widget.controller == null;
+    _controller = widget.controller ?? ChatThreadController(room: widget.room);
+    _chatClient = agent_sessions.MessagingChatClient(room: widget.room, agentName: widget.agentName);
+  }
+
+  @override
+  void didUpdateWidget(covariant RoomDatasetChatThread oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller || oldWidget.room != widget.room) {
+      if (_ownsController) {
+        _controller.dispose();
+      }
+      _ownsController = widget.controller == null;
+      _controller = widget.controller ?? ChatThreadController(room: widget.room);
+    }
+    if (oldWidget.room != widget.room || oldWidget.agentName != widget.agentName) {
+      unawaited(_chatClient.stop());
+      _chatClient = agent_sessions.MessagingChatClient(room: widget.room, agentName: widget.agentName);
+    }
+  }
+
+  @override
+  void dispose() {
+    unawaited(_chatClient.stop());
+    if (_ownsController) {
+      _controller.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DatasetChatThread(
+      key: widget.key,
+      path: widget.path,
+      chatClient: _chatClient,
+      controller: _controller,
+      composerKey: widget.composerKey,
+      agentName: widget.agentName,
+      emptyStateTitle: widget.emptyStateTitle,
+      emptyStateDescription: widget.emptyStateDescription,
+      openFile: widget.openFile,
+      attachmentRenderer: widget.attachmentRenderer ?? (context, path) => ChatThreadPreview(room: widget.room, path: path),
+      toolsBuilder: widget.toolsBuilder,
+      inputPlaceholder: widget.inputPlaceholder,
+      attachmentBuilder: widget.attachmentBuilder,
+      inputContextMenuBuilder: widget.inputContextMenuBuilder,
+      inputOnPressedOutside: widget.inputOnPressedOutside,
+      rowsLoader: ({required namespace, required table}) {
+        return widget.room.datasets.searchStream(table: table, namespace: namespace).map((batch) => batch.toRows());
+      },
+      onFileDrop: (name, dataStream, size) => _controller.uploadFile(name, dataStream, size ?? 0),
+      localParticipant: widget.room.localParticipant,
+      generatedImageAttachmentRenderer: (context, image, onOpenFullscreen) => ChatThreadImageAttachment(
+        room: widget.room,
+        imageId: image.imageId,
+        imageUri: image.uri,
+        fallbackMimeType: image.mimeType,
+        status: image.status,
+        statusDetail: image.statusDetail,
+        widthPx: image.width,
+        heightPx: image.height,
+        roundedCorners: false,
+        onOpenFullscreen: onOpenFullscreen,
+      ),
+      imageGalleryBuilder: (context, images, initialIndex, onClose) =>
+          ChatThreadImageGalleryPage(room: widget.room, images: images, initialIndex: initialIndex, onClose: onClose),
+      modelController: widget.modelController,
+      initialShowCompletedToolCalls: widget.initialShowCompletedToolCalls,
+      showUsageFooter: widget.showUsageFooter,
+    );
+  }
 }
 
 class _DatasetChatThreadState extends State<DatasetChatThread> {
-  StreamSubscription<ArrowRecordBatch>? _tableLoadSubscription;
-  StreamSubscription<RoomEvent>? _roomSubscription;
+  StreamSubscription<List<Map<String, Object?>>>? _rowsLoadSubscription;
   Timer? _tableLoadRetryTimer;
+  agent_sessions.BaseChatClient? _chatClient;
+  bool _ownsChatClient = false;
+  final AgentThreadMessageStatusStore _statusStore = AgentThreadMessageStatusStore();
+  agent_sessions.ChatThreadSession? _threadSession;
   final Map<String, Map<String, Object?>> _rowsByItemId = {};
   final Map<String, Map<String, Object?>> _agentRowsByItemId = {};
+  final Map<String, Map<String, Object?>> _agentDebugRowsByKey = {};
   final List<Map<String, dynamic>> _bufferedAgentPayloads = <Map<String, dynamic>>[];
   final TextStreamAccumulator _liveTextContent = TextStreamAccumulator();
   final TextStreamAccumulator _liveReasoningContent = TextStreamAccumulator();
   final FileStreamAccumulator _liveFileContent = FileStreamAccumulator();
   final Map<String, String> _realtimeAudioCommitItemIdsByTurnId = <String, String>{};
-  final Map<String, _DatasetPendingAgentWait> _pendingAgentWaits = <String, _DatasetPendingAgentWait>{};
   final _DatasetThreadRealtimeAudioPlayer _audioPlayer = _DatasetThreadRealtimeAudioPlayer();
   late ChatThreadController _controller;
   late bool _ownsController;
@@ -493,8 +732,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   ChatThreadStatusState _status = const ChatThreadStatusState();
   AgentUsageSnapshot? _usage;
   int _nextAgentSequence = 0;
-  String? _openedPath;
-  String? _openedAgentParticipantId;
+  int _threadSessionMessageCursor = 0;
+  String? _lastDebugRowsSignature;
   final OverlayPortalController _imageViewerController = OverlayPortalController();
   LocalHistoryEntry? _imageViewerHistoryEntry;
   List<ChatThreadFeedImage> _overlayImages = const <ChatThreadFeedImage>[];
@@ -506,17 +745,15 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   void initState() {
     super.initState();
     _ownsController = widget.controller == null;
-    _controller = widget.controller ?? ChatThreadController(room: widget.room);
+    _controller = widget.controller ?? ChatThreadController(room: null);
     _ownsModelController = widget.modelController == null;
     _modelController = widget.modelController ?? DatasetChatModelController();
     _modelController.bindChangeHandler(_changeModel);
     _modelController.bindVoiceChangeHandler(_changeVoice);
     _composerInputKey = widget.composerKey ?? GlobalObjectKey(_controller);
-    _roomSubscription = widget.room.listen(_onRoomEvent);
-    widget.room.messaging.addListener(_onMessagingChanged);
     _refreshStatus();
     _startWatch();
-    _syncOpenSubscription();
+    _bindChatSession();
   }
 
   @override
@@ -525,16 +762,12 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (oldWidget.composerKey != widget.composerKey) {
       _composerInputKey = widget.composerKey ?? GlobalObjectKey(_controller);
     }
-    if (oldWidget.room != widget.room || oldWidget.controller != widget.controller) {
-      _roomSubscription?.cancel();
-      oldWidget.room.messaging.removeListener(_onMessagingChanged);
-      _roomSubscription = widget.room.listen(_onRoomEvent);
-      widget.room.messaging.addListener(_onMessagingChanged);
+    if (oldWidget.controller != widget.controller) {
       if (_ownsController) {
         _controller.dispose();
       }
       _ownsController = widget.controller == null;
-      _controller = widget.controller ?? ChatThreadController(room: widget.room);
+      _controller = widget.controller ?? ChatThreadController(room: null);
       _composerInputKey = widget.composerKey ?? GlobalObjectKey(_controller);
     }
     if (oldWidget.modelController != widget.modelController) {
@@ -547,28 +780,35 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       _modelController.bindChangeHandler(_changeModel);
       _modelController.bindVoiceChangeHandler(_changeVoice);
     }
-    if (oldWidget.path != widget.path || oldWidget.agentName != widget.agentName || oldWidget.room != widget.room) {
-      _cancelPendingAgentWaits(oldWidget.path);
+    if (oldWidget.path != widget.path ||
+        oldWidget.agentName != widget.agentName ||
+        oldWidget.rowsLoader != widget.rowsLoader ||
+        oldWidget.chatClient != widget.chatClient) {
       _usage = null;
       _refreshStatus();
-      _syncOpenSubscription();
     }
-    if (oldWidget.path != widget.path || oldWidget.room != widget.room) {
+    if (oldWidget.path != widget.path || oldWidget.rowsLoader != widget.rowsLoader) {
       _startWatch();
+    }
+    if (oldWidget.path != widget.path ||
+        oldWidget.agentName != widget.agentName ||
+        oldWidget.rowsLoader != widget.rowsLoader ||
+        oldWidget.chatClient != widget.chatClient) {
+      _bindChatSession();
     }
   }
 
   @override
   void dispose() {
     _tableLoadRetryTimer?.cancel();
-    _tableLoadSubscription?.cancel();
-    _closeOpenSubscription();
-    _roomSubscription?.cancel();
+    _rowsLoadSubscription?.cancel();
+    _closeChatSession();
+    if (_ownsChatClient || widget.disposeChatClient) {
+      unawaited(_chatClient?.stop());
+    }
     final historyEntry = _imageViewerHistoryEntry;
     _imageViewerHistoryEntry = null;
     historyEntry?.remove();
-    widget.room.messaging.removeListener(_onMessagingChanged);
-    _cancelPendingAgentWaits(widget.path);
     if (_ownsController) {
       _controller.dispose();
     }
@@ -583,9 +823,11 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   void _startWatch() {
     _tableLoadGeneration += 1;
     _tableLoadRetryTimer?.cancel();
-    _tableLoadSubscription?.cancel();
+    _rowsLoadSubscription?.cancel();
+    _statusStore.clearThread(widget.path);
     _rowsByItemId.clear();
     _agentRowsByItemId.clear();
+    _agentDebugRowsByKey.clear();
     _bufferedAgentPayloads.clear();
     _liveTextContent.clear();
     _liveReasoningContent.clear();
@@ -603,31 +845,40 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       return;
     }
 
+    if (widget.rowsLoader == null) {
+      _ready = true;
+      _materializePendingMessagesForThread();
+      return;
+    }
+
     _loadDatasetRows(generation: _tableLoadGeneration);
   }
 
   void _loadDatasetRows({required int generation}) {
     _tableLoadRetryTimer?.cancel();
-    _tableLoadSubscription?.cancel();
+    _rowsLoadSubscription?.cancel();
     final loadedRowsByItemId = <String, Map<String, Object?>>{};
     try {
       final ref = _DatasetThreadRef.parse(widget.path);
-      _tableLoadSubscription = widget.room.datasets
-          .searchStream(table: ref.table, namespace: ref.namespace)
-          .listen(
-            (batch) {
-              if (!mounted || generation != _tableLoadGeneration) {
-                return;
-              }
-              _applyRowsToMap(batch.toRows(), loadedRowsByItemId);
-            },
-            onError: (Object error, StackTrace stackTrace) {
-              _handleTableLoadError(error, stackTrace, generation: generation);
-            },
-            onDone: () {
-              _finishDatasetRowsLoad(loadedRowsByItemId, generation: generation);
-            },
-          );
+      final rowsLoader = widget.rowsLoader;
+      if (rowsLoader == null) {
+        _ready = true;
+        return;
+      }
+      _rowsLoadSubscription = rowsLoader(table: ref.table, namespace: ref.namespace).listen(
+        (rows) {
+          if (!mounted || generation != _tableLoadGeneration) {
+            return;
+          }
+          _applyRowsToMap(rows, loadedRowsByItemId);
+        },
+        onError: (Object error, StackTrace stackTrace) {
+          _handleTableLoadError(error, stackTrace, generation: generation);
+        },
+        onDone: () {
+          _finishDatasetRowsLoad(loadedRowsByItemId, generation: generation);
+        },
+      );
     } catch (error) {
       _error = error;
       _fatalError = true;
@@ -720,7 +971,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         continue;
       }
       final rawType = data['type']?.toString();
-      final message = rawType == _agentUsageUpdatedType
+      final message = rawType == agentUsageUpdatedType
           ? data
           : data['kind'] == 'usage'
           ? _mapValue(data['message'])
@@ -748,6 +999,34 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         .toList(growable: false);
     for (final liveItemId in liveItemIds) {
       _agentRowsByItemId.remove(liveItemId);
+    }
+    _removeReconciledAgentDebugRowsForDatasetRow(datasetRow);
+  }
+
+  void _removeReconciledAgentDebugRowsForDatasetRow(Map<String, Object?> datasetRow) {
+    final datasetData = _rowData(datasetRow);
+    final datasetMessageId = datasetData?['message_id']?.toString().trim();
+    final datasetItemId = datasetRow['item_id']?.toString().trim();
+    final datasetType = datasetData?['type']?.toString().trim();
+    final keys = _agentDebugRowsByKey.entries
+        .where((entry) {
+          final liveData = _rowData(entry.value);
+          final liveMessageId = liveData?['message_id']?.toString().trim();
+          if (datasetMessageId != null && datasetMessageId.isNotEmpty && liveMessageId == datasetMessageId) {
+            return true;
+          }
+          final liveItemId = entry.value['item_id']?.toString().trim();
+          final liveType = liveData?['type']?.toString().trim();
+          return datasetItemId != null &&
+              datasetItemId.isNotEmpty &&
+              liveItemId == datasetItemId &&
+              datasetType != null &&
+              datasetType == liveType;
+        })
+        .map((entry) => entry.key)
+        .toList(growable: false);
+    for (final key in keys) {
+      _agentDebugRowsByKey.remove(key);
     }
   }
 
@@ -804,9 +1083,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   int _maxVisibleDatasetSequence() {
     var maxSequence = -1;
     final rows = _rowsByItemId.values.toList(growable: false);
-    final turnInputPayloadsById = _turnInputPayloadsById(rows);
     for (final row in rows) {
-      final message = _messageForRow(row, turnInputPayloadsById: turnInputPayloadsById);
+      final message = _messageForRow(row);
       if (message == null || !_shouldRenderDatasetThreadMessage(message)) {
         continue;
       }
@@ -826,43 +1104,99 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return _rowsByItemId.values.any((row) => row['item_id']?.toString() == normalized);
   }
 
-  void _onMessagingChanged() {
-    if (!mounted) {
-      return;
-    }
-    _refreshStatus(notify: true);
-    _syncOpenSubscription();
-  }
-
-  void _onRoomEvent(RoomEvent event) {
-    if (!mounted) {
-      return;
-    }
-    if (event is! RoomMessageEvent) {
-      return;
-    }
-    if (event.message.type == _agentRoomMessageType) {
-      final attachment = event.message.attachment;
-      final message = event.message.message;
-      final payload = message['type'] is String ? message : message['payload'];
-      if (payload is Map<String, dynamic>) {
-        trackAgentThreadStatusPayload(room: widget.room, payload: payload);
-        if (_shouldBufferAgentPayload(payload)) {
-          _bufferedAgentPayloads.add(Map<String, dynamic>.from(payload));
-        } else {
-          _handleAgentMessagePayload(payload, attachment: attachment);
-        }
-      } else if (payload is Map) {
-        final normalized = Map<String, dynamic>.from(payload);
-        trackAgentThreadStatusPayload(room: widget.room, payload: normalized);
-        if (_shouldBufferAgentPayload(normalized)) {
-          _bufferedAgentPayloads.add(normalized);
-        } else {
-          _handleAgentMessagePayload(normalized, attachment: attachment);
-        }
+  void _bindChatSession() {
+    final existingClient = _chatClient;
+    final injectedClient = widget.chatClient;
+    final clientChanged = !identical(existingClient, injectedClient);
+    if (clientChanged) {
+      _threadSession?.removeListener(_onThreadSessionChanged);
+      _threadSession = null;
+      _threadSessionMessageCursor = 0;
+      if (existingClient != null && (_ownsChatClient || widget.disposeChatClient)) {
+        unawaited(existingClient.stop());
+      }
+      if (injectedClient != null) {
+        _chatClient = injectedClient;
+        _ownsChatClient = false;
+      } else {
+        _chatClient = null;
+        _ownsChatClient = false;
+      }
+      final nextClient = _chatClient;
+      if (nextClient != null) {
+        unawaited(nextClient.start());
       }
     }
-    _refreshStatus(notify: true);
+    final chatClient = _chatClient;
+    if (chatClient == null) {
+      return;
+    }
+
+    final currentSession = _threadSession;
+    if (currentSession != null && currentSession.threadPath == widget.path) {
+      return;
+    }
+
+    currentSession?.removeListener(_onThreadSessionChanged);
+    final nextSession = chatClient.openThread(widget.path);
+    _threadSession = nextSession;
+    _threadSessionMessageCursor = 0;
+    nextSession.addListener(_onThreadSessionChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !identical(_threadSession, nextSession)) {
+        return;
+      }
+      _drainThreadSessionMessages(notify: true, scroll: false);
+    });
+  }
+
+  void _closeChatSession() {
+    final session = _threadSession;
+    _threadSession = null;
+    _threadSessionMessageCursor = 0;
+    session?.removeListener(_onThreadSessionChanged);
+    if (session != null) {
+      unawaited(session.close());
+    }
+  }
+
+  void _onThreadSessionChanged() {
+    if (!mounted) {
+      return;
+    }
+    final changed = _drainThreadSessionMessages();
+    if (!changed && mounted) {
+      setState(() {});
+    }
+  }
+
+  bool _drainThreadSessionMessages({bool notify = true, bool scroll = true}) {
+    final session = _threadSession;
+    if (session == null) {
+      return false;
+    }
+    final messages = session.messages;
+    var changed = false;
+    while (_threadSessionMessageCursor < messages.length) {
+      final event = messages[_threadSessionMessageCursor];
+      _threadSessionMessageCursor += 1;
+      final payload = event.payload;
+      trackAgentThreadStatusMessageInStore(store: _statusStore, message: event.message, path: widget.path);
+      if (_shouldBufferAgentPayload(payload)) {
+        _bufferedAgentPayloads.add(Map<String, dynamic>.from(payload));
+      } else {
+        _handleAgentMessagePayload(payload, attachment: event.attachment, notify: false, scroll: false);
+      }
+      changed = true;
+    }
+    _refreshStatus();
+    if (changed && notify && mounted) {
+      setState(() {});
+      if (scroll) {
+        _controller.scrollThreadToBottom(animated: false);
+      }
+    }
+    return changed;
   }
 
   bool _shouldBufferAgentPayload(Map<String, dynamic> payload) {
@@ -874,10 +1208,10 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
 
   bool _isModelPayload(Map<String, dynamic> payload) {
     final type = payload['type'];
-    return type == _agentModelsRequestType ||
-        type == _agentModelsResponseType ||
-        type == _agentModelChangeType ||
-        type == _agentModelChangedType;
+    return type == agentModelsRequestType ||
+        type == agentModelsResponseType ||
+        type == agentModelChangeType ||
+        type == agentModelChangedType;
   }
 
   bool _agentPayloadBelongsToThread(Map<String, dynamic> payload) {
@@ -890,20 +1224,120 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   void _handleAgentMessagePayload(Map<String, dynamic> payload, {Uint8List? attachment, bool notify = true, bool scroll = true}) {
+    final debugChanged = _recordRawAgentDebugPayload(payload);
     if (_handleUsagePayload(payload, notify: notify)) {
+      if (debugChanged && notify && mounted) {
+        setState(() {});
+      }
       return;
     }
     if (_handleModelPayload(payload)) {
+      if (debugChanged && notify && mounted) {
+        setState(() {});
+      }
       return;
     }
-    final changed = _applyAgentMessagePayload(payload, attachment: attachment);
-    _controller.handleAgentMessagePayload(payload);
+    if (payload['type'] == agentSecretRequestedType) {
+      unawaited(_handleSecretRequestPayload(payload));
+    }
+    if (payload['type'] == agentClientToolCallRequestedType) {
+      unawaited(_handleClientToolCallRequestPayload(payload));
+    }
+    final changed = _applyAgentMessagePayload(payload, attachment: attachment) || debugChanged;
+    try {
+      _controller.handleAgentMessage(agent_sessions.AgentMessage.fromJson(payload));
+    } catch (_) {}
     if (changed && notify && mounted) {
       setState(() {});
       if (scroll) {
         _controller.scrollThreadToBottom(animated: false);
       }
     }
+  }
+
+  bool _recordRawAgentDebugPayload(Map<String, dynamic> payload) {
+    if (!_agentPayloadBelongsToThread(payload)) {
+      return false;
+    }
+    final explicitItemId = _payloadExplicitItemId(payload);
+    final messageId = payload['message_id']?.toString().trim();
+    final itemId = explicitItemId ?? (messageId != null && messageId.isNotEmpty ? messageId : const Uuid().v4());
+    final key = messageId != null && messageId.isNotEmpty
+        ? 'message:$messageId'
+        : [
+            'live',
+            itemId,
+            payload['type']?.toString() ?? '',
+            payload['turn_id']?.toString() ?? '',
+            _agentDebugRowsByKey.length.toString(),
+          ].join(':');
+    final existing = _agentDebugRowsByKey[key];
+    final row = <String, Object?>{
+      'turn_id': _payloadTurnId(payload),
+      'item_id': itemId,
+      'type': payload['type']?.toString(),
+      'sequence': existing?['sequence'] ?? _nextAgentSequence++,
+      'timestamp': _timestampFromPayload(payload) ?? existing?['timestamp'] ?? DateTime.now().toUtc(),
+      'data': Map<String, Object?>.from(payload),
+    };
+    if (existing != null && const DeepCollectionEquality().equals(existing, row)) {
+      return false;
+    }
+    _agentDebugRowsByKey[key] = row;
+    return true;
+  }
+
+  Future<void> _handleSecretRequestPayload(Map<String, dynamic> payload) async {
+    final chatClient = _chatClient;
+    if (chatClient == null) {
+      return;
+    }
+    AgentSecretRequested request;
+    try {
+      request = AgentSecretRequested.fromJson(payload);
+    } catch (_) {
+      return;
+    }
+
+    AgentSecretResponse response;
+    final handler = widget.secretRequestHandler;
+    if (handler == null) {
+      response = AgentSecretResponse(
+        threadId: request.threadId,
+        turnId: request.turnId,
+        requestId: request.requestId,
+        error: 'No secret request handler is configured.',
+      );
+    } else {
+      try {
+        response = await handler(context, request);
+      } catch (error) {
+        response = AgentSecretResponse(
+          threadId: request.threadId,
+          turnId: request.turnId,
+          requestId: request.requestId,
+          error: error.toString(),
+        );
+      }
+    }
+    await chatClient.sendAgentMessage(response);
+  }
+
+  Future<void> _handleClientToolCallRequestPayload(Map<String, dynamic> payload) async {
+    final session = _threadSession;
+    if (session == null) {
+      return;
+    }
+    AgentClientToolCallRequested request;
+    try {
+      request = AgentClientToolCallRequested.fromJson(payload);
+    } catch (_) {
+      return;
+    }
+
+    final response = await _controller.executeClientToolCall(request);
+
+    await session.respondToClientToolCall(turnId: request.turnId, requestId: request.requestId, response: response);
   }
 
   bool _handleUsagePayload(Map<String, dynamic> payload, {bool notify = true}) {
@@ -934,33 +1368,43 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   bool _applyAgentMessagePayload(Map<String, dynamic> payload, {Uint8List? attachment}) {
-    if (payload['thread_id'] != widget.path) {
-      return false;
-    }
-
     final type = payload['type'];
     if (type is! String) {
       return false;
     }
-    if (type == _agentTurnStartRejectedType || type == _agentTurnSteerRejectedType) {
+
+    if (type == agentConnectionStatusType) {
+      return _upsertAgentRow(
+        itemId: _payloadItemId(payload),
+        turnId: null,
+        timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
+        data: payload,
+      );
+    }
+
+    if (payload['thread_id'] != widget.path) {
+      return false;
+    }
+
+    if (type == agentTurnStartRejectedType || type == agentTurnSteerRejectedType) {
       return false;
     }
 
     var changed = false;
 
     switch (type) {
-      case _agentTurnStartType:
-      case _agentTurnSteerType:
-      case _agentTurnInterruptType:
+      case agentTurnStartType:
+      case agentTurnSteerType:
+      case agentTurnInterruptType:
         unawaited(_audioPlayer.stopAll());
         break;
-      case _agentModelsRequestType:
-      case _agentModelsResponseType:
-      case _agentModelChangeType:
-      case _agentModelChangedType:
+      case agentModelsRequestType:
+      case agentModelsResponseType:
+      case agentModelChangeType:
+      case agentModelChangedType:
         break;
-      case _agentTurnStartAcceptedType:
-      case _agentTurnSteerAcceptedType:
+      case agentTurnStartAcceptedType:
+      case agentTurnSteerAcceptedType:
         final sourceMessageId = payload['source_message_id']?.toString().trim();
         final turnId = _payloadTurnId(payload);
         if (sourceMessageId != null && sourceMessageId.isNotEmpty && turnId != null && turnId.trim().isNotEmpty) {
@@ -975,7 +1419,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
           }
         }
         break;
-      case _agentTurnStartedType:
+      case agentTurnStartedType:
         changed =
             _upsertAgentRow(
               itemId: _turnApplicationItemId(payload, 'started'),
@@ -986,12 +1430,12 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             changed;
         changed = _materializePendingMessage(payload['source_message_id']?.toString()) || changed;
         break;
-      case _agentTurnInterruptAcceptedType:
-      case _agentTurnInterruptedType:
-      case _agentAudioInputSpeechStartedType:
+      case agentTurnInterruptAcceptedType:
+      case agentTurnInterruptedType:
+      case agentAudioInputSpeechStartedType:
         unawaited(_audioPlayer.stopAll());
         break;
-      case _agentTurnSteeredType:
+      case agentTurnSteeredType:
         changed =
             _upsertAgentRow(
               itemId: _turnApplicationItemId(payload, 'steered'),
@@ -1002,7 +1446,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             changed;
         changed = _materializePendingMessage(payload['source_message_id']?.toString()) || changed;
         break;
-      case _agentRealtimeAudioCommitType:
+      case agentRealtimeAudioCommitType:
         final turnId = _payloadTurnId(payload);
         final itemId = _payloadItemId(payload);
         if (turnId != null && turnId.trim().isNotEmpty) {
@@ -1024,12 +1468,12 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         break;
-      case _agentTextContentStartedType:
-      case _agentAudioTranscriptionStartedType:
+      case agentTextContentStartedType:
+      case agentAudioTranscriptionStartedType:
         _liveTextContent.upsert(itemId: _transcriptionItemId(payload), turnId: _payloadTurnId(payload), phase: _agentMessagePhase(payload));
         break;
-      case _agentTextContentDeltaType:
-      case _agentAudioTranscriptionDeltaType:
+      case agentTextContentDeltaType:
+      case agentAudioTranscriptionDeltaType:
         final contentRole = _textContentRoleFromPayload(payload);
         changed =
             _appendAgentRowText(
@@ -1043,8 +1487,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         break;
-      case _agentTextContentEndedType:
-      case _agentAudioTranscriptionCompletedType:
+      case agentTextContentEndedType:
+      case agentAudioTranscriptionCompletedType:
         final contentRole = _textContentRoleFromPayload(payload);
         final itemId = _transcriptionItemId(payload);
         final accumulatedText = _liveTextContent.complete(itemId);
@@ -1065,13 +1509,13 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         break;
-      case _agentAudioTranscriptionFailedType:
+      case agentAudioTranscriptionFailedType:
         _liveTextContent.remove(_transcriptionItemId(payload));
         break;
-      case _agentAudioGenerationStartedType:
+      case agentAudioGenerationStartedType:
         unawaited(_audioPlayer.start(_audioPlaybackStreamItemId(payload)));
         break;
-      case _agentAudioGenerationDeltaType:
+      case agentAudioGenerationDeltaType:
         unawaited(
           _audioPlayer.append(
             itemId: _audioPlaybackStreamItemId(payload),
@@ -1081,13 +1525,13 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
           ),
         );
         break;
-      case _agentAudioGenerationCompletedType:
+      case agentAudioGenerationCompletedType:
         unawaited(_audioPlayer.complete(_audioPlaybackStreamItemId(payload)));
         break;
-      case _agentAudioGenerationFailedType:
+      case agentAudioGenerationFailedType:
         unawaited(_audioPlayer.stop(_audioPlaybackStreamItemId(payload)));
         break;
-      case _agentReasoningContentStartedType:
+      case agentReasoningContentStartedType:
         _liveReasoningContent.upsert(itemId: _payloadItemId(payload), turnId: _payloadTurnId(payload));
         changed =
             _upsertAgentRow(
@@ -1097,7 +1541,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         break;
-      case _agentReasoningContentDeltaType:
+      case agentReasoningContentDeltaType:
         changed =
             _appendAgentRowText(
               itemId: _payloadItemId(payload),
@@ -1110,7 +1554,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         break;
-      case _agentReasoningContentEndedType:
+      case agentReasoningContentEndedType:
         final accumulatedReasoning = _liveReasoningContent.complete(_payloadItemId(payload));
         _liveReasoningContent.remove(_payloadItemId(payload));
         changed =
@@ -1128,7 +1572,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         break;
-      case _agentFileContentStartedType:
+      case agentFileContentStartedType:
         _liveFileContent.upsert(itemId: _payloadItemId(payload), turnId: _payloadTurnId(payload));
         changed =
             _upsertAgentRow(
@@ -1138,7 +1582,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         break;
-      case _agentFileContentDeltaType:
+      case agentFileContentDeltaType:
         changed =
             _appendAgentRowUrl(
               itemId: _payloadItemId(payload),
@@ -1148,7 +1592,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         break;
-      case _agentFileContentEndedType:
+      case agentFileContentEndedType:
         final endUrl = payload['url']?.toString();
         if (endUrl != null && endUrl.trim().isNotEmpty) {
           _liveFileContent.appendUrl(
@@ -1175,10 +1619,10 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         break;
-      case _agentToolCallPendingType:
-      case _agentToolCallInProgressType:
-      case _agentToolCallStartedType:
-      case _agentToolCallEndedType:
+      case agentToolCallPendingType:
+      case agentToolCallInProgressType:
+      case agentToolCallStartedType:
+      case agentToolCallEndedType:
         final itemId = _payloadItemId(payload);
         final existingData = _mapValue(_agentRowsByItemId[itemId]?['data']);
         final tool = payload['tool']?.toString() ?? payload['tool_name']?.toString() ?? payload['name']?.toString() ?? '';
@@ -1198,10 +1642,10 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         final errorData = errorMessage == null ? const <String, Object?>{} : <String, Object?>{'error_message': errorMessage};
         final logs = _stringList(existingData?['logs']);
         final isImageGeneration = tool.trim().toLowerCase() == 'image_generation';
-        final status = type == _agentToolCallEndedType
+        final status = type == agentToolCallEndedType
             ? (errorMessage == null ? 'completed' : 'failed')
-            : (type == _agentToolCallPendingType ? 'pending' : 'running');
-        if (isImageGeneration && type == _agentToolCallEndedType && payload['error'] == null) {
+            : (type == agentToolCallPendingType ? 'pending' : 'running');
+        if (isImageGeneration && type == agentToolCallEndedType && payload['error'] == null) {
           break;
         }
         changed =
@@ -1235,7 +1679,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                         arguments: arguments,
                         logs: logs,
                         errorMessage: errorMessage,
-                        completed: type == _agentToolCallEndedType,
+                        completed: type == agentToolCallEndedType,
                         pending: _toolCallStatusIsPending(status),
                         argumentDeltaBytes: _intValue(existingData?['argument_delta_bytes']),
                       ),
@@ -1244,7 +1688,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         break;
-      case _agentToolCallArgumentsDeltaType:
+      case agentToolCallArgumentsDeltaType:
         changed =
             _appendAgentToolArgumentDelta(
               itemId: _payloadItemId(payload),
@@ -1254,7 +1698,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         break;
-      case _agentToolCallLogDeltaType:
+      case agentToolCallLogDeltaType:
         changed =
             _appendAgentToolLogs(
               itemId: _payloadItemId(payload),
@@ -1264,10 +1708,10 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         break;
-      case _agentImageGenerationStartedType:
-      case _agentImageGenerationPartialType:
-      case _agentImageGenerationCompletedType:
-      case _agentImageGenerationFailedType:
+      case agentImageGenerationStartedType:
+      case agentImageGenerationPartialType:
+      case agentImageGenerationCompletedType:
+      case agentImageGenerationFailedType:
         changed =
             _upsertAgentRow(
               itemId: _payloadItemId(payload),
@@ -1285,7 +1729,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         break;
-      case _agentContextCompactedType:
+      case agentContextCompactedType:
         changed =
             _upsertAgentRow(
               itemId: _payloadItemId(payload),
@@ -1301,7 +1745,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         break;
-      case _agentTurnEndedType:
+      case agentTurnEndedType:
         final errorMessage = agentTurnEndedErrorMessage(payload);
         if (errorMessage == null) {
           break;
@@ -1339,7 +1783,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     for (final pending in _status.pendingMessages) {
       combined[pending.messageId] = pending;
     }
-    final currentStatus = resolveChatThreadStatus(room: widget.room, path: widget.path, agentName: widget.agentName, previous: _status);
+    final currentStatus = resolveChatThreadStatusFromStore(store: _statusStore, path: widget.path, previous: _status);
     for (final pending in currentStatus.pendingMessages) {
       combined[pending.messageId] = pending;
     }
@@ -1363,7 +1807,11 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (pending == null) {
       return false;
     }
-    final attachments = pending.attachments.map(_normalizeAgentAttachmentUrl).whereType<String>().toList(growable: false);
+    final attachments = [
+      for (final attachment in pending.attachments)
+        if (_normalizeAgentAttachmentUrl(attachment.url) case final normalizedUrl?)
+          {'url': normalizedUrl, if (attachment.name?.trim().isNotEmpty == true) 'name': attachment.name!.trim()},
+    ];
     return _upsertAgentRow(
       itemId: pending.messageId,
       turnId: null,
@@ -1374,10 +1822,10 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
 
   String _transcriptionItemId(Map<String, dynamic> payload) {
     final type = payload['type']?.toString();
-    if (type != _agentAudioTranscriptionStartedType &&
-        type != _agentAudioTranscriptionDeltaType &&
-        type != _agentAudioTranscriptionCompletedType &&
-        type != _agentAudioTranscriptionFailedType) {
+    if (type != agentAudioTranscriptionStartedType &&
+        type != agentAudioTranscriptionDeltaType &&
+        type != agentAudioTranscriptionCompletedType &&
+        type != agentAudioTranscriptionFailedType) {
       return _payloadItemId(payload);
     }
     if (_textContentRoleFromPayload(payload) != 'user') {
@@ -1450,8 +1898,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     }
 
     final liveMessage = _messageForRow(liveRow);
-    final turnInputPayloadsById = _turnInputPayloadsById([..._rowsByItemId.values, datasetRow]);
-    final datasetMessage = _messageForRow(datasetRow, turnInputPayloadsById: turnInputPayloadsById);
+    final datasetMessage = _messageForRow(datasetRow);
     if (liveMessage == null || datasetMessage == null) {
       return false;
     }
@@ -1606,7 +2053,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   void _refreshStatus({bool notify = false}) {
-    final next = resolveChatThreadStatus(room: widget.room, path: widget.path, agentName: widget.agentName, previous: _status);
+    final next = resolveChatThreadStatusFromStore(store: _statusStore, path: widget.path, previous: _status);
     _status = next;
     _modelController.setLocked(next.turnId != null);
     if (notify && mounted) {
@@ -1615,214 +2062,42 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   RemoteParticipant? _agentParticipant() {
-    final normalizedAgentName = widget.agentName?.trim();
-    for (final participant in widget.room.messaging.remoteParticipants) {
-      if (normalizedAgentName != null && normalizedAgentName.isNotEmpty && participant.getAttribute('name') != normalizedAgentName) {
-        continue;
-      }
-      if (participant.getAttribute('supports_agent_messages') == true) {
-        return participant;
-      }
-    }
-    return null;
-  }
-
-  void _syncOpenSubscription() {
-    final agent = _agentParticipant();
-    if (agent == null) {
-      return;
-    }
-    if (_openedPath == widget.path && _openedAgentParticipantId == agent.id) {
-      return;
-    }
-    _closeOpenSubscription();
-    _openedPath = widget.path;
-    _openedAgentParticipantId = agent.id;
-    _sendThreadSubscriptionMessageNowait(agent: agent, messageType: _agentThreadOpenType, path: widget.path);
-    _sendModelsRequestNowait(agent: agent);
-  }
-
-  bool _hasPendingAgentWait(String threadPath) {
-    return _pendingAgentWaits.values.any((wait) => wait.threadPath == threadPath);
-  }
-
-  void _cancelPendingAgentWaits(String threadPath) {
-    final waits = _pendingAgentWaits.values.where((wait) => wait.threadPath == threadPath).toList(growable: false);
-    for (final wait in waits) {
-      wait.cancel();
-    }
-  }
-
-  void _setPendingAgentMessageAwaitingOnline({required String threadPath, required String messageId, required bool awaitingOnline}) {
-    for (final existing in _controller.pendingAgentMessagesForPath(threadPath)) {
-      if (existing.messageId != messageId || existing.awaitingOnline == awaitingOnline) {
-        continue;
-      }
-      _controller.markPendingAgentMessage(
-        PendingAgentMessage(
-          messageId: existing.messageId,
-          messageType: existing.messageType,
-          threadPath: existing.threadPath,
-          text: existing.text,
-          attachments: existing.attachments,
-          senderName: existing.senderName,
-          createdAt: existing.createdAt,
-          matchByContentOnly: existing.matchByContentOnly,
-          awaitingAcceptance: existing.awaitingAcceptance,
-          awaitingApplication: existing.awaitingApplication,
-          awaitingOnline: awaitingOnline,
-        ),
-      );
-      return;
-    }
-  }
-
-  Future<RemoteParticipant> _waitForAgentParticipant({required String threadPath, required String messageId}) async {
-    final agent = _agentParticipant();
-    if (agent != null) {
-      return agent;
-    }
-
-    final existing = _pendingAgentWaits.remove(messageId);
-    existing?.cancel();
-
-    final wait = _DatasetPendingAgentWait(messageId: messageId, threadPath: threadPath);
-    final completer = Completer<RemoteParticipant>();
-    _pendingAgentWaits[messageId] = wait;
-    _setPendingAgentMessageAwaitingOnline(threadPath: threadPath, messageId: messageId, awaitingOnline: true);
-    if (mounted) {
-      setState(() {});
-    }
-
-    void listener() {
-      if (completer.isCompleted) {
-        return;
-      }
-      final nextAgent = _agentParticipant();
-      if (nextAgent != null) {
-        completer.complete(nextAgent);
-      }
-    }
-
-    wait.detach = () {
-      widget.room.messaging.removeListener(listener);
-      wait.detach = null;
-    };
-    widget.room.messaging.addListener(listener);
-    listener();
-
-    try {
-      return await Future.any([
-        completer.future,
-        wait.cancelled.future.then<RemoteParticipant>((_) => throw const ChatSendCancelledException()),
-      ]);
-    } finally {
-      final removed = _pendingAgentWaits.remove(messageId);
-      if (identical(removed, wait)) {
-        wait.detach?.call();
-      }
-      _setPendingAgentMessageAwaitingOnline(threadPath: threadPath, messageId: messageId, awaitingOnline: false);
-      if (mounted) {
-        setState(() {});
-      }
-    }
-  }
-
-  void _closeOpenSubscription() {
-    final openedPath = _openedPath;
-    final openedAgentParticipantId = _openedAgentParticipantId;
-    _openedPath = null;
-    _openedAgentParticipantId = null;
-    if (openedPath == null || openedAgentParticipantId == null) {
-      return;
-    }
-    final agent = widget.room.messaging.remoteParticipants.firstWhereOrNull((participant) => participant.id == openedAgentParticipantId);
-    if (agent == null) {
-      return;
-    }
-    _sendThreadSubscriptionMessageNowait(agent: agent, messageType: _agentThreadCloseType, path: openedPath);
-  }
-
-  void _sendThreadSubscriptionMessageNowait({required RemoteParticipant agent, required String messageType, required String path}) {
-    unawaited(() async {
-      try {
-        await widget.room.messaging.sendMessage(
-          to: agent,
-          type: _agentRoomMessageType,
-          ignoreOffline: true,
-          message: {'type': messageType, 'thread_id': path},
-        );
-      } catch (_) {}
-    }());
-  }
-
-  void _sendModelsRequestNowait({required RemoteParticipant agent}) {
-    unawaited(() async {
-      try {
-        await widget.room.messaging.sendMessage(
-          to: agent,
-          type: _agentRoomMessageType,
-          ignoreOffline: true,
-          message: {'type': _agentModelsRequestType, 'message_id': const Uuid().v4()},
-        );
-      } catch (_) {}
-    }());
+    return _chatClient?.agentParticipant();
   }
 
   Future<void> _changeModel(DatasetChatModelOption option) async {
-    final agent = _agentParticipant();
-    if (agent == null) {
+    final session = _threadSession;
+    if (session == null || (_agentParticipant() == null && widget.chatClient == null)) {
       throw StateError('No online agent supports agent messages for this thread.');
     }
-    await widget.room.messaging.sendMessage(
-      to: agent,
-      type: _agentRoomMessageType,
-      message: {
-        'type': _agentModelChangeType,
-        'thread_id': widget.path,
-        'message_id': const Uuid().v4(),
-        'provider': option.provider,
-        'model': option.model,
-      },
-    );
+    await session.changeModel(provider: option.provider, model: option.model);
   }
 
   Future<void> _changeVoice(String voice) async {
-    final agent = _agentParticipant();
+    final session = _threadSession;
     final activeModel = _modelController.activeModel;
-    if (agent == null) {
+    if (session == null || (_agentParticipant() == null && widget.chatClient == null)) {
       throw StateError('No online agent supports agent messages for this thread.');
     }
     if (activeModel == null) {
       throw StateError('No model selected for this thread.');
     }
-    await widget.room.messaging.sendMessage(
-      to: agent,
-      type: _agentRoomMessageType,
-      message: {
-        'type': _agentModelChangeType,
-        'thread_id': widget.path,
-        'message_id': const Uuid().v4(),
-        'provider': activeModel.provider,
-        'model': activeModel.model,
-        'voice': voice,
-      },
-    );
+    await session.changeModel(provider: activeModel.provider, model: activeModel.model, voice: voice);
   }
 
   bool _handleModelPayload(Map<String, dynamic> payload) {
     final type = payload['type'];
-    if (type == _agentModelsResponseType) {
+    if (type == agentModelsResponseType) {
       _modelController.applyModelsResponse(payload);
       return true;
     }
     if (payload['thread_id'] != widget.path) {
       return false;
     }
-    if (type == _agentModelChangedType) {
+    if (type == agentModelChangedType) {
       _modelController.applyModelChanged(payload);
       return true;
-    } else if (type == _agentModelsRequestType || type == _agentModelChangeType) {
+    } else if (type == agentModelsRequestType || type == agentModelChangeType) {
       return true;
     }
     return false;
@@ -1836,9 +2111,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       mergedRowsByItemId[entry.key] = liveRow == null ? entry.value : _mergeDatasetAndLiveRow(datasetRow: entry.value, liveRow: liveRow);
     }
     final rows = mergedRowsByItemId.values.toList(growable: false)..sort(_compareDatasetThreadRows);
-    final turnInputPayloadsById = _turnInputPayloadsById(rows);
     final messagesById = <String, _DatasetThreadMessage>{};
-    for (final parsed in _messagesForRows(rows, turnInputPayloadsById: turnInputPayloadsById)) {
+    for (final parsed in _messagesForRows(rows)) {
       final row = parsed.row;
       final message = parsed.message;
       if (message != null && _shouldRenderDatasetThreadMessage(message)) {
@@ -1850,10 +2124,41 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return messagesById.values.toList(growable: false);
   }
 
-  List<({Map<String, Object?> row, _DatasetThreadMessage? message})> _messagesForRows(
-    List<Map<String, Object?>> rows, {
-    required Map<String, Map<String, Object?>> turnInputPayloadsById,
-  }) {
+  List<DatasetChatDebugRow> _debugRows() {
+    final rows = [..._rowsByItemId.values, ..._agentDebugRowsByKey.values]..sort(_compareDatasetThreadRows);
+    return [
+      for (final row in rows)
+        DatasetChatDebugRow(
+          sequence: _intValue(row['sequence']),
+          timestamp: _timestampFromObject(row['timestamp']),
+          itemId: row['item_id']?.toString(),
+          turnId: row['turn_id']?.toString(),
+          type: _debugRowType(row),
+          row: Map<String, Object?>.unmodifiable(row),
+          data: Map<String, Object?>.unmodifiable(_rowData(row) ?? const <String, Object?>{}),
+        ),
+    ];
+  }
+
+  void _notifyDebugRowsChanged(List<DatasetChatDebugRow> rows) {
+    final handler = widget.onDebugRowsChanged;
+    if (handler == null) {
+      return;
+    }
+    final signature = rows.map((row) => row.signature).join('\n');
+    if (signature == _lastDebugRowsSignature) {
+      return;
+    }
+    _lastDebugRowsSignature = signature;
+    final snapshot = List<DatasetChatDebugRow>.unmodifiable(rows);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        handler(snapshot);
+      }
+    });
+  }
+
+  List<({Map<String, Object?> row, _DatasetThreadMessage? message})> _messagesForRows(List<Map<String, Object?>> rows) {
     final messages = <({Map<String, Object?> row, _DatasetThreadMessage? message})>[];
     final toolCallsByItemId = <String, _DatasetToolCallState>{};
     final toolArgumentDeltaBytesByItemId = <String, int>{};
@@ -1864,40 +2169,38 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       final data = _rowData(row);
       final type = data?['type']?.toString();
       final itemId = _datasetThreadContentItemId(row: row, payload: data, type: type);
-      if (type == _agentTextContentStartedType ||
-          type == _agentAudioTranscriptionStartedType ||
-          type == _agentReasoningContentStartedType) {
+      if (type == agentTextContentStartedType || type == agentAudioTranscriptionStartedType || type == agentReasoningContentStartedType) {
         if (data != null) {
-          final statesByItemId = type == _agentReasoningContentStartedType ? reasoningContentByItemId : textContentByItemId;
+          final statesByItemId = type == agentReasoningContentStartedType ? reasoningContentByItemId : textContentByItemId;
           statesByItemId[itemId] = _DatasetTextContentState.fromPayload(
             row: row,
             payload: data,
-            kind: type == _agentReasoningContentStartedType ? 'reasoning' : 'message',
-            role: type == _agentAudioTranscriptionStartedType ? _textContentRoleFromPayload(data) : 'assistant',
+            kind: type == agentReasoningContentStartedType ? 'reasoning' : 'message',
+            role: type == agentAudioTranscriptionStartedType ? _textContentRoleFromPayload(data) : 'assistant',
           );
         }
         continue;
       }
-      if (type == _agentTextContentDeltaType || type == _agentAudioTranscriptionDeltaType || type == _agentReasoningContentDeltaType) {
-        final statesByItemId = type == _agentReasoningContentDeltaType ? reasoningContentByItemId : textContentByItemId;
+      if (type == agentTextContentDeltaType || type == agentAudioTranscriptionDeltaType || type == agentReasoningContentDeltaType) {
+        final statesByItemId = type == agentReasoningContentDeltaType ? reasoningContentByItemId : textContentByItemId;
         final state = statesByItemId.putIfAbsent(
           itemId,
           () => _DatasetTextContentState.fromPayload(
             row: row,
             payload: data ?? const <String, Object?>{},
-            kind: type == _agentReasoningContentDeltaType ? 'reasoning' : 'message',
-            role: type == _agentAudioTranscriptionDeltaType ? _textContentRoleFromPayload(data) : 'assistant',
+            kind: type == agentReasoningContentDeltaType ? 'reasoning' : 'message',
+            role: type == agentAudioTranscriptionDeltaType ? _textContentRoleFromPayload(data) : 'assistant',
           ),
         );
         state.appendDelta(row: row, payload: data ?? const <String, Object?>{});
         continue;
       }
-      if (type == _agentTextContentEndedType || type == _agentAudioTranscriptionCompletedType || type == _agentReasoningContentEndedType) {
-        final statesByItemId = type == _agentReasoningContentEndedType ? reasoningContentByItemId : textContentByItemId;
+      if (type == agentTextContentEndedType || type == agentAudioTranscriptionCompletedType || type == agentReasoningContentEndedType) {
+        final statesByItemId = type == agentReasoningContentEndedType ? reasoningContentByItemId : textContentByItemId;
         final state = statesByItemId.remove(itemId);
         final message =
             state?.complete(row: row, payload: data ?? const <String, Object?>{}) ??
-            (type == _agentAudioTranscriptionCompletedType && data != null
+            (type == agentAudioTranscriptionCompletedType && data != null
                 ? _DatasetTextContentState.fromPayload(
                     row: row,
                     payload: data,
@@ -1920,14 +2223,14 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         }
         continue;
       }
-      if (type == _agentToolCallLogDeltaType) {
+      if (type == agentToolCallLogDeltaType) {
         final state = toolCallsByItemId[itemId];
         if (state != null) {
           state.logs.addAll(_agentToolCallLogLines(data?['lines']));
         }
         continue;
       }
-      if (type == _agentToolCallArgumentsDeltaType) {
+      if (type == agentToolCallArgumentsDeltaType) {
         final delta = data?['delta']?.toString() ?? '';
         final deltaBytes = utf8.encode(delta).length;
         final state = toolCallsByItemId[itemId];
@@ -1940,37 +2243,19 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         }
         continue;
       }
-      if (type == _agentToolCallEndedType) {
+      if (type == agentToolCallEndedType) {
         final state = toolCallsByItemId.remove(itemId);
         final message = _messageForToolCallEndRow(row: row, payload: data, state: state);
         messages.add((row: row, message: message));
         continue;
       }
-      final message = _messageForRow(row, turnInputPayloadsById: turnInputPayloadsById);
+      final message = _messageForRow(row);
       messages.add((row: row, message: message));
     }
     for (final state in [...textContentByItemId.values, ...reasoningContentByItemId.values]) {
       messages.add((row: state.latestRow, message: state.toMessage(row: state.latestRow)));
     }
     return messages;
-  }
-
-  Map<String, Map<String, Object?>> _turnInputPayloadsById(Iterable<Map<String, Object?>> rows) {
-    final payloadsById = <String, Map<String, Object?>>{};
-    for (final row in rows) {
-      final data = _rowData(row);
-      final type = data?['type']?.toString();
-      if (type != _agentTurnStartType && type != _agentTurnSteerType) {
-        continue;
-      }
-      final messageId = data?['message_id']?.toString().trim();
-      final rowItemId = row['item_id']?.toString().trim();
-      final inputId = messageId != null && messageId.isNotEmpty ? messageId : rowItemId;
-      if (inputId != null && inputId.isNotEmpty && data != null) {
-        payloadsById[inputId] = data;
-      }
-    }
-    return payloadsById;
   }
 
   bool _hasWireBackedContent() {
@@ -2016,14 +2301,14 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     for (final row in rows) {
       final data = _rowData(row);
       final type = data?['type']?.toString();
-      if (type == _agentTurnSteeredType || type == _agentTurnSteerRejectedType) {
+      if (type == agentTurnSteeredType || type == agentTurnSteerRejectedType) {
         final sourceMessageId = data?['source_message_id']?.toString();
         if (sourceMessageId != null && sourceMessageId.trim().isNotEmpty) {
           pendingByMessageId.remove(sourceMessageId.trim());
         }
         continue;
       }
-      if (type == _agentTurnSteerAcceptedType) {
+      if (type == agentTurnSteerAcceptedType) {
         final sourceMessageId = data?['source_message_id']?.toString();
         final existing = sourceMessageId == null ? null : pendingByMessageId[sourceMessageId.trim()];
         if (existing != null && existing.awaitingAcceptance) {
@@ -2041,7 +2326,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         }
         continue;
       }
-      if (type != _agentTurnSteerType || data == null) {
+      if (type != agentTurnSteerType || data == null) {
         continue;
       }
       final sourceMessageId = data['message_id']?.toString() ?? row['item_id']?.toString();
@@ -2058,10 +2343,10 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       }
       pendingByMessageId[sourceMessageId.trim()] = PendingAgentMessage(
         messageId: sourceMessageId.trim(),
-        messageType: _agentTurnSteerType,
+        messageType: agentTurnSteerType,
         threadPath: widget.path,
         text: extracted.text,
-        attachments: extracted.attachments,
+        attachments: [for (final attachment in extracted.attachments) AgentFileContent(url: attachment.url, name: attachment.name)],
         senderName: data['sender_name']?.toString(),
         createdAt: _rowTimestamp(row),
         awaitingAcceptance: true,
@@ -2082,15 +2367,11 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       return;
     }
     await _audioPlayer.stopAll();
-    final agent = _agentParticipant();
-    if (agent == null) {
+    final session = _threadSession;
+    if (session == null || (_agentParticipant() == null && widget.chatClient == null)) {
       return;
     }
-    await widget.room.messaging.sendMessage(
-      to: agent,
-      type: _agentRoomMessageType,
-      message: {'type': _agentTurnInterruptType, 'thread_id': widget.path, 'turn_id': turnId},
-    );
+    await session.interruptTurn(turnId);
   }
 
   Future<void> _sendRealtimeAudioChunk(Uint8List chunk, {required bool finalChunk}) async {
@@ -2101,54 +2382,51 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       if (_modelController.activeTurnDetection == 'automatic') {
         return;
       }
-      final messageId = const Uuid().v4();
       final turnId = const Uuid().v4();
-      final agent = _agentParticipant() ?? await _waitForAgentParticipant(threadPath: widget.path, messageId: messageId);
-      await widget.room.messaging.sendMessage(
-        to: agent,
-        type: _agentRoomMessageType,
-        message: {'type': _agentRealtimeAudioCommitType, 'thread_id': widget.path, 'message_id': messageId, 'turn_id': turnId},
-      );
-      await widget.room.messaging.sendMessage(
-        to: agent,
-        type: _agentRoomMessageType,
-        message: {
-          'type': _agentTurnStartType,
-          'thread_id': widget.path,
-          'message_id': const Uuid().v4(),
-          'turn_id': turnId,
-          if (activeModel != null) 'provider': activeModel.provider,
-          if (activeModel != null) 'model': activeModel.model,
-          if (activeVoice != null && activeVoice.trim().isNotEmpty) 'voice': activeVoice.trim(),
-          'output_modalities': [_modelController.activeModality],
-        },
+      final session = _threadSession;
+      if (session == null) {
+        throw StateError('No thread session is open.');
+      }
+      await session.commitRealtimeAudio(
+        turnId: turnId,
+        provider: activeModel?.provider,
+        model: activeModel?.model,
+        voice: activeVoice,
+        outputModalities: [_modelController.activeModality],
       );
       return;
     }
-    final messageId = const Uuid().v4();
-    final agent = _agentParticipant() ?? await _waitForAgentParticipant(threadPath: widget.path, messageId: messageId);
-    await widget.room.messaging.sendMessage(
-      to: agent,
-      type: _agentRoomMessageType,
-      message: {'type': _agentRealtimeAudioChunkType, 'thread_id': widget.path, 'message_id': messageId, 'format': inputFormat.toJson()},
-      attachment: chunk,
-    );
+    final session = _threadSession;
+    if (session == null) {
+      throw StateError('No thread session is open.');
+    }
+    await session.sendRealtimeAudioChunk(chunk: chunk, format: inputFormat.toJson());
   }
 
   Future<void> _send(String value, List<FileAttachment> attachments) async {
+    if (_threadSession?.isLoading == true) {
+      throw StateError('Thread is loading.');
+    }
     final threadPath = widget.path;
     final isSteer = _status.mode == 'steerable' && _status.turnId != null;
     final messageId = const Uuid().v4();
-    final attachmentPaths = attachments.map((attachment) => attachment.path).toList(growable: false);
-    final senderName = widget.room.localParticipant?.getAttribute('name');
+    final agentAttachments = attachments
+        .map(
+          (attachment) => AgentFileContent(
+            url: attachment.path,
+            name: attachment.displayName?.trim().isNotEmpty == true ? attachment.displayName!.trim() : null,
+          ),
+        )
+        .toList(growable: false);
+    final senderName = _localParticipantName();
     _controller.markPendingAgentMessage(
       PendingAgentMessage(
         messageId: messageId,
-        messageType: isSteer ? _agentTurnSteerType : _agentTurnStartType,
+        messageType: isSteer ? agentTurnSteerType : agentTurnStartType,
         threadPath: threadPath,
         text: value,
-        attachments: attachmentPaths,
-        senderName: senderName is String && senderName.trim().isNotEmpty ? senderName.trim() : null,
+        attachments: agentAttachments,
+        senderName: senderName,
         createdAt: DateTime.now(),
         awaitingAcceptance: true,
       ),
@@ -2156,25 +2434,24 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     _controller.outboundStatus.markSending(messageId);
 
     try {
-      final agent = _agentParticipant() ?? await _waitForAgentParticipant(threadPath: threadPath, messageId: messageId);
-      final payload = <String, dynamic>{
-        'type': isSteer ? _agentTurnSteerType : _agentTurnStartType,
-        'thread_id': threadPath,
-        'message_id': messageId,
-        'content': _agentInputContent(text: value, attachments: attachmentPaths),
-      };
-      if (isSteer && _status.turnId != null) {
-        payload['turn_id'] = _status.turnId;
-      }
       final activeModel = _modelController.activeModel;
-      if (!isSteer && activeModel != null) {
-        payload['provider'] = activeModel.provider;
-        payload['model'] = activeModel.model;
+      final session = _threadSession;
+      if (session == null) {
+        throw StateError('No thread session is open.');
       }
-      if (!isSteer) {
-        payload['output_modalities'] = [_modelController.activeModality];
-      }
-      await widget.room.messaging.sendMessage(to: agent, type: _agentRoomMessageType, message: payload);
+      final clientToolkits = _controller.clientToolkitDescriptions;
+      await session.sendText(
+        messageId: messageId,
+        text: value,
+        attachments: agentAttachments,
+        steer: isSteer,
+        turnId: _status.turnId,
+        provider: activeModel?.provider,
+        model: activeModel?.model,
+        outputModalities: isSteer ? null : [_modelController.activeModality],
+        senderName: senderName,
+        clientToolkits: isSteer || clientToolkits.isEmpty ? null : clientToolkits,
+      );
       _controller.outboundStatus.markDelivered(messageId);
       _controller.clear();
     } on ChatSendCancelledException {
@@ -2187,26 +2464,109 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     }
   }
 
+  Widget _buildAttachmentWidget(BuildContext context, _DatasetThreadAttachment attachment, {required bool mine}) {
+    final previewPath = _previewPath(attachment.url);
+    final attachmentRenderer = widget.attachmentRenderer;
+    final canOpen = widget.openFile != null || _isDataUrl(previewPath);
+    if (attachmentRenderer != null) {
+      return GestureDetector(
+        onTap: canOpen ? () => unawaited(_openAttachment(context, attachment)) : null,
+        child: attachmentRenderer.call(context, previewPath),
+      );
+    }
+    final isInlineImage = previewPath.startsWith('data:image/');
+    final card = ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 312.5),
+      child: isInlineImage
+          ? ChatThreadImageAttachment(
+              room: null,
+              imageId: null,
+              imageUri: previewPath,
+              onOpenFullscreen: canOpen ? () => unawaited(_openAttachment(context, attachment)) : null,
+            )
+          : FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: attachment.displayName),
+    );
+    if (!canOpen) {
+      return card;
+    }
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(onTap: () => unawaited(_openAttachment(context, attachment)), child: card),
+    );
+  }
+
+  Future<void> _openAttachment(BuildContext context, _DatasetThreadAttachment attachment) async {
+    final previewPath = _previewPath(attachment.url);
+    if (_isDataUrl(previewPath)) {
+      await _showInlineAttachmentViewer(context, attachment.copyWith(url: previewPath));
+      return;
+    }
+    final openFile = widget.openFile;
+    if (openFile != null) {
+      await openFile(previewPath);
+    }
+  }
+
+  Future<void> _showInlineAttachmentViewer(BuildContext context, _DatasetThreadAttachment attachment) {
+    return showDialog<void>(
+      context: context,
+      useSafeArea: false,
+      builder: (context) => _InlineAttachmentViewer(attachment: attachment),
+    );
+  }
+
+  Future<void> _attachInlineFile(String name, Stream<Uint8List> dataStream, int? size) async {
+    final bytes = BytesBuilder(copy: false);
+    await for (final chunk in dataStream) {
+      bytes.add(chunk);
+    }
+    final data = bytes.takeBytes();
+    final filename = name.trim().isEmpty ? 'attachment' : name.trim();
+    final mimeType = _guessInlineAttachmentMimeType(filename, headerBytes: data);
+    final dataUrl = 'data:$mimeType;base64,${base64Encode(data)}';
+    _controller.attachFile(dataUrl, mimeType: mimeType, displayName: filename);
+  }
+
+  String? _localParticipantName() {
+    final explicit = widget.localParticipantName?.trim();
+    if (explicit != null && explicit.isNotEmpty) {
+      return explicit;
+    }
+    final participantName = widget.localParticipant?.getAttribute('name');
+    if (participantName is String) {
+      final trimmed = participantName.trim();
+      if (trimmed.isNotEmpty) {
+        return trimmed;
+      }
+    }
+    final clientName = widget.chatClient?.localParticipantName()?.trim();
+    if (clientName != null && clientName.isNotEmpty) {
+      return clientName;
+    }
+    return null;
+  }
+
   ChatThreadSnapshot _snapshot(List<_DatasetThreadMessage> messages, List<PendingAgentMessage> pendingMessages) {
     final agent = _agentParticipant();
-    final localParticipant = widget.room.localParticipant;
+    final localParticipant = widget.localParticipant;
     final online = <Participant>[?localParticipant, ?agent];
+    final agentAvailable = agent != null || widget.chatClient != null;
     return ChatThreadSnapshot(
       messages: const [],
       online: online,
       offline: const [],
       typing: const [],
       listening: const [],
-      agentOnline: agent != null,
+      agentOnline: agentAvailable,
       threadStatus: _status.text,
       threadStatusStartedAt: _status.startedAt,
       threadStatusMode: _status.mode,
       threadStatusTotalBytes: _status.totalBytes,
       threadStatusLinesAdded: _status.linesAdded,
       threadStatusLinesRemoved: _status.linesRemoved,
-      supportsAgentMessages: agent != null,
+      supportsAgentMessages: agentAvailable,
       supportsMcp: agent?.getAttribute('supports_mcp') == true,
-      toolkits: const <String, AgentToolkitCapabilities>{},
+      toolkits: const <String, ToolkitCapabilities>{},
       threadTurnId: _status.turnId,
       pendingMessages: pendingMessages,
       pendingItemId: _status.pendingItemId,
@@ -2378,7 +2738,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return imagesInThread;
   }
 
-  Widget _buildInput(BuildContext context, ChatThreadSnapshot snapshot, List<PendingAgentMessage> pendingMessages) {
+  Widget _buildInput(BuildContext context, ChatThreadSnapshot snapshot, List<PendingAgentMessage> pendingMessages, {bool loading = false}) {
     PendingAgentMessage? waitingForOnlineMessage;
     for (final pending in pendingMessages) {
       if (pending.awaitingOnline) {
@@ -2386,34 +2746,42 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         break;
       }
     }
-    final toolArea = resolveChatThreadToolArea(widget.toolsBuilder == null ? null : widget.toolsBuilder!(context, _controller, snapshot));
+    final sendEnabled = !loading && waitingForOnlineMessage == null;
+    final sendDisabledReason = loading
+        ? 'Thread is loading.'
+        : waitingForOnlineMessage == null
+        ? null
+        : 'Waiting for ${_displayAgentName(widget.agentName ?? "agent")} to come online.';
     return AnimatedBuilder(
-      animation: _modelController,
-      builder: (context, _) => ChatThreadInput(
-        key: _composerInputKey,
-        focusTrigger: _controller,
-        sendEnabled: waitingForOnlineMessage == null,
-        sendDisabledReason: waitingForOnlineMessage == null
-            ? null
-            : 'Waiting for ${_displayAgentName(widget.agentName ?? "agent")} to come online.',
-        onCancelSend: _hasPendingAgentWait(widget.path) ? () => _cancelPendingAgentWaits(widget.path) : null,
-        onInterrupt: _canInterruptActiveTurn() ? _cancelTurn : null,
-        sendPendingText: waitingForOnlineMessage == null
-            ? null
-            : 'Waiting for ${_displayAgentName(widget.agentName ?? "agent")} to come online.',
-        placeholder: widget.inputPlaceholder,
-        leading: toolArea.leading,
-        footer: toolArea.footer,
-        audioInputEnabled: _modelController.supportsAudioInput,
-        automaticAudioTurnDetection: _modelController.activeTurnDetection == 'automatic',
-        onAudioChunk: _sendRealtimeAudioChunk,
-        room: widget.room,
-        controller: _controller,
-        attachmentBuilder: widget.attachmentBuilder,
-        contextMenuBuilder: widget.inputContextMenuBuilder,
-        onPressedOutside: widget.inputOnPressedOutside,
-        onSend: _send,
-      ),
+      animation: Listenable.merge([_modelController, _controller]),
+      builder: (context, _) {
+        final toolArea = resolveChatThreadToolArea(
+          widget.toolsBuilder == null ? null : widget.toolsBuilder!(context, _controller, snapshot),
+        );
+        return ChatThreadInput(
+          key: _composerInputKey,
+          focusTrigger: _controller,
+          sendEnabled: sendEnabled,
+          sendDisabledReason: sendDisabledReason,
+          onCancelSend: null,
+          onInterrupt: _canInterruptActiveTurn() ? _cancelTurn : null,
+          sendPendingText: waitingForOnlineMessage == null
+              ? null
+              : 'Waiting for ${_displayAgentName(widget.agentName ?? "agent")} to come online.',
+          placeholder: widget.inputPlaceholder,
+          leading: toolArea.leading,
+          footer: toolArea.footer,
+          audioInputEnabled: widget.chatClient != null && _modelController.supportsAudioInput,
+          automaticAudioTurnDetection: _modelController.activeTurnDetection == 'automatic',
+          onAudioChunk: _sendRealtimeAudioChunk,
+          room: null,
+          controller: _controller,
+          attachmentBuilder: widget.attachmentBuilder,
+          contextMenuBuilder: widget.inputContextMenuBuilder,
+          onPressedOutside: widget.inputOnPressedOutside,
+          onSend: _send,
+        );
+      },
     );
   }
 
@@ -2492,19 +2860,20 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       );
     }
 
-    final localParticipantName = widget.room.localParticipant?.getAttribute('name');
+    final localParticipantName = _localParticipantName();
     final isAgentMessage = message.role == 'agent';
     final rawAuthorName = message.authorName;
-    final authorName = rawAuthorName == null || rawAuthorName.trim().isEmpty ? null : rawAuthorName;
+    final authorName = rawAuthorName == null || rawAuthorName.trim().isEmpty ? null : rawAuthorName.trim();
     final mine =
         !isAgentMessage &&
-        (rawAuthorName == localParticipantName || ((rawAuthorName == null || rawAuthorName.trim().isEmpty) && message.role == 'user'));
+        ((authorName != null && localParticipantName != null && authorName == localParticipantName) ||
+            (authorName == null && message.role == 'user'));
     final imageAttachmentId = message.id;
     final imageInitialIndex = feedImages.indexWhere((entry) => entry.attachmentElementId == imageAttachmentId);
 
     return ChatThreadMessageView(
       key: ValueKey(message.id),
-      room: widget.room,
+      room: null,
       mine: mine,
       isAgentMessage: isAgentMessage,
       text: message.text,
@@ -2512,26 +2881,25 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       createdAt: message.createdAt,
       shouldShowHeader: shouldShowParticipantHeader,
       attachmentWidgets: [
-        for (final attachment in message.attachments)
-          GestureDetector(
-            onTap: widget.openFile == null ? null : () => widget.openFile!(_previewPath(attachment)),
-            child: ChatThreadPreview(room: widget.room, path: _previewPath(attachment)),
-          ),
+        for (final attachment in message.attachments) _buildAttachmentWidget(context, attachment, mine: mine),
         if (message.image != null)
-          ChatThreadImageAttachment(
-            room: widget.room,
-            imageId: message.image!.imageId,
-            imageUri: message.image!.uri,
-            fallbackMimeType: message.image!.mimeType,
-            status: message.image!.status,
-            statusDetail: message.image!.statusDetail,
-            widthPx: message.image!.width,
-            heightPx: message.image!.height,
-            roundedCorners: false,
-            onOpenFullscreen: imageInitialIndex == -1
-                ? null
-                : () => _openThreadImageViewer(context, images: feedImages, initialIndex: imageInitialIndex),
-          ),
+          widget.generatedImageAttachmentRenderer?.call(
+                context,
+                message.image!,
+                imageInitialIndex == -1 ? null : () => _openThreadImageViewer(context, images: feedImages, initialIndex: imageInitialIndex),
+              ) ??
+              ChatThreadImageAttachment(
+                imageId: message.image!.imageId,
+                imageUri: message.image!.uri,
+                fallbackMimeType: message.image!.mimeType,
+                status: message.image!.status,
+                statusDetail: message.image!.statusDetail,
+                widthPx: message.image!.width,
+                heightPx: message.image!.height,
+                onOpenFullscreen: imageInitialIndex == -1
+                    ? null
+                    : () => _openThreadImageViewer(context, images: feedImages, initialIndex: imageInitialIndex),
+              ),
       ],
     );
   }
@@ -2581,24 +2949,28 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ),
           );
         case _DatasetThreadDetailGroupFeedItem():
-          messageWidgets.insert(
-            0,
-            _DatasetDetailLine(
-              key: ValueKey(feedItem.id),
-              text: feedItem.collapsedText,
-              authorName: feedItem.authorName,
-              createdAt: feedItem.createdAt,
-              onTap: () {
-                setState(() {
-                  _expandedDetailGroupIds.add(feedItem.id);
-                });
-              },
-            ),
-          );
+          if (feedItem.expanded) {
+            messageWidgets.insert(0, _buildExpandedDetailGroup(context, feedItem, feedImages: feedImages));
+          } else {
+            messageWidgets.insert(
+              0,
+              _DatasetDetailLine(
+                key: ValueKey(feedItem.id),
+                text: feedItem.collapsedText,
+                authorName: feedItem.authorName,
+                createdAt: feedItem.createdAt,
+                onTap: () {
+                  setState(() {
+                    _expandedDetailGroupIds.add(feedItem.id);
+                  });
+                },
+              ),
+            );
+          }
       }
     }
     final pendingFeedMessages = pendingMessages.where((pending) {
-      if (pending.messageType == _agentTurnSteerType || pending.matchByContentOnly) {
+      if (pending.messageType == agentTurnSteerType || pending.matchByContentOnly) {
         return false;
       }
       return pending.awaitingApplication || !messages.any((message) => message.id == pending.messageId);
@@ -2607,7 +2979,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       if (messageWidgets.isNotEmpty) {
         messageWidgets.insert(0, const SizedBox(height: ChatThreadMessageView.chatMessageStackSpacing));
       }
-      messageWidgets.insert(0, PendingChatThreadMessage(room: widget.room, message: pending));
+      messageWidgets.insert(0, PendingChatThreadMessage(room: null, message: pending));
     }
     return messageWidgets;
   }
@@ -2635,7 +3007,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
           nextMessage: _nextNonDetailMessage(messages, detailIndexes, segmentIndex + 1, segmentEnd),
         );
         if (_expandedDetailGroupIds.contains(group.id)) {
-          items.addAll(group.messages.map(_DatasetThreadMessageFeedItem.new));
+          items.add(group.expandedCopy());
         } else {
           items.add(group);
         }
@@ -2644,6 +3016,38 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       index = segmentEnd;
     }
     return items;
+  }
+
+  Widget _buildExpandedDetailGroup(
+    BuildContext context,
+    _DatasetThreadDetailGroupFeedItem group, {
+    required List<ChatThreadFeedImage> feedImages,
+  }) {
+    final children = <Widget>[
+      ChatThreadMessageView(
+        room: null,
+        mine: false,
+        isAgentMessage: true,
+        text: null,
+        authorName: group.authorName,
+        createdAt: group.createdAt,
+        showBubbleActions: false,
+      ),
+    ];
+    for (final item in group.messages.indexed) {
+      if (item.$1 == 0) {
+        children.add(const SizedBox(height: 4));
+      } else {
+        children.add(SizedBox(height: _datasetThreadMessageSpacing(group.messages[item.$1 - 1], item.$2)));
+      }
+      children.add(_buildMessage(context, item.$2, feedImages: feedImages, shouldShowParticipantHeader: false));
+    }
+    return Column(
+      key: ValueKey(group.id),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: children,
+    );
   }
 
   _DatasetThreadMessage? _nextNonDetailMessage(List<_DatasetThreadMessage> messages, Set<int> detailIndexes, int start, int end) {
@@ -3062,7 +3466,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     final queuedPendingMessages = pendingMessages
         .where(
           (pending) =>
-              (pending.messageType == _agentTurnStartType || pending.messageType == _agentTurnSteerType) &&
+              (pending.messageType == agentTurnStartType || pending.messageType == agentTurnSteerType) &&
               !_pendingDatasetMessageIsOptimisticallyRendered(pending: pending, messages: messages),
         )
         .toList(growable: false);
@@ -3117,12 +3521,14 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     List<PendingAgentMessage> pendingMessages, {
     bool loading = false,
   }) {
-    final showStatus = shouldShowChatThreadStatus(_status);
+    final showStatus = !loading && shouldShowChatThreadStatus(_status);
     final feedImages = _collectThreadImages(messages);
+    final children = loading
+        ? const <Widget>[_DatasetThreadLoadingRow()]
+        : _buildMessageWidgets(context, messages, pendingMessages, feedImages: feedImages);
     final threadView = ChatThreadViewportBody(
       scrollController: _controller.threadScrollController,
       bottomAlign: true,
-      centerContent: loading ? const CircularProgressIndicator() : null,
       bottomSpacer: showStatus ? 20 : 0,
       overlays: [
         if (showStatus)
@@ -3147,7 +3553,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ),
           ),
       ],
-      children: loading ? const <Widget>[] : _buildMessageWidgets(context, messages, pendingMessages, feedImages: feedImages),
+      children: children,
     );
 
     return OverlayPortal(
@@ -3157,12 +3563,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         if (_overlayImages.isEmpty) {
           return const SizedBox.shrink();
         }
-        return ChatThreadImageGalleryPage(
-          room: widget.room,
-          images: _overlayImages,
-          initialIndex: _overlayInitialIndex,
-          onClose: _closeThreadImageViewer,
-        );
+        return widget.imageGalleryBuilder?.call(context, _overlayImages, _overlayInitialIndex, _closeThreadImageViewer) ??
+            ChatThreadImageGalleryPage(images: _overlayImages, initialIndex: _overlayInitialIndex, onClose: _closeThreadImageViewer);
       },
       child: threadView,
     );
@@ -3180,14 +3582,14 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return ListenableBuilder(
       listenable: _controller,
       builder: (context, _) {
-        final loading = !_ready;
-        final messages = loading ? const <_DatasetThreadMessage>[] : _messages();
+        final loading = _threadSession?.isLoading ?? false;
+        final messages = _messages();
+        final debugRows = _debugRows();
+        _notifyDebugRowsChanged(debugRows);
         final pendingMessages = loading ? const <PendingAgentMessage>[] : _combinedPendingMessages(messages);
         final snapshot = _snapshot(messages, pendingMessages);
         return FileDropArea(
-          onFileDrop: (name, dataStream, size) async {
-            await _controller.uploadFile(name, dataStream, size ?? 0);
-          },
+          onFileDrop: widget.onFileDrop ?? _attachInlineFile,
           child: Column(
             children: [
               Expanded(child: _buildThreadViewport(context, messages, pendingMessages, loading: loading)),
@@ -3198,7 +3600,11 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     ?_buildQueuedPendingMessages(context, messages, pendingMessages),
-                    _buildComposerWithUsageFooter(context, input: _buildInput(context, snapshot, pendingMessages), usage: snapshot.usage),
+                    _buildComposerWithUsageFooter(
+                      context,
+                      input: _buildInput(context, snapshot, pendingMessages, loading: loading),
+                      usage: snapshot.usage,
+                    ),
                   ],
                 ),
               ),
@@ -3231,15 +3637,102 @@ class _DatasetThreadMessage {
   final String kind;
   final String role;
   final String text;
-  final List<String> attachments;
+  final List<_DatasetThreadAttachment> attachments;
   final DateTime createdAt;
-  final _DatasetThreadImage? image;
+  final DatasetThreadImage? image;
   final ToolCallEntryDisplay? toolCallEntry;
   final ToolCallEntryDisplay? expandedToolCallEntry;
   final List<_DatasetDiffPreviewBlock> diffPreviewBlocks;
   final String? authorName;
   final String? phase;
   final String? turnId;
+}
+
+class _DatasetThreadAttachment {
+  const _DatasetThreadAttachment({required this.url, this.name});
+
+  final String url;
+  final String? name;
+
+  String get displayName {
+    final explicit = name?.trim();
+    if (explicit != null && explicit.isNotEmpty) {
+      return explicit;
+    }
+    return _inlineAttachmentDisplayName(_previewPath(url));
+  }
+
+  _DatasetThreadAttachment copyWith({String? url, String? name}) {
+    return _DatasetThreadAttachment(url: url ?? this.url, name: name ?? this.name);
+  }
+
+  Map<String, Object?> toJson() {
+    return <String, Object?>{'url': url, if (name != null && name!.trim().isNotEmpty) 'name': name!.trim()};
+  }
+}
+
+class _InlineAttachmentViewer extends StatelessWidget {
+  const _InlineAttachmentViewer({required this.attachment});
+
+  final _DatasetThreadAttachment attachment;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final decoded = _decodeDataUrl(attachment.url);
+    return Material(
+      color: theme.colorScheme.background,
+      child: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 10, 12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(attachment.displayName, style: theme.textTheme.h4, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ),
+                  ShadIconButton.ghost(icon: const Icon(LucideIcons.x), onPressed: () => Navigator.of(context).maybePop()),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: decoded == null
+                  ? Center(child: Text('Unable to preview attachment', style: theme.textTheme.muted))
+                  : _InlineAttachmentPreview(data: decoded.data, mimeType: decoded.mimeType, displayName: attachment.displayName),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _InlineAttachmentPreview extends StatelessWidget {
+  const _InlineAttachmentPreview({required this.data, required this.mimeType, required this.displayName});
+
+  final Uint8List data;
+  final String mimeType;
+  final String displayName;
+
+  @override
+  Widget build(BuildContext context) {
+    if (mimeType.startsWith('image/')) {
+      return InteractiveViewer(
+        child: Center(child: Image.memory(data, fit: BoxFit.contain)),
+      );
+    }
+    if (mimeType == 'application/pdf') {
+      return PdfViewer.data(data, sourceName: displayName);
+    }
+    if (mimeType.startsWith('text/') || mimeType == 'application/json' || mimeType == 'application/yaml') {
+      return SingleChildScrollView(padding: const EdgeInsets.all(24), child: SelectableText(utf8.decode(data, allowMalformed: true)));
+    }
+    return Center(
+      child: FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: displayName),
+    );
+  }
 }
 
 class _DatasetDiffPreviewBlock {
@@ -3268,6 +3761,7 @@ class _DatasetThreadDetailGroupFeedItem extends _DatasetThreadFeedItem {
     required this.collapsedText,
     required this.authorName,
     required this.createdAt,
+    this.expanded = false,
   });
 
   final String id;
@@ -3275,6 +3769,30 @@ class _DatasetThreadDetailGroupFeedItem extends _DatasetThreadFeedItem {
   final String collapsedText;
   final String authorName;
   final DateTime createdAt;
+  final bool expanded;
+
+  _DatasetThreadDetailGroupFeedItem expandedCopy() {
+    return _DatasetThreadDetailGroupFeedItem(
+      id: id,
+      messages: messages,
+      collapsedText: collapsedText,
+      authorName: authorName,
+      createdAt: createdAt,
+      expanded: true,
+    );
+  }
+}
+
+class _DatasetThreadLoadingRow extends StatelessWidget {
+  const _DatasetThreadLoadingRow();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.symmetric(vertical: 16),
+      child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
+    );
+  }
 }
 
 class _DatasetDetailLine extends StatelessWidget {
@@ -3538,8 +4056,8 @@ bool _datasetThreadMessageReconcilesLiveMessage({
   }
 
   if (liveMessage.attachments.isNotEmpty) {
-    final datasetAttachments = datasetMessage.attachments.map(_comparableThreadAttachmentPath).toSet();
-    return liveMessage.attachments.map(_comparableThreadAttachmentPath).every(datasetAttachments.contains);
+    final datasetAttachments = datasetMessage.attachments.map((attachment) => _comparableThreadAttachmentPath(attachment.url)).toSet();
+    return liveMessage.attachments.map((attachment) => _comparableThreadAttachmentPath(attachment.url)).every(datasetAttachments.contains);
   }
 
   final liveText = liveMessage.text.trim();
@@ -3550,8 +4068,8 @@ bool _datasetThreadMessageReconcilesLiveMessage({
   return true;
 }
 
-class _DatasetThreadImage {
-  const _DatasetThreadImage({this.uri, this.imageId, this.mimeType, this.status, this.statusDetail, this.width, this.height});
+class DatasetThreadImage {
+  const DatasetThreadImage({this.uri, this.imageId, this.mimeType, this.status, this.statusDetail, this.width, this.height});
 
   final String? uri;
   final String? imageId;
@@ -3738,15 +4256,12 @@ List<_DatasetDiffPreviewBlock> _toolCallDiffPreviewBlocks({required String tool,
   return _applyPatchDiffPreviewBlocks(patch);
 }
 
-_DatasetThreadMessage? _messageForRow(
-  Map<String, Object?> row, {
-  Map<String, Map<String, Object?>> turnInputPayloadsById = const <String, Map<String, Object?>>{},
-}) {
+_DatasetThreadMessage? _messageForRow(Map<String, Object?> row) {
   final data = _rowData(row);
   if (data == null) {
     return null;
   }
-  final agentMessage = _messageForAgentPayload(row, data, turnInputPayloadsById: turnInputPayloadsById);
+  final agentMessage = _messageForAgentPayload(row, data);
   if (agentMessage != null) {
     return agentMessage;
   }
@@ -3759,7 +4274,7 @@ _DatasetThreadMessage? _messageForRow(
   switch (kind) {
     case 'message':
       final text = data['text']?.toString() ?? '';
-      final attachments = _stringList(data['attachments']);
+      final attachments = _datasetThreadAttachments(data['attachments']);
       if (text.trim().isEmpty && attachments.isEmpty) {
         return null;
       }
@@ -3775,7 +4290,7 @@ _DatasetThreadMessage? _messageForRow(
         turnId: turnId,
       );
     case 'file':
-      final urls = _stringList(data['urls']);
+      final urls = _stringList(data['urls']).map((url) => _DatasetThreadAttachment(url: url)).toList(growable: false);
       if (urls.isEmpty) {
         return null;
       }
@@ -3806,7 +4321,7 @@ _DatasetThreadMessage? _messageForRow(
         createdAt: _rowTimestamp(row),
         phase: phase,
         turnId: turnId,
-        image: _DatasetThreadImage(
+        image: DatasetThreadImage(
           uri: imageUri,
           imageId: imageId,
           mimeType: _stringValue(image?['mime_type']),
@@ -4060,11 +4575,7 @@ Uint8List? _wavDataChunk(Uint8List bytes) {
   return null;
 }
 
-_DatasetThreadMessage? _messageForAgentPayload(
-  Map<String, Object?> row,
-  Map<String, Object?> payload, {
-  Map<String, Map<String, Object?>> turnInputPayloadsById = const <String, Map<String, Object?>>{},
-}) {
+_DatasetThreadMessage? _messageForAgentPayload(Map<String, Object?> row, Map<String, Object?> payload) {
   final type = payload['type']?.toString();
   if (type == null || type.trim().isEmpty) {
     return null;
@@ -4075,8 +4586,8 @@ _DatasetThreadMessage? _messageForAgentPayload(
   final turnId = row['turn_id']?.toString() ?? payload['turn_id']?.toString();
   final phase = _agentMessagePhase(payload);
   switch (type) {
-    case _agentTurnStartType:
-    case _agentTurnSteerType:
+    case agentTurnStartType:
+    case agentTurnSteerType:
       final content = payload['content'];
       if (content is! List) {
         return null;
@@ -4095,12 +4606,12 @@ _DatasetThreadMessage? _messageForAgentPayload(
         createdAt: createdAt,
         turnId: turnId,
       );
-    case _agentModelsRequestType:
-    case _agentModelsResponseType:
-    case _agentModelChangeType:
-    case _agentModelChangedType:
+    case agentModelsRequestType:
+    case agentModelsResponseType:
+    case agentModelChangeType:
+    case agentModelChangedType:
       return null;
-    case _agentRealtimeAudioCommitType:
+    case agentRealtimeAudioCommitType:
       final text = payload['text']?.toString() ?? '';
       if (text.trim().isEmpty) {
         return null;
@@ -4115,39 +4626,17 @@ _DatasetThreadMessage? _messageForAgentPayload(
         createdAt: createdAt,
         turnId: turnId,
       );
-    case _agentTurnStartedType:
-    case _agentTurnSteeredType:
-      final sourceMessageId = payload['source_message_id']?.toString().trim();
-      if (sourceMessageId == null || sourceMessageId.isEmpty) {
-        return null;
-      }
-      final inputPayload = turnInputPayloadsById[sourceMessageId] ?? payload;
-      final content = inputPayload['content'];
-      if (content is! List) {
-        return null;
-      }
-      final extracted = _agentInputContentParts(content);
-      if (extracted.text.trim().isEmpty && extracted.attachments.isEmpty) {
-        return null;
-      }
-      return _DatasetThreadMessage(
-        id: sourceMessageId,
-        kind: 'message',
-        role: 'user',
-        text: extracted.text,
-        authorName: inputPayload['sender_name']?.toString(),
-        attachments: extracted.attachments,
-        createdAt: createdAt,
-        turnId: turnId,
-      );
-    case _agentTurnStartAcceptedType:
-    case _agentTurnSteerAcceptedType:
+    case agentTurnStartedType:
+    case agentTurnSteeredType:
       return null;
-    case _agentTextContentDeltaType:
-    case _agentAudioTranscriptionDeltaType:
-    case _agentAudioTranscriptionCompletedType:
+    case agentTurnStartAcceptedType:
+    case agentTurnSteerAcceptedType:
+      return null;
+    case agentTextContentDeltaType:
+    case agentAudioTranscriptionDeltaType:
+    case agentAudioTranscriptionCompletedType:
       final text = payload['text']?.toString() ?? '';
-      final role = type == _agentAudioTranscriptionDeltaType || type == _agentAudioTranscriptionCompletedType
+      final role = type == agentAudioTranscriptionDeltaType || type == agentAudioTranscriptionCompletedType
           ? _textContentRoleFromPayload(payload)
           : 'assistant';
       return text.trim().isEmpty
@@ -4163,14 +4652,14 @@ _DatasetThreadMessage? _messageForAgentPayload(
               phase: phase,
               turnId: turnId,
             );
-    case _agentAudioGenerationStartedType:
-    case _agentAudioGenerationDeltaType:
-    case _agentAudioGenerationCompletedType:
-    case _agentAudioGenerationFailedType:
-    case _agentAudioTranscriptionStartedType:
-    case _agentAudioTranscriptionFailedType:
+    case agentAudioGenerationStartedType:
+    case agentAudioGenerationDeltaType:
+    case agentAudioGenerationCompletedType:
+    case agentAudioGenerationFailedType:
+    case agentAudioTranscriptionStartedType:
+    case agentAudioTranscriptionFailedType:
       return null;
-    case _agentReasoningContentDeltaType:
+    case agentReasoningContentDeltaType:
       final text = payload['text']?.toString() ?? '';
       return text.trim().isEmpty
           ? null
@@ -4184,8 +4673,9 @@ _DatasetThreadMessage? _messageForAgentPayload(
               createdAt: createdAt,
               turnId: turnId,
             );
-    case _agentFileContentDeltaType:
+    case agentFileContentDeltaType:
       final url = payload['url']?.toString();
+      final name = payload['name']?.toString().trim();
       return url == null || url.trim().isEmpty
           ? null
           : _DatasetThreadMessage(
@@ -4194,14 +4684,14 @@ _DatasetThreadMessage? _messageForAgentPayload(
               role: 'agent',
               text: '',
               authorName: payload['sender_name']?.toString(),
-              attachments: [url.trim()],
+              attachments: [_DatasetThreadAttachment(url: url.trim(), name: name == null || name.isEmpty ? null : name)],
               createdAt: createdAt,
               turnId: turnId,
             );
-    case _agentImageGenerationStartedType:
-    case _agentImageGenerationPartialType:
-    case _agentImageGenerationCompletedType:
-    case _agentImageGenerationFailedType:
+    case agentImageGenerationStartedType:
+    case agentImageGenerationPartialType:
+    case agentImageGenerationCompletedType:
+    case agentImageGenerationFailedType:
       final image = _firstGeneratedImage(payload);
       final dimensions = _imageGenerationDimensions(data: const <String, Object?>{}, message: payload, image: image);
       final imageUri = _stringValue(image?['uri']);
@@ -4214,7 +4704,7 @@ _DatasetThreadMessage? _messageForAgentPayload(
         attachments: const [],
         createdAt: createdAt,
         turnId: turnId,
-        image: _DatasetThreadImage(
+        image: DatasetThreadImage(
           uri: imageUri,
           imageId: _imageIdFromDatasetUri(imageUri),
           mimeType: _stringValue(image?['mime_type']),
@@ -4224,13 +4714,13 @@ _DatasetThreadMessage? _messageForAgentPayload(
           height: dimensions.$2,
         ),
       );
-    case _agentToolCallStartedType:
-    case _agentToolCallArgumentsDeltaType:
-    case _agentToolCallLogDeltaType:
+    case agentToolCallStartedType:
+    case agentToolCallArgumentsDeltaType:
+    case agentToolCallLogDeltaType:
       return null;
-    case _agentToolCallEndedType:
+    case agentToolCallEndedType:
       return _messageForToolCallEndRow(row: row, payload: payload, state: null);
-    case _agentContextCompactedType:
+    case agentContextCompactedType:
       return _DatasetThreadMessage(
         id: itemId,
         kind: 'compaction',
@@ -4241,7 +4731,7 @@ _DatasetThreadMessage? _messageForAgentPayload(
         createdAt: createdAt,
         turnId: turnId,
       );
-    case _agentTurnEndedType:
+    case agentTurnEndedType:
       final errorMessage = agentTurnEndedErrorMessage(payload);
       return errorMessage == null
           ? null
@@ -4261,7 +4751,7 @@ _DatasetThreadMessage? _messageForAgentPayload(
 }
 
 bool _isDatasetToolCallStartType(String? type) {
-  return type == _agentToolCallPendingType || type == _agentToolCallInProgressType || type == _agentToolCallStartedType;
+  return type == agentToolCallPendingType || type == agentToolCallInProgressType || type == agentToolCallStartedType;
 }
 
 bool _toolCallStatusIsRunning(String? status) {
@@ -4323,7 +4813,7 @@ _DatasetThreadMessage _messageForToolCallEndRow({
 
 @visibleForTesting
 String? agentTurnEndedErrorMessage(Map<String, Object?> payload) {
-  if (payload['type'] != _agentTurnEndedType) {
+  if (payload['type'] != agentTurnEndedType) {
     return null;
   }
   final error = payload['error'];
@@ -4402,9 +4892,36 @@ List<String> _agentToolCallLogLines(Object? lines) {
   return output;
 }
 
-({String text, List<String> attachments}) _agentInputContentParts(List<Object?> content) {
+List<_DatasetThreadAttachment> _datasetThreadAttachments(Object? value) {
+  if (value is! List) {
+    return const [];
+  }
+  final attachments = <_DatasetThreadAttachment>[];
+  for (final item in value) {
+    if (item is String) {
+      final url = item.trim();
+      if (url.isNotEmpty) {
+        attachments.add(_DatasetThreadAttachment(url: url));
+      }
+      continue;
+    }
+    final map = item is Map<String, dynamic> ? item : (item is Map ? Map<String, dynamic>.from(item) : null);
+    if (map == null) {
+      continue;
+    }
+    final url = map['url']?.toString().trim();
+    if (url == null || url.isEmpty) {
+      continue;
+    }
+    final name = map['name']?.toString().trim();
+    attachments.add(_DatasetThreadAttachment(url: url, name: name == null || name.isEmpty ? null : name));
+  }
+  return attachments;
+}
+
+({String text, List<_DatasetThreadAttachment> attachments}) _agentInputContentParts(List<Object?> content) {
   final textParts = <String>[];
-  final attachments = <String>[];
+  final attachments = <_DatasetThreadAttachment>[];
   for (final item in content) {
     final contentItem = item is Map<String, dynamic> ? item : (item is Map ? Map<String, dynamic>.from(item) : null);
     if (contentItem == null) {
@@ -4419,7 +4936,8 @@ List<String> _agentToolCallLogLines(Object? lines) {
     } else if (contentType == 'file') {
       final url = contentItem['url']?.toString();
       if (url != null && url.trim().isNotEmpty) {
-        attachments.add(url.trim());
+        final name = contentItem['name']?.toString().trim();
+        attachments.add(_DatasetThreadAttachment(url: url.trim(), name: name == null || name.isEmpty ? null : name));
       }
     }
   }
@@ -4446,7 +4964,7 @@ bool _pendingDatasetMessageIsOptimisticallyRendered({
   required PendingAgentMessage pending,
   required Iterable<_DatasetThreadMessage> messages,
 }) {
-  if (pending.messageType == _agentTurnSteerType || pending.matchByContentOnly) {
+  if (pending.messageType == agentTurnSteerType || pending.matchByContentOnly) {
     return false;
   }
   return pending.awaitingApplication || !messages.any((message) => message.id == pending.messageId);
@@ -4459,7 +4977,7 @@ bool _datasetThreadMessageContentMatchesPendingAgentMessage(_DatasetThreadMessag
   }
 
   final pendingAttachments = pending.attachments
-      .map(_comparableThreadAttachmentPath)
+      .map((attachment) => _comparableThreadAttachmentPath(attachment.url))
       .where((path) => path.isNotEmpty)
       .toList(growable: false);
   if (pendingAttachments.isEmpty) {
@@ -4467,44 +4985,14 @@ bool _datasetThreadMessageContentMatchesPendingAgentMessage(_DatasetThreadMessag
   }
 
   final messageAttachments = message.attachments
-      .map(_comparableThreadAttachmentPath)
+      .map((attachment) => _comparableThreadAttachmentPath(attachment.url))
       .where((path) => path.isNotEmpty)
       .toList(growable: false);
   return const ListEquality<String>().equals(messageAttachments, pendingAttachments);
 }
 
-List<Map<String, dynamic>> _agentInputContent({required String text, required List<String> attachments}) {
-  final content = <Map<String, dynamic>>[];
-  if (text.trim().isNotEmpty) {
-    content.add({'type': 'text', 'text': text});
-  }
-  for (final attachment in attachments) {
-    final url = _normalizeAgentAttachmentUrl(attachment);
-    if (url != null) {
-      content.add({'type': 'file', 'url': url});
-    }
-  }
-  return content;
-}
-
 bool _isTmpThreadPath(String path) {
   return path.trim().startsWith('tmp://');
-}
-
-class _DatasetPendingAgentWait {
-  _DatasetPendingAgentWait({required this.messageId, required this.threadPath});
-
-  final String messageId;
-  final String threadPath;
-  final Completer<void> cancelled = Completer<void>();
-  VoidCallback? detach;
-
-  void cancel() {
-    if (!cancelled.isCompleted) {
-      cancelled.complete();
-    }
-    detach?.call();
-  }
 }
 
 bool _isDatasetTableNotFoundError(Object error) {
@@ -4573,15 +5061,15 @@ String _datasetThreadContentItemId({required Map<String, Object?> row, required 
 }
 
 bool _isAgentStreamContentType(String? type) {
-  return type == _agentTextContentStartedType ||
-      type == _agentTextContentDeltaType ||
-      type == _agentTextContentEndedType ||
-      type == _agentAudioTranscriptionStartedType ||
-      type == _agentAudioTranscriptionDeltaType ||
-      type == _agentAudioTranscriptionCompletedType ||
-      type == _agentReasoningContentStartedType ||
-      type == _agentReasoningContentDeltaType ||
-      type == _agentReasoningContentEndedType;
+  return type == agentTextContentStartedType ||
+      type == agentTextContentDeltaType ||
+      type == agentTextContentEndedType ||
+      type == agentAudioTranscriptionStartedType ||
+      type == agentAudioTranscriptionDeltaType ||
+      type == agentAudioTranscriptionCompletedType ||
+      type == agentReasoningContentStartedType ||
+      type == agentReasoningContentDeltaType ||
+      type == agentReasoningContentEndedType;
 }
 
 String? _payloadTurnId(Map<String, dynamic> payload) {
@@ -4611,9 +5099,9 @@ String? _agentMessagePhase(Map<String, dynamic> payload) {
     }
   }
   final type = payload['type']?.toString();
-  if ((type == _agentAudioTranscriptionStartedType ||
-          type == _agentAudioTranscriptionDeltaType ||
-          type == _agentAudioTranscriptionCompletedType) &&
+  if ((type == agentAudioTranscriptionStartedType ||
+          type == agentAudioTranscriptionDeltaType ||
+          type == agentAudioTranscriptionCompletedType) &&
       _textContentRoleFromPayload(payload) != 'user') {
     return 'final_answer';
   }
@@ -4626,6 +5114,10 @@ String _textContentRoleFromPayload(Map<String, Object?>? payload) {
 
 DateTime? _timestampFromPayload(Map<String, dynamic> payload) {
   final createdAt = payload['created_at'];
+  return _timestampFromObject(createdAt);
+}
+
+DateTime? _timestampFromObject(Object? createdAt) {
   if (createdAt is DateTime) {
     return createdAt;
   }
@@ -4633,6 +5125,37 @@ DateTime? _timestampFromPayload(Map<String, dynamic> payload) {
     return DateTime.tryParse(createdAt);
   }
   return null;
+}
+
+String? _debugRowType(Map<String, Object?> row) {
+  final data = _rowData(row);
+  final rawType = data?['type']?.toString().trim();
+  if (rawType != null && rawType.isNotEmpty) {
+    return rawType;
+  }
+  final message = _mapValue(data?['message']);
+  final messageType = message?['type']?.toString().trim();
+  if (messageType != null && messageType.isNotEmpty) {
+    return messageType;
+  }
+  final kind = data?['kind']?.toString().trim();
+  return kind == null || kind.isEmpty ? null : kind;
+}
+
+Object? _debugJsonValue(Object? value) {
+  if (value == null || value is String || value is num || value is bool) {
+    return value;
+  }
+  if (value is DateTime) {
+    return value.toIso8601String();
+  }
+  if (value is Map) {
+    return {for (final entry in value.entries) entry.key.toString(): _debugJsonValue(entry.value)};
+  }
+  if (value is Iterable) {
+    return [for (final item in value) _debugJsonValue(item)];
+  }
+  return value.toString();
 }
 
 String? _normalizeAgentAttachmentUrl(String path) {
@@ -4654,6 +5177,48 @@ String? _normalizeAgentAttachmentUrl(String path) {
 String _previewPath(String path) {
   const prefix = 'room:///';
   return path.startsWith(prefix) ? path.substring(prefix.length) : path;
+}
+
+bool _isDataUrl(String path) {
+  return path.trimLeft().startsWith('data:');
+}
+
+({String mimeType, Uint8List data})? _decodeDataUrl(String value) {
+  final trimmed = value.trim();
+  if (!trimmed.startsWith('data:')) {
+    return null;
+  }
+  final commaIndex = trimmed.indexOf(',');
+  if (commaIndex == -1) {
+    return null;
+  }
+  final header = trimmed.substring(5, commaIndex);
+  final body = trimmed.substring(commaIndex + 1);
+  final headerParts = header.split(';');
+  final mimeType = headerParts.firstOrNull?.trim();
+  final isBase64 = headerParts.any((part) => part.trim().toLowerCase() == 'base64');
+  try {
+    final data = isBase64 ? base64Decode(body) : Uint8List.fromList(utf8.encode(Uri.decodeComponent(body)));
+    return (mimeType: mimeType == null || mimeType.isEmpty ? 'application/octet-stream' : mimeType, data: Uint8List.fromList(data));
+  } on FormatException {
+    return null;
+  }
+}
+
+String _guessInlineAttachmentMimeType(String filename, {List<int>? headerBytes}) {
+  return lookupMimeType(filename, headerBytes: headerBytes) ?? 'application/octet-stream';
+}
+
+String _inlineAttachmentDisplayName(String path) {
+  final trimmed = path.trim();
+  if (!trimmed.startsWith('data:')) {
+    final normalized = trimmed.endsWith('/') ? trimmed.substring(0, trimmed.length - 1) : trimmed;
+    return normalized.split('/').lastOrNull?.trim().isNotEmpty == true ? normalized.split('/').last.trim() : 'Attachment';
+  }
+  final commaIndex = trimmed.indexOf(',');
+  final header = commaIndex == -1 ? trimmed.substring(5) : trimmed.substring(5, commaIndex);
+  final mimeType = header.split(';').firstOrNull?.trim();
+  return mimeType == null || mimeType.isEmpty ? 'Inline attachment' : 'Inline attachment ($mimeType)';
 }
 
 String _comparableThreadAttachmentPath(String path) {
@@ -4731,10 +5296,10 @@ bool _isImageGenerationRow(Map<String, Object?> row) {
     return true;
   }
   final type = data['type']?.toString();
-  return type == _agentImageGenerationStartedType ||
-      type == _agentImageGenerationPartialType ||
-      type == _agentImageGenerationCompletedType ||
-      type == _agentImageGenerationFailedType;
+  return type == agentImageGenerationStartedType ||
+      type == agentImageGenerationPartialType ||
+      type == agentImageGenerationCompletedType ||
+      type == agentImageGenerationFailedType;
 }
 
 Set<String> _imageGenerationCorrelationKeys(Map<String, Object?> row) {
@@ -4746,10 +5311,10 @@ Set<String> _imageGenerationCorrelationKeys(Map<String, Object?> row) {
   final data = _rowData(row);
   final rawType = data?['type']?.toString();
   final message =
-      rawType == _agentImageGenerationStartedType ||
-          rawType == _agentImageGenerationPartialType ||
-          rawType == _agentImageGenerationCompletedType ||
-          rawType == _agentImageGenerationFailedType
+      rawType == agentImageGenerationStartedType ||
+          rawType == agentImageGenerationPartialType ||
+          rawType == agentImageGenerationCompletedType ||
+          rawType == agentImageGenerationFailedType
       ? data
       : _mapValue(data?['message']);
   for (final value in <Object?>[data?['call_id'], message?['call_id']]) {
@@ -4784,7 +5349,7 @@ bool _imageGenerationRowsReconcile({required Map<String, Object?> datasetRow, re
   return true;
 }
 
-Set<String> _datasetThreadImageReferenceKeys(_DatasetThreadImage image) {
+Set<String> _datasetThreadImageReferenceKeys(DatasetThreadImage image) {
   final keys = <String>{};
   final imageId = _stringValue(image.imageId);
   if (imageId != null) {
@@ -4838,11 +5403,11 @@ Set<String> _datasetThreadImageReferenceKeys(_DatasetThreadImage image) {
 
 String _imageGenerationStatusFromType(String? type) {
   switch (type) {
-    case _agentImageGenerationCompletedType:
+    case agentImageGenerationCompletedType:
       return 'completed';
-    case _agentImageGenerationFailedType:
+    case agentImageGenerationFailedType:
       return 'failed';
-    case _agentImageGenerationPartialType:
+    case agentImageGenerationPartialType:
       return 'in_progress';
     default:
       return 'pending';

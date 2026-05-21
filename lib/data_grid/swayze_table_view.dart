@@ -1971,22 +1971,13 @@ String? _rawJsonTextForCellValue(Object? value) {
   }
 }
 
-String _jsonDataUrlForCell(_SharedSwayzeController controller, _SharedSwayzeCellData cell) {
-  final columnName = cell.position.dx >= 0 && cell.position.dx < controller.columns.length ? controller.columns[cell.position.dx] : 'value';
-  final title = '${_safeJsonFileName(columnName)}-${cell.position.dy + 1}.json';
+String _jsonDataUrlForCell(_SharedSwayzeCellData cell) {
   final text = _jsonTextForCell(cell);
   if (text == null) {
     throw StateError('Cell does not contain displayable JSON.');
   }
-  final encodedName = Uri.encodeComponent(title);
   final encodedData = base64Encode(utf8.encode(text));
-  return 'data:application/json;name=$encodedName;base64,$encodedData';
-}
-
-String _safeJsonFileName(String value) {
-  final normalized = value.trim().replaceAll(RegExp(r'[^A-Za-z0-9._-]+'), '-').replaceAll(RegExp(r'-+'), '-');
-  final trimmed = normalized.replaceAll(RegExp(r'^[-.]+|[-.]+$'), '');
-  return trimmed.isEmpty ? 'cell' : trimmed;
+  return 'data:application/json;base64,$encodedData';
 }
 
 TextSpan _cellTextSpan(
@@ -2397,7 +2388,7 @@ class _SharedSwayzeCellContextMenuRegionState extends State<_SharedSwayzeCellCon
           ShadContextMenuItem(
             leading: const Icon(Icons.visibility, size: 16),
             onPressed: () async {
-              final file = _jsonDataUrlForCell(widget.controller, widget.data);
+              final file = _jsonDataUrlForCell(widget.data);
               await _waitForDismiss();
               if (!mounted) {
                 return;
