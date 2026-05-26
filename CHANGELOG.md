@@ -1,3 +1,33 @@
+## [0.42.2]
+- Added container and build model fields for image IDs, runtime stats, exit status details, and published build image metadata.
+- Added `waitForExitStatus` alongside `waitForExit`, preserving the existing exit-code convenience while exposing richer exit information.
+- Updated container list parsing to consume the new metadata fields in responses without breaking existing callers.
+
+## [0.42.1]
+- Stability
+
+## [0.42.0]
+- Added project lookup by key.
+- Container and room APIs now model ports as structured `containerPort`/`hostPort` pairs, which is a breaking response-shape change for container listings.
+- `RoutePath` and `PortSpec` now support `stripPrefix` and `hostPort`, and room service MCP URL resolution uses `hostPort` when present.
+- Room creation now serializes permissions correctly and preserves annotations.
+- Container creation now accepts a `template` option.
+
+## [0.41.10]
+- Stability
+
+## [0.41.9]
+- Stability
+
+## [0.41.8]
+- Stability
+
+## [0.41.7]
+- Stability
+
+## [0.41.6]
+- Extended the Dart storage client `downloadUrl` API with an optional `download` flag for inline versus attachment links.
+
 ## [0.41.5]
 - Stability
 
