@@ -27,4 +27,37 @@ void main() {
       expect(message, isNull);
     });
   });
+
+  group('dataset tool call diff previews', () {
+    test('renders Codex diff tool calls like apply patch previews', () {
+      const diff = '''
+diff --git a/lib/report.py b/lib/report.py
+--- a/lib/report.py
++++ b/lib/report.py
+@@
+-old
++new
++extra
+''';
+
+      final blocks = datasetToolCallDiffPreviewBlocksForTesting(toolkit: 'codex', tool: 'diff_updated', arguments: {'diff': diff});
+
+      expect(blocks, hasLength(1));
+      expect(blocks.single['header'], 'lib/report.py');
+      expect(blocks.single['code'], contains('-old'));
+      expect(blocks.single['code'], contains('+extra'));
+      expect(blocks.single['linesAdded'], 2);
+      expect(blocks.single['linesRemoved'], 1);
+    });
+
+    test('does not render arbitrary diff arguments from unrelated tools', () {
+      final blocks = datasetToolCallDiffPreviewBlocksForTesting(
+        toolkit: 'other',
+        tool: 'diff_updated',
+        arguments: {'diff': '@@\n-old\n+new\n'},
+      );
+
+      expect(blocks, isEmpty);
+    });
+  });
 }

@@ -301,6 +301,8 @@ ToolCallHeadline? _friendlyBuiltinHeadline({
   ToolCallHeadline? headline;
   if (normalizedTool == 'apply_patch') {
     headline = _applyPatchHeadline(arguments: args, completed: completed, pending: pending);
+  } else if (normalizedToolkit == 'codex' && normalizedTool.startsWith('diff')) {
+    headline = _codexDiffHeadline(arguments: args, completed: completed, pending: pending);
   } else if (normalizedToolkit == 'storage') {
     headline = _storageHeadline(tool: normalizedTool, arguments: args, completed: completed, pending: pending);
   } else if (normalizedToolkit == 'dataset') {
@@ -326,6 +328,27 @@ ToolCallHeadline? _applyPatchHeadline({required Map<String, Object?> arguments, 
   final stats = _applyPatchStatsFromArguments(arguments);
   if (stats == null) {
     return null;
+  }
+  final action = completed ? 'Edited' : (pending ? 'Preparing' : 'Editing');
+  final target = stats.paths.length == 1 ? stats.paths.single : '${stats.paths.length} files';
+  return ToolCallHeadline(
+    action: action,
+    rest: target,
+    detailLanguageOrFilename: stats.paths.length == 1 ? stats.paths.single : null,
+    linesAdded: stats.linesAdded,
+    linesRemoved: stats.linesRemoved,
+  );
+}
+
+ToolCallHeadline? _codexDiffHeadline({required Map<String, Object?> arguments, required bool completed, required bool pending}) {
+  final diff = _nestedStringArgument(arguments, const {'diff'});
+  final fallback = _headlineFromText(completed ? 'Updated diff' : (pending ? 'Preparing diff' : 'Updating diff'));
+  if (diff == null) {
+    return fallback;
+  }
+  final stats = _unifiedDiffStats(diff);
+  if (stats == null) {
+    return fallback;
   }
   final action = completed ? 'Edited' : (pending ? 'Preparing' : 'Editing');
   final target = stats.paths.length == 1 ? stats.paths.single : '${stats.paths.length} files';
@@ -403,6 +426,63 @@ _ApplyPatchStats? _applyPatchStats(String patch) {
     return null;
   }
   return _ApplyPatchStats(paths: paths, linesAdded: linesAdded, linesRemoved: linesRemoved);
+}
+
+_ApplyPatchStats? _unifiedDiffStats(String diff) {
+  final normalized = diff.replaceAll('\r\n', '\n').trimRight();
+  if (normalized.isEmpty) {
+    return null;
+  }
+
+  final paths = <String>[];
+  var linesAdded = 0;
+  var linesRemoved = 0;
+  String? pendingOldPath;
+  final diffGitPattern = RegExp(r'^diff --git a/(.+) b/(.+)$');
+  final oldPathPattern = RegExp(r'^--- (?:a/)?(.+)$');
+  final newPathPattern = RegExp(r'^\+\+\+ (?:b/)?(.+)$');
+
+  void addPath(String path) {
+    final normalizedPath = path.trim();
+    if (normalizedPath.isEmpty || normalizedPath == '/dev/null' || paths.contains(normalizedPath)) {
+      return;
+    }
+    paths.add(normalizedPath);
+  }
+
+  for (final line in normalized.split('\n')) {
+    final diffGitMatch = diffGitPattern.firstMatch(line);
+    if (diffGitMatch != null) {
+      addPath(diffGitMatch.group(2) ?? diffGitMatch.group(1) ?? '');
+      pendingOldPath = null;
+      continue;
+    }
+
+    final oldPathMatch = oldPathPattern.firstMatch(line);
+    if (oldPathMatch != null) {
+      pendingOldPath = oldPathMatch.group(1);
+      continue;
+    }
+
+    final newPathMatch = newPathPattern.firstMatch(line);
+    if (newPathMatch != null) {
+      final newPath = newPathMatch.group(1);
+      addPath(newPath == null || newPath == '/dev/null' ? pendingOldPath ?? '' : newPath);
+      pendingOldPath = null;
+      continue;
+    }
+
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      linesAdded++;
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      linesRemoved++;
+    }
+  }
+
+  if (paths.isEmpty && linesAdded == 0 && linesRemoved == 0) {
+    return null;
+  }
+  return _ApplyPatchStats(paths: paths.isEmpty ? const ['Diff'] : paths, linesAdded: linesAdded, linesRemoved: linesRemoved);
 }
 
 (int, int) _diffLineCounts(String diff) {

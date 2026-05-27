@@ -86,10 +86,12 @@ class LiveToolCallAccumulator {
   bool remove(String itemId) => _callsByItemId.remove(itemId) != null;
 
   ToolCallStatusSnapshot _snapshotFor({required String itemId, required AccumulatedLiveToolCall call, required String? fallbackText}) {
-    final isApplyPatch = call.tool?.trim().toLowerCase() == "apply_patch";
+    final normalizedTool = call.tool?.trim().toLowerCase();
+    final isApplyPatch = normalizedTool == "apply_patch";
+    final isCodexDiff = normalizedTool?.startsWith("diff") == true && applyPatchTextFromArguments(call.arguments?["diff"]) != null;
     final patchInfo = _patchStatusInfo(call);
     final path = patchInfo?.path;
-    final patchText = patchInfo == null && !isApplyPatch
+    final patchText = patchInfo == null && !isApplyPatch && !isCodexDiff
         ? null
         : path == null
         ? switch (call.status) {
@@ -119,7 +121,9 @@ class LiveToolCallAccumulator {
     final tool = call.tool?.trim().toLowerCase();
     final deltaText = call.argumentText.trim().isEmpty ? null : call.argumentText;
     final looksLikePatch =
-        tool == "apply_patch" || (deltaText != null && (deltaText.contains("*** Begin Patch") || deltaText.contains("@@")));
+        tool == "apply_patch" ||
+        tool?.startsWith("diff") == true ||
+        (deltaText != null && (deltaText.contains("*** Begin Patch") || deltaText.contains("@@")));
     if (!looksLikePatch) {
       return null;
     }

@@ -162,6 +162,24 @@ void main() {
     );
   });
 
+  test('formatToolCallSummary renders Codex diff tool calls with line counts', () {
+    const diff = '''
+diff --git a/lib/report.py b/lib/report.py
+--- a/lib/report.py
++++ b/lib/report.py
+@@
+-old
++new
++extra
+''';
+
+    expect(formatToolCallSummary(toolkit: 'codex', tool: 'diff_updated', arguments: {'diff': diff}), 'Edited lib/report.py (+2 -1)');
+    expect(
+      formatToolCallSummary(toolkit: 'codex', tool: 'diff_updated', arguments: {'diff': diff}, completed: false),
+      'Editing lib/report.py (+2 -1)',
+    );
+  });
+
   test('formatToolCallEntryText keeps header and shows trailing details', () {
     final text = formatToolCallEntryText(
       toolkit: 'openai',
