@@ -794,6 +794,25 @@ void main() {
     expect(withPath.text, 'Editing report.py');
   });
 
+  test('LiveToolCallAccumulator summarizes Codex diff tool calls', () {
+    final accumulator = LiveToolCallAccumulator();
+    const diff = '''
+diff --git a/report.py b/report.py
+--- a/report.py
++++ b/report.py
+@@
+-old
++new
++extra
+''';
+
+    final snapshot = accumulator.upsert(itemId: 'diff-1', tool: 'diff_updated', arguments: {'diff': diff}, fallbackText: 'Updating diff');
+
+    expect(snapshot.text, 'Editing report.py');
+    expect(snapshot.linesAdded, 2);
+    expect(snapshot.linesRemoved, 1);
+  });
+
   test('stream accumulators expose in progress and completed status', () {
     final text = TextStreamAccumulator();
     final firstText = text.appendDelta(itemId: 'msg-1', delta: 'hello');

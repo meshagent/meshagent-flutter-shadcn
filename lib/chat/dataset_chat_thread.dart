@@ -4234,19 +4234,119 @@ List<_DatasetDiffPreviewBlock> _applyPatchDiffPreviewBlocks(String patch) {
   return (linesAdded, linesRemoved);
 }
 
-List<_DatasetDiffPreviewBlock> _toolCallDiffPreviewBlocks({required String tool, required Map<String, Object?>? arguments}) {
+List<_DatasetDiffPreviewBlock> _unifiedDiffPreviewBlocks(String diff) {
+  final normalized = diff.replaceAll('\r\n', '\n').trimRight();
+  if (normalized.isEmpty) {
+    return const <_DatasetDiffPreviewBlock>[];
+  }
+
+  final previews = <_DatasetDiffPreviewBlock>[];
+  var currentPath = '';
+  var lines = <String>[];
+  var linesAdded = 0;
+  var linesRemoved = 0;
+  String? pendingOldPath;
+  final diffGitPattern = RegExp(r'^diff --git a/(.+) b/(.+)$');
+  final oldPathPattern = RegExp(r'^--- (?:a/)?(.+)$');
+  final newPathPattern = RegExp(r'^\+\+\+ (?:b/)?(.+)$');
+
+  void flush() {
+    if (currentPath.isNotEmpty && lines.isNotEmpty) {
+      previews.add(
+        _DatasetDiffPreviewBlock(
+          header: currentPath,
+          code: lines.join('\n').trimRight(),
+          linesAdded: linesAdded,
+          linesRemoved: linesRemoved,
+        ),
+      );
+    }
+    lines = <String>[];
+    linesAdded = 0;
+    linesRemoved = 0;
+  }
+
+  void beginFile(String path) {
+    final normalizedPath = path.trim();
+    if (normalizedPath.isEmpty || normalizedPath == '/dev/null') {
+      return;
+    }
+    if (currentPath != normalizedPath) {
+      flush();
+      currentPath = normalizedPath;
+    }
+  }
+
+  for (final line in normalized.split('\n')) {
+    final diffGitMatch = diffGitPattern.firstMatch(line);
+    if (diffGitMatch != null) {
+      beginFile(diffGitMatch.group(2) ?? diffGitMatch.group(1) ?? '');
+      pendingOldPath = null;
+      continue;
+    }
+
+    final oldPathMatch = oldPathPattern.firstMatch(line);
+    if (oldPathMatch != null) {
+      pendingOldPath = oldPathMatch.group(1);
+      continue;
+    }
+
+    final newPathMatch = newPathPattern.firstMatch(line);
+    if (newPathMatch != null) {
+      final newPath = newPathMatch.group(1);
+      beginFile(newPath == null || newPath == '/dev/null' ? pendingOldPath ?? '' : newPath);
+      pendingOldPath = null;
+      continue;
+    }
+
+    if (currentPath.isEmpty) {
+      continue;
+    }
+    lines.add(line);
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      linesAdded++;
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      linesRemoved++;
+    }
+  }
+  flush();
+
+  if (previews.isNotEmpty) {
+    return previews;
+  }
+  final counts = _diffLineCounts(normalized);
+  return <_DatasetDiffPreviewBlock>[
+    _DatasetDiffPreviewBlock(header: 'Diff', code: normalized, linesAdded: counts.$1, linesRemoved: counts.$2),
+  ];
+}
+
+bool _isCodexDiffToolCall({required String toolkit, required String tool}) {
+  return toolkit.trim().toLowerCase() == 'codex' && tool.trim().toLowerCase().startsWith('diff');
+}
+
+List<_DatasetDiffPreviewBlock> _toolCallDiffPreviewBlocks({
+  required String toolkit,
+  required String tool,
+  required Map<String, Object?>? arguments,
+}) {
   if (arguments == null) {
     return const <_DatasetDiffPreviewBlock>[];
   }
+  final normalizedTool = tool.trim().toLowerCase();
+  final isCodexDiff = _isCodexDiffToolCall(toolkit: toolkit, tool: tool);
+  if (isCodexDiff) {
+    final diff = _firstNestedStringValue(arguments, const {'diff'});
+    return diff == null ? const <_DatasetDiffPreviewBlock>[] : _unifiedDiffPreviewBlocks(diff);
+  }
   final operationBlock = _openAiPatchOperationPreviewBlock(arguments);
-  if (operationBlock != null && tool.trim().toLowerCase() == 'apply_patch') {
+  if (operationBlock != null && normalizedTool == 'apply_patch') {
     return <_DatasetDiffPreviewBlock>[operationBlock];
   }
   final patch = _firstNestedStringValue(arguments, const {'patch', 'input', 'diff'});
   if (patch == null) {
     return const <_DatasetDiffPreviewBlock>[];
   }
-  if (tool.trim().toLowerCase() != 'apply_patch' &&
+  if (normalizedTool != 'apply_patch' &&
       !patch.contains('*** Begin Patch') &&
       !patch.contains('*** Update File:') &&
       !patch.contains('*** Add File:') &&
@@ -4357,7 +4457,7 @@ _DatasetThreadMessage? _messageForRow(Map<String, Object?> row) {
       final errorMessage = data['error_message']?.toString();
       final status = data['status']?.toString();
       final argumentDeltaBytes = _intValue(data['argument_delta_bytes']);
-      final diffPreviewBlocks = _toolCallDiffPreviewBlocks(tool: tool, arguments: arguments);
+      final diffPreviewBlocks = _toolCallDiffPreviewBlocks(toolkit: toolkit, tool: tool, arguments: arguments);
       final summary = formatToolCallEntry(
         toolkit: toolkit,
         tool: tool.trim().isEmpty ? 'tool' : tool,
@@ -4778,7 +4878,7 @@ _DatasetThreadMessage _messageForToolCallEndRow({
   final logs = state?.logs ?? const <String>[];
   final argumentDeltaBytes = state?.argumentDeltaBytes ?? _intValue(payload?['argument_delta_bytes']);
   final errorMessage = _agentToolCallErrorMessage(payload?['error']);
-  final diffPreviewBlocks = _toolCallDiffPreviewBlocks(tool: tool, arguments: arguments);
+  final diffPreviewBlocks = _toolCallDiffPreviewBlocks(toolkit: toolkit, tool: tool, arguments: arguments);
   final entry = formatToolCallEntry(
     toolkit: toolkit,
     tool: tool.trim().isEmpty ? 'tool' : tool,
@@ -4821,6 +4921,18 @@ String? agentTurnEndedErrorMessage(Map<String, Object?> payload) {
     return null;
   }
   return _agentErrorMessage(error);
+}
+
+@visibleForTesting
+List<Map<String, Object?>> datasetToolCallDiffPreviewBlocksForTesting({
+  required String toolkit,
+  required String tool,
+  required Map<String, Object?>? arguments,
+}) {
+  return [
+    for (final block in _toolCallDiffPreviewBlocks(toolkit: toolkit, tool: tool, arguments: arguments))
+      {'header': block.header, 'code': block.code, 'linesAdded': block.linesAdded, 'linesRemoved': block.linesRemoved},
+  ];
 }
 
 String? _agentToolCallErrorMessage(Object? error) {

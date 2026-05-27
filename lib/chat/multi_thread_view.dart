@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:meshagent/meshagent.dart';
+import 'package:meshagent_agents/meshagent_agents.dart' show BaseChatClient;
 
 import 'chat.dart';
 import 'dataset_chat_thread.dart';
@@ -12,6 +13,8 @@ class MultiThreadView extends StatefulWidget {
   const MultiThreadView({
     super.key,
     required this.room,
+    this.chatClient,
+    this.disposeChatClient = false,
     required this.agentName,
     required this.builder,
     this.controller,
@@ -33,6 +36,8 @@ class MultiThreadView extends StatefulWidget {
   });
 
   final RoomClient room;
+  final BaseChatClient? chatClient;
+  final bool disposeChatClient;
   final String agentName;
   final MultiThreadContentBuilder builder;
   final ChatThreadController? controller;
@@ -113,6 +118,8 @@ class _MultiThreadViewState extends State<MultiThreadView> {
     return NewChatThread(
       key: ValueKey("new-thread-${widget.agentName}-${widget.newThreadResetVersion}"),
       room: widget.room,
+      chatClient: widget.chatClient,
+      disposeChatClient: widget.disposeChatClient,
       agentName: widget.agentName,
       controller: _controller,
       composerKey: _composerKey,
