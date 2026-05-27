@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:meshagent/meshagent.dart';
+import 'package:meshagent_agents/meshagent_agents.dart' show BaseChatClient, MessagingChatClient;
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import 'chat.dart';
@@ -19,6 +20,8 @@ class ChatBotView extends StatefulWidget {
   const ChatBotView({
     super.key,
     required this.room,
+    this.chatClient,
+    this.disposeChatClient = false,
     this.agentName,
     this.threadDisplayMode = ChatThreadDisplayMode.singleThread,
     this.threadDir,
@@ -64,6 +67,8 @@ class ChatBotView extends StatefulWidget {
   });
 
   final RoomClient room;
+  final BaseChatClient? chatClient;
+  final bool disposeChatClient;
   final String? agentName;
   final ChatThreadDisplayMode threadDisplayMode;
   final String? threadDir;
@@ -116,6 +121,7 @@ class _ChatBotViewState extends State<ChatBotView> {
   late bool _ownsController;
   final Map<String, DatasetChatModelController> _datasetModelControllers = <String, DatasetChatModelController>{};
   late final DatasetChatModelController _newThreadModelController;
+  MessagingChatClient? _ownedChatClient;
 
   @override
   void initState() {
@@ -128,15 +134,16 @@ class _ChatBotViewState extends State<ChatBotView> {
   @override
   void didUpdateWidget(covariant ChatBotView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.room == widget.room && oldWidget.controller == widget.controller) {
-      return;
+    if (oldWidget.room != widget.room || oldWidget.controller != widget.controller) {
+      if (_ownsController) {
+        _controller.dispose();
+      }
+      _ownsController = widget.controller == null;
+      _controller = widget.controller ?? ChatThreadController(room: widget.room);
     }
-
-    if (_ownsController) {
-      _controller.dispose();
+    if (oldWidget.room != widget.room || oldWidget.agentName != widget.agentName || oldWidget.chatClient != widget.chatClient) {
+      _disposeOwnedChatClient();
     }
-    _ownsController = widget.controller == null;
-    _controller = widget.controller ?? ChatThreadController(room: widget.room);
   }
 
   @override
@@ -144,6 +151,7 @@ class _ChatBotViewState extends State<ChatBotView> {
     if (_ownsController) {
       _controller.dispose();
     }
+    _disposeOwnedChatClient(disposeInjected: widget.disposeChatClient);
     for (final controller in _datasetModelControllers.values) {
       controller.dispose();
     }
@@ -173,6 +181,36 @@ class _ChatBotViewState extends State<ChatBotView> {
     return resolvedThreadListPath(widget.threadListPath, threadDir: widget.threadDir, agentName: widget.agentName);
   }
 
+  BaseChatClient? _agentChatClient() {
+    final injected = widget.chatClient;
+    if (injected != null) {
+      return injected;
+    }
+    final agentName = widget.agentName?.trim();
+    if (agentName == null || agentName.isEmpty) {
+      return null;
+    }
+    final existing = _ownedChatClient;
+    if (existing != null) {
+      return existing;
+    }
+    final created = MessagingChatClient(room: widget.room, agentName: agentName);
+    _ownedChatClient = created;
+    unawaited(created.start());
+    return created;
+  }
+
+  void _disposeOwnedChatClient({bool disposeInjected = false}) {
+    final owned = _ownedChatClient;
+    _ownedChatClient = null;
+    if (owned != null) {
+      unawaited(owned.stop());
+    }
+    if (disposeInjected) {
+      unawaited(widget.chatClient?.stop());
+    }
+  }
+
   Widget _buildChatInputBox(BuildContext context, Widget chatBox) {
     if (widget.hideChatInput) {
       return const SizedBox.shrink();
@@ -199,7 +237,55 @@ class _ChatBotViewState extends State<ChatBotView> {
     _datasetModelControllerFor(normalizedPath).replaceModelsFrom(_newThreadModelController);
   }
 
+  Widget _buildAgentMessageThread(BuildContext context, String path, ChatThreadController controller, {GlobalKey? composerKey}) {
+    final modelController = _datasetModelControllerFor(path);
+    final thread = DatasetChatThread(
+      key: ValueKey(path),
+      path: path,
+      chatClient: _agentChatClient(),
+      controller: controller,
+      composerKey: composerKey,
+      agentName: widget.agentName,
+      emptyStateTitle: widget.emptyStateTitle,
+      emptyStateDescription: widget.emptyStateDescription,
+      openFile: widget.openFile,
+      attachmentRenderer: (context, path) => ChatThreadPreview(room: widget.room, path: path),
+      toolsBuilder: widget.toolsBuilder,
+      inputPlaceholder: widget.inputPlaceholder,
+      attachmentBuilder: widget.attachmentBuilder,
+      inputContextMenuBuilder: widget.inputContextMenuBuilder,
+      inputOnPressedOutside: widget.inputOnPressedOutside,
+      onFileDrop: (name, dataStream, size) => controller.uploadFile(name, dataStream, size ?? 0),
+      localParticipant: widget.room.localParticipant,
+      generatedImageAttachmentRenderer: (context, image, onOpenFullscreen) => ChatThreadImageAttachment(
+        room: widget.room,
+        imageId: image.imageId,
+        imageUri: image.uri,
+        fallbackMimeType: image.mimeType,
+        status: image.status,
+        statusDetail: image.statusDetail,
+        widthPx: image.width,
+        heightPx: image.height,
+        roundedCorners: false,
+        onOpenFullscreen: onOpenFullscreen,
+      ),
+      imageGalleryBuilder: (context, images, initialIndex, onClose) =>
+          ChatThreadImageGalleryPage(room: widget.room, images: images, initialIndex: initialIndex, onClose: onClose),
+      modelController: modelController,
+      initialShowCompletedToolCalls: widget.initialShowCompletedToolCalls,
+      showUsageFooter: widget.showUsageFooter,
+    );
+    if (!path.startsWith('dataset://') && !path.startsWith('tmp://')) {
+      return thread;
+    }
+    return widget.datasetThreadWrapperBuilder?.call(context, path, thread, modelController) ?? thread;
+  }
+
   Widget _buildThread(BuildContext context, String path, ChatThreadController controller, {GlobalKey? composerKey}) {
+    if (widget.threadDisplayMode == ChatThreadDisplayMode.multiThreadComposer && _agentChatClient() != null) {
+      return _buildAgentMessageThread(context, path, controller, composerKey: composerKey);
+    }
+
     if (path.startsWith('dataset://') || path.startsWith('tmp://')) {
       final modelController = _datasetModelControllerFor(path);
       final thread = RoomDatasetChatThread(
@@ -266,8 +352,10 @@ class _ChatBotViewState extends State<ChatBotView> {
       );
     }
 
+    final chatClient = _agentChatClient();
     final content = MultiThreadView(
       room: widget.room,
+      chatClient: chatClient,
       agentName: agentName.trim(),
       controller: _controller,
       selectedThreadPath: _normalizeSelectedThreadPath(widget.selectedThreadPath),
@@ -290,7 +378,7 @@ class _ChatBotViewState extends State<ChatBotView> {
     );
 
     final threadListPath = _resolvedThreadListPath();
-    if (!widget.showThreadList || threadListPath == null) {
+    if (!widget.showThreadList || threadListPath == null || chatClient == null) {
       return content;
     }
 
@@ -300,7 +388,8 @@ class _ChatBotViewState extends State<ChatBotView> {
         final showSideBySide = constraints.maxWidth >= 920;
         final list = ChatThreadListView(
           room: widget.room,
-          threadListPath: threadListPath,
+          chatClient: chatClient,
+          threadListPath: "agent://threads",
           agentName: widget.agentName,
           selectedThreadPath: selectedThreadPath,
           selectedThreadDisplayName: widget.selectedThreadDisplayName,
