@@ -119,6 +119,7 @@ class DatasetChatAudioFormat {
 
 class DatasetChatModelOption {
   const DatasetChatModelOption({
+    this.backend,
     required this.provider,
     required this.providerFriendlyName,
     required this.model,
@@ -136,6 +137,7 @@ class DatasetChatModelOption {
     this.active = false,
   });
 
+  final String? backend;
   final String provider;
   final String providerFriendlyName;
   final String model;
@@ -152,16 +154,18 @@ class DatasetChatModelOption {
   final List<String> accepts;
   final bool active;
 
-  String get key => '$provider/$model';
+  String get key => '${backend ?? ''}/$provider/$model';
 
   String get label {
     final displayModel = modelFriendlyName == null || modelFriendlyName!.trim().isEmpty ? model : modelFriendlyName!.trim();
     final displayProvider = providerFriendlyName.trim().isEmpty ? provider : providerFriendlyName.trim();
-    return '$displayProvider / $displayModel';
+    final displayBackend = backend == null || backend!.trim().isEmpty ? null : backend!.trim();
+    return displayBackend == null ? '$displayProvider / $displayModel' : '$displayBackend / $displayProvider / $displayModel';
   }
 
   DatasetChatModelOption copyWith({bool? active, bool? supportsAttachments, List<String>? accepts}) {
     return DatasetChatModelOption(
+      backend: backend,
       provider: provider,
       providerFriendlyName: providerFriendlyName,
       model: model,
@@ -358,6 +362,7 @@ class DatasetChatModelController extends ChangeNotifier {
       if (provider == null || provider.isEmpty) {
         continue;
       }
+      final backend = providerValue['backend']?.toString().trim();
       final providerFriendlyName = providerValue['friendly_name']?.toString() ?? provider;
       final models = providerValue['models'];
       if (models is! List) {
@@ -379,6 +384,7 @@ class DatasetChatModelController extends ChangeNotifier {
               ]
             : const <String>['text'];
         final option = DatasetChatModelOption(
+          backend: backend == null || backend.isEmpty ? null : backend,
           provider: provider,
           providerFriendlyName: providerFriendlyName,
           model: model,
@@ -417,12 +423,16 @@ class DatasetChatModelController extends ChangeNotifier {
   }
 
   void applyModelChanged(Map<String, dynamic> payload) {
+    final backend = payload['backend']?.toString().trim();
     final provider = payload['provider']?.toString().trim();
     final model = payload['model']?.toString().trim();
     if (provider == null || provider.isEmpty || model == null || model.isEmpty) {
       return;
     }
-    final existing = _models.firstWhereOrNull((option) => option.provider == provider && option.model == model);
+    final normalizedBackend = backend == null || backend.isEmpty ? null : backend;
+    final existing = _models.firstWhereOrNull(
+      (option) => option.backend == normalizedBackend && option.provider == provider && option.model == model,
+    );
     final payloadHasSupportsAttachments = payload.containsKey('supports_attachments');
     final payloadHasAccepts = payload.containsKey('accepts');
     final payloadSupportsAttachments = payload['supports_attachments'] == true;
@@ -441,6 +451,7 @@ class DatasetChatModelController extends ChangeNotifier {
           accepts: payloadHasAccepts ? payloadAccepts : null,
         ) ??
         DatasetChatModelOption(
+          backend: normalizedBackend,
           provider: provider,
           providerFriendlyName: payload['provider_friendly_name']?.toString() ?? provider,
           model: model,
@@ -2070,7 +2081,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (session == null || (_agentParticipant() == null && widget.chatClient == null)) {
       throw StateError('No online agent supports agent messages for this thread.');
     }
-    await session.changeModel(provider: option.provider, model: option.model);
+    await session.changeModel(backend: option.backend, provider: option.provider, model: option.model);
   }
 
   Future<void> _changeVoice(String voice) async {
@@ -2082,7 +2093,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (activeModel == null) {
       throw StateError('No model selected for this thread.');
     }
-    await session.changeModel(provider: activeModel.provider, model: activeModel.model, voice: voice);
+    await session.changeModel(backend: activeModel.backend, provider: activeModel.provider, model: activeModel.model, voice: voice);
   }
 
   bool _handleModelPayload(Map<String, dynamic> payload) {
@@ -2389,6 +2400,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       }
       await session.commitRealtimeAudio(
         turnId: turnId,
+        backend: activeModel?.backend,
         provider: activeModel?.provider,
         model: activeModel?.model,
         voice: activeVoice,
@@ -2446,6 +2458,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         attachments: agentAttachments,
         steer: isSteer,
         turnId: _status.turnId,
+        backend: activeModel?.backend,
         provider: activeModel?.provider,
         model: activeModel?.model,
         outputModalities: isSteer ? null : [_modelController.activeModality],

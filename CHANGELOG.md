@@ -1,3 +1,22 @@
+## [0.43.3]
+- Stability
+
+## [0.43.2]
+- Added optional backend fields throughout `meshagent-agents-dart` messages and chat session methods, enabling multi-backend conversations and model changes.
+- Added IAP-aware websocket helpers in `meshagent-api`, including `WebSocketClientProtocol.withIAP()` and Authorization-header based room connections instead of token query parameters.
+- Breaking: websocket room auth now uses `meshagent-agent.<token>` instead of `bearer.<token>`.
+- Expanded `meshagent_flutter_desktop_updater` with update-check dialog, controller-scope, and menu-copy exports for desktop apps.
+
+## [0.43.1]
+- Added IAP room websocket support to the Dart agent chat client.
+- Reworked the Flutter chat and thread components to load thread lists through `MessagingChatClient` and `AgentThreadStorageRepository` instead of direct document mutation.
+- Added the desktop update bridge APIs used by Flutter apps for update checks on macOS and Windows.
+
+## [0.43.0]
+- Room websocket clients now support IAP connections through `withIAP()` helpers, nullable tokens, and the new auth flow that avoids query-string token handling.
+- Agent and chat payloads now carry backend metadata through thread starts, turn starts, model changes, and realtime audio commits.
+- The shared Dart UI/tooling packages now understand backend-aware model lists, unified diff previews, and Codex diff tool calls, and the desktop updater exports reusable dialog and scope helpers.
+
 ## [0.42.2]
 - Added container and build model fields for image IDs, runtime stats, exit status details, and published build image metadata.
 - Added `waitForExitStatus` alongside `waitForExit`, preserving the existing exit-code convenience while exposing richer exit information.
