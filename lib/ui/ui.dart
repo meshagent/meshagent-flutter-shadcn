@@ -3,8 +3,8 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 
 export 'mobile_flow_dialog.dart';
 
-String timeAgo(DateTime d) {
-  Duration diff = DateTime.now().difference(d);
+String timeAgo(DateTime d, {DateTime? now}) {
+  Duration diff = (now ?? DateTime.now()).difference(d);
   String ago;
   if (diff.inDays > 365) {
     ago = "${(diff.inDays / 365).floor()} ${(diff.inDays / 365).floor() == 1 ? "year" : "years"}";
@@ -30,6 +30,8 @@ String timeAgo(DateTime d) {
     ago = "${diff.inHours.abs()} ${diff.inHours == -1 ? "hour" : "hours"}";
   } else if (diff.inMinutes < 0) {
     ago = "${diff.inMinutes.abs()} ${diff.inMinutes == -1 ? "minute" : "minutes"}";
+  } else if (diff.inSeconds.abs() >= 5) {
+    ago = "${diff.inSeconds.abs()} ${diff.inSeconds.abs() == 1 ? "second" : "seconds"}";
   } else {
     return "just now";
   }

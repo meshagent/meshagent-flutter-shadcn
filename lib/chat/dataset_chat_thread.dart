@@ -4948,6 +4948,11 @@ List<Map<String, Object?>> datasetToolCallDiffPreviewBlocksForTesting({
   ];
 }
 
+@visibleForTesting
+DateTime datasetRowTimestampForTesting(Map<String, Object?> row) {
+  return _rowTimestamp(row);
+}
+
 String? _agentToolCallErrorMessage(Object? error) {
   return _agentErrorMessage(error);
 }
@@ -5238,7 +5243,7 @@ String _textContentRoleFromPayload(Map<String, Object?>? payload) {
 }
 
 DateTime? _timestampFromPayload(Map<String, dynamic> payload) {
-  final createdAt = payload['created_at'];
+  final createdAt = payload['created_at'] ?? payload['timestamp'];
   return _timestampFromObject(createdAt);
 }
 
@@ -5246,8 +5251,21 @@ DateTime? _timestampFromObject(Object? createdAt) {
   if (createdAt is DateTime) {
     return createdAt;
   }
+  if (createdAt is ArrowTimestampValue) {
+    return createdAt.dateTime;
+  }
+  if (createdAt is int) {
+    return _dateTimeFromEpochValue(createdAt);
+  }
+  if (createdAt is BigInt) {
+    return _dateTimeFromEpochValue(createdAt.toInt());
+  }
+  if (createdAt is double && createdAt.isFinite) {
+    return _dateTimeFromEpochValue(createdAt.round());
+  }
   if (createdAt is String) {
-    return DateTime.tryParse(createdAt);
+    final trimmed = createdAt.trim();
+    return trimmed.isEmpty ? null : DateTime.tryParse(trimmed);
   }
   return null;
 }
@@ -5604,24 +5622,21 @@ double? _doubleValue(Object? value) {
 }
 
 DateTime _rowTimestamp(Map<String, Object?> row) {
-  final value = row['timestamp'];
-  if (value is DateTime) {
-    return value;
+  final rowTimestamp = _timestampFromObject(row['timestamp']);
+  if (rowTimestamp != null) {
+    return rowTimestamp;
   }
-  if (value is ArrowTimestampValue) {
-    return value.dateTime;
-  }
-  if (value is int) {
-    return _dateTimeFromEpochValue(value);
-  }
-  if (value is BigInt) {
-    return _dateTimeFromEpochValue(value.toInt());
-  }
-  if (value is double && value.isFinite) {
-    return _dateTimeFromEpochValue(value.round());
-  }
-  if (value is String) {
-    return DateTime.tryParse(value) ?? DateTime.now();
+  final data = _rowData(row);
+  for (final value in <Object?>[
+    data?['created_at'],
+    data?['timestamp'],
+    _mapValue(data?['message'])?['created_at'],
+    _mapValue(data?['message'])?['timestamp'],
+  ]) {
+    final timestamp = _timestampFromObject(value);
+    if (timestamp != null) {
+      return timestamp;
+    }
   }
   return DateTime.now();
 }
