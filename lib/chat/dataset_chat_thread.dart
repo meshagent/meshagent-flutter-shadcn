@@ -744,6 +744,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   AgentUsageSnapshot? _usage;
   int _nextAgentSequence = 0;
   int _threadSessionMessageCursor = 0;
+  final Map<agent_sessions.AgentMessageEvent, VoidCallback> _threadSessionMessageListeners =
+      <agent_sessions.AgentMessageEvent, VoidCallback>{};
   String? _lastDebugRowsSignature;
   final OverlayPortalController _imageViewerController = OverlayPortalController();
   LocalHistoryEntry? _imageViewerHistoryEntry;
@@ -1121,6 +1123,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     final clientChanged = !identical(existingClient, injectedClient);
     if (clientChanged) {
       _threadSession?.removeListener(_onThreadSessionChanged);
+      _removeThreadSessionMessageListeners();
       _threadSession = null;
       _threadSessionMessageCursor = 0;
       if (existingClient != null && (_ownsChatClient || widget.disposeChatClient)) {
@@ -1149,6 +1152,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     }
 
     currentSession?.removeListener(_onThreadSessionChanged);
+    _removeThreadSessionMessageListeners();
     final nextSession = chatClient.openThread(widget.path);
     _threadSession = nextSession;
     _threadSessionMessageCursor = 0;
@@ -1166,9 +1170,17 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     _threadSession = null;
     _threadSessionMessageCursor = 0;
     session?.removeListener(_onThreadSessionChanged);
+    _removeThreadSessionMessageListeners();
     if (session != null) {
       unawaited(session.close());
     }
+  }
+
+  void _removeThreadSessionMessageListeners() {
+    for (final entry in _threadSessionMessageListeners.entries) {
+      entry.key.removeEventListener(entry.value);
+    }
+    _threadSessionMessageListeners.clear();
   }
 
   void _onThreadSessionChanged() {
@@ -1191,6 +1203,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     while (_threadSessionMessageCursor < messages.length) {
       final event = messages[_threadSessionMessageCursor];
       _threadSessionMessageCursor += 1;
+      _listenToThreadSessionMessageEvent(event);
       final payload = event.payload;
       trackAgentThreadStatusMessageInStore(store: _statusStore, message: event.message, path: widget.path);
       if (_shouldBufferAgentPayload(payload)) {
@@ -1208,6 +1221,34 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       }
     }
     return changed;
+  }
+
+  void _listenToThreadSessionMessageEvent(agent_sessions.AgentMessageEvent event) {
+    if (_threadSessionMessageListeners.containsKey(event)) {
+      return;
+    }
+    void listener() {
+      _handleThreadSessionMessageEventChanged(event);
+    }
+
+    _threadSessionMessageListeners[event] = listener;
+    event.addEventListener(listener);
+  }
+
+  void _handleThreadSessionMessageEventChanged(agent_sessions.AgentMessageEvent event) {
+    if (!mounted) {
+      return;
+    }
+    final payload = event.payload;
+    trackAgentThreadStatusMessageInStore(store: _statusStore, message: event.message, path: widget.path);
+    if (_shouldBufferAgentPayload(payload)) {
+      _bufferedAgentPayloads.add(Map<String, dynamic>.from(payload));
+    } else {
+      _handleAgentMessagePayload(payload, attachment: event.attachment, notify: false, scroll: false);
+    }
+    _refreshStatus();
+    setState(() {});
+    _controller.scrollThreadToBottom(animated: false);
   }
 
   bool _shouldBufferAgentPayload(Map<String, dynamic> payload) {
