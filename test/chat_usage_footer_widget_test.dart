@@ -10,6 +10,7 @@ import 'package:google_fonts/google_fonts.dart';
 // ignore: depend_on_referenced_packages
 import 'package:irondash_message_channel/irondash_message_channel.dart';
 import 'package:meshagent/meshagent.dart';
+import 'package:meshagent_agents/meshagent_agents.dart' as agent_sessions;
 import 'package:meshagent_flutter_shadcn/chat/chat.dart';
 import 'package:meshagent_flutter_shadcn/chat/chat_bot_view.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
@@ -70,6 +71,28 @@ class _MessagingHarness {
     // loops a turn to flush before closing the in-memory stream sinks.
     await Future<void>.delayed(const Duration(milliseconds: 50));
     await pair.dispose();
+  }
+}
+
+class _FakeChatClient extends agent_sessions.BaseChatClient {
+  final List<agent_sessions.AgentMessage> sentMessages = <agent_sessions.AgentMessage>[];
+
+  @override
+  Future<void> start() async {}
+
+  @override
+  Future<void> stop() async {}
+
+  @override
+  Future<void> sendAgentMessage(agent_sessions.AgentMessage message, {Uint8List? attachment, bool ignoreOffline = false}) async {
+    sentMessages.add(message);
+    if (message is agent_sessions.OpenThread && message.load != false) {
+      scheduleMicrotask(() {
+        handleAgentMessage(
+          agent_sessions.ThreadLoaded(threadId: message.threadId, sourceMessageId: message.messageId, sinceTurn: message.sinceTurn),
+        );
+      });
+    }
   }
 }
 
@@ -673,6 +696,7 @@ void main() {
       ),
     );
     await tester.runAsync(() async {
+      await _waitUntil(() => harness.server.watchReadyEvents > 0);
       await Future<void>.delayed(const Duration(milliseconds: 250));
     });
     await tester.pump();
@@ -1109,6 +1133,67 @@ void main() {
     expect(find.text(' there'), findsNothing);
     expect(find.text('!'), findsNothing);
     expect(find.textContaining('Worked for'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 500));
+  });
+
+  testWidgets('Dataset ChatBotView rerenders merged live text deltas', (tester) async {
+    final harness = (await tester.runAsync<_MessagingHarness>(() async {
+      final harness = await _startMessagingHarness(initialDatasetBatch: _threadRowsBatch(const []));
+      return harness;
+    }))!;
+    addTearDown(harness.dispose);
+    final chatClient = _FakeChatClient();
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox.expand(
+            child: ChatBotView(room: harness.room, chatClient: chatClient, agentName: 'assistant', documentPath: 'dataset://threads/test'),
+          ),
+        ),
+      ),
+    );
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    });
+    await tester.pump();
+
+    Future<void> sendDelta(String messageId, String text) async {
+      chatClient.handleAgentMessage(
+        agent_sessions.AgentTextContentDelta(
+          messageId: messageId,
+          threadId: 'dataset://threads/test',
+          turnId: 'turn-1',
+          itemId: 'assistant-live-1',
+          senderName: 'assistant',
+          text: text,
+        ),
+      );
+    }
+
+    await sendDelta('delta-1', 'hello');
+    await _pumpUntil(
+      tester,
+      () => find.text('hello').evaluate().isNotEmpty,
+      describe: () {
+        final texts = tester.widgetList<Text>(find.byType(Text)).map((text) => text.data).whereType<String>().join(' | ');
+        return 'first live delta did not render. Rendered text: $texts';
+      },
+    );
+
+    await sendDelta('delta-2', ' world');
+    await _pumpUntil(
+      tester,
+      () => find.text('hello world').evaluate().isNotEmpty,
+      describe: () {
+        final texts = tester.widgetList<Text>(find.byType(Text)).map((text) => text.data).whereType<String>().join(' | ');
+        return 'merged live delta did not rerender. Rendered text: $texts';
+      },
+    );
+
+    expect(find.text('hello'), findsNothing);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(milliseconds: 500));

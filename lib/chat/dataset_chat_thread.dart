@@ -744,6 +744,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   AgentUsageSnapshot? _usage;
   int _nextAgentSequence = 0;
   int _threadSessionMessageCursor = 0;
+  final Map<agent_sessions.AgentMessageEvent, VoidCallback> _threadSessionMessageListeners =
+      <agent_sessions.AgentMessageEvent, VoidCallback>{};
   String? _lastDebugRowsSignature;
   final OverlayPortalController _imageViewerController = OverlayPortalController();
   LocalHistoryEntry? _imageViewerHistoryEntry;
@@ -1121,6 +1123,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     final clientChanged = !identical(existingClient, injectedClient);
     if (clientChanged) {
       _threadSession?.removeListener(_onThreadSessionChanged);
+      _removeThreadSessionMessageListeners();
       _threadSession = null;
       _threadSessionMessageCursor = 0;
       if (existingClient != null && (_ownsChatClient || widget.disposeChatClient)) {
@@ -1149,6 +1152,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     }
 
     currentSession?.removeListener(_onThreadSessionChanged);
+    _removeThreadSessionMessageListeners();
     final nextSession = chatClient.openThread(widget.path);
     _threadSession = nextSession;
     _threadSessionMessageCursor = 0;
@@ -1166,9 +1170,17 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     _threadSession = null;
     _threadSessionMessageCursor = 0;
     session?.removeListener(_onThreadSessionChanged);
+    _removeThreadSessionMessageListeners();
     if (session != null) {
       unawaited(session.close());
     }
+  }
+
+  void _removeThreadSessionMessageListeners() {
+    for (final entry in _threadSessionMessageListeners.entries) {
+      entry.key.removeEventListener(entry.value);
+    }
+    _threadSessionMessageListeners.clear();
   }
 
   void _onThreadSessionChanged() {
@@ -1191,6 +1203,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     while (_threadSessionMessageCursor < messages.length) {
       final event = messages[_threadSessionMessageCursor];
       _threadSessionMessageCursor += 1;
+      _listenToThreadSessionMessageEvent(event);
       final payload = event.payload;
       trackAgentThreadStatusMessageInStore(store: _statusStore, message: event.message, path: widget.path);
       if (_shouldBufferAgentPayload(payload)) {
@@ -1208,6 +1221,34 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       }
     }
     return changed;
+  }
+
+  void _listenToThreadSessionMessageEvent(agent_sessions.AgentMessageEvent event) {
+    if (_threadSessionMessageListeners.containsKey(event)) {
+      return;
+    }
+    void listener() {
+      _handleThreadSessionMessageEventChanged(event);
+    }
+
+    _threadSessionMessageListeners[event] = listener;
+    event.addEventListener(listener);
+  }
+
+  void _handleThreadSessionMessageEventChanged(agent_sessions.AgentMessageEvent event) {
+    if (!mounted) {
+      return;
+    }
+    final payload = event.payload;
+    trackAgentThreadStatusMessageInStore(store: _statusStore, message: event.message, path: widget.path);
+    if (_shouldBufferAgentPayload(payload)) {
+      _bufferedAgentPayloads.add(Map<String, dynamic>.from(payload));
+    } else {
+      _handleAgentMessagePayload(payload, attachment: event.attachment, notify: false, scroll: false);
+    }
+    _refreshStatus();
+    setState(() {});
+    _controller.scrollThreadToBottom(animated: false);
   }
 
   bool _shouldBufferAgentPayload(Map<String, dynamic> payload) {
@@ -4948,6 +4989,11 @@ List<Map<String, Object?>> datasetToolCallDiffPreviewBlocksForTesting({
   ];
 }
 
+@visibleForTesting
+DateTime datasetRowTimestampForTesting(Map<String, Object?> row) {
+  return _rowTimestamp(row);
+}
+
 String? _agentToolCallErrorMessage(Object? error) {
   return _agentErrorMessage(error);
 }
@@ -5238,7 +5284,7 @@ String _textContentRoleFromPayload(Map<String, Object?>? payload) {
 }
 
 DateTime? _timestampFromPayload(Map<String, dynamic> payload) {
-  final createdAt = payload['created_at'];
+  final createdAt = payload['created_at'] ?? payload['timestamp'];
   return _timestampFromObject(createdAt);
 }
 
@@ -5246,8 +5292,21 @@ DateTime? _timestampFromObject(Object? createdAt) {
   if (createdAt is DateTime) {
     return createdAt;
   }
+  if (createdAt is ArrowTimestampValue) {
+    return createdAt.dateTime;
+  }
+  if (createdAt is int) {
+    return _dateTimeFromEpochValue(createdAt);
+  }
+  if (createdAt is BigInt) {
+    return _dateTimeFromEpochValue(createdAt.toInt());
+  }
+  if (createdAt is double && createdAt.isFinite) {
+    return _dateTimeFromEpochValue(createdAt.round());
+  }
   if (createdAt is String) {
-    return DateTime.tryParse(createdAt);
+    final trimmed = createdAt.trim();
+    return trimmed.isEmpty ? null : DateTime.tryParse(trimmed);
   }
   return null;
 }
@@ -5604,24 +5663,21 @@ double? _doubleValue(Object? value) {
 }
 
 DateTime _rowTimestamp(Map<String, Object?> row) {
-  final value = row['timestamp'];
-  if (value is DateTime) {
-    return value;
+  final rowTimestamp = _timestampFromObject(row['timestamp']);
+  if (rowTimestamp != null) {
+    return rowTimestamp;
   }
-  if (value is ArrowTimestampValue) {
-    return value.dateTime;
-  }
-  if (value is int) {
-    return _dateTimeFromEpochValue(value);
-  }
-  if (value is BigInt) {
-    return _dateTimeFromEpochValue(value.toInt());
-  }
-  if (value is double && value.isFinite) {
-    return _dateTimeFromEpochValue(value.round());
-  }
-  if (value is String) {
-    return DateTime.tryParse(value) ?? DateTime.now();
+  final data = _rowData(row);
+  for (final value in <Object?>[
+    data?['created_at'],
+    data?['timestamp'],
+    _mapValue(data?['message'])?['created_at'],
+    _mapValue(data?['message'])?['timestamp'],
+  ]) {
+    final timestamp = _timestampFromObject(value);
+    if (timestamp != null) {
+      return timestamp;
+    }
   }
   return DateTime.now();
 }

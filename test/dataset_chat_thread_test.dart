@@ -60,4 +60,34 @@ diff --git a/lib/report.py b/lib/report.py
       expect(blocks, isEmpty);
     });
   });
+
+  group('dataset row timestamps', () {
+    test('uses top-level timestamp when present', () {
+      final timestamp = datasetRowTimestampForTesting({
+        'timestamp': '2026-05-01T12:30:00Z',
+        'data': {'created_at': '2026-05-02T12:30:00Z'},
+      });
+
+      expect(timestamp.toUtc(), DateTime.utc(2026, 5, 1, 12, 30));
+    });
+
+    test('falls back to payload created_at when row timestamp is missing', () {
+      final timestamp = datasetRowTimestampForTesting({
+        'data': {'created_at': '2026-05-02T12:30:00Z'},
+      });
+
+      expect(timestamp.toUtc(), DateTime.utc(2026, 5, 2, 12, 30));
+    });
+
+    test('falls back to nested message created_at when row timestamp is empty', () {
+      final timestamp = datasetRowTimestampForTesting({
+        'timestamp': '',
+        'data': {
+          'message': {'created_at': '2026-05-03T12:30:00Z'},
+        },
+      });
+
+      expect(timestamp.toUtc(), DateTime.utc(2026, 5, 3, 12, 30));
+    });
+  });
 }
