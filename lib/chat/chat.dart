@@ -880,6 +880,7 @@ class PendingAgentMessage {
       text: parsedContent.text,
       attachments: parsedContent.attachments,
       senderName: message.senderName?.trim().isNotEmpty == true ? message.senderName!.trim() : null,
+      createdAt: message.createdAtUtc,
       matchByContentOnly: false,
       awaitingAcceptance: true,
       awaitingApplication: true,

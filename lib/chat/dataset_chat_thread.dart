@@ -1200,9 +1200,13 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     }
     final messages = session.messages;
     var changed = false;
-    while (_threadSessionMessageCursor < messages.length) {
-      final event = messages[_threadSessionMessageCursor];
-      _threadSessionMessageCursor += 1;
+    final startCursor = _threadSessionMessageCursor;
+    final pendingEvents = messages.sublist(startCursor);
+    if (startCursor == 0 && pendingEvents.length > 1) {
+      pendingEvents.sort((left, right) => left.createdAt.compareTo(right.createdAt));
+    }
+    _threadSessionMessageCursor = messages.length;
+    for (final event in pendingEvents) {
       _listenToThreadSessionMessageEvent(event);
       final payload = event.payload;
       trackAgentThreadStatusMessageInStore(store: _statusStore, message: event.message, path: widget.path);
@@ -1447,6 +1451,33 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     switch (type) {
       case agentTurnStartType:
       case agentTurnSteerType:
+        final content = payload['content'];
+        if (content is List) {
+          final extracted = _agentInputContentParts(content);
+          if (extracted.text.trim().isNotEmpty || extracted.attachments.isNotEmpty) {
+            changed =
+                _upsertAgentRow(
+                  itemId: payload['message_id']?.toString() ?? _payloadItemId(payload),
+                  turnId: _payloadTurnId(payload),
+                  timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
+                  data: {
+                    'kind': 'message',
+                    'role': 'user',
+                    'status': 'completed',
+                    'text': extracted.text,
+                    'sender_name': _senderNameFromPayload(payload),
+                    'attachments': [
+                      for (final attachment in extracted.attachments)
+                        {'url': attachment.url, if (attachment.name?.trim().isNotEmpty == true) 'name': attachment.name!.trim()},
+                    ],
+                    'message': payload,
+                  },
+                ) ||
+                changed;
+          }
+        }
+        unawaited(_audioPlayer.stopAll());
+        break;
       case agentTurnInterruptType:
         unawaited(_audioPlayer.stopAll());
         break;
@@ -1531,6 +1562,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             _appendAgentRowText(
               itemId: _transcriptionItemId(payload),
               turnId: _payloadTurnId(payload),
+              timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
               kind: 'message',
               role: contentRole,
               delta: payload['text']?.toString() ?? '',
@@ -1550,6 +1582,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             _upsertAgentRow(
               itemId: itemId,
               turnId: _payloadTurnId(payload),
+              timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
               data: {
                 'kind': 'message',
                 'role': contentRole,
@@ -1589,6 +1622,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             _upsertAgentRow(
               itemId: _payloadItemId(payload),
               turnId: _payloadTurnId(payload),
+              timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
               data: const {'kind': 'reasoning', 'role': 'assistant', 'status': 'in_progress', 'text': ''},
             ) ||
             changed;
@@ -1598,6 +1632,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             _appendAgentRowText(
               itemId: _payloadItemId(payload),
               turnId: _payloadTurnId(payload),
+              timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
               kind: 'reasoning',
               role: 'assistant',
               delta: payload['text']?.toString() ?? '',
@@ -1613,6 +1648,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             _upsertAgentRow(
               itemId: _payloadItemId(payload),
               turnId: _payloadTurnId(payload),
+              timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
               data: {
                 'kind': 'reasoning',
                 'role': 'assistant',
@@ -1630,6 +1666,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             _upsertAgentRow(
               itemId: _payloadItemId(payload),
               turnId: _payloadTurnId(payload),
+              timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
               data: const {'kind': 'file', 'role': 'assistant', 'status': 'in_progress', 'urls': <String>[]},
             ) ||
             changed;
@@ -1639,6 +1676,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             _appendAgentRowUrl(
               itemId: _payloadItemId(payload),
               turnId: _payloadTurnId(payload),
+              timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
               url: payload['url']?.toString(),
               senderName: _senderNameFromPayload(payload),
             ) ||
@@ -1661,6 +1699,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             _upsertAgentRow(
               itemId: _payloadItemId(payload),
               turnId: _payloadTurnId(payload),
+              timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
               data: {
                 'kind': 'file',
                 'role': 'assistant',
@@ -1704,6 +1743,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             _upsertAgentRow(
               itemId: itemId,
               turnId: _payloadTurnId(payload),
+              timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
               data: isImageGeneration
                   ? {
                       'kind': 'image_generation',
@@ -1745,6 +1785,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             _appendAgentToolArgumentDelta(
               itemId: _payloadItemId(payload),
               turnId: _payloadTurnId(payload),
+              timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
               delta: payload['delta']?.toString() ?? '',
               senderName: _senderNameFromPayload(payload),
             ) ||
@@ -1755,6 +1796,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             _appendAgentToolLogs(
               itemId: _payloadItemId(payload),
               turnId: _payloadTurnId(payload),
+              timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
               lines: _agentToolCallLogLines(payload['lines']),
               senderName: _senderNameFromPayload(payload),
             ) ||
@@ -1960,6 +2002,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   bool _appendAgentRowText({
     required String itemId,
     required String? turnId,
+    required DateTime timestamp,
     required String kind,
     required String role,
     required String delta,
@@ -1976,6 +2019,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return _upsertAgentRow(
       itemId: itemId,
       turnId: turnId,
+      timestamp: timestamp,
       data: {
         'kind': kind,
         'role': role,
@@ -1987,7 +2031,13 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     );
   }
 
-  bool _appendAgentRowUrl({required String itemId, required String? turnId, required String? url, required String? senderName}) {
+  bool _appendAgentRowUrl({
+    required String itemId,
+    required String? turnId,
+    required DateTime timestamp,
+    required String? url,
+    required String? senderName,
+  }) {
     final normalizedUrl = url?.trim();
     if (normalizedUrl == null || normalizedUrl.isEmpty) {
       return false;
@@ -1997,6 +2047,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return _upsertAgentRow(
       itemId: itemId,
       turnId: turnId,
+      timestamp: timestamp,
       data: {
         'kind': 'file',
         'role': 'assistant',
@@ -2007,7 +2058,13 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     );
   }
 
-  bool _appendAgentToolLogs({required String itemId, required String? turnId, required List<String> lines, required String? senderName}) {
+  bool _appendAgentToolLogs({
+    required String itemId,
+    required String? turnId,
+    required DateTime timestamp,
+    required List<String> lines,
+    required String? senderName,
+  }) {
     if (itemId.trim().isEmpty || lines.isEmpty) {
       return false;
     }
@@ -2022,6 +2079,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return _upsertAgentRow(
       itemId: itemId,
       turnId: turnId,
+      timestamp: timestamp,
       data: {
         'kind': 'tool_call',
         'role': 'assistant',
@@ -2050,6 +2108,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   bool _appendAgentToolArgumentDelta({
     required String itemId,
     required String? turnId,
+    required DateTime timestamp,
     required String delta,
     required String? senderName,
   }) {
@@ -2069,6 +2128,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return _upsertAgentRow(
       itemId: itemId,
       turnId: turnId,
+      timestamp: timestamp,
       data: {
         'kind': 'tool_call',
         'role': 'assistant',

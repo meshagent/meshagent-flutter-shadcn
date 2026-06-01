@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:meshagent/meshagent.dart';
+import 'package:meshagent_agents/meshagent_agents.dart' show AgentMessage, TurnStart, agentInputContent, agentTurnStartType;
 import 'package:meshagent/runtime.dart';
 import 'package:meshagent_flutter_shadcn/chat/chat.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
@@ -205,6 +206,26 @@ Widget _buildThreadHarness({
 void main() {
   final previousRuntime = DocumentRuntime.instance;
   final previousVisibilityUpdateInterval = VisibilityDetectorController.instance.updateInterval;
+
+  test('pending agent messages preserve input message created_at', () {
+    final createdAt = DateTime.utc(2026, 5, 28, 16, 11, 48, 538);
+    final message =
+        AgentMessage.fromJson({
+              'type': agentTurnStartType,
+              'thread_id': 'dataset://threads/example',
+              'message_id': 'message-1',
+              'content': agentInputContent(
+                text: 'loaded question',
+                attachments: const <AgentFileContent>[],
+              ).map((item) => item.toJson()).toList(),
+              'created_at': createdAt.toIso8601String(),
+            })
+            as TurnStart;
+
+    final pending = PendingAgentMessage.fromTurnInputMessage(message);
+
+    expect(pending.createdAt, createdAt);
+  });
 
   setUpAll(() {
     DocumentRuntime.instance = _FakeDocumentRuntime();
