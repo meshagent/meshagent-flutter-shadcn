@@ -14,6 +14,35 @@ Color? _bubbleBackgroundColor(WidgetTester tester) {
 }
 
 void main() {
+  testWidgets('byte status counter handles large jumps without unbounded digit widgets', (tester) async {
+    var totalBytes = 100;
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: StatefulBuilder(
+            builder: (context, setState) => Column(
+              children: [
+                StatusByteCounter(totalBytes: totalBytes, style: const TextStyle(fontSize: 13)),
+                TextButton(onPressed: () => setState(() => totalBytes = 1000000000), child: const Text('jump')),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('jump'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 180));
+
+    expect(tester.takeException(), isNull);
+    expect(find.byType(Text).evaluate().length, lessThan(40));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 600));
+  });
+
   testWidgets('uses the accent background for non-assistant bubbles in dark mode', (tester) async {
     final darkTheme = ShadThemeData(colorScheme: const ShadSlateColorScheme.dark(), brightness: Brightness.dark);
 
