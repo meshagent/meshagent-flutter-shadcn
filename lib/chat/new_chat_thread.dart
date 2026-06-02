@@ -54,6 +54,7 @@ class NewChatThread extends StatefulWidget {
     this.inputContextMenuBuilder,
     this.inputOnPressedOutside,
     this.onAttachmentOpen,
+    this.fileDropOverlayBuilder,
     this.modelController,
     this.newThreadWrapperBuilder,
   });
@@ -78,6 +79,7 @@ class NewChatThread extends StatefulWidget {
   final EditableTextContextMenuBuilder? inputContextMenuBuilder;
   final TapRegionCallback? inputOnPressedOutside;
   final ValueChanged<FileAttachment>? onAttachmentOpen;
+  final FileDropOverlayBuilder? fileDropOverlayBuilder;
   final DatasetChatModelController? modelController;
   final NewChatThreadWrapperBuilder? newThreadWrapperBuilder;
 
@@ -1006,6 +1008,7 @@ class _NewChatThreadState extends State<NewChatThread> {
         }
         await _controller.uploadFile(name, dataStream, fileSize ?? 0);
       },
+      overlayBuilder: widget.fileDropOverlayBuilder,
       child: child,
     );
   }

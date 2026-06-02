@@ -4864,6 +4864,7 @@ class ChatThread extends StatefulWidget {
     this.fileInThreadBuilder,
     this.chatInputBoxBuilder,
     this.openFile,
+    this.fileDropOverlayBuilder,
     this.toolsBuilder,
     this.inputPlaceholder,
     this.emptyStateTitle,
@@ -4909,6 +4910,7 @@ class ChatThread extends StatefulWidget {
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
   final Widget Function(BuildContext context, Widget chatBox)? chatInputBoxBuilder;
   final FutureOr<void> Function(String path)? openFile;
+  final FileDropOverlayBuilder? fileDropOverlayBuilder;
   final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
   final EditableTextContextMenuBuilder? inputContextMenuBuilder;
   final TapRegionCallback? inputOnPressedOutside;
@@ -5989,6 +5991,7 @@ class _ChatThreadState extends State<ChatThread> {
             onFileDrop: (name, dataStream, size) async {
               controller.uploadFile(name, dataStream, size ?? 0);
             },
+            overlayBuilder: widget.fileDropOverlayBuilder,
             child: Column(
               mainAxisAlignment: bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
               children: [
@@ -6152,6 +6155,7 @@ class _ChatThreadState extends State<ChatThread> {
         onFileDrop: (name, dataStream, size) async {
           controller.uploadFile(name, dataStream, size ?? 0);
         },
+        overlayBuilder: widget.fileDropOverlayBuilder,
         child: Column(
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
@@ -12174,6 +12178,7 @@ class ChatThreadPreview extends StatelessWidget {
 }
 
 typedef FileDropCallback = Future<void> Function(String name, Stream<Uint8List> dataStream, int? fileSize);
+typedef FileDropOverlayBuilder = Widget Function(BuildContext context, bool dragging);
 typedef TextPasteCallback = Future<void> Function(String text);
 
 class FileDropArea extends StatefulWidget {
@@ -12183,7 +12188,18 @@ class FileDropArea extends StatefulWidget {
 
   final bool multiple;
 
-  const FileDropArea({super.key, required this.onFileDrop, required this.child, this.multiple = true});
+  final FileDropOverlayBuilder? overlayBuilder;
+
+  final ValueChanged<bool>? onDraggingChanged;
+
+  const FileDropArea({
+    super.key,
+    required this.onFileDrop,
+    required this.child,
+    this.multiple = true,
+    this.overlayBuilder,
+    this.onDraggingChanged,
+  });
 
   @override
   FileDropAreaState createState() => FileDropAreaState();
@@ -12205,6 +12221,14 @@ const _preferredFormats = [
 class FileDropAreaState extends State<FileDropArea> {
   bool _dragging = false;
 
+  @override
+  void dispose() {
+    if (_dragging) {
+      widget.onDraggingChanged?.call(false);
+    }
+    super.dispose();
+  }
+
   Future<DataReaderFile> _getFile(DataReader reader, SimpleFileFormat? format) {
     final completer = Completer<DataReaderFile>();
 
@@ -12223,6 +12247,8 @@ class FileDropAreaState extends State<FileDropArea> {
 
   @override
   Widget build(BuildContext context) {
+    final overlay = widget.overlayBuilder?.call(context, _dragging);
+
     return DropRegion(
       formats: const [...Formats.standardFormats, Formats.fileUri],
       hitTestBehavior: HitTestBehavior.opaque,
@@ -12232,24 +12258,36 @@ class FileDropAreaState extends State<FileDropArea> {
       child: Stack(
         children: [
           widget.child,
-          if (_dragging) Positioned.fill(child: Container(color: Colors.blue.withValues(alpha: 0.1))),
+          if (overlay != null)
+            Positioned.fill(child: IgnorePointer(child: overlay))
+          else if (_dragging)
+            Positioned.fill(child: Container(color: Colors.blue.withValues(alpha: 0.1))),
         ],
       ),
     );
   }
 
+  void _setDragging(bool dragging) {
+    if (!mounted || _dragging == dragging) {
+      return;
+    }
+
+    setState(() => _dragging = dragging);
+    widget.onDraggingChanged?.call(dragging);
+  }
+
   DropOperation _onDragOver(DropOverEvent event) {
-    setState(() => _dragging = true);
+    _setDragging(true);
 
     return event.session.allowedOperations.contains(DropOperation.copy) ? DropOperation.copy : DropOperation.none;
   }
 
   void _onDragLeave(DropEvent event) {
-    setState(() => _dragging = false);
+    _setDragging(false);
   }
 
   Future<void> _onDrop(PerformDropEvent event) async {
-    setState(() => _dragging = false);
+    _setDragging(false);
 
     final readers = event.session.items.map((m) => m.dataReader).toList();
     var droppedFile = false;

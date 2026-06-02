@@ -32,6 +32,7 @@ class MultiThreadView extends StatefulWidget {
     this.inputContextMenuBuilder,
     this.inputOnPressedOutside,
     this.onAttachmentOpen,
+    this.fileDropOverlayBuilder,
     this.modelController,
     this.newThreadWrapperBuilder,
   });
@@ -56,6 +57,7 @@ class MultiThreadView extends StatefulWidget {
   final EditableTextContextMenuBuilder? inputContextMenuBuilder;
   final TapRegionCallback? inputOnPressedOutside;
   final ValueChanged<FileAttachment>? onAttachmentOpen;
+  final FileDropOverlayBuilder? fileDropOverlayBuilder;
   final DatasetChatModelController? modelController;
   final NewChatThreadWrapperBuilder? newThreadWrapperBuilder;
 
@@ -138,6 +140,7 @@ class _MultiThreadViewState extends State<MultiThreadView> {
       inputContextMenuBuilder: widget.inputContextMenuBuilder,
       inputOnPressedOutside: widget.inputOnPressedOutside,
       onAttachmentOpen: widget.onAttachmentOpen,
+      fileDropOverlayBuilder: widget.fileDropOverlayBuilder,
       modelController: widget.modelController,
       newThreadWrapperBuilder: widget.newThreadWrapperBuilder,
       builder: (context, threadPath) => widget.builder(context, threadPath, _controller, _composerKey),
