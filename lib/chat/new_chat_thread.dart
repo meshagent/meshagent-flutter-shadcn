@@ -53,6 +53,7 @@ class NewChatThread extends StatefulWidget {
     this.inputPlaceholder,
     this.inputContextMenuBuilder,
     this.inputOnPressedOutside,
+    this.onAttachmentOpen,
     this.modelController,
     this.newThreadWrapperBuilder,
   });
@@ -76,6 +77,7 @@ class NewChatThread extends StatefulWidget {
   final Widget? inputPlaceholder;
   final EditableTextContextMenuBuilder? inputContextMenuBuilder;
   final TapRegionCallback? inputOnPressedOutside;
+  final ValueChanged<FileAttachment>? onAttachmentOpen;
   final DatasetChatModelController? modelController;
   final NewChatThreadWrapperBuilder? newThreadWrapperBuilder;
 
@@ -1085,6 +1087,7 @@ class _NewChatThreadState extends State<NewChatThread> {
               await _startNewThread();
             }
           },
+          onAttachmentOpen: widget.onAttachmentOpen,
           contextMenuBuilder: widget.inputContextMenuBuilder,
           onPressedOutside: widget.inputOnPressedOutside,
         );

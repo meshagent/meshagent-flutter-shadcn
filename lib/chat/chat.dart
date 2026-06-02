@@ -3797,6 +3797,7 @@ class ChatThreadInput extends StatefulWidget {
     this.placeholder,
     this.onChanged,
     this.attachmentBuilder,
+    this.onAttachmentOpen,
     this.onFileDrop,
     this.leading,
     this.trailing,
@@ -3834,6 +3835,7 @@ class ChatThreadInput extends StatefulWidget {
   final String? sendPendingText;
   final ChatThreadController controller;
   final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
+  final ValueChanged<FileAttachment>? onAttachmentOpen;
   final Future<void> Function(String name, Stream<Uint8List> dataStream, int size)? onFileDrop;
   final Widget? leading;
   final Widget? trailing;
@@ -4768,6 +4770,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
                                   key: ValueKey(attachment.path),
                                   attachment: attachment,
                                   maxWidth: constraints.maxWidth - 50,
+                                  onOpen: widget.onAttachmentOpen == null ? null : () => widget.onAttachmentOpen!(attachment),
                                   onRemove: () {
                                     widget.controller.removeFileUpload(attachment);
                                   },
@@ -4857,6 +4860,7 @@ class ChatThread extends StatefulWidget {
     this.messageHeaderBuilder,
     this.waitingForParticipantsBuilder,
     this.attachmentBuilder,
+    this.onAttachmentOpen,
     this.fileInThreadBuilder,
     this.chatInputBoxBuilder,
     this.openFile,
@@ -4901,6 +4905,7 @@ class ChatThread extends StatefulWidget {
   final Widget Function(BuildContext, MeshDocument, MeshElement)? messageHeaderBuilder;
   final Widget Function(BuildContext, List<String>)? waitingForParticipantsBuilder;
   final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
+  final ValueChanged<FileAttachment>? onAttachmentOpen;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
   final Widget Function(BuildContext context, Widget chatBox)? chatInputBoxBuilder;
   final FutureOr<void> Function(String path)? openFile;
@@ -5929,6 +5934,7 @@ class _ChatThreadState extends State<ChatThread> {
       },
       controller: controller,
       attachmentBuilder: widget.attachmentBuilder,
+      onAttachmentOpen: widget.onAttachmentOpen,
       contextMenuBuilder: widget.inputContextMenuBuilder,
       onPressedOutside: widget.inputOnPressedOutside,
       tapRegionGroupId: _composerTapRegionGroupId,
@@ -5952,6 +5958,7 @@ class _ChatThreadState extends State<ChatThread> {
       onSend: (value, attachments) async {},
       controller: controller,
       attachmentBuilder: widget.attachmentBuilder,
+      onAttachmentOpen: widget.onAttachmentOpen,
       tapRegionGroupId: _composerTapRegionGroupId,
     );
   }
