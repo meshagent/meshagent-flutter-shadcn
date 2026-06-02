@@ -131,7 +131,27 @@ const double _mobileScreenWidthMax = 600;
 const double _mobileComposerPillCornerRadius = 999;
 const double _mobileComposerCornerRadius = 18;
 
+class ChatContextLayoutOverride extends InheritedWidget {
+  const ChatContextLayoutOverride({super.key, required this.useMobileLayout, required super.child});
+
+  final bool useMobileLayout;
+
+  static bool? maybeUseMobileLayoutOf(BuildContext context) {
+    return context.dependOnInheritedWidgetOfExactType<ChatContextLayoutOverride>()?.useMobileLayout;
+  }
+
+  @override
+  bool updateShouldNotify(covariant ChatContextLayoutOverride oldWidget) {
+    return useMobileLayout != oldWidget.useMobileLayout;
+  }
+}
+
 bool _usesMobileContextLayout(BuildContext context) {
+  final overriddenValue = ChatContextLayoutOverride.maybeUseMobileLayoutOf(context);
+  if (overriddenValue != null) {
+    return overriddenValue;
+  }
+
   return MediaQuery.sizeOf(context).width < _mobileScreenWidthMax;
 }
 
