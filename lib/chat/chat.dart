@@ -18,7 +18,6 @@ import 'package:meshagent_agents/meshagent_agents.dart'
     show
         AgentMessage,
         AgentClientToolCallRequested,
-        AgentConnectionStatus,
         AgentThreadMessage,
         AgentThreadStatus,
         AgentToolCallArgumentsDelta,
@@ -987,20 +986,11 @@ class AgentThreadMessageStatusStore {
 
   final Set<String> _touchedThreadPaths = <String>{};
   final Map<String, _AgentThreadMessageStatus> _statusByThreadPath = <String, _AgentThreadMessageStatus>{};
-  final Map<String, _AgentThreadMessageStatus> _connectionStatusByThreadPath = <String, _AgentThreadMessageStatus>{};
   final Map<String, LinkedHashMap<String, PendingAgentMessage>> _pendingMessagesByThreadPath =
       <String, LinkedHashMap<String, PendingAgentMessage>>{};
   final Map<String, LiveToolCallAccumulator> _toolCallAccumulatorsByThreadPath = <String, LiveToolCallAccumulator>{};
 
   bool apply(AgentMessage message, {String? path}) {
-    if (message is AgentConnectionStatus) {
-      final normalizedPath = path?.trim();
-      if (normalizedPath == null || normalizedPath.isEmpty) {
-        return false;
-      }
-      _touchedThreadPaths.add(normalizedPath);
-      return _applyConnectionStatus(normalizedPath, message);
-    }
     if (message is! AgentThreadMessage || message.threadId.trim().isEmpty) {
       return false;
     }
@@ -1065,14 +1055,13 @@ class AgentThreadMessageStatusStore {
     }
     _touchedThreadPaths.remove(normalizedPath);
     _statusByThreadPath.remove(normalizedPath);
-    _connectionStatusByThreadPath.remove(normalizedPath);
     _pendingMessagesByThreadPath.remove(normalizedPath);
     _toolCallAccumulatorsByThreadPath.remove(normalizedPath);
   }
 
   ChatThreadStatusState state({required String path, ChatThreadStatusState? previous, required bool supportsAgentMessages}) {
     final normalizedPath = path.trim();
-    final status = _connectionStatusByThreadPath[normalizedPath] ?? _statusByThreadPath[normalizedPath];
+    final status = _statusByThreadPath[normalizedPath];
     final pendingMessages = List<PendingAgentMessage>.unmodifiable(
       _pendingMessagesByThreadPath[normalizedPath]?.values ?? const <PendingAgentMessage>[],
     );
@@ -1169,34 +1158,6 @@ class AgentThreadMessageStatusStore {
     }
 
     _statusByThreadPath[threadPath] = next;
-    return true;
-  }
-
-  bool _applyConnectionStatus(String threadPath, AgentConnectionStatus message) {
-    final status = message.status.trim().toLowerCase();
-    if (status == "connected" || status == "reconnected") {
-      return _connectionStatusByThreadPath.remove(threadPath) != null;
-    }
-
-    final text = switch (status) {
-      "reconnecting" => "Reconnecting",
-      "disconnected" => "Disconnected",
-      _ => message.message?.trim().isNotEmpty == true ? message.message!.trim() : null,
-    };
-    if (text == null || text.isEmpty) {
-      return false;
-    }
-
-    final previous = _connectionStatusByThreadPath[threadPath];
-    final next = _AgentThreadMessageStatus(
-      text: message.message?.trim().isNotEmpty == true ? message.message!.trim() : text,
-      startedAt: DateTime.now(),
-      mode: "busy",
-    );
-    if (previous != null && previous.text == next.text && previous.mode == next.mode) {
-      return false;
-    }
-    _connectionStatusByThreadPath[threadPath] = next;
     return true;
   }
 
