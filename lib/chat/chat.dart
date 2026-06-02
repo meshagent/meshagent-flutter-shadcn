@@ -10300,32 +10300,28 @@ abstract class _AnimatedStatusValueCounterState<T extends StatefulWidget> extend
       animation: _controller,
       builder: (context, _) {
         final progress = _transitioning ? Curves.easeOutCubic.transform(_controller.value) : 1.0;
-        final startValue = _transitioning ? _transitionStartValue.round() : _displayValue;
-        final endValue = _transitioning ? _transitionEndValue.round() : _displayValue;
-        final startDigits = startValue.toString();
-        final endDigits = endValue.toString();
-        final digitCount = math.max(startDigits.length, endDigits.length);
-        final paddedStartDigits = startDigits.padLeft(digitCount);
-        final paddedEndDigits = endDigits.padLeft(digitCount);
-        final currentValue = progress >= 1 ? endValue : _currentAnimatedValue.round();
+        final digitCount = _transitioning
+            ? math.max(_transitionStartValue.floor().toString().length, _transitionEndValue.floor().toString().length)
+            : _displayValue.toString().length;
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(prefixForValue(currentValue), style: numberStyle, maxLines: 1, overflow: TextOverflow.clip),
+            Text(prefixForValue(_displayValue), style: numberStyle, maxLines: 1, overflow: TextOverflow.clip),
             for (var index = 0; index < digitCount; index++) ...[
               if (index > 0 && (digitCount - index) % 3 == 0) Text(",", style: numberStyle, maxLines: 1, overflow: TextOverflow.clip),
               _StatusCounterWheelDigit(
-                startDigit: paddedStartDigits[index],
-                endDigit: paddedEndDigits[index],
+                startValue: _transitioning ? _transitionStartValue : _displayValue.toDouble(),
+                endValue: _transitioning ? _transitionEndValue : _displayValue.toDouble(),
                 progress: progress,
+                digitIndex: index,
+                digitCount: digitCount,
                 style: numberStyle,
                 width: digitSize.width,
                 height: wheelHeight,
-                rollsForward: endValue >= startValue,
                 fadeColor: ShadTheme.of(context).colorScheme.background,
               ),
             ],
-            Text(suffixForValue(currentValue), style: counterStyle, maxLines: 1, overflow: TextOverflow.clip),
+            Text(suffixForValue(_displayValue), style: counterStyle, maxLines: 1, overflow: TextOverflow.clip),
           ],
         );
       },
@@ -10414,47 +10410,65 @@ class StatusSignedCounter extends StatelessWidget {
 
 class _StatusCounterWheelDigit extends StatelessWidget {
   const _StatusCounterWheelDigit({
-    required this.startDigit,
-    required this.endDigit,
+    required this.startValue,
+    required this.endValue,
     required this.progress,
+    required this.digitIndex,
+    required this.digitCount,
     required this.style,
     required this.width,
     required this.height,
-    required this.rollsForward,
     required this.fadeColor,
   });
 
-  final String startDigit;
-  final String endDigit;
+  final double startValue;
+  final double endValue;
   final double progress;
+  final int digitIndex;
+  final int digitCount;
   final TextStyle style;
   final double width;
   final double height;
-  final bool rollsForward;
   final Color fadeColor;
 
   @override
   Widget build(BuildContext context) {
-    final normalizedStart = startDigit == ' ' ? '' : startDigit;
-    final normalizedEnd = endDigit == ' ' ? '' : endDigit;
-    if (normalizedStart == normalizedEnd) {
-      return SizedBox(
-        width: width,
-        height: height,
-        child: Center(child: _digitText(normalizedEnd)),
-      );
-    }
-
-    final direction = rollsForward ? -1.0 : 1.0;
+    final place = math.pow(10, digitCount - digitIndex - 1).toDouble();
+    final startPlaceValue = (startValue / place).floor();
+    final endPlaceValue = (endValue / place).floor();
+    final startDigit = _positiveModulo(startPlaceValue, 10);
+    final wheelDelta = endPlaceValue - startPlaceValue;
+    final virtualDigit = startDigit + (wheelDelta * progress);
+    final firstStripValue = math.min(startDigit, startDigit + wheelDelta) - 10;
+    final lastStripValue = math.max(startDigit, startDigit + wheelDelta) + 10;
+    final stripOffset = -((virtualDigit - firstStripValue) * height);
     return SizedBox(
       width: width,
       height: height,
       child: ClipRect(
         child: Stack(
-          alignment: Alignment.center,
           children: [
-            Transform.translate(offset: Offset(0, direction * height * progress), child: _digitText(normalizedStart)),
-            Transform.translate(offset: Offset(0, -direction * height * (1 - progress)), child: _digitText(normalizedEnd)),
+            OverflowBox(
+              minHeight: 0,
+              maxHeight: double.infinity,
+              alignment: Alignment.topCenter,
+              child: Transform.translate(
+                offset: Offset(0, stripOffset),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (var value = firstStripValue; value <= lastStripValue; value++)
+                      SizedBox(
+                        width: width,
+                        height: height,
+                        child: Center(
+                          child: Text("${_positiveModulo(value, 10)}", style: style, maxLines: 1, overflow: TextOverflow.clip),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
             Positioned.fill(
               child: IgnorePointer(child: _StatusCounterWheelFade(color: fadeColor)),
             ),
@@ -10463,17 +10477,9 @@ class _StatusCounterWheelDigit extends StatelessWidget {
       ),
     );
   }
-
-  Widget _digitText(String digit) {
-    return SizedBox(
-      width: width,
-      height: height,
-      child: Center(
-        child: Text(digit, style: style, maxLines: 1, overflow: TextOverflow.clip),
-      ),
-    );
-  }
 }
+
+int _positiveModulo(int value, int modulus) => ((value % modulus) + modulus) % modulus;
 
 class _StatusCounterWheelFade extends StatelessWidget {
   const _StatusCounterWheelFade({required this.color});
