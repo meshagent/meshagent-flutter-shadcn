@@ -26,11 +26,22 @@ class PendingStorageDeleteHandle {
   }
 }
 
-class _PendingStorageDeleteEntry {
-  _PendingStorageDeleteEntry({required this.path, required this.isFolder});
+class PendingStorageDeleteEntry {
+  const PendingStorageDeleteEntry({required this.path, required this.isFolder, required this.startedAt, required this.sequence});
 
   final String path;
   final bool isFolder;
+  final DateTime startedAt;
+  final int sequence;
+}
+
+class _PendingStorageDeleteEntry {
+  _PendingStorageDeleteEntry({required this.path, required this.isFolder, required this.startedAt, required this.sequence});
+
+  final String path;
+  final bool isFolder;
+  final DateTime startedAt;
+  final int sequence;
   int count = 1;
 
   String get key => PendingStorageDeletes._entryKey(path: path, isFolder: isFolder);
@@ -63,18 +74,28 @@ class _PendingStorageDeleteBucket {
 
 class PendingStorageDeletes {
   static final _buckets = <String, _PendingStorageDeleteBucket>{};
+  static int _sequence = 0;
 
   static ValueListenable<int> listenableFor(PendingStorageDeleteScope scope) {
     return _bucket(scope.key).revision;
   }
 
+  static String normalizePath(String path) {
+    return path.trim().replaceAll(RegExp(r'^/+|/+$'), '');
+  }
+
   static PendingStorageDeleteHandle begin({required PendingStorageDeleteScope scope, required String path, required bool isFolder}) {
-    final normalizedPath = _normalizePath(path);
+    final normalizedPath = normalizePath(path);
     final entryKey = _entryKey(path: normalizedPath, isFolder: isFolder);
     final bucket = _bucket(scope.key);
     final existing = bucket.entries[entryKey];
     if (existing == null) {
-      bucket.entries[entryKey] = _PendingStorageDeleteEntry(path: normalizedPath, isFolder: isFolder);
+      bucket.entries[entryKey] = _PendingStorageDeleteEntry(
+        path: normalizedPath,
+        isFolder: isFolder,
+        startedAt: DateTime.now(),
+        sequence: _sequence++,
+      );
     } else {
       existing.count++;
     }
@@ -83,13 +104,25 @@ class PendingStorageDeletes {
   }
 
   static bool contains({required PendingStorageDeleteScope scope, required String path, required bool isFolder}) {
-    final normalizedPath = _normalizePath(path);
+    final normalizedPath = normalizePath(path);
     final bucket = _buckets[scope.key];
     if (bucket == null) {
       return false;
     }
 
     return bucket.entries.values.any((entry) => entry.contains(candidatePath: normalizedPath, candidateIsFolder: isFolder));
+  }
+
+  static List<PendingStorageDeleteEntry> entriesFor(PendingStorageDeleteScope scope) {
+    final bucket = _buckets[scope.key];
+    if (bucket == null) {
+      return const <PendingStorageDeleteEntry>[];
+    }
+
+    return [
+      for (final entry in bucket.entries.values)
+        PendingStorageDeleteEntry(path: entry.path, isFolder: entry.isFolder, startedAt: entry.startedAt, sequence: entry.sequence),
+    ];
   }
 
   static _PendingStorageDeleteBucket _bucket(String scopeKey) {
@@ -115,10 +148,6 @@ class PendingStorageDeletes {
   }
 
   static String _entryKey({required String path, required bool isFolder}) {
-    return '${isFolder ? 'folder' : 'file'}:${_normalizePath(path)}';
-  }
-
-  static String _normalizePath(String path) {
-    return path.trim().replaceAll(RegExp(r'^/+|/+$'), '');
+    return '${isFolder ? 'folder' : 'file'}:${normalizePath(path)}';
   }
 }
