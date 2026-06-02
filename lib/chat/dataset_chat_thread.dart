@@ -1442,10 +1442,6 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       return false;
     }
 
-    if (type == agentTurnStartRejectedType || type == agentTurnSteerRejectedType) {
-      return false;
-    }
-
     var changed = false;
 
     switch (type) {
@@ -1512,6 +1508,25 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         changed = _materializePendingMessage(payload['source_message_id']?.toString()) || changed;
+        break;
+      case agentTurnStartRejectedType:
+      case agentTurnSteerRejectedType:
+        final errorMessage = _agentErrorMessage(payload['error']) ?? 'Message rejected';
+        changed =
+            _upsertAgentRow(
+              itemId: _turnApplicationItemId(payload, 'rejected'),
+              turnId: _payloadTurnId(payload),
+              timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
+              data: {
+                'kind': 'error',
+                'role': 'assistant',
+                'status': 'failed',
+                'text': errorMessage,
+                'message': payload,
+                'sender_name': _senderNameFromPayload(payload) ?? 'agent',
+              },
+            ) ||
+            changed;
         break;
       case agentTurnInterruptAcceptedType:
       case agentTurnInterruptedType:
