@@ -18,7 +18,6 @@ import 'package:meshagent_agents/meshagent_agents.dart'
     show
         AgentMessage,
         AgentClientToolCallRequested,
-        AgentConnectionStatus,
         AgentThreadMessage,
         AgentThreadStatus,
         AgentToolCallArgumentsDelta,
@@ -900,6 +899,7 @@ class PendingAgentMessage {
       text: parsedContent.text,
       attachments: parsedContent.attachments,
       senderName: message.senderName?.trim().isNotEmpty == true ? message.senderName!.trim() : null,
+      createdAt: message.createdAtUtc,
       matchByContentOnly: false,
       awaitingAcceptance: true,
       awaitingApplication: true,
@@ -1006,20 +1006,11 @@ class AgentThreadMessageStatusStore {
 
   final Set<String> _touchedThreadPaths = <String>{};
   final Map<String, _AgentThreadMessageStatus> _statusByThreadPath = <String, _AgentThreadMessageStatus>{};
-  final Map<String, _AgentThreadMessageStatus> _connectionStatusByThreadPath = <String, _AgentThreadMessageStatus>{};
   final Map<String, LinkedHashMap<String, PendingAgentMessage>> _pendingMessagesByThreadPath =
       <String, LinkedHashMap<String, PendingAgentMessage>>{};
   final Map<String, LiveToolCallAccumulator> _toolCallAccumulatorsByThreadPath = <String, LiveToolCallAccumulator>{};
 
   bool apply(AgentMessage message, {String? path}) {
-    if (message is AgentConnectionStatus) {
-      final normalizedPath = path?.trim();
-      if (normalizedPath == null || normalizedPath.isEmpty) {
-        return false;
-      }
-      _touchedThreadPaths.add(normalizedPath);
-      return _applyConnectionStatus(normalizedPath, message);
-    }
     if (message is! AgentThreadMessage || message.threadId.trim().isEmpty) {
       return false;
     }
@@ -1084,14 +1075,13 @@ class AgentThreadMessageStatusStore {
     }
     _touchedThreadPaths.remove(normalizedPath);
     _statusByThreadPath.remove(normalizedPath);
-    _connectionStatusByThreadPath.remove(normalizedPath);
     _pendingMessagesByThreadPath.remove(normalizedPath);
     _toolCallAccumulatorsByThreadPath.remove(normalizedPath);
   }
 
   ChatThreadStatusState state({required String path, ChatThreadStatusState? previous, required bool supportsAgentMessages}) {
     final normalizedPath = path.trim();
-    final status = _connectionStatusByThreadPath[normalizedPath] ?? _statusByThreadPath[normalizedPath];
+    final status = _statusByThreadPath[normalizedPath];
     final pendingMessages = List<PendingAgentMessage>.unmodifiable(
       _pendingMessagesByThreadPath[normalizedPath]?.values ?? const <PendingAgentMessage>[],
     );
@@ -1188,34 +1178,6 @@ class AgentThreadMessageStatusStore {
     }
 
     _statusByThreadPath[threadPath] = next;
-    return true;
-  }
-
-  bool _applyConnectionStatus(String threadPath, AgentConnectionStatus message) {
-    final status = message.status.trim().toLowerCase();
-    if (status == "connected" || status == "reconnected") {
-      return _connectionStatusByThreadPath.remove(threadPath) != null;
-    }
-
-    final text = switch (status) {
-      "reconnecting" => "Reconnecting",
-      "disconnected" => "Disconnected",
-      _ => message.message?.trim().isNotEmpty == true ? message.message!.trim() : null,
-    };
-    if (text == null || text.isEmpty) {
-      return false;
-    }
-
-    final previous = _connectionStatusByThreadPath[threadPath];
-    final next = _AgentThreadMessageStatus(
-      text: message.message?.trim().isNotEmpty == true ? message.message!.trim() : text,
-      startedAt: DateTime.now(),
-      mode: "busy",
-    );
-    if (previous != null && previous.text == next.text && previous.mode == next.mode) {
-      return false;
-    }
-    _connectionStatusByThreadPath[threadPath] = next;
     return true;
   }
 
@@ -3818,6 +3780,7 @@ class ChatThreadInput extends StatefulWidget {
     this.onChanged,
     this.attachmentBuilder,
     this.onAttachmentOpen,
+    this.onAttachmentRemoved,
     this.onFileDrop,
     this.leading,
     this.trailing,
@@ -3856,6 +3819,7 @@ class ChatThreadInput extends StatefulWidget {
   final ChatThreadController controller;
   final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
   final ValueChanged<FileAttachment>? onAttachmentOpen;
+  final ValueChanged<FileAttachment>? onAttachmentRemoved;
   final Future<void> Function(String name, Stream<Uint8List> dataStream, int size)? onFileDrop;
   final Widget? leading;
   final Widget? trailing;
@@ -4793,6 +4757,7 @@ class _ChatThreadInput extends State<ChatThreadInput> {
                                   onOpen: widget.onAttachmentOpen == null ? null : () => widget.onAttachmentOpen!(attachment),
                                   onRemove: () {
                                     widget.controller.removeFileUpload(attachment);
+                                    widget.onAttachmentRemoved?.call(attachment);
                                   },
                                 );
                               },
@@ -4881,6 +4846,7 @@ class ChatThread extends StatefulWidget {
     this.waitingForParticipantsBuilder,
     this.attachmentBuilder,
     this.onAttachmentOpen,
+    this.onAttachmentRemoved,
     this.fileInThreadBuilder,
     this.chatInputBoxBuilder,
     this.openFile,
@@ -4927,6 +4893,7 @@ class ChatThread extends StatefulWidget {
   final Widget Function(BuildContext, List<String>)? waitingForParticipantsBuilder;
   final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
   final ValueChanged<FileAttachment>? onAttachmentOpen;
+  final ValueChanged<FileAttachment>? onAttachmentRemoved;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
   final Widget Function(BuildContext context, Widget chatBox)? chatInputBoxBuilder;
   final FutureOr<void> Function(String path)? openFile;
@@ -5957,6 +5924,7 @@ class _ChatThreadState extends State<ChatThread> {
       controller: controller,
       attachmentBuilder: widget.attachmentBuilder,
       onAttachmentOpen: widget.onAttachmentOpen,
+      onAttachmentRemoved: widget.onAttachmentRemoved,
       contextMenuBuilder: widget.inputContextMenuBuilder,
       onPressedOutside: widget.inputOnPressedOutside,
       tapRegionGroupId: _composerTapRegionGroupId,
@@ -5981,6 +5949,7 @@ class _ChatThreadState extends State<ChatThread> {
       controller: controller,
       attachmentBuilder: widget.attachmentBuilder,
       onAttachmentOpen: widget.onAttachmentOpen,
+      onAttachmentRemoved: widget.onAttachmentRemoved,
       tapRegionGroupId: _composerTapRegionGroupId,
     );
   }
@@ -10387,6 +10356,7 @@ abstract class _AnimatedStatusValueCounterState<T extends StatefulWidget> extend
                 style: numberStyle,
                 width: digitSize.width,
                 height: wheelHeight,
+                fadeColor: ShadTheme.of(context).colorScheme.background,
               ),
             ],
             Text(suffixForValue(_displayValue), style: counterStyle, maxLines: 1, overflow: TextOverflow.clip),
@@ -10486,6 +10456,7 @@ class _StatusCounterWheelDigit extends StatelessWidget {
     required this.style,
     required this.width,
     required this.height,
+    required this.fadeColor,
   });
 
   final double startValue;
@@ -10496,6 +10467,7 @@ class _StatusCounterWheelDigit extends StatelessWidget {
   final TextStyle style;
   final double width;
   final double height;
+  final Color fadeColor;
 
   @override
   Widget build(BuildContext context) {
@@ -10511,36 +10483,34 @@ class _StatusCounterWheelDigit extends StatelessWidget {
     return SizedBox(
       width: width,
       height: height,
-      child: ShaderMask(
-        blendMode: BlendMode.dstIn,
-        shaderCallback: (bounds) => const LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Colors.transparent, Colors.black, Colors.black, Colors.transparent],
-          stops: [0, 0.12, 0.88, 1],
-        ).createShader(bounds),
-        child: ClipRect(
-          child: OverflowBox(
-            minHeight: 0,
-            maxHeight: double.infinity,
-            alignment: Alignment.topCenter,
-            child: Transform.translate(
-              offset: Offset(0, stripOffset),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  for (var value = firstStripValue; value <= lastStripValue; value++)
-                    SizedBox(
-                      width: width,
-                      height: height,
-                      child: Center(
-                        child: Text("${_positiveModulo(value, 10)}", style: style, maxLines: 1, overflow: TextOverflow.clip),
+      child: ClipRect(
+        child: Stack(
+          children: [
+            OverflowBox(
+              minHeight: 0,
+              maxHeight: double.infinity,
+              alignment: Alignment.topCenter,
+              child: Transform.translate(
+                offset: Offset(0, stripOffset),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (var value = firstStripValue; value <= lastStripValue; value++)
+                      SizedBox(
+                        width: width,
+                        height: height,
+                        child: Center(
+                          child: Text("${_positiveModulo(value, 10)}", style: style, maxLines: 1, overflow: TextOverflow.clip),
+                        ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
+            Positioned.fill(
+              child: IgnorePointer(child: _StatusCounterWheelFade(color: fadeColor)),
+            ),
+          ],
         ),
       ),
     );
@@ -10548,6 +10518,27 @@ class _StatusCounterWheelDigit extends StatelessWidget {
 }
 
 int _positiveModulo(int value, int modulus) => ((value % modulus) + modulus) % modulus;
+
+class _StatusCounterWheelFade extends StatelessWidget {
+  const _StatusCounterWheelFade({required this.color});
+
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final transparent = color.withValues(alpha: 0);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [color, transparent, transparent, color],
+          stops: const [0, 0.28, 0.72, 1],
+        ),
+      ),
+    );
+  }
+}
 
 Size _measureStatusCounterText(BuildContext context, TextStyle style, String text) {
   final painter = TextPainter(
@@ -10557,7 +10548,9 @@ Size _measureStatusCounterText(BuildContext context, TextStyle style, String tex
     locale: Localizations.maybeLocaleOf(context),
     maxLines: 1,
   )..layout();
-  return painter.size;
+  final size = painter.size;
+  painter.dispose();
+  return size;
 }
 
 Size _measureStatusCounterDigit(BuildContext context, TextStyle style) {

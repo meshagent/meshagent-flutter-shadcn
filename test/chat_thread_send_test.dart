@@ -384,6 +384,33 @@ void main() {
     expect(state.supportsAgentMessages, isTrue);
   });
 
+  test('resolveChatThreadStatusFromStore ignores client connection status', () async {
+    const threadPath = 'dataset://agents/dataset/threads/thread-1';
+    final store = AgentThreadMessageStatusStore();
+    trackAgentThreadStatusMessageInStore(
+      store: store,
+      message: AgentMessage.fromJson({'type': 'meshagent.agent.thread.status', 'thread_id': threadPath, 'status': 'Working'}),
+    );
+
+    expect(
+      trackAgentThreadStatusMessageInStore(
+        store: store,
+        message: AgentMessage.fromJson({'type': 'meshagent.agent.connection.status', 'status': 'reconnecting'}),
+      ),
+      isFalse,
+    );
+    expect(resolveChatThreadStatusFromStore(store: store, path: threadPath).text, 'Working');
+
+    expect(
+      trackAgentThreadStatusMessageInStore(
+        store: store,
+        message: AgentMessage.fromJson({'type': 'meshagent.agent.connection.status', 'status': 'reconnected'}),
+      ),
+      isFalse,
+    );
+    expect(resolveChatThreadStatusFromStore(store: store, path: threadPath).text, 'Working');
+  });
+
   test('resolveChatThreadStatus ignores stale participant status attributes', () async {
     final harness = await _startMessagingHarness();
     addTearDown(harness.dispose);

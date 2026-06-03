@@ -43,6 +43,7 @@ class ChatBotView extends StatefulWidget {
     this.waitingForParticipantsBuilder,
     this.attachmentBuilder,
     this.onAttachmentOpen,
+    this.onAttachmentRemoved,
     this.fileInThreadBuilder,
     this.chatInputBoxBuilder,
     this.openFile,
@@ -92,6 +93,7 @@ class ChatBotView extends StatefulWidget {
   final Widget Function(BuildContext, List<String>)? waitingForParticipantsBuilder;
   final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
   final ValueChanged<FileAttachment>? onAttachmentOpen;
+  final ValueChanged<FileAttachment>? onAttachmentRemoved;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
   final Widget Function(BuildContext context, Widget chatBox)? chatInputBoxBuilder;
   final FutureOr<void> Function(String path)? openFile;
@@ -332,6 +334,7 @@ class _ChatBotViewState extends State<ChatBotView> {
       waitingForParticipantsBuilder: widget.waitingForParticipantsBuilder,
       attachmentBuilder: widget.attachmentBuilder,
       onAttachmentOpen: widget.onAttachmentOpen,
+      onAttachmentRemoved: widget.onAttachmentRemoved,
       fileInThreadBuilder: widget.fileInThreadBuilder,
       chatInputBoxBuilder: (context, chatBox) => _buildChatInputBox(context, chatBox),
       openFile: widget.openFile,
@@ -380,6 +383,7 @@ class _ChatBotViewState extends State<ChatBotView> {
       inputContextMenuBuilder: widget.inputContextMenuBuilder,
       inputOnPressedOutside: widget.inputOnPressedOutside,
       onAttachmentOpen: widget.onAttachmentOpen,
+      onAttachmentRemoved: widget.onAttachmentRemoved,
       fileDropOverlayBuilder: widget.fileDropOverlayBuilder,
       toolsBuilder: widget.toolsBuilder,
       modelController: _newThreadModelController,
