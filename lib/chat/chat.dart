@@ -10896,7 +10896,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
 
     unawaited(() async {
       try {
-        await widget.room.messaging.sendMessage(to: agent, type: "opened", ignoreOffline: true, message: {"path": widget.path});
+        await widget.room.messaging.sendMessage(to: agent, type: "opened", message: {"path": widget.path});
       } catch (_) {}
     }());
   }
@@ -10923,7 +10923,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
   void _sendThreadSubscriptionMessageNowait({required RoomClient room, required RemoteParticipant agent, required AgentMessage message}) {
     unawaited(() async {
       try {
-        await room.messaging.sendMessage(to: agent, type: agentRoomMessageType, ignoreOffline: true, message: message.toJson());
+        await room.messaging.sendMessage(to: agent, type: agentRoomMessageType, message: message.toJson());
       } catch (_) {}
     }());
   }

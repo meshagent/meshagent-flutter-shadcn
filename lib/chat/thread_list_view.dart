@@ -304,6 +304,20 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
     return _MeshDocumentChatThreadListStore(room: room, path: path, onChanged: _onStoreChanged);
   }
 
+  Future<void> _waitForAgentThreadListReady(String path) async {
+    if (!path.startsWith("agent://")) {
+      return;
+    }
+    final chatClient = widget.chatClient;
+    if (chatClient == null) {
+      throw StateError("Agent thread lists require an agent chat client.");
+    }
+    await chatClient.start();
+    if (chatClient is MessagingChatClient) {
+      await chatClient.waitForAgentParticipant();
+    }
+  }
+
   Future<void> _rebindStore() async {
     final nextPath = _normalizePath(widget.threadListPath);
     if (nextPath == _openedPath && _store != null) {
@@ -327,6 +341,10 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
     });
 
     try {
+      await _waitForAgentThreadListReady(nextPath);
+      if (!mounted || _normalizePath(widget.threadListPath) != nextPath) {
+        return;
+      }
       final store = _createStore(nextPath);
       await store.open();
       if (!mounted || _normalizePath(widget.threadListPath) != nextPath) {

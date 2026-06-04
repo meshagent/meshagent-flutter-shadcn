@@ -405,7 +405,7 @@ class _NewChatThreadState extends State<NewChatThread> {
     if (chatClient != null) {
       unawaited(() async {
         try {
-          await chatClient.sendAgentMessage(ModelsRequest(messageId: const Uuid().v4()), ignoreOffline: true);
+          await chatClient.sendAgentMessage(ModelsRequest(messageId: const Uuid().v4()));
         } catch (_) {}
       }());
       return;
@@ -423,7 +423,6 @@ class _NewChatThreadState extends State<NewChatThread> {
         await room.messaging.sendMessage(
           to: agent,
           type: agentRoomMessageType,
-          ignoreOffline: true,
           message: ModelsRequest(messageId: const Uuid().v4()).toJson(),
         );
       } catch (_) {}

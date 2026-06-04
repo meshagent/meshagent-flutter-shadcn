@@ -32,7 +32,7 @@ class _FakeManagedAgentChatClient extends agent_sessions.BaseChatClient {
   String? localParticipantName() => participantName;
 
   @override
-  Future<void> sendAgentMessage(agent_sessions.AgentMessage message, {Uint8List? attachment, bool ignoreOffline = false}) async {
+  Future<void> sendAgentMessage(agent_sessions.AgentMessage message, {Uint8List? attachment}) async {
     sentMessages.add(message);
     if (message is agent_sessions.StartThread) {
       final threadId = 'thread-${++_threadCounter}';
