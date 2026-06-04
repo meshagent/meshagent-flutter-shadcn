@@ -6366,8 +6366,6 @@ class ChatThreadMessageView extends StatelessWidget {
     final hasText = messageText != null && messageText.trim().isNotEmpty;
     final headerLeftInset = mine ? chatBubbleHorizontalInset + chatBubbleActionRailWidth : chatBubbleHorizontalInset;
     final headerRightInset = mine || isAgentMessage ? chatBubbleHorizontalInset : chatBubbleHorizontalInset + chatBubbleActionRailWidth;
-    const attachmentInset = chatBubbleHorizontalInset + _chatBubbleContentHorizontalPadding;
-
     return Column(
       mainAxisAlignment: MainAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -6403,13 +6401,19 @@ class ChatThreadMessageView extends StatelessWidget {
           ),
         for (var i = 0; i < attachmentWidgets.length; i++) ...[
           if (hasText || i > 0) const SizedBox(height: chatBubbleSiblingSpacing),
-          Padding(
-            padding: const EdgeInsets.only(left: attachmentInset, right: attachmentInset),
-            child: Align(alignment: mine ? Alignment.centerRight : Alignment.centerLeft, child: attachmentWidgets[i]),
-          ),
+          _buildAttachmentWidget(attachmentWidgets[i]),
         ],
         ?trailing,
       ],
+    );
+  }
+
+  Widget _buildAttachmentWidget(Widget attachmentWidget) {
+    const attachmentInset = chatBubbleHorizontalInset + _chatBubbleContentHorizontalPadding;
+    return Padding(
+      key: attachmentWidget.key == null ? null : ValueKey<Object>(attachmentWidget.key!),
+      padding: const EdgeInsets.only(left: attachmentInset, right: attachmentInset),
+      child: Align(alignment: mine ? Alignment.centerRight : Alignment.centerLeft, child: attachmentWidget),
     );
   }
 }
@@ -6448,13 +6452,16 @@ class PendingChatThreadMessage extends StatelessWidget {
           createdAt: createdAt,
           shouldShowHeader: shouldShowAuthorNames,
           mobileStorageSaveSurfacePresenter: mobileStorageSaveSurfacePresenter,
-          attachmentWidgets: [for (final attachment in message.attachments) _buildAttachmentPreview(context, attachment)],
+          attachmentWidgets: [
+            for (final indexedAttachment in message.attachments.indexed)
+              _buildAttachmentPreview(context, indexedAttachment.$2, attachmentIndex: indexedAttachment.$1),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildAttachmentPreview(BuildContext context, AgentFileContent attachment) {
+  Widget _buildAttachmentPreview(BuildContext context, AgentFileContent attachment, {required int attachmentIndex}) {
     final trimmed = attachment.url.trim();
     final isInlineImage = trimmed.startsWith("data:image/");
     final displayName = attachment.name?.trim().isNotEmpty == true ? attachment.name!.trim() : _defaultSuggestedFileNameFromPath(trimmed);
@@ -6473,10 +6480,19 @@ class PendingChatThreadMessage extends StatelessWidget {
             child: GestureDetector(onTap: () => unawaited(_showPendingAttachmentPreview(context, attachment)), child: preview),
           )
         : preview;
-    return Align(
-      alignment: Alignment.centerRight,
-      child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 312.5), child: child),
+    return KeyedSubtree(
+      key: ValueKey(_pendingAttachmentWidgetKey(attachment, attachmentIndex)),
+      child: Align(
+        alignment: Alignment.centerRight,
+        child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 312.5), child: child),
+      ),
     );
+  }
+
+  String _pendingAttachmentWidgetKey(AgentFileContent attachment, int attachmentIndex) {
+    final name = attachment.name?.trim() ?? "";
+    final trimmed = attachment.url.trim();
+    return "pending-agent-attachment:${message.messageId}:$attachmentIndex:$name:${trimmed.length}:${trimmed.hashCode}";
   }
 
   Future<void> _showPendingAttachmentPreview(BuildContext context, AgentFileContent attachment) {
@@ -7629,30 +7645,37 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     MeshElement message,
     bool mine,
     MeshElement attachment, {
+    required int attachmentIndex,
     required List<ChatThreadFeedImage> feedImages,
   }) {
+    Widget keyed(Widget child) {
+      return KeyedSubtree(key: ValueKey(_threadAttachmentWidgetKey(message, attachment, attachmentIndex)), child: child);
+    }
+
     final normalizedAttachmentRef = _normalizeReactionAttachmentRef(attachment.id);
 
     if (attachment.tagName == "image") {
-      return Column(
-        crossAxisAlignment: mine ? .end : .start,
-        children: [
-          _buildImageInThread(context, attachment, feedImages: feedImages),
-          if (normalizedAttachmentRef != null)
-            _buildReactionRow(
-              context,
-              message: message,
-              mine: mine,
-              target: _reactionTargetAttachment,
-              attachmentRef: normalizedAttachmentRef,
-            ),
-        ],
+      return keyed(
+        Column(
+          crossAxisAlignment: mine ? .end : .start,
+          children: [
+            _buildImageInThread(context, attachment, feedImages: feedImages),
+            if (normalizedAttachmentRef != null)
+              _buildReactionRow(
+                context,
+                message: message,
+                mine: mine,
+                target: _reactionTargetAttachment,
+                attachmentRef: normalizedAttachmentRef,
+              ),
+          ],
+        ),
       );
     }
 
     final pathAttribute = attachment.getAttribute("path");
     if (pathAttribute is! String || pathAttribute.trim().isEmpty) {
-      return const SizedBox.shrink();
+      return keyed(const SizedBox.shrink());
     }
 
     final normalizedPath = _sanitizePath(pathAttribute);
@@ -7664,62 +7687,92 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
           : () {
               _openThreadImageViewer(context, images: feedImages, initialIndex: initialIndex);
             };
-      return _ThreadImageLookup(
-        lookupKey: normalizedPath,
-        readCached: () => _readCachedImageRecord(normalizedPath),
-        lookupImage: () => _loadImageRecord(normalizedPath),
-        builder: (context, snapshot) {
-          final imageRecord = snapshot.data;
-          final loading = snapshot.connectionState != ConnectionState.done;
-          final items = _usesMobileContextLayout(context)
-              ? _buildMobileAttachmentOptions(
-                  message: message,
-                  attachmentRef: normalizedAttachmentRef,
-                  imageRecord: imageRecord,
-                  path: normalizedPath,
-                )
-              : _buildAttachmentOptions(imageRecord: imageRecord, path: normalizedPath);
+      return keyed(
+        _ThreadImageLookup(
+          lookupKey: normalizedPath,
+          readCached: () => _readCachedImageRecord(normalizedPath),
+          lookupImage: () => _loadImageRecord(normalizedPath),
+          builder: (context, snapshot) {
+            final imageRecord = snapshot.data;
+            final loading = snapshot.connectionState != ConnectionState.done;
+            final items = _usesMobileContextLayout(context)
+                ? _buildMobileAttachmentOptions(
+                    message: message,
+                    attachmentRef: normalizedAttachmentRef,
+                    imageRecord: imageRecord,
+                    path: normalizedPath,
+                  )
+                : _buildAttachmentOptions(imageRecord: imageRecord, path: normalizedPath);
 
-          return Column(
-            crossAxisAlignment: mine ? .end : .start,
-            children: [
-              _buildFileImageInThread(context, normalizedPath, imageRecord, loading, items: items, onOpenFullscreen: onOpenFullscreen),
-              if (normalizedAttachmentRef != null)
-                _buildReactionRow(
-                  context,
-                  message: message,
-                  mine: mine,
-                  target: _reactionTargetAttachment,
-                  attachmentRef: normalizedAttachmentRef,
-                  leadingActions: _buildAttachmentActions(imageRecord: imageRecord, path: normalizedPath),
-                ),
-            ],
-          );
-        },
+            return Column(
+              crossAxisAlignment: mine ? .end : .start,
+              children: [
+                _buildFileImageInThread(context, normalizedPath, imageRecord, loading, items: items, onOpenFullscreen: onOpenFullscreen),
+                if (normalizedAttachmentRef != null)
+                  _buildReactionRow(
+                    context,
+                    message: message,
+                    mine: mine,
+                    target: _reactionTargetAttachment,
+                    attachmentRef: normalizedAttachmentRef,
+                    leadingActions: _buildAttachmentActions(imageRecord: imageRecord, path: normalizedPath),
+                  ),
+              ],
+            );
+          },
+        ),
       );
     }
 
-    return Column(
-      crossAxisAlignment: mine ? .end : .start,
-      children: [
-        _buildFileInThread(
-          context,
-          normalizedPath,
-          items: _usesMobileContextLayout(context)
-              ? _buildMobileAttachmentOptions(message: message, attachmentRef: normalizedAttachmentRef, path: normalizedPath)
-              : _buildAttachmentOptions(path: normalizedPath),
-        ),
-        if (normalizedAttachmentRef != null)
-          _buildReactionRow(
+    return keyed(
+      Column(
+        crossAxisAlignment: mine ? .end : .start,
+        children: [
+          _buildFileInThread(
             context,
-            message: message,
-            mine: mine,
-            target: _reactionTargetAttachment,
-            attachmentRef: normalizedAttachmentRef,
-            leadingActions: _buildAttachmentActions(path: normalizedPath),
+            normalizedPath,
+            items: _usesMobileContextLayout(context)
+                ? _buildMobileAttachmentOptions(message: message, attachmentRef: normalizedAttachmentRef, path: normalizedPath)
+                : _buildAttachmentOptions(path: normalizedPath),
           ),
-      ],
+          if (normalizedAttachmentRef != null)
+            _buildReactionRow(
+              context,
+              message: message,
+              mine: mine,
+              target: _reactionTargetAttachment,
+              attachmentRef: normalizedAttachmentRef,
+              leadingActions: _buildAttachmentActions(path: normalizedPath),
+            ),
+        ],
+      ),
     );
+  }
+
+  String _threadAttachmentWidgetKey(MeshElement message, MeshElement attachment, int attachmentIndex) {
+    final messageIdAttribute = message.getAttribute("id");
+    final messageElementId = message.id;
+    final messageId = messageIdAttribute is String && messageIdAttribute.trim().isNotEmpty
+        ? messageIdAttribute.trim()
+        : messageElementId == null || messageElementId.trim().isEmpty
+        ? "message"
+        : messageElementId.trim();
+    final attachmentElementId = attachment.id?.trim();
+    if (attachmentElementId != null && attachmentElementId.isNotEmpty) {
+      return "thread-attachment:$messageId:element:$attachmentElementId";
+    }
+
+    final imageIdAttribute = attachment.getAttribute("id");
+    if (imageIdAttribute is String && imageIdAttribute.trim().isNotEmpty) {
+      return "thread-attachment:$messageId:image:${imageIdAttribute.trim()}";
+    }
+
+    final pathAttribute = attachment.getAttribute("path");
+    if (pathAttribute is String && pathAttribute.trim().isNotEmpty) {
+      return "thread-attachment:$messageId:path:${_sanitizePath(pathAttribute)}";
+    }
+
+    return "thread-attachment:$messageId:index:$attachmentIndex";
   }
 
   List<ShadContextMenuItem> _buildAttachmentOptions({_ThreadImageRecord? imageRecord, String? path}) {
@@ -7903,7 +7956,15 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                 );
               },
         attachmentWidgets: [
-          for (final attachment in attachments) _buildAttachmentInThread(context, message, mine, attachment, feedImages: feedImages),
+          for (final indexedAttachment in attachments.indexed)
+            _buildAttachmentInThread(
+              context,
+              message,
+              mine,
+              indexedAttachment.$2,
+              attachmentIndex: indexedAttachment.$1,
+              feedImages: feedImages,
+            ),
         ],
         trailing: _buildReactionRow(context, message: message, mine: mine, target: _reactionTargetMessage, showAddWhenEmpty: false),
       ),

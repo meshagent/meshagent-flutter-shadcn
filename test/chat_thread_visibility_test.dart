@@ -173,6 +173,7 @@ Widget _buildThreadHarness({
   DateTime? threadStatusStartedAt,
   String? threadStatusMode,
   List<PendingAgentMessage> pendingMessages = const [],
+  Widget Function(BuildContext context, String path)? fileInThreadBuilder,
 }) {
   return ShadApp(
     home: Scaffold(
@@ -192,6 +193,7 @@ Widget _buildThreadHarness({
             threadStatusStartedAt: threadStatusStartedAt,
             threadStatusMode: threadStatusMode,
             pendingMessages: pendingMessages,
+            fileInThreadBuilder: fileInThreadBuilder,
             emptyStateTitle: "No visible messages",
           ),
           ChatThreadInputFrame(
@@ -261,6 +263,55 @@ void main() {
     expect(find.byType(ChatBubble), findsNothing);
     expect(find.text("No visible messages"), findsNothing);
     expect(find.byType(ChatThreadEmptyStateContent), findsNothing);
+  });
+
+  testWidgets('keys thread attachments with stable message and attachment identity', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
+    final document = _createThreadDocument();
+    addTearDown(room.dispose);
+    addTearDown(controller.dispose);
+    addTearDown(document.dispose);
+
+    _insertElement(
+      document: document,
+      targetId: _messagesElement(document).id,
+      tagName: "message",
+      elementId: "message-with-attachment",
+      attributes: {"id": "message-stable-id", "text": "Attached", "author_name": "assistant", "role": "agent"},
+    );
+    _insertElement(
+      document: document,
+      targetId: "message-with-attachment",
+      tagName: "file",
+      elementId: "attachment-stable-id",
+      attributes: {"path": "/files/example.txt"},
+    );
+
+    await tester.pumpWidget(
+      _buildThreadHarness(
+        room: room,
+        controller: controller,
+        document: document,
+        fileInThreadBuilder: (context, path) => Text("file:$path"),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byKey(const ValueKey("thread-attachment:message-stable-id:element:attachment-stable-id")), findsOneWidget);
+
+    await tester.pumpWidget(
+      _buildThreadHarness(
+        room: room,
+        controller: controller,
+        document: document,
+        fileInThreadBuilder: (context, path) => Text("file:$path"),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byKey(const ValueKey("thread-attachment:message-stable-id:element:attachment-stable-id")), findsOneWidget);
+    expect(find.text("file:files/example.txt"), findsOneWidget);
   });
 
   testWidgets('keeps non-empty messages visible when empty ones are present', (tester) async {
