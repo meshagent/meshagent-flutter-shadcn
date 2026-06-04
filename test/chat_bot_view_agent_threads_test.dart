@@ -32,7 +32,7 @@ class _FakeChatClient extends agent_sessions.BaseChatClient {
   Future<void> stop() async {}
 
   @override
-  Future<void> sendAgentMessage(agent_sessions.AgentMessage message, {Uint8List? attachment, bool ignoreOffline = false}) async {
+  Future<void> sendAgentMessage(agent_sessions.AgentMessage message, {Uint8List? attachment}) async {
     sentMessages.add(message);
     if (message is agent_sessions.OpenThread && message.load != false) {
       scheduleMicrotask(() {

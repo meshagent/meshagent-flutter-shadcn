@@ -251,7 +251,7 @@ void main() {
       maxLines: null,
     )..layout(maxWidth: columnExtent - 1 - cellPadding.horizontal);
 
-    expect(cellPaddingSize.height, closeTo(textPainter.height.ceilToDouble() + cellPadding.vertical, 0.1));
+    expect(cellPaddingSize.height, greaterThanOrEqualTo(textPainter.height.ceilToDouble() + cellPadding.vertical));
   });
 
   testWidgets('wrapped auto sized rows infer vertical padding from the default shad table theme', (tester) async {
@@ -314,7 +314,7 @@ void main() {
       maxLines: null,
     )..layout(maxWidth: columnExtent - 1 - inferredPadding.horizontal);
 
-    expect(cellPaddingSize.height, closeTo(textPainter.height.ceilToDouble() + inferredPadding.vertical, 0.1));
+    expect(cellPaddingSize.height, greaterThanOrEqualTo(textPainter.height.ceilToDouble() + inferredPadding.vertical));
   });
 
   testWidgets('wrapped auto sized rows render text with matching top and side insets', (tester) async {

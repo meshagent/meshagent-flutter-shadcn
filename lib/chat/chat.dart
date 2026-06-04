@@ -130,7 +130,27 @@ const double _mobileScreenWidthMax = 600;
 const double _mobileComposerPillCornerRadius = 999;
 const double _mobileComposerCornerRadius = 18;
 
+class ChatContextLayoutOverride extends InheritedWidget {
+  const ChatContextLayoutOverride({super.key, required this.useMobileLayout, required super.child});
+
+  final bool useMobileLayout;
+
+  static bool? maybeUseMobileLayoutOf(BuildContext context) {
+    return context.dependOnInheritedWidgetOfExactType<ChatContextLayoutOverride>()?.useMobileLayout;
+  }
+
+  @override
+  bool updateShouldNotify(covariant ChatContextLayoutOverride oldWidget) {
+    return useMobileLayout != oldWidget.useMobileLayout;
+  }
+}
+
 bool _usesMobileContextLayout(BuildContext context) {
+  final overriddenValue = ChatContextLayoutOverride.maybeUseMobileLayoutOf(context);
+  if (overriddenValue != null) {
+    return overriddenValue;
+  }
+
   return MediaQuery.sizeOf(context).width < _mobileScreenWidthMax;
 }
 
@@ -3759,6 +3779,8 @@ class ChatThreadInput extends StatefulWidget {
     this.placeholder,
     this.onChanged,
     this.attachmentBuilder,
+    this.onAttachmentOpen,
+    this.onAttachmentRemoved,
     this.onFileDrop,
     this.leading,
     this.trailing,
@@ -3796,6 +3818,8 @@ class ChatThreadInput extends StatefulWidget {
   final String? sendPendingText;
   final ChatThreadController controller;
   final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
+  final ValueChanged<FileAttachment>? onAttachmentOpen;
+  final ValueChanged<FileAttachment>? onAttachmentRemoved;
   final Future<void> Function(String name, Stream<Uint8List> dataStream, int size)? onFileDrop;
   final Widget? leading;
   final Widget? trailing;
@@ -4730,8 +4754,10 @@ class _ChatThreadInput extends State<ChatThreadInput> {
                                   key: ValueKey(attachment.path),
                                   attachment: attachment,
                                   maxWidth: constraints.maxWidth - 50,
+                                  onOpen: widget.onAttachmentOpen == null ? null : () => widget.onAttachmentOpen!(attachment),
                                   onRemove: () {
                                     widget.controller.removeFileUpload(attachment);
+                                    widget.onAttachmentRemoved?.call(attachment);
                                   },
                                 );
                               },
@@ -4819,9 +4845,12 @@ class ChatThread extends StatefulWidget {
     this.messageHeaderBuilder,
     this.waitingForParticipantsBuilder,
     this.attachmentBuilder,
+    this.onAttachmentOpen,
+    this.onAttachmentRemoved,
     this.fileInThreadBuilder,
     this.chatInputBoxBuilder,
     this.openFile,
+    this.fileDropOverlayBuilder,
     this.toolsBuilder,
     this.inputPlaceholder,
     this.emptyStateTitle,
@@ -4863,9 +4892,12 @@ class ChatThread extends StatefulWidget {
   final Widget Function(BuildContext, MeshDocument, MeshElement)? messageHeaderBuilder;
   final Widget Function(BuildContext, List<String>)? waitingForParticipantsBuilder;
   final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
+  final ValueChanged<FileAttachment>? onAttachmentOpen;
+  final ValueChanged<FileAttachment>? onAttachmentRemoved;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
   final Widget Function(BuildContext context, Widget chatBox)? chatInputBoxBuilder;
   final FutureOr<void> Function(String path)? openFile;
+  final FileDropOverlayBuilder? fileDropOverlayBuilder;
   final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
   final EditableTextContextMenuBuilder? inputContextMenuBuilder;
   final TapRegionCallback? inputOnPressedOutside;
@@ -5891,6 +5923,8 @@ class _ChatThreadState extends State<ChatThread> {
       },
       controller: controller,
       attachmentBuilder: widget.attachmentBuilder,
+      onAttachmentOpen: widget.onAttachmentOpen,
+      onAttachmentRemoved: widget.onAttachmentRemoved,
       contextMenuBuilder: widget.inputContextMenuBuilder,
       onPressedOutside: widget.inputOnPressedOutside,
       tapRegionGroupId: _composerTapRegionGroupId,
@@ -5914,6 +5948,8 @@ class _ChatThreadState extends State<ChatThread> {
       onSend: (value, attachments) async {},
       controller: controller,
       attachmentBuilder: widget.attachmentBuilder,
+      onAttachmentOpen: widget.onAttachmentOpen,
+      onAttachmentRemoved: widget.onAttachmentRemoved,
       tapRegionGroupId: _composerTapRegionGroupId,
     );
   }
@@ -5944,6 +5980,7 @@ class _ChatThreadState extends State<ChatThread> {
             onFileDrop: (name, dataStream, size) async {
               controller.uploadFile(name, dataStream, size ?? 0);
             },
+            overlayBuilder: widget.fileDropOverlayBuilder,
             child: Column(
               mainAxisAlignment: bottomAlign ? MainAxisAlignment.end : MainAxisAlignment.center,
               children: [
@@ -6107,6 +6144,7 @@ class _ChatThreadState extends State<ChatThread> {
         onFileDrop: (name, dataStream, size) async {
           controller.uploadFile(name, dataStream, size ?? 0);
         },
+        overlayBuilder: widget.fileDropOverlayBuilder,
         child: Column(
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
@@ -6328,8 +6366,6 @@ class ChatThreadMessageView extends StatelessWidget {
     final hasText = messageText != null && messageText.trim().isNotEmpty;
     final headerLeftInset = mine ? chatBubbleHorizontalInset + chatBubbleActionRailWidth : chatBubbleHorizontalInset;
     final headerRightInset = mine || isAgentMessage ? chatBubbleHorizontalInset : chatBubbleHorizontalInset + chatBubbleActionRailWidth;
-    const attachmentInset = chatBubbleHorizontalInset + _chatBubbleContentHorizontalPadding;
-
     return Column(
       mainAxisAlignment: MainAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -6365,13 +6401,19 @@ class ChatThreadMessageView extends StatelessWidget {
           ),
         for (var i = 0; i < attachmentWidgets.length; i++) ...[
           if (hasText || i > 0) const SizedBox(height: chatBubbleSiblingSpacing),
-          Padding(
-            padding: const EdgeInsets.only(left: attachmentInset, right: attachmentInset),
-            child: Align(alignment: mine ? Alignment.centerRight : Alignment.centerLeft, child: attachmentWidgets[i]),
-          ),
+          _buildAttachmentWidget(attachmentWidgets[i]),
         ],
         ?trailing,
       ],
+    );
+  }
+
+  Widget _buildAttachmentWidget(Widget attachmentWidget) {
+    const attachmentInset = chatBubbleHorizontalInset + _chatBubbleContentHorizontalPadding;
+    return Padding(
+      key: attachmentWidget.key == null ? null : ValueKey<Object>(attachmentWidget.key!),
+      padding: const EdgeInsets.only(left: attachmentInset, right: attachmentInset),
+      child: Align(alignment: mine ? Alignment.centerRight : Alignment.centerLeft, child: attachmentWidget),
     );
   }
 }
@@ -6410,13 +6452,16 @@ class PendingChatThreadMessage extends StatelessWidget {
           createdAt: createdAt,
           shouldShowHeader: shouldShowAuthorNames,
           mobileStorageSaveSurfacePresenter: mobileStorageSaveSurfacePresenter,
-          attachmentWidgets: [for (final attachment in message.attachments) _buildAttachmentPreview(context, attachment)],
+          attachmentWidgets: [
+            for (final indexedAttachment in message.attachments.indexed)
+              _buildAttachmentPreview(context, indexedAttachment.$2, attachmentIndex: indexedAttachment.$1),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildAttachmentPreview(BuildContext context, AgentFileContent attachment) {
+  Widget _buildAttachmentPreview(BuildContext context, AgentFileContent attachment, {required int attachmentIndex}) {
     final trimmed = attachment.url.trim();
     final isInlineImage = trimmed.startsWith("data:image/");
     final displayName = attachment.name?.trim().isNotEmpty == true ? attachment.name!.trim() : _defaultSuggestedFileNameFromPath(trimmed);
@@ -6435,10 +6480,19 @@ class PendingChatThreadMessage extends StatelessWidget {
             child: GestureDetector(onTap: () => unawaited(_showPendingAttachmentPreview(context, attachment)), child: preview),
           )
         : preview;
-    return Align(
-      alignment: Alignment.centerRight,
-      child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 312.5), child: child),
+    return KeyedSubtree(
+      key: ValueKey(_pendingAttachmentWidgetKey(attachment, attachmentIndex)),
+      child: Align(
+        alignment: Alignment.centerRight,
+        child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 312.5), child: child),
+      ),
     );
+  }
+
+  String _pendingAttachmentWidgetKey(AgentFileContent attachment, int attachmentIndex) {
+    final name = attachment.name?.trim() ?? "";
+    final trimmed = attachment.url.trim();
+    return "pending-agent-attachment:${message.messageId}:$attachmentIndex:$name:${trimmed.length}:${trimmed.hashCode}";
   }
 
   Future<void> _showPendingAttachmentPreview(BuildContext context, AgentFileContent attachment) {
@@ -7591,30 +7645,37 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     MeshElement message,
     bool mine,
     MeshElement attachment, {
+    required int attachmentIndex,
     required List<ChatThreadFeedImage> feedImages,
   }) {
+    Widget keyed(Widget child) {
+      return KeyedSubtree(key: ValueKey(_threadAttachmentWidgetKey(message, attachment, attachmentIndex)), child: child);
+    }
+
     final normalizedAttachmentRef = _normalizeReactionAttachmentRef(attachment.id);
 
     if (attachment.tagName == "image") {
-      return Column(
-        crossAxisAlignment: mine ? .end : .start,
-        children: [
-          _buildImageInThread(context, attachment, feedImages: feedImages),
-          if (normalizedAttachmentRef != null)
-            _buildReactionRow(
-              context,
-              message: message,
-              mine: mine,
-              target: _reactionTargetAttachment,
-              attachmentRef: normalizedAttachmentRef,
-            ),
-        ],
+      return keyed(
+        Column(
+          crossAxisAlignment: mine ? .end : .start,
+          children: [
+            _buildImageInThread(context, attachment, feedImages: feedImages),
+            if (normalizedAttachmentRef != null)
+              _buildReactionRow(
+                context,
+                message: message,
+                mine: mine,
+                target: _reactionTargetAttachment,
+                attachmentRef: normalizedAttachmentRef,
+              ),
+          ],
+        ),
       );
     }
 
     final pathAttribute = attachment.getAttribute("path");
     if (pathAttribute is! String || pathAttribute.trim().isEmpty) {
-      return const SizedBox.shrink();
+      return keyed(const SizedBox.shrink());
     }
 
     final normalizedPath = _sanitizePath(pathAttribute);
@@ -7626,62 +7687,92 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
           : () {
               _openThreadImageViewer(context, images: feedImages, initialIndex: initialIndex);
             };
-      return _ThreadImageLookup(
-        lookupKey: normalizedPath,
-        readCached: () => _readCachedImageRecord(normalizedPath),
-        lookupImage: () => _loadImageRecord(normalizedPath),
-        builder: (context, snapshot) {
-          final imageRecord = snapshot.data;
-          final loading = snapshot.connectionState != ConnectionState.done;
-          final items = _usesMobileContextLayout(context)
-              ? _buildMobileAttachmentOptions(
-                  message: message,
-                  attachmentRef: normalizedAttachmentRef,
-                  imageRecord: imageRecord,
-                  path: normalizedPath,
-                )
-              : _buildAttachmentOptions(imageRecord: imageRecord, path: normalizedPath);
+      return keyed(
+        _ThreadImageLookup(
+          lookupKey: normalizedPath,
+          readCached: () => _readCachedImageRecord(normalizedPath),
+          lookupImage: () => _loadImageRecord(normalizedPath),
+          builder: (context, snapshot) {
+            final imageRecord = snapshot.data;
+            final loading = snapshot.connectionState != ConnectionState.done;
+            final items = _usesMobileContextLayout(context)
+                ? _buildMobileAttachmentOptions(
+                    message: message,
+                    attachmentRef: normalizedAttachmentRef,
+                    imageRecord: imageRecord,
+                    path: normalizedPath,
+                  )
+                : _buildAttachmentOptions(imageRecord: imageRecord, path: normalizedPath);
 
-          return Column(
-            crossAxisAlignment: mine ? .end : .start,
-            children: [
-              _buildFileImageInThread(context, normalizedPath, imageRecord, loading, items: items, onOpenFullscreen: onOpenFullscreen),
-              if (normalizedAttachmentRef != null)
-                _buildReactionRow(
-                  context,
-                  message: message,
-                  mine: mine,
-                  target: _reactionTargetAttachment,
-                  attachmentRef: normalizedAttachmentRef,
-                  leadingActions: _buildAttachmentActions(imageRecord: imageRecord, path: normalizedPath),
-                ),
-            ],
-          );
-        },
+            return Column(
+              crossAxisAlignment: mine ? .end : .start,
+              children: [
+                _buildFileImageInThread(context, normalizedPath, imageRecord, loading, items: items, onOpenFullscreen: onOpenFullscreen),
+                if (normalizedAttachmentRef != null)
+                  _buildReactionRow(
+                    context,
+                    message: message,
+                    mine: mine,
+                    target: _reactionTargetAttachment,
+                    attachmentRef: normalizedAttachmentRef,
+                    leadingActions: _buildAttachmentActions(imageRecord: imageRecord, path: normalizedPath),
+                  ),
+              ],
+            );
+          },
+        ),
       );
     }
 
-    return Column(
-      crossAxisAlignment: mine ? .end : .start,
-      children: [
-        _buildFileInThread(
-          context,
-          normalizedPath,
-          items: _usesMobileContextLayout(context)
-              ? _buildMobileAttachmentOptions(message: message, attachmentRef: normalizedAttachmentRef, path: normalizedPath)
-              : _buildAttachmentOptions(path: normalizedPath),
-        ),
-        if (normalizedAttachmentRef != null)
-          _buildReactionRow(
+    return keyed(
+      Column(
+        crossAxisAlignment: mine ? .end : .start,
+        children: [
+          _buildFileInThread(
             context,
-            message: message,
-            mine: mine,
-            target: _reactionTargetAttachment,
-            attachmentRef: normalizedAttachmentRef,
-            leadingActions: _buildAttachmentActions(path: normalizedPath),
+            normalizedPath,
+            items: _usesMobileContextLayout(context)
+                ? _buildMobileAttachmentOptions(message: message, attachmentRef: normalizedAttachmentRef, path: normalizedPath)
+                : _buildAttachmentOptions(path: normalizedPath),
           ),
-      ],
+          if (normalizedAttachmentRef != null)
+            _buildReactionRow(
+              context,
+              message: message,
+              mine: mine,
+              target: _reactionTargetAttachment,
+              attachmentRef: normalizedAttachmentRef,
+              leadingActions: _buildAttachmentActions(path: normalizedPath),
+            ),
+        ],
+      ),
     );
+  }
+
+  String _threadAttachmentWidgetKey(MeshElement message, MeshElement attachment, int attachmentIndex) {
+    final messageIdAttribute = message.getAttribute("id");
+    final messageElementId = message.id;
+    final messageId = messageIdAttribute is String && messageIdAttribute.trim().isNotEmpty
+        ? messageIdAttribute.trim()
+        : messageElementId == null || messageElementId.trim().isEmpty
+        ? "message"
+        : messageElementId.trim();
+    final attachmentElementId = attachment.id?.trim();
+    if (attachmentElementId != null && attachmentElementId.isNotEmpty) {
+      return "thread-attachment:$messageId:element:$attachmentElementId";
+    }
+
+    final imageIdAttribute = attachment.getAttribute("id");
+    if (imageIdAttribute is String && imageIdAttribute.trim().isNotEmpty) {
+      return "thread-attachment:$messageId:image:${imageIdAttribute.trim()}";
+    }
+
+    final pathAttribute = attachment.getAttribute("path");
+    if (pathAttribute is String && pathAttribute.trim().isNotEmpty) {
+      return "thread-attachment:$messageId:path:${_sanitizePath(pathAttribute)}";
+    }
+
+    return "thread-attachment:$messageId:index:$attachmentIndex";
   }
 
   List<ShadContextMenuItem> _buildAttachmentOptions({_ThreadImageRecord? imageRecord, String? path}) {
@@ -7865,7 +7956,15 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
                 );
               },
         attachmentWidgets: [
-          for (final attachment in attachments) _buildAttachmentInThread(context, message, mine, attachment, feedImages: feedImages),
+          for (final indexedAttachment in attachments.indexed)
+            _buildAttachmentInThread(
+              context,
+              message,
+              mine,
+              indexedAttachment.$2,
+              attachmentIndex: indexedAttachment.$1,
+              feedImages: feedImages,
+            ),
         ],
         trailing: _buildReactionRow(context, message: message, mine: mine, target: _reactionTargetMessage, showAddWhenEmpty: false),
       ),
@@ -10896,7 +10995,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
 
     unawaited(() async {
       try {
-        await widget.room.messaging.sendMessage(to: agent, type: "opened", ignoreOffline: true, message: {"path": widget.path});
+        await widget.room.messaging.sendMessage(to: agent, type: "opened", message: {"path": widget.path});
       } catch (_) {}
     }());
   }
@@ -10923,7 +11022,7 @@ class _ChatThreadBuilder extends State<ChatThreadBuilder> {
   void _sendThreadSubscriptionMessageNowait({required RoomClient room, required RemoteParticipant agent, required AgentMessage message}) {
     unawaited(() async {
       try {
-        await room.messaging.sendMessage(to: agent, type: agentRoomMessageType, ignoreOffline: true, message: message.toJson());
+        await room.messaging.sendMessage(to: agent, type: agentRoomMessageType, message: message.toJson());
       } catch (_) {}
     }());
   }
@@ -12153,6 +12252,7 @@ class ChatThreadPreview extends StatelessWidget {
 }
 
 typedef FileDropCallback = Future<void> Function(String name, Stream<Uint8List> dataStream, int? fileSize);
+typedef FileDropOverlayBuilder = Widget Function(BuildContext context, bool dragging);
 typedef TextPasteCallback = Future<void> Function(String text);
 
 class FileDropArea extends StatefulWidget {
@@ -12162,7 +12262,18 @@ class FileDropArea extends StatefulWidget {
 
   final bool multiple;
 
-  const FileDropArea({super.key, required this.onFileDrop, required this.child, this.multiple = true});
+  final FileDropOverlayBuilder? overlayBuilder;
+
+  final ValueChanged<bool>? onDraggingChanged;
+
+  const FileDropArea({
+    super.key,
+    required this.onFileDrop,
+    required this.child,
+    this.multiple = true,
+    this.overlayBuilder,
+    this.onDraggingChanged,
+  });
 
   @override
   FileDropAreaState createState() => FileDropAreaState();
@@ -12184,6 +12295,14 @@ const _preferredFormats = [
 class FileDropAreaState extends State<FileDropArea> {
   bool _dragging = false;
 
+  @override
+  void dispose() {
+    if (_dragging) {
+      widget.onDraggingChanged?.call(false);
+    }
+    super.dispose();
+  }
+
   Future<DataReaderFile> _getFile(DataReader reader, SimpleFileFormat? format) {
     final completer = Completer<DataReaderFile>();
 
@@ -12202,6 +12321,8 @@ class FileDropAreaState extends State<FileDropArea> {
 
   @override
   Widget build(BuildContext context) {
+    final overlay = widget.overlayBuilder?.call(context, _dragging);
+
     return DropRegion(
       formats: const [...Formats.standardFormats, Formats.fileUri],
       hitTestBehavior: HitTestBehavior.opaque,
@@ -12211,24 +12332,36 @@ class FileDropAreaState extends State<FileDropArea> {
       child: Stack(
         children: [
           widget.child,
-          if (_dragging) Positioned.fill(child: Container(color: Colors.blue.withValues(alpha: 0.1))),
+          if (overlay != null)
+            Positioned.fill(child: IgnorePointer(child: overlay))
+          else if (_dragging)
+            Positioned.fill(child: Container(color: Colors.blue.withValues(alpha: 0.1))),
         ],
       ),
     );
   }
 
+  void _setDragging(bool dragging) {
+    if (!mounted || _dragging == dragging) {
+      return;
+    }
+
+    setState(() => _dragging = dragging);
+    widget.onDraggingChanged?.call(dragging);
+  }
+
   DropOperation _onDragOver(DropOverEvent event) {
-    setState(() => _dragging = true);
+    _setDragging(true);
 
     return event.session.allowedOperations.contains(DropOperation.copy) ? DropOperation.copy : DropOperation.none;
   }
 
   void _onDragLeave(DropEvent event) {
-    setState(() => _dragging = false);
+    _setDragging(false);
   }
 
   Future<void> _onDrop(PerformDropEvent event) async {
-    setState(() => _dragging = false);
+    _setDragging(false);
 
     final readers = event.session.items.map((m) => m.dataReader).toList();
     var droppedFile = false;
