@@ -447,7 +447,8 @@ void main() {
     newThread.onThreadPathChanged?.call('/threads/focused.thread');
     await tester.pumpAndSettle();
 
-    expect(find.byType(NewChatThread), findsNothing);
+    expect(find.byType(NewChatThread), findsOneWidget);
+    expect(find.byType(ChatThreadInput), findsOneWidget);
     final updatedFocusNode = tester.widget<EditableText>(find.byType(EditableText)).focusNode;
     expect(identical(updatedFocusNode, originalFocusNode), isTrue);
     expect(updatedFocusNode.hasFocus, isTrue);

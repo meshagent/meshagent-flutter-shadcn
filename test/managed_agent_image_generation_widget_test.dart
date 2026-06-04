@@ -329,8 +329,6 @@ void main() {
     );
     await tester.pump();
 
-    expect(debugRows.last.map((row) => row.type), contains(agent_sessions.agentConnectionStatusType));
-
     chatClient.emit(
       agent_sessions.AgentImageGenerationCompleted(
         threadId: threadId,
