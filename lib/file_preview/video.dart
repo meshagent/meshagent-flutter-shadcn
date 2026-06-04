@@ -31,10 +31,11 @@ class _AudioPreviewState extends State<AudioPreview> {
 }
 
 class VideoPreview extends StatefulWidget {
-  const VideoPreview({super.key, required this.url, required this.fit});
+  const VideoPreview({super.key, required this.url, required this.fit, this.allowNativeFullscreen = true});
 
   final BoxFit fit;
   final Uri url;
+  final bool allowNativeFullscreen;
 
   @override
   State createState() => _VideoPreviewState();
@@ -53,7 +54,7 @@ class _VideoPreviewState extends State<VideoPreview> {
 
   @override
   Widget build(BuildContext context) {
-    return VideoAttachment(videoUrl: widget.url.toString());
+    return VideoAttachment(videoUrl: widget.url.toString(), allowNativeFullscreen: widget.allowNativeFullscreen);
   }
 }
 
@@ -78,9 +79,11 @@ class VideoAttachment extends StatefulWidget {
     this.playOnTap = false,
     // ignore: unused_element
     this.timelineSource,
+    this.allowNativeFullscreen = true,
   });
 
   final bool autoPlay;
+  final bool allowNativeFullscreen;
 
   final void Function()? onPlay;
 
@@ -116,6 +119,7 @@ class _VideoAttachmentState extends State<VideoAttachment> {
       showControlsOnInitialize: false,
       hideControlsTimer: const Duration(milliseconds: 1000),
       showControls: widget.onPlay == null,
+      allowFullScreen: widget.allowNativeFullscreen,
       videoPlayerController: controller!,
     );
     controller!.initialize().then((value) {

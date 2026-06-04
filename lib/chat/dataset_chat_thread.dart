@@ -525,6 +525,7 @@ class DatasetChatThread extends StatefulWidget {
     this.inputOnPressedOutside,
     this.rowsLoader,
     this.onFileDrop,
+    this.fileDropOverlayBuilder,
     this.localParticipant,
     this.localParticipantName,
     this.generatedImageAttachmentRenderer,
@@ -553,6 +554,7 @@ class DatasetChatThread extends StatefulWidget {
   final TapRegionCallback? inputOnPressedOutside;
   final DatasetChatRowsLoader? rowsLoader;
   final DatasetChatFileDropHandler? onFileDrop;
+  final FileDropOverlayBuilder? fileDropOverlayBuilder;
   final Participant? localParticipant;
   final String? localParticipantName;
   final DatasetChatGeneratedImageAttachmentRenderer? generatedImageAttachmentRenderer;
@@ -606,6 +608,7 @@ class RoomDatasetChatThread extends StatefulWidget {
     this.attachmentBuilder,
     this.inputContextMenuBuilder,
     this.inputOnPressedOutside,
+    this.fileDropOverlayBuilder,
     this.modelController,
     this.initialShowCompletedToolCalls = false,
     this.showUsageFooter = false,
@@ -625,6 +628,7 @@ class RoomDatasetChatThread extends StatefulWidget {
   final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
   final EditableTextContextMenuBuilder? inputContextMenuBuilder;
   final TapRegionCallback? inputOnPressedOutside;
+  final FileDropOverlayBuilder? fileDropOverlayBuilder;
   final DatasetChatModelController? modelController;
   final bool initialShowCompletedToolCalls;
   final bool showUsageFooter;
@@ -693,6 +697,7 @@ class _RoomDatasetChatThreadState extends State<RoomDatasetChatThread> {
         return widget.room.datasets.searchStream(table: table, namespace: namespace).map((batch) => batch.toRows());
       },
       onFileDrop: (name, dataStream, size) => _controller.uploadFile(name, dataStream, size ?? 0),
+      fileDropOverlayBuilder: widget.fileDropOverlayBuilder,
       localParticipant: widget.room.localParticipant,
       generatedImageAttachmentRenderer: (context, image, onOpenFullscreen) => ChatThreadImageAttachment(
         room: widget.room,
@@ -3719,6 +3724,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         final snapshot = _snapshot(messages, pendingMessages);
         return FileDropArea(
           onFileDrop: widget.onFileDrop ?? _attachInlineFile,
+          overlayBuilder: widget.fileDropOverlayBuilder,
           child: Column(
             children: [
               Expanded(child: _buildThreadViewport(context, messages, pendingMessages, loading: loading)),

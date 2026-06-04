@@ -179,10 +179,11 @@ class _FilePreviewState extends State<FilePreview> {
 }
 
 class FileDefaultAttachmentPreview extends StatefulWidget {
-  const FileDefaultAttachmentPreview({super.key, required this.attachment, required this.onRemove, this.maxWidth = 200});
+  const FileDefaultAttachmentPreview({super.key, required this.attachment, required this.onRemove, this.onOpen, this.maxWidth = 200});
 
   final FileAttachment attachment;
   final VoidCallback onRemove;
+  final VoidCallback? onOpen;
 
   final double maxWidth;
 
@@ -237,49 +238,56 @@ class _FileDefaultAttachmentPreviewState extends State<FileDefaultAttachmentPrev
     final isUploading = status == UploadStatus.initial || status == UploadStatus.uploading;
     final hasFailed = status == UploadStatus.failed;
 
+    Widget content = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Stack(
+          children: [
+            SizedBox(
+              width: 24,
+              height: 24,
+              child: isUploading
+                  ? CircularProgressIndicator(color: theme.colorScheme.primary, strokeWidth: 2.0)
+                  : Center(
+                      child: Icon(
+                        hasFailed ? LucideIcons.triangleAlert : LucideIcons.file,
+                        size: 20,
+                        color: hasFailed ? destructiveColor : null,
+                      ),
+                    ),
+            ),
+          ],
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(widget.attachment.filename, style: ShadTheme.of(context).textTheme.small, overflow: TextOverflow.ellipsis),
+        ),
+      ],
+    );
+    final onOpen = widget.onOpen;
+    if (onOpen != null) {
+      content = ShadGestureDetector(cursor: SystemMouseCursors.click, onTap: onOpen, child: content);
+    }
+
+    final preview = ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: widget.maxWidth),
+      child: ShadCard(
+        backgroundColor: hasFailed ? destructiveColor.withValues(alpha: 0.1) : Colors.transparent,
+        border: hasFailed ? ShadBorder.all(color: destructiveColor.withValues(alpha: 0.5), width: 1) : null,
+        radius: BorderRadius.circular(16),
+        padding: EdgeInsets.only(left: 8, top: 8, bottom: 8, right: 8),
+        rowCrossAxisAlignment: CrossAxisAlignment.center,
+        trailing: ShadGestureDetector(cursor: SystemMouseCursors.click, onTap: widget.onRemove, child: Icon(LucideIcons.x, size: 20)),
+        child: content,
+      ),
+    );
+
     return ShadTooltip(
       waitDuration: const Duration(seconds: 1),
       builder: (context) {
         return Text(hasFailed ? 'Upload failed: ${widget.attachment.filename}' : widget.attachment.filename, style: theme.textTheme.small);
       },
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: widget.maxWidth),
-        child: ShadCard(
-          backgroundColor: hasFailed ? destructiveColor.withValues(alpha: 0.1) : Colors.transparent,
-          border: hasFailed ? ShadBorder.all(color: destructiveColor.withValues(alpha: 0.5), width: 1) : null,
-          radius: BorderRadius.circular(16),
-          padding: EdgeInsets.only(left: 8, top: 8, bottom: 8, right: 8),
-          rowCrossAxisAlignment: CrossAxisAlignment.center,
-          trailing: ShadGestureDetector(cursor: SystemMouseCursors.click, onTap: widget.onRemove, child: Icon(LucideIcons.x, size: 20)),
-
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Stack(
-                children: [
-                  SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: isUploading
-                        ? CircularProgressIndicator(color: theme.colorScheme.primary, strokeWidth: 2.0)
-                        : Center(
-                            child: Icon(
-                              hasFailed ? LucideIcons.triangleAlert : LucideIcons.file,
-                              size: 20,
-                              color: hasFailed ? destructiveColor : null,
-                            ),
-                          ),
-                  ),
-                ],
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(widget.attachment.filename, style: ShadTheme.of(context).textTheme.small, overflow: TextOverflow.ellipsis),
-              ),
-            ],
-          ),
-        ),
-      ),
+      child: preview,
     );
   }
 }

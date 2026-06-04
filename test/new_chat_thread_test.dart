@@ -8,6 +8,7 @@ import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_flutter_shadcn/chat/chat.dart';
 import 'package:meshagent_flutter_shadcn/chat/multi_thread_view.dart';
 import 'package:meshagent_flutter_shadcn/chat/new_chat_thread.dart';
+import 'package:meshagent_flutter_shadcn/file_preview/file_preview.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 class _NoopProtocolChannel extends ProtocolChannel {
@@ -95,6 +96,44 @@ void main() {
     controller.attachFile('data:text/plain;base64,aGVsbG8=', mimeType: 'text/plain');
 
     expect(controller.attachmentUploads.single.filename, 'attachment.txt');
+  });
+
+  testWidgets('new thread composer reports removed attachments without changing typed text', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
+    final removedPaths = <String>[];
+    addTearDown(room.dispose);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 640,
+            child: NewChatThread(
+              room: room,
+              agentName: 'assistant',
+              controller: controller,
+              onAttachmentRemoved: (attachment) => removedPaths.add(attachment.path),
+              builder: (context, threadPath) => const SizedBox.shrink(),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    controller.textFieldController.text = 'keep this draft';
+    controller.attachFile('/draft.txt');
+    await tester.pump();
+
+    tester.widget<FileDefaultAttachmentPreview>(find.byType(FileDefaultAttachmentPreview)).onRemove();
+    await tester.pump();
+
+    expect(removedPaths, ['/draft.txt']);
+    expect(controller.attachmentUploads, isEmpty);
+    expect(controller.text, 'keep this draft');
+    expect(find.text('keep this draft'), findsOneWidget);
   });
 
   testWidgets('wraps the new thread composer in a file drop area', (tester) async {
