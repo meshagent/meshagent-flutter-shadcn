@@ -1,5 +1,8 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+
+bool get _shouldUseMeetingWakeLock => !kIsWeb || kReleaseMode;
 
 class WakeLocker extends StatefulWidget {
   const WakeLocker({super.key, required this.child});
@@ -17,7 +20,7 @@ class _WakeLocker extends State<WakeLocker> {
   void initState() {
     super.initState();
     refCount++;
-    if (refCount == 1) {
+    if (_shouldUseMeetingWakeLock && refCount == 1) {
       WakelockPlus.enable();
     }
   }
@@ -25,7 +28,7 @@ class _WakeLocker extends State<WakeLocker> {
   @override
   void dispose() {
     refCount--;
-    if (refCount == 0) {
+    if (_shouldUseMeetingWakeLock && refCount == 0) {
       WakelockPlus.disable();
     }
     super.dispose();
