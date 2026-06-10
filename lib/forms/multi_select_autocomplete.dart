@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 typedef AsyncSearch = Future<List<String>> Function(String query);
+typedef MultiSelectItemBuilder = Widget Function(BuildContext context, String item);
 
 bool _usesSystemAdaptiveTextSelectionToolbar() {
   if (kIsWeb) {
@@ -78,6 +79,9 @@ class MultiSelectAutocomplete extends StatefulWidget {
     this.debounceDuration = const Duration(milliseconds: 300),
     this.minimumSearchLength = 2,
     this.initialValue,
+    this.maxSelected,
+    this.optionBuilder,
+    this.selectedItemBuilder,
   });
 
   final AsyncSearch search;
@@ -94,6 +98,9 @@ class MultiSelectAutocomplete extends StatefulWidget {
   final List<String>? initialValue;
   final Duration debounceDuration;
   final int minimumSearchLength;
+  final int? maxSelected;
+  final MultiSelectItemBuilder? optionBuilder;
+  final MultiSelectItemBuilder? selectedItemBuilder;
 
   @override
   State createState() => _MultiSelectAutocompleteState();
@@ -186,6 +193,11 @@ class _MultiSelectAutocompleteState extends State<MultiSelectAutocomplete> {
     final added = await controller.add(trimmed);
     if (!added || !mounted) {
       return;
+    }
+
+    final maxSelected = widget.maxSelected;
+    if (maxSelected != null && controller.value.length > maxSelected) {
+      controller.value = controller.value.sublist(controller.value.length - maxSelected);
     }
 
     textController.clear();
@@ -407,36 +419,60 @@ class _MultiSelectAutocompleteState extends State<MultiSelectAutocomplete> {
               builder: (context, items, child) {
                 final maxHeight = items.length > 10 ? 400.0 : items.length * 40.0;
 
-                return ConstrainedBox(
-                  constraints: BoxConstraints(maxHeight: maxHeight, maxWidth: 300),
-                  child: TextFieldTapRegion(
-                    groupId: tapRegionGroupId,
-                    child: Focus(
-                      canRequestFocus: false,
-                      descendantsAreFocusable: false,
-                      child: ValueListenableBuilder<int>(
-                        valueListenable: selectedOption,
-                        builder: (context, selected, child) {
-                          return ListView.builder(
-                            padding: const EdgeInsets.all(0),
-                            itemCount: items.length,
-                            itemBuilder: (context, index) {
-                              final option = items[index];
-                              final highlight = index == selected;
+                return DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: cs.popover,
+                    border: Border.all(color: cs.border),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxHeight: maxHeight, maxWidth: 300),
+                    child: TextFieldTapRegion(
+                      groupId: tapRegionGroupId,
+                      child: Focus(
+                        canRequestFocus: false,
+                        descendantsAreFocusable: false,
+                        child: ValueListenableBuilder<int>(
+                          valueListenable: selectedOption,
+                          builder: (context, selected, child) {
+                            return ListView.builder(
+                              padding: const EdgeInsets.all(4),
+                              itemCount: items.length,
+                              itemBuilder: (context, index) {
+                                final option = items[index];
+                                final highlight = index == selected;
 
-                              return ShadButton.ghost(
-                                height: 40,
-                                mainAxisAlignment: MainAxisAlignment.start,
-                                backgroundColor: highlight ? hoveredBackgroundColor : null,
-                                onPressed: () {
-                                  add(option);
-                                  popoverController.hide();
-                                },
-                                child: Text(option, textAlign: TextAlign.left, overflow: TextOverflow.ellipsis),
-                              );
-                            },
-                          );
-                        },
+                                return ShadGestureDetector(
+                                  cursor: SystemMouseCursors.click,
+                                  onTap: () {
+                                    add(option);
+                                    popoverController.hide();
+                                  },
+                                  child: Container(
+                                    height: 40,
+                                    alignment: Alignment.centerLeft,
+                                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                                    decoration: BoxDecoration(
+                                      color: highlight ? hoveredBackgroundColor : Colors.transparent,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: IconTheme(
+                                      data: IconThemeData(color: cs.popoverForeground, size: 16),
+                                      child: DefaultTextStyle(
+                                        style: effectiveTextStyle.copyWith(color: cs.popoverForeground),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        child:
+                                            widget.optionBuilder?.call(context, option) ??
+                                            Text(option, textAlign: TextAlign.left, overflow: TextOverflow.ellipsis),
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                            );
+                          },
+                        ),
                       ),
                     ),
                   ),
@@ -484,7 +520,10 @@ class _MultiSelectAutocompleteState extends State<MultiSelectAutocomplete> {
                                         mainAxisSize: MainAxisSize.min,
                                         spacing: 4,
                                         children: [
-                                          Text(item),
+                                          DefaultTextStyle(
+                                            style: effectiveTextStyle.copyWith(color: cs.background),
+                                            child: widget.selectedItemBuilder?.call(context, item) ?? Text(item),
+                                          ),
                                           ShadGestureDetector(
                                             cursor: SystemMouseCursors.click,
                                             onTap: () => remove(item),
