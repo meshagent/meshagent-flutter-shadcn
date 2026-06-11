@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:meshagent/room_server_client.dart';
 import 'package:meshagent_flutter_shadcn/meetings/audio_visualization.dart';
@@ -22,6 +25,8 @@ class VoiceAgentCaller extends StatefulWidget {
     this.pinActionToMobileFooter = false,
     this.connectedControlsBuilder,
     this.disconnectedEmptyStateBuilder,
+    this.onSessionStarted,
+    this.connectedContentAlignment = Alignment.center,
   });
 
   final RemoteParticipant participant;
@@ -38,6 +43,8 @@ class VoiceAgentCaller extends StatefulWidget {
   final bool pinActionToMobileFooter;
   final Widget Function(BuildContext context, MeetingController meeting)? connectedControlsBuilder;
   final Widget Function(BuildContext context, VoiceAgentDisconnectedState state)? disconnectedEmptyStateBuilder;
+  final FutureOr<void> Function(BuildContext context)? onSessionStarted;
+  final Alignment connectedContentAlignment;
 
   @override
   State createState() => _VoiceAgentCaller();
@@ -50,6 +57,9 @@ class _VoiceAgentCaller extends State<VoiceAgentCaller> {
   static const double _mobileScreenWidthMax = 600;
   static const double _connectedControlsReservedHeight = 150;
   static const double _compactConnectedControlsReservedHeight = 220;
+  static const double _desktopConnectedWaveSlotHeight = 280;
+  static const double _compactConnectedWaveSlotHeight = 220;
+  static const double _connectedControlsGap = 12;
 
   late bool transcribe = widget.transcribe;
 
@@ -69,6 +79,7 @@ class _VoiceAgentCaller extends State<VoiceAgentCaller> {
     required MeetingController meeting,
     required RemoteParticipant participant,
     required Future<String?> Function(BuildContext)? getBreakoutRoom,
+    FutureOr<void> Function(BuildContext context)? onSessionStarted,
   }) async {
     final toaster = ShadToaster.maybeOf(context);
 
@@ -89,6 +100,9 @@ class _VoiceAgentCaller extends State<VoiceAgentCaller> {
                 "transcripts/${participant.getAttribute("name")}/${meeting.room.localParticipant!.getAttribute("name")}/${buildTranscriptFileName()}",
         },
       );
+      if (mounted && onSessionStarted != null) {
+        await onSessionStarted(this.context);
+      }
     } catch (error) {
       toaster?.show(ShadToast.destructive(description: Text(_describeStartSessionError(error))));
     }
@@ -120,8 +134,13 @@ class _VoiceAgentCaller extends State<VoiceAgentCaller> {
               showDisconnectedAction: showDisconnectedAction,
               allowToggleTranscribe: allowToggleTranscribe,
               pinActionToMobileFooter: pinActionToMobileFooter,
-              onStartSessionPressed: () =>
-                  _startSession(context: context, meeting: meeting, participant: participant, getBreakoutRoom: getBreakoutRoom),
+              onStartSessionPressed: () => _startSession(
+                context: context,
+                meeting: meeting,
+                participant: participant,
+                getBreakoutRoom: getBreakoutRoom,
+                onSessionStarted: widget.onSessionStarted,
+              ),
               onTranscribeChanged: allowToggleTranscribe
                   ? (value) {
                       setState(() {
@@ -151,8 +170,13 @@ class _VoiceAgentCaller extends State<VoiceAgentCaller> {
                               ? double.infinity
                               : (isMobileScreen && !horizontalControls ? mobileButtonWidth : null),
                           height: pinActionToMobileFooter ? _mobileFooterPrimaryButtonHeight : null,
-                          onPressed: () =>
-                              _startSession(context: context, meeting: meeting, participant: participant, getBreakoutRoom: getBreakoutRoom),
+                          onPressed: () => _startSession(
+                            context: context,
+                            meeting: meeting,
+                            participant: participant,
+                            getBreakoutRoom: getBreakoutRoom,
+                            onSessionStarted: widget.onSessionStarted,
+                          ),
                           child: const Text("Start session"),
                         );
 
@@ -199,36 +223,45 @@ class _VoiceAgentCaller extends State<VoiceAgentCaller> {
               ? _compactConnectedControlsReservedHeight
               : _connectedControlsReservedHeight;
           final waveMaxHeight = (availableHeight - reservedControlsHeight).clamp(180.0, 360.0);
+          final waveSlotHeight = math.min(
+            waveMaxHeight,
+            constraints.maxWidth < 420 ? _compactConnectedWaveSlotHeight : _desktopConnectedWaveSlotHeight,
+          );
+
+          final waveView = ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: constraints.maxWidth, maxHeight: waveMaxHeight),
+            child: ListenableBuilder(
+              listenable: meeting.livekitRoom,
+              builder: (c, _) {
+                final participant = meeting.livekitRoom.remoteParticipants.values.firstOrNull;
+                return participant == null
+                    ? const SizedBox(width: 320, height: 180)
+                    : Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: AspectRatio(
+                          aspectRatio: 1.25,
+                          child: AudioWave(
+                            room: meeting.livekitRoom,
+                            participant: participant,
+                            backgroundColor: Colors.transparent,
+                            speakingColor: Colors.green,
+                            notSpeakingColor: Colors.green.withAlpha(50),
+                          ),
+                        ),
+                      );
+              },
+            ),
+          );
 
           final connectedContent = Column(
             mainAxisSize: MainAxisSize.min,
-            spacing: 16,
             children: [
-              ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: constraints.maxWidth, maxHeight: waveMaxHeight),
-                child: ListenableBuilder(
-                  listenable: meeting.livekitRoom,
-                  builder: (c, _) {
-                    final participant = meeting.livekitRoom.remoteParticipants.values.firstOrNull;
-                    return participant == null
-                        ? const SizedBox(width: 320, height: 180)
-                        : Padding(
-                            padding: const EdgeInsets.all(24),
-                            child: AspectRatio(
-                              aspectRatio: 1.25,
-                              child: AudioWave(
-                                room: meeting.livekitRoom,
-                                participant: participant,
-                                backgroundColor: Colors.transparent,
-                                speakingColor: Colors.green,
-                                notSpeakingColor: Colors.green.withAlpha(50),
-                              ),
-                            ),
-                          );
-                  },
-                ),
+              SizedBox(
+                width: constraints.maxWidth,
+                height: waveSlotHeight,
+                child: Center(child: waveView),
               ),
-              ?controls,
+              if (controls != null) ...[const SizedBox(height: _connectedControlsGap), controls],
             ],
           );
 
@@ -242,7 +275,7 @@ class _VoiceAgentCaller extends State<VoiceAgentCaller> {
             );
           }
 
-          return connectedContent;
+          return Align(alignment: widget.connectedContentAlignment, child: connectedContent);
         },
       ),
     );
