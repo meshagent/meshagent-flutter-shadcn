@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:meshagent/room_server_client.dart';
 import 'package:meshagent_flutter_shadcn/meetings/audio_visualization.dart';
@@ -21,6 +24,11 @@ class VoiceAgentCaller extends StatefulWidget {
     this.emptyStateDescription = "Connect with this agent using your microphone.",
     this.pinActionToMobileFooter = false,
     this.connectedControlsBuilder,
+    this.disconnectedEmptyStateBuilder,
+    this.onSessionStarted,
+    this.connectedContentAlignment = Alignment.center,
+    this.showConnectedVisualization = true,
+    this.connectedVisualizationStyle = AudioWaveStyle.ribbon,
   });
 
   final RemoteParticipant participant;
@@ -36,6 +44,11 @@ class VoiceAgentCaller extends StatefulWidget {
   final String emptyStateDescription;
   final bool pinActionToMobileFooter;
   final Widget Function(BuildContext context, MeetingController meeting)? connectedControlsBuilder;
+  final Widget Function(BuildContext context, VoiceAgentDisconnectedState state)? disconnectedEmptyStateBuilder;
+  final FutureOr<void> Function(BuildContext context)? onSessionStarted;
+  final Alignment connectedContentAlignment;
+  final bool showConnectedVisualization;
+  final AudioWaveStyle connectedVisualizationStyle;
 
   @override
   State createState() => _VoiceAgentCaller();
@@ -48,6 +61,9 @@ class _VoiceAgentCaller extends State<VoiceAgentCaller> {
   static const double _mobileScreenWidthMax = 600;
   static const double _connectedControlsReservedHeight = 150;
   static const double _compactConnectedControlsReservedHeight = 220;
+  static const double _desktopConnectedWaveSlotHeight = 280;
+  static const double _compactConnectedWaveSlotHeight = 220;
+  static const double _connectedControlsGap = 12;
 
   late bool transcribe = widget.transcribe;
 
@@ -60,6 +76,40 @@ class _VoiceAgentCaller extends State<VoiceAgentCaller> {
       return 'The selected microphone was not found.';
     }
     return 'Unable to start session: $message';
+  }
+
+  Future<void> _startSession({
+    required BuildContext context,
+    required MeetingController meeting,
+    required RemoteParticipant participant,
+    required Future<String?> Function(BuildContext)? getBreakoutRoom,
+    FutureOr<void> Function(BuildContext context)? onSessionStarted,
+  }) async {
+    final toaster = ShadToaster.maybeOf(context);
+
+    try {
+      final breakout = getBreakoutRoom != null ? await getBreakoutRoom(context) : const Uuid().v4();
+      if (breakout == null) {
+        return;
+      }
+      await meeting.configure(breakoutRoom: breakout);
+      await meeting.connect(livekit.FastConnectOptions(microphone: livekit.TrackOption(enabled: true)));
+      await meeting.room.messaging.sendMessage(
+        to: participant,
+        type: "voice_call",
+        message: {
+          "breakout_room": breakout,
+          if (transcribe)
+            "transcript_path":
+                "transcripts/${participant.getAttribute("name")}/${meeting.room.localParticipant!.getAttribute("name")}/${buildTranscriptFileName()}",
+        },
+      );
+      if (mounted && onSessionStarted != null) {
+        await onSessionStarted(this.context);
+      }
+    } catch (error) {
+      toaster?.show(ShadToast.destructive(description: Text(_describeStartSessionError(error))));
+    }
   }
 
   @override
@@ -80,6 +130,32 @@ class _VoiceAgentCaller extends State<VoiceAgentCaller> {
         listenable: meeting,
         builder: (context, _) {
           if (meeting.livekitRoom.connectionState == livekit.ConnectionState.disconnected) {
+            final disconnectedState = VoiceAgentDisconnectedState(
+              title: emptyStateTitle,
+              description: emptyStateDescription,
+              availableWidth: emptyStateAvailableWidth ?? constraints.maxWidth,
+              transcribe: transcribe,
+              showDisconnectedAction: showDisconnectedAction,
+              allowToggleTranscribe: allowToggleTranscribe,
+              pinActionToMobileFooter: pinActionToMobileFooter,
+              onStartSessionPressed: () => _startSession(
+                context: context,
+                meeting: meeting,
+                participant: participant,
+                getBreakoutRoom: getBreakoutRoom,
+                onSessionStarted: widget.onSessionStarted,
+              ),
+              onTranscribeChanged: allowToggleTranscribe
+                  ? (value) {
+                      setState(() {
+                        transcribe = value;
+                      });
+                    }
+                  : null,
+            );
+            if (widget.disconnectedEmptyStateBuilder case final builder?) {
+              return SizedBox.expand(child: builder(context, disconnectedState));
+            }
             return AudioAgentEmptyState(
               title: emptyStateTitle,
               description: emptyStateDescription,
@@ -98,30 +174,13 @@ class _VoiceAgentCaller extends State<VoiceAgentCaller> {
                               ? double.infinity
                               : (isMobileScreen && !horizontalControls ? mobileButtonWidth : null),
                           height: pinActionToMobileFooter ? _mobileFooterPrimaryButtonHeight : null,
-                          onPressed: () async {
-                            final toaster = ShadToaster.maybeOf(context);
-
-                            try {
-                              final breakout = getBreakoutRoom != null ? await getBreakoutRoom(context) : const Uuid().v4();
-                              if (breakout == null) {
-                                return;
-                              }
-                              await meeting.configure(breakoutRoom: breakout);
-                              await meeting.connect(livekit.FastConnectOptions(microphone: livekit.TrackOption(enabled: true)));
-                              await meeting.room.messaging.sendMessage(
-                                to: participant,
-                                type: "voice_call",
-                                message: {
-                                  "breakout_room": breakout,
-                                  if (transcribe)
-                                    "transcript_path":
-                                        "transcripts/${participant.getAttribute("name")}/${meeting.room.localParticipant!.getAttribute("name")}/${buildTranscriptFileName()}",
-                                },
-                              );
-                            } catch (error) {
-                              toaster?.show(ShadToast.destructive(description: Text(_describeStartSessionError(error))));
-                            }
-                          },
+                          onPressed: () => _startSession(
+                            context: context,
+                            meeting: meeting,
+                            participant: participant,
+                            getBreakoutRoom: getBreakoutRoom,
+                            onSessionStarted: widget.onSessionStarted,
+                          ),
                           child: const Text("Start session"),
                         );
 
@@ -168,36 +227,49 @@ class _VoiceAgentCaller extends State<VoiceAgentCaller> {
               ? _compactConnectedControlsReservedHeight
               : _connectedControlsReservedHeight;
           final waveMaxHeight = (availableHeight - reservedControlsHeight).clamp(180.0, 360.0);
+          final waveSlotHeight = math.min(
+            waveMaxHeight,
+            constraints.maxWidth < 420 ? _compactConnectedWaveSlotHeight : _desktopConnectedWaveSlotHeight,
+          );
+
+          final waveView = widget.showConnectedVisualization
+              ? ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: constraints.maxWidth, maxHeight: waveMaxHeight),
+                  child: ListenableBuilder(
+                    listenable: meeting.livekitRoom,
+                    builder: (c, _) {
+                      final participant = meeting.livekitRoom.remoteParticipants.values.firstOrNull;
+                      return participant == null
+                          ? const SizedBox(width: 320, height: 180)
+                          : Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: AspectRatio(
+                                aspectRatio: 1.25,
+                                child: AudioWave(
+                                  room: meeting.livekitRoom,
+                                  participant: participant,
+                                  backgroundColor: Colors.transparent,
+                                  speakingColor: Colors.green,
+                                  notSpeakingColor: Colors.green.withAlpha(50),
+                                  style: widget.connectedVisualizationStyle,
+                                ),
+                              ),
+                            );
+                    },
+                  ),
+                )
+              : const SizedBox.shrink();
 
           final connectedContent = Column(
             mainAxisSize: MainAxisSize.min,
-            spacing: 16,
             children: [
-              ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: constraints.maxWidth, maxHeight: waveMaxHeight),
-                child: ListenableBuilder(
-                  listenable: meeting.livekitRoom,
-                  builder: (c, _) {
-                    final participant = meeting.livekitRoom.remoteParticipants.values.firstOrNull;
-                    return participant == null
-                        ? const SizedBox(width: 320, height: 180)
-                        : Padding(
-                            padding: const EdgeInsets.all(24),
-                            child: AspectRatio(
-                              aspectRatio: 1.25,
-                              child: AudioWave(
-                                room: meeting.livekitRoom,
-                                participant: participant,
-                                backgroundColor: Colors.transparent,
-                                speakingColor: Colors.green,
-                                notSpeakingColor: Colors.green.withAlpha(50),
-                              ),
-                            ),
-                          );
-                  },
+              if (widget.showConnectedVisualization)
+                SizedBox(
+                  width: constraints.maxWidth,
+                  height: waveSlotHeight,
+                  child: Center(child: waveView),
                 ),
-              ),
-              ?controls,
+              if (controls != null) ...[if (widget.showConnectedVisualization) const SizedBox(height: _connectedControlsGap), controls],
             ],
           );
 
@@ -211,13 +283,37 @@ class _VoiceAgentCaller extends State<VoiceAgentCaller> {
             );
           }
 
-          return connectedContent;
+          return Align(alignment: widget.connectedContentAlignment, child: connectedContent);
         },
       ),
     );
 
     return pinActionToMobileFooter ? SizedBox.expand(child: content) : Center(child: content);
   }
+}
+
+class VoiceAgentDisconnectedState {
+  const VoiceAgentDisconnectedState({
+    required this.title,
+    required this.description,
+    required this.availableWidth,
+    required this.transcribe,
+    required this.showDisconnectedAction,
+    required this.allowToggleTranscribe,
+    required this.pinActionToMobileFooter,
+    required this.onStartSessionPressed,
+    required this.onTranscribeChanged,
+  });
+
+  final String title;
+  final String description;
+  final double availableWidth;
+  final bool transcribe;
+  final bool showDisconnectedAction;
+  final bool allowToggleTranscribe;
+  final bool pinActionToMobileFooter;
+  final Future<void> Function() onStartSessionPressed;
+  final ValueChanged<bool>? onTranscribeChanged;
 }
 
 class AudioAgentEmptyState extends StatelessWidget {
