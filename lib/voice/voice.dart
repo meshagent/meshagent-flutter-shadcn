@@ -27,6 +27,8 @@ class VoiceAgentCaller extends StatefulWidget {
     this.disconnectedEmptyStateBuilder,
     this.onSessionStarted,
     this.connectedContentAlignment = Alignment.center,
+    this.showConnectedVisualization = true,
+    this.connectedVisualizationStyle = AudioWaveStyle.ribbon,
   });
 
   final RemoteParticipant participant;
@@ -45,6 +47,8 @@ class VoiceAgentCaller extends StatefulWidget {
   final Widget Function(BuildContext context, VoiceAgentDisconnectedState state)? disconnectedEmptyStateBuilder;
   final FutureOr<void> Function(BuildContext context)? onSessionStarted;
   final Alignment connectedContentAlignment;
+  final bool showConnectedVisualization;
+  final AudioWaveStyle connectedVisualizationStyle;
 
   @override
   State createState() => _VoiceAgentCaller();
@@ -228,40 +232,44 @@ class _VoiceAgentCaller extends State<VoiceAgentCaller> {
             constraints.maxWidth < 420 ? _compactConnectedWaveSlotHeight : _desktopConnectedWaveSlotHeight,
           );
 
-          final waveView = ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: constraints.maxWidth, maxHeight: waveMaxHeight),
-            child: ListenableBuilder(
-              listenable: meeting.livekitRoom,
-              builder: (c, _) {
-                final participant = meeting.livekitRoom.remoteParticipants.values.firstOrNull;
-                return participant == null
-                    ? const SizedBox(width: 320, height: 180)
-                    : Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: AspectRatio(
-                          aspectRatio: 1.25,
-                          child: AudioWave(
-                            room: meeting.livekitRoom,
-                            participant: participant,
-                            backgroundColor: Colors.transparent,
-                            speakingColor: Colors.green,
-                            notSpeakingColor: Colors.green.withAlpha(50),
-                          ),
-                        ),
-                      );
-              },
-            ),
-          );
+          final waveView = widget.showConnectedVisualization
+              ? ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: constraints.maxWidth, maxHeight: waveMaxHeight),
+                  child: ListenableBuilder(
+                    listenable: meeting.livekitRoom,
+                    builder: (c, _) {
+                      final participant = meeting.livekitRoom.remoteParticipants.values.firstOrNull;
+                      return participant == null
+                          ? const SizedBox(width: 320, height: 180)
+                          : Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: AspectRatio(
+                                aspectRatio: 1.25,
+                                child: AudioWave(
+                                  room: meeting.livekitRoom,
+                                  participant: participant,
+                                  backgroundColor: Colors.transparent,
+                                  speakingColor: Colors.green,
+                                  notSpeakingColor: Colors.green.withAlpha(50),
+                                  style: widget.connectedVisualizationStyle,
+                                ),
+                              ),
+                            );
+                    },
+                  ),
+                )
+              : const SizedBox.shrink();
 
           final connectedContent = Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              SizedBox(
-                width: constraints.maxWidth,
-                height: waveSlotHeight,
-                child: Center(child: waveView),
-              ),
-              if (controls != null) ...[const SizedBox(height: _connectedControlsGap), controls],
+              if (widget.showConnectedVisualization)
+                SizedBox(
+                  width: constraints.maxWidth,
+                  height: waveSlotHeight,
+                  child: Center(child: waveView),
+                ),
+              if (controls != null) ...[if (widget.showConnectedVisualization) const SizedBox(height: _connectedControlsGap), controls],
             ],
           );
 

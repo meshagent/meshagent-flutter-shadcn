@@ -4,6 +4,9 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:livekit_client/livekit_client.dart';
+import 'package:siri_wave/siri_wave.dart';
+
+enum AudioWaveStyle { legacy, ribbon }
 
 class AudioWave extends StatefulWidget {
   const AudioWave({
@@ -14,6 +17,7 @@ class AudioWave extends StatefulWidget {
     this.backgroundColor = const Color.from(alpha: 1, red: 1, green: 1, blue: 1),
     this.speakingColor = const Color.from(alpha: .2, red: 0, green: 0, blue: 0),
     this.notSpeakingColor = const Color.from(alpha: 1, red: 0, green: 0, blue: 0),
+    this.style = AudioWaveStyle.ribbon,
   });
 
   final Room room;
@@ -22,15 +26,22 @@ class AudioWave extends StatefulWidget {
   final Color backgroundColor;
   final Color speakingColor;
   final Color notSpeakingColor;
+  final AudioWaveStyle style;
 
   @override
   State createState() => _AudioWaveState();
 }
 
 class _AudioWaveState extends State<AudioWave> {
+  late final IOS7SiriWaveformController _legacyController;
+
   @override
   void initState() {
     super.initState();
+
+    _legacyController = IOS7SiriWaveformController()
+      ..amplitude = 1.0
+      ..color = widget.backgroundColor;
 
     timer = Timer.periodic(const Duration(milliseconds: 1000 ~/ 30), onTick);
 
@@ -63,6 +74,22 @@ class _AudioWaveState extends State<AudioWave> {
         thinking = widget.participant.attributes["lk.agent.state"] == "thinking";
 
         listening = widget.participant.attributes["busy"] != "true";
+
+        if (widget.style == AudioWaveStyle.legacy) {
+          if (!widget.participant.isSpeaking) {
+            _legacyController
+              ..amplitude = .2
+              ..speed = 0.05
+              ..frequency = 1
+              ..color = widget.speakingColor;
+          } else {
+            _legacyController
+              ..amplitude = audioLevel
+              ..frequency = 6
+              ..speed = 0.2
+              ..color = widget.notSpeakingColor;
+          }
+        }
       });
     }
   }
@@ -87,6 +114,9 @@ class _AudioWaveState extends State<AudioWave> {
           if (levels != null) {
             if (!thinking) {
               audioLevel = (levels as num).toDouble();
+            }
+            if (widget.style == AudioWaveStyle.legacy) {
+              _legacyController.amplitude = audioLevel;
             }
             hasReceivedLevels = true;
           }
@@ -117,17 +147,19 @@ class _AudioWaveState extends State<AudioWave> {
       decoration: BoxDecoration(color: widget.backgroundColor),
       child: Opacity(
         opacity: hasReceivedLevels ? 1 : 0.1,
-        child: CustomPaint(
-          painter: _AudioRibbonPainter(
-            level: _visualLevel,
-            phase: _phase,
-            speaking: widget.participant.isSpeaking,
-            thinking: thinking,
-            primaryColor: widget.notSpeakingColor,
-            secondaryColor: widget.speakingColor,
-          ),
-          child: const SizedBox.expand(),
-        ),
+        child: widget.style == AudioWaveStyle.legacy
+            ? SiriWaveform.ios7(controller: _legacyController)
+            : CustomPaint(
+                painter: _AudioRibbonPainter(
+                  level: _visualLevel,
+                  phase: _phase,
+                  speaking: widget.participant.isSpeaking,
+                  thinking: thinking,
+                  primaryColor: widget.notSpeakingColor,
+                  secondaryColor: widget.speakingColor,
+                ),
+                child: const SizedBox.expand(),
+              ),
       ),
     );
   }
