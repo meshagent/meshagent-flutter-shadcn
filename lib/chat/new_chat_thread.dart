@@ -48,6 +48,7 @@ class NewChatThread extends StatefulWidget {
     this.onThreadPathChanged,
     this.onThreadResolved,
     this.centerComposer = true,
+    this.showCenteredComposerTitle = true,
     this.showUsageFooter = false,
     this.emptyState,
     this.inputPlaceholder,
@@ -74,6 +75,7 @@ class NewChatThread extends StatefulWidget {
   final ValueChanged<String?>? onThreadPathChanged;
   final void Function(String? path, String? displayName)? onThreadResolved;
   final bool centerComposer;
+  final bool showCenteredComposerTitle;
   final bool showUsageFooter;
   final Widget? emptyState;
   final Widget? inputPlaceholder;
@@ -1143,7 +1145,7 @@ class _NewChatThreadState extends State<NewChatThread> {
                   mainAxisSize: MainAxisSize.min,
                   spacing: 12,
                   children: [
-                    Text("Start a new thread", style: headingStyle),
+                    if (widget.showCenteredComposerTitle) Text("Start a new thread", style: headingStyle),
                     composer,
                     if (_newThreadError != null) ...[
                       ShadAlert.destructive(title: const Text("Unable to start thread"), description: Text(_newThreadError!)),

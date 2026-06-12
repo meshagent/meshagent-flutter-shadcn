@@ -58,6 +58,7 @@ class ChatBotView extends StatefulWidget {
     this.mobileStorageSaveSurfacePresenter,
     this.mobileUnderHeaderContentPadding,
     this.centerComposer = false,
+    this.showCenteredComposerTitle = true,
     this.hideChatInput = false,
     this.showThreadList = true,
     this.threadListWidth = 280,
@@ -108,6 +109,7 @@ class ChatBotView extends StatefulWidget {
   final ThreadStorageSaveSurfacePresenter? mobileStorageSaveSurfacePresenter;
   final double? mobileUnderHeaderContentPadding;
   final bool centerComposer;
+  final bool showCenteredComposerTitle;
   final bool hideChatInput;
   final bool showThreadList;
   final double threadListWidth;
@@ -377,6 +379,7 @@ class _ChatBotViewState extends State<ChatBotView> {
       },
       newThreadResetVersion: widget.newThreadResetVersion,
       centerComposer: widget.centerComposer,
+      showCenteredComposerTitle: widget.showCenteredComposerTitle,
       showUsageFooter: widget.showUsageFooter,
       emptyState: widget.emptyState,
       inputPlaceholder: widget.inputPlaceholder,
