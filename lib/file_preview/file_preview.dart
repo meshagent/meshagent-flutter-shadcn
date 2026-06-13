@@ -1,6 +1,7 @@
 import "package:flutter/material.dart";
 import "package:meshagent_flutter_shadcn/file_preview/code.dart";
 import "package:meshagent_flutter_shadcn/code_language_resolver.dart";
+import "package:meshagent_flutter_shadcn/thread_typography.dart";
 import "package:meshagent_flutter_shadcn/ui/coordinated_context_menu.dart";
 import "package:path/path.dart";
 import "package:shadcn_ui/shadcn_ui.dart";
@@ -166,7 +167,7 @@ class _FilePreviewState extends State<FilePreview> {
               child: Text(
                 'Unable to load file preview: ${snapshot.error}',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: ShadTheme.of(context).colorScheme.destructive),
+                style: threadTypographyTextStyle(context, TextStyle(color: ShadTheme.of(context).colorScheme.destructive)),
               ),
             ),
           );
@@ -318,7 +319,12 @@ class FileDefaultPreviewCard extends StatelessWidget {
             const SizedBox(width: 8),
             ConstrainedBox(
               constraints: BoxConstraints(maxWidth: constraints.maxWidth - (24 + 16 + 16)),
-              child: Text(text, style: ShadTheme.of(context).textTheme.small, maxLines: 1, overflow: TextOverflow.ellipsis),
+              child: Text(
+                text,
+                style: threadTypographyTextStyle(context, ShadTheme.of(context).textTheme.small),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ],
         ),

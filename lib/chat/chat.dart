@@ -10,7 +10,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:interactive_viewer_2/interactive_viewer_2.dart';
 import 'package:meshagent/meshagent.dart';
@@ -69,6 +68,7 @@ import 'package:meshagent_flutter_shadcn/code_editor.dart';
 import 'package:meshagent_flutter_shadcn/code_language_resolver.dart';
 import 'package:meshagent_flutter_shadcn/markdown_viewer.dart';
 import 'package:meshagent_flutter_shadcn/storage/file_browser.dart';
+import 'package:meshagent_flutter_shadcn/thread_typography.dart';
 import 'package:meshagent_flutter_shadcn/ui/coordinated_context_menu.dart';
 import 'package:meshagent_flutter_shadcn/ui/ui.dart';
 import 'package:meshagent_flutter_shadcn/src/web_context_menu_manager/enable_web_context_menu.dart';
@@ -2887,7 +2887,7 @@ class ClientResponseDialogTool extends FunctionTool {
                     child: CodeEditor(
                       style: CodeEditorStyle(
                         fontSize: 14,
-                        fontFamily: "SourceCodePro",
+                        fontFamily: ThreadTypographyOverride.maybeCodeFontFamilyOf(context) ?? defaultThreadCodeFontFamily,
                         codeTheme: CodeHighlightTheme(
                           languages: {'default': CodeHighlightThemeMode(mode: langJson)},
                           theme: monokaiSublimeTheme,
@@ -6081,7 +6081,10 @@ class _ChatThreadState extends State<ChatThread> {
                                       children: [
                                         Text(
                                           "Pending messages:",
-                                          style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                                          style: threadTypographyTextStyle(
+                                            context,
+                                            TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                                          ),
                                         ),
                                         const SizedBox(height: 4),
                                         for (final pending in queuedPendingMessages)
@@ -6096,7 +6099,10 @@ class _ChatThreadState extends State<ChatThread> {
                                                 if (pending.awaitingOnline)
                                                   "(waiting for @${_displayParticipantName(widget.agentName ?? "agent")} to come online)",
                                               ].join(" "),
-                                              style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                                              style: threadTypographyTextStyle(
+                                                context,
+                                                TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                                              ),
                                             ),
                                           ),
                                         if (canInterruptActiveTurn)
@@ -6104,7 +6110,10 @@ class _ChatThreadState extends State<ChatThread> {
                                             padding: const EdgeInsets.only(top: 8),
                                             child: _ProcessingStatusText(
                                               text: "Messages will be processed shortly. Press Esc to interrupt and send now.",
-                                              style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                                              style: threadTypographyTextStyle(
+                                                context,
+                                                TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                                              ),
                                             ),
                                           ),
                                       ],
@@ -6528,7 +6537,7 @@ class _PendingAgentAttachmentViewer extends StatelessWidget {
                   Expanded(
                     child: Text(
                       displayName,
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                      style: threadTypographyTextStyle(context, const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -6566,7 +6575,13 @@ class _PendingAgentAttachmentPreview extends StatelessWidget {
       return PdfViewer.data(data, sourceName: displayName);
     }
     if (mimeType.startsWith('text/') || mimeType == 'application/json' || mimeType == 'application/yaml') {
-      return SingleChildScrollView(padding: const EdgeInsets.all(24), child: SelectableText(utf8.decode(data, allowMalformed: true)));
+      return SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: SelectableText(
+          utf8.decode(data, allowMalformed: true),
+          style: threadTypographyTextStyle(context, ShadTheme.of(context).textTheme.p),
+        ),
+      );
     }
     return Center(
       child: FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: displayName),
@@ -10160,7 +10175,7 @@ class _ChatThreadProcessingStatusRowState extends State<ChatThreadProcessingStat
     final cancelButtonColor = widget.cancelEnabled ? theme.colorScheme.foreground : theme.colorScheme.muted;
     final cancelIconColor = widget.cancelEnabled ? theme.colorScheme.background : theme.colorScheme.mutedForeground;
     final displayText = _displayText();
-    final statusTextStyle = TextStyle(fontSize: 13, color: theme.colorScheme.mutedForeground);
+    final statusTextStyle = threadTypographyTextStyle(context, TextStyle(fontSize: 13, color: theme.colorScheme.mutedForeground));
     final elapsedSeconds = widget.startedAt == null || _shouldDisplayBytes || _shouldDisplayLineCounts
         ? 0
         : _clampedElapsedSeconds(DateTime.now().difference(widget.startedAt!));
@@ -11393,22 +11408,22 @@ class _ShellLineState extends State<ShellLine> {
                     maxLines: expanded ? null : 1,
                     TextSpan(
                       children: [
-                        TextSpan(text: widget.message.getAttribute("command"), style: GoogleFonts.sourceCodePro()),
+                        TextSpan(text: widget.message.getAttribute("command"), style: threadTypographyCodeTextStyle(context)),
                         if (expanded) ...[
                           TextSpan(text: "\n"),
                           if (widget.message.getAttribute("result") != null) ...[
                             TextSpan(text: "\n"),
-                            TextSpan(text: trim(widget.message.getAttribute("result")), style: GoogleFonts.sourceCodePro()),
+                            TextSpan(text: trim(widget.message.getAttribute("result")), style: threadTypographyCodeTextStyle(context)),
                           ],
                           if (widget.message.getAttribute("stdout") != null) ...[
                             TextSpan(text: "\n"),
-                            TextSpan(text: trim(widget.message.getAttribute("stdout")), style: GoogleFonts.sourceCodePro()),
+                            TextSpan(text: trim(widget.message.getAttribute("stdout")), style: threadTypographyCodeTextStyle(context)),
                           ],
                           if (widget.message.getAttribute("stderr") != null) ...[
                             TextSpan(text: "\n"),
                             TextSpan(
                               text: trim(widget.message.getAttribute("stderr")),
-                              style: GoogleFonts.sourceCodePro(color: Colors.red),
+                              style: threadTypographyCodeTextStyle(context, color: Colors.red),
                             ),
                           ],
                         ],
@@ -11799,12 +11814,17 @@ class _EventLineState extends State<EventLine> {
     const previewBackground = Color(0xFF050505);
     const previewHeaderBackground = Color(0xFF111111);
     final usesMobileTypography = chatBubbleMarkdownUsesMobileTypography(context);
-    final codeTextStyle = GoogleFonts.sourceCodePro(
+    final codeTextStyle = threadTypographyCodeTextStyle(
+      context,
       fontSize: usesMobileTypography ? chatBubbleMarkdownMobileBaseFontSize : 12,
       color: const Color(0xFFE5E7EB),
       height: usesMobileTypography ? chatBubbleMarkdownMobileCodeLineHeight : 1.3,
     );
-    final headerTextStyle = GoogleFonts.sourceCodePro(fontSize: usesMobileTypography ? 13 : 11, color: theme.colorScheme.mutedForeground);
+    final headerTextStyle = threadTypographyCodeTextStyle(
+      context,
+      fontSize: usesMobileTypography ? 13 : 11,
+      color: theme.colorScheme.mutedForeground,
+    );
     final resolvedLanguageId = resolveLanguageIdForFilename(languageOrFilename) ?? fallbackLanguageId;
     final body = resolvedLanguageId == "diff"
         ? Container(
@@ -12104,12 +12124,15 @@ class _EventLineState extends State<EventLine> {
                                   Expanded(
                                     child: Text(
                                       displayText,
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                        color: textColor,
-                                        height: 1.3,
-                                        decoration: TextDecoration.underline,
+                                      style: threadTypographyTextStyle(
+                                        context,
+                                        TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: textColor,
+                                          height: 1.3,
+                                          decoration: TextDecoration.underline,
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -12124,7 +12147,10 @@ class _EventLineState extends State<EventLine> {
                             child: SelectionArea(
                               child: Text(
                                 displayText,
-                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: textColor, height: 1.3),
+                                style: threadTypographyTextStyle(
+                                  context,
+                                  TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: textColor, height: 1.3),
+                                ),
                               ),
                             ),
                           ),
@@ -12165,7 +12191,10 @@ class _EventLineState extends State<EventLine> {
                 child: Padding(
                   padding: eventTextPadding,
                   child: SelectionArea(
-                    child: Text(renderedDetailLines.join("\n"), style: TextStyle(color: textColor.withAlpha(220), height: 1.3)),
+                    child: Text(
+                      renderedDetailLines.join("\n"),
+                      style: threadTypographyTextStyle(context, TextStyle(color: textColor.withAlpha(220), height: 1.3)),
+                    ),
                   ),
                 ),
               ),

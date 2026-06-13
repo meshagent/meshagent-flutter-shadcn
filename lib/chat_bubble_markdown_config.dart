@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:markdown_widget/markdown_widget.dart';
 import 'package:meshagent_flutter_shadcn/code_language_resolver.dart';
+import 'package:meshagent_flutter_shadcn/thread_typography.dart';
 import 'package:re_highlight/languages/all.dart';
 import 'package:re_highlight/re_highlight.dart';
 import 'package:re_highlight/styles/monokai-sublime.dart';
@@ -96,7 +96,11 @@ Widget _buildHighlightedCodeBlock({
   final normalizedCode = lines.join("\n");
   final usesMobileTypography = chatBubbleMarkdownUsesMobileTypography(context);
   final resolvedBackgroundColor = backgroundColor ?? theme.cardTheme.backgroundColor;
-  final headerTextStyle = GoogleFonts.sourceCodePro(fontSize: usesMobileTypography ? 13 : 11, color: theme.colorScheme.mutedForeground);
+  final headerTextStyle = threadTypographyCodeTextStyle(
+    context,
+    fontSize: usesMobileTypography ? 13 : 11,
+    color: theme.colorScheme.mutedForeground,
+  );
   final body = languageId == "diff"
       ? SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -189,7 +193,8 @@ MarkdownConfig buildChatBubbleMarkdownConfig(
   final mdColor = color ?? chatBubbleMarkdownColor(context);
   final usesMobileThreadTypography = threadTypography && chatBubbleMarkdownUsesMobileTypography(context);
   final resolvedBaseFontSize = baseFontSize ?? chatBubbleMarkdownBaseFontSize(context, threadTypography: threadTypography);
-  final codeTextStyle = GoogleFonts.sourceCodePro(
+  final codeTextStyle = threadTypographyCodeTextStyle(
+    context,
     fontSize: usesMobileThreadTypography
         ? resolvedBaseFontSize
         : threadTypography
@@ -198,42 +203,48 @@ MarkdownConfig buildChatBubbleMarkdownConfig(
     color: mdColor,
     height: usesMobileThreadTypography ? chatBubbleMarkdownMobileCodeLineHeight : null,
   );
-  final paragraphStyle = TextStyle(
-    fontSize: resolvedBaseFontSize,
-    color: mdColor,
-    inherit: false,
-    height: threadTypography ? chatBubbleMarkdownThreadLineHeight : null,
+  final paragraphStyle = threadTypographyTextStyle(
+    context,
+    TextStyle(
+      fontSize: resolvedBaseFontSize,
+      color: mdColor,
+      inherit: false,
+      height: threadTypography ? chatBubbleMarkdownThreadLineHeight : null,
+    ),
   );
 
-  final headingBase = TextStyle(
-    color: mdColor,
-    inherit: false,
-    height: threadTypography ? 1.25 : null,
-    fontWeight: threadTypography ? FontWeight.w600 : null,
+  final headingBase = threadTypographyTextStyle(
+    context,
+    TextStyle(
+      color: mdColor,
+      inherit: false,
+      height: threadTypography ? 1.25 : null,
+      fontWeight: threadTypography ? FontWeight.w600 : null,
+    ),
   );
   final h1Style = threadTypography
       ? headingBase.copyWith(fontSize: (resolvedBaseFontSize * 1.55).clamp(20.0, 30.0).toDouble(), height: 1.2, fontWeight: FontWeight.w700)
-      : TextStyle(fontSize: resolvedBaseFontSize * 2, color: mdColor, fontWeight: FontWeight.bold);
+      : threadTypographyTextStyle(context, TextStyle(fontSize: resolvedBaseFontSize * 2, color: mdColor, fontWeight: FontWeight.bold));
   final h2Style = threadTypography
       ? headingBase.copyWith(fontSize: (resolvedBaseFontSize * 1.35).clamp(18.0, 26.0).toDouble())
-      : TextStyle(fontSize: resolvedBaseFontSize * 1.8, color: mdColor, inherit: false);
+      : threadTypographyTextStyle(context, TextStyle(fontSize: resolvedBaseFontSize * 1.8, color: mdColor, inherit: false));
   final h3Style = threadTypography
       ? headingBase.copyWith(fontSize: (resolvedBaseFontSize * 1.2).clamp(16.0, 22.0).toDouble())
-      : TextStyle(fontSize: resolvedBaseFontSize * 1.6, color: mdColor, inherit: false);
+      : threadTypographyTextStyle(context, TextStyle(fontSize: resolvedBaseFontSize * 1.6, color: mdColor, inherit: false));
   final h4Style = threadTypography
       ? headingBase.copyWith(fontSize: (resolvedBaseFontSize * 1.1).clamp(15.0, 20.0).toDouble())
-      : TextStyle(fontSize: resolvedBaseFontSize * 1.4, color: mdColor, inherit: false);
+      : threadTypographyTextStyle(context, TextStyle(fontSize: resolvedBaseFontSize * 1.4, color: mdColor, inherit: false));
   final h5Style = threadTypography
       ? headingBase.copyWith(fontSize: resolvedBaseFontSize.clamp(14.0, 18.0).toDouble())
-      : TextStyle(fontSize: resolvedBaseFontSize * 1.2, color: mdColor, inherit: false);
+      : threadTypographyTextStyle(context, TextStyle(fontSize: resolvedBaseFontSize * 1.2, color: mdColor, inherit: false));
   final h6Style = threadTypography
       ? headingBase.copyWith(fontSize: (resolvedBaseFontSize * 0.95).clamp(13.0, 16.0).toDouble(), fontWeight: FontWeight.w500)
-      : TextStyle(fontSize: resolvedBaseFontSize * 1.0, color: mdColor, inherit: false);
-  final preStyle = TextStyle(
+      : threadTypographyTextStyle(context, TextStyle(fontSize: resolvedBaseFontSize * 1.0, color: mdColor, inherit: false));
+  final preStyle = threadTypographyCodeTextStyle(
+    context,
     fontSize: codeTextStyle.fontSize,
     color: mdColor,
     inherit: false,
-    fontFamily: 'SourceCodePro',
     height: usesMobileThreadTypography
         ? chatBubbleMarkdownMobileCodeLineHeight
         : threadTypography
@@ -269,7 +280,10 @@ MarkdownConfig buildChatBubbleMarkdownConfig(
       CodeConfig(style: codeTextStyle),
       BlockquoteConfig(textColor: mdColor),
       LinkConfig(
-        style: TextStyle(color: theme.linkButtonTheme.foregroundColor, decoration: TextDecoration.underline),
+        style: threadTypographyTextStyle(
+          context,
+          TextStyle(color: theme.linkButtonTheme.foregroundColor, decoration: TextDecoration.underline),
+        ),
       ),
       ListConfig(
         marker: (isOrdered, depth, index) {

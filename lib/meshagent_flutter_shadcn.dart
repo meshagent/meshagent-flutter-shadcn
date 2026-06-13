@@ -11,6 +11,7 @@ export "forms/select_users_dialog.dart";
 export "data_grid/data_grid.dart";
 export "markdown_viewer.dart";
 export "theme/colors.dart";
+export "thread_typography.dart";
 export "voice/voice.dart";
 export "toolkits/ui.dart";
 export "usage_graph.dart";

@@ -6,7 +6,6 @@ import 'dart:typed_data';
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:meshagent_agents/meshagent_agents.dart'
     show
         ToolkitCapabilities,
@@ -67,6 +66,7 @@ import 'package:meshagent_agents/meshagent_agents.dart' as agent_sessions;
 import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_flutter_shadcn/chat_bubble_markdown_config.dart';
 import 'package:meshagent_flutter_shadcn/file_preview/file_preview.dart';
+import 'package:meshagent_flutter_shadcn/thread_typography.dart';
 import 'package:mime/mime.dart';
 import 'package:pdfrx/pdfrx.dart';
 import 'package:re_highlight/styles/monokai-sublime.dart';
@@ -3499,7 +3499,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (languageOrFilename == null) {
       return SelectableText(text, style: style, textAlign: TextAlign.left);
     }
-    final codeStyle = GoogleFonts.sourceCodePro(textStyle: style);
+    final codeStyle = threadTypographyCodeTextStyle(context, textStyle: style);
     return SelectableText.rich(
       highlightCodeSpanWithReHighlight(context: context, code: text, languageOrFilename: languageOrFilename, textStyle: codeStyle),
       textAlign: TextAlign.left,
@@ -3513,8 +3513,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     }
 
     final theme = ShadTheme.of(context);
-    final codeTextStyle = GoogleFonts.sourceCodePro(fontSize: 12, color: const Color(0xFFE5E7EB), height: 1.3);
-    final headerTextStyle = GoogleFonts.sourceCodePro(fontSize: 11, color: theme.colorScheme.mutedForeground);
+    final codeTextStyle = threadTypographyCodeTextStyle(context, fontSize: 12, color: const Color(0xFFE5E7EB), height: 1.3);
+    final headerTextStyle = threadTypographyCodeTextStyle(context, fontSize: 11, color: theme.colorScheme.mutedForeground);
     final headerCounterStyle = headerTextStyle.copyWith(fontWeight: FontWeight.w700);
     final lines = normalizedCode.split('\n');
     return Container(
@@ -3607,7 +3607,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (queuedPendingMessages.isEmpty) {
       return null;
     }
-    final textStyle = TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground);
+    final textStyle = threadTypographyTextStyle(context, TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground));
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(
@@ -3862,7 +3862,13 @@ class _InlineAttachmentPreview extends StatelessWidget {
       return PdfViewer.data(data, sourceName: displayName);
     }
     if (mimeType.startsWith('text/') || mimeType == 'application/json' || mimeType == 'application/yaml') {
-      return SingleChildScrollView(padding: const EdgeInsets.all(24), child: SelectableText(utf8.decode(data, allowMalformed: true)));
+      return SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: SelectableText(
+          utf8.decode(data, allowMalformed: true),
+          style: threadTypographyTextStyle(context, ShadTheme.of(context).textTheme.p),
+        ),
+      );
     }
     return Center(
       child: FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: displayName),
