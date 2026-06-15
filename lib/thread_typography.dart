@@ -15,6 +15,9 @@ typedef ThreadAttachmentIconBuilder =
 
 typedef ThreadAttachmentActionIconBuilder = Widget Function(BuildContext context, {required Color? color, required bool hovered});
 
+typedef ThreadMarkdownHeadingPaddingResolver = EdgeInsets? Function(String tag);
+typedef ThreadMarkdownHeadingStyleResolver = TextStyle? Function(String tag, TextStyle defaultStyle);
+
 class ThreadTypographyOverride extends InheritedWidget {
   const ThreadTypographyOverride({
     super.key,
@@ -50,6 +53,12 @@ class ThreadTypographyOverride extends InheritedWidget {
     this.inlineCodeTextColor,
     this.inlineCodeBackgroundColor,
     this.inlineCodeHorizontalPadding = false,
+    this.markdownHorizontalRuleColor,
+    this.markdownBlockquoteSideColor,
+    this.markdownBlockquoteBackgroundColor,
+    this.markdownSuppressHeadingDividers = false,
+    this.markdownHeadingPaddingResolver,
+    this.markdownHeadingStyleResolver,
   });
 
   final String? textFontFamily;
@@ -83,6 +92,12 @@ class ThreadTypographyOverride extends InheritedWidget {
   final Color? inlineCodeTextColor;
   final Color? inlineCodeBackgroundColor;
   final bool inlineCodeHorizontalPadding;
+  final Color? markdownHorizontalRuleColor;
+  final Color? markdownBlockquoteSideColor;
+  final Color? markdownBlockquoteBackgroundColor;
+  final bool markdownSuppressHeadingDividers;
+  final ThreadMarkdownHeadingPaddingResolver? markdownHeadingPaddingResolver;
+  final ThreadMarkdownHeadingStyleResolver? markdownHeadingStyleResolver;
 
   static ThreadTypographyOverride? maybeOf(BuildContext context) {
     return context.dependOnInheritedWidgetOfExactType<ThreadTypographyOverride>();
@@ -212,6 +227,30 @@ class ThreadTypographyOverride extends InheritedWidget {
     return maybeOf(context)?.inlineCodeHorizontalPadding ?? false;
   }
 
+  static Color? maybeMarkdownHorizontalRuleColorOf(BuildContext context) {
+    return maybeOf(context)?.markdownHorizontalRuleColor;
+  }
+
+  static Color? maybeMarkdownBlockquoteSideColorOf(BuildContext context) {
+    return maybeOf(context)?.markdownBlockquoteSideColor;
+  }
+
+  static Color? maybeMarkdownBlockquoteBackgroundColorOf(BuildContext context) {
+    return maybeOf(context)?.markdownBlockquoteBackgroundColor;
+  }
+
+  static bool markdownSuppressHeadingDividersOf(BuildContext context) {
+    return maybeOf(context)?.markdownSuppressHeadingDividers ?? false;
+  }
+
+  static EdgeInsets? maybeMarkdownHeadingPaddingOf(BuildContext context, String tag) {
+    return maybeOf(context)?.markdownHeadingPaddingResolver?.call(tag);
+  }
+
+  static TextStyle? maybeMarkdownHeadingStyleOf(BuildContext context, String tag, TextStyle defaultStyle) {
+    return maybeOf(context)?.markdownHeadingStyleResolver?.call(tag, defaultStyle);
+  }
+
   @override
   bool updateShouldNotify(ThreadTypographyOverride oldWidget) {
     return textFontFamily != oldWidget.textFontFamily ||
@@ -244,7 +283,13 @@ class ThreadTypographyOverride extends InheritedWidget {
         codeBlockActionButtonSize != oldWidget.codeBlockActionButtonSize ||
         inlineCodeTextColor != oldWidget.inlineCodeTextColor ||
         inlineCodeBackgroundColor != oldWidget.inlineCodeBackgroundColor ||
-        inlineCodeHorizontalPadding != oldWidget.inlineCodeHorizontalPadding;
+        inlineCodeHorizontalPadding != oldWidget.inlineCodeHorizontalPadding ||
+        markdownHorizontalRuleColor != oldWidget.markdownHorizontalRuleColor ||
+        markdownBlockquoteSideColor != oldWidget.markdownBlockquoteSideColor ||
+        markdownBlockquoteBackgroundColor != oldWidget.markdownBlockquoteBackgroundColor ||
+        markdownSuppressHeadingDividers != oldWidget.markdownSuppressHeadingDividers ||
+        markdownHeadingPaddingResolver != oldWidget.markdownHeadingPaddingResolver ||
+        markdownHeadingStyleResolver != oldWidget.markdownHeadingStyleResolver;
   }
 }
 

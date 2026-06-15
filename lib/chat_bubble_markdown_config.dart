@@ -316,6 +316,12 @@ MarkdownConfig buildChatBubbleMarkdownConfig(
   final h6Style = threadTypography
       ? headingBase.copyWith(fontSize: (resolvedBaseFontSize * 0.95).clamp(13.0, 16.0).toDouble(), fontWeight: FontWeight.w500)
       : threadTypographyTextStyle(context, TextStyle(fontSize: resolvedBaseFontSize * 1.0, color: mdColor, inherit: false));
+  final resolvedH1Style = ThreadTypographyOverride.maybeMarkdownHeadingStyleOf(context, MarkdownTag.h1.name, h1Style) ?? h1Style;
+  final resolvedH2Style = ThreadTypographyOverride.maybeMarkdownHeadingStyleOf(context, MarkdownTag.h2.name, h2Style) ?? h2Style;
+  final resolvedH3Style = ThreadTypographyOverride.maybeMarkdownHeadingStyleOf(context, MarkdownTag.h3.name, h3Style) ?? h3Style;
+  final resolvedH4Style = ThreadTypographyOverride.maybeMarkdownHeadingStyleOf(context, MarkdownTag.h4.name, h4Style) ?? h4Style;
+  final resolvedH5Style = ThreadTypographyOverride.maybeMarkdownHeadingStyleOf(context, MarkdownTag.h5.name, h5Style) ?? h5Style;
+  final resolvedH6Style = ThreadTypographyOverride.maybeMarkdownHeadingStyleOf(context, MarkdownTag.h6.name, h6Style) ?? h6Style;
   final preStyle = threadTypographyCodeTextStyle(
     context,
     fontSize:
@@ -334,16 +340,20 @@ MarkdownConfig buildChatBubbleMarkdownConfig(
   final codeBlockSurfaceColor = ThreadTypographyOverride.maybeCodeBlockSurfaceColorOf(context);
   final codeBlockBorderColor = ThreadTypographyOverride.maybeCodeBlockBorderColorOf(context);
   final resolvedCodeBlockSurfaceColor = codeBlockSurfaceColor ?? theme.cardTheme.backgroundColor;
+  final resolvedHorizontalRuleColor =
+      horizontalRuleColor ?? ThreadTypographyOverride.maybeMarkdownHorizontalRuleColorOf(context) ?? mdColor.withAlpha(100);
+  final suppressHeadingDividers = ThreadTypographyOverride.markdownSuppressHeadingDividersOf(context);
+  final blockquoteSideColor = ThreadTypographyOverride.maybeMarkdownBlockquoteSideColorOf(context);
 
   return MarkdownConfig(
     configs: [
-      HrConfig(color: horizontalRuleColor ?? mdColor.withAlpha(100), height: horizontalRuleHeight),
-      _NoDividerH1Config(style: h1Style),
-      _NoDividerH2Config(style: h2Style),
-      H3Config(style: h3Style),
-      H4Config(style: h4Style),
-      H5Config(style: h5Style),
-      H6Config(style: h6Style),
+      HrConfig(color: resolvedHorizontalRuleColor, height: horizontalRuleHeight),
+      _NoDividerH1Config(style: resolvedH1Style),
+      _NoDividerH2Config(style: resolvedH2Style),
+      suppressHeadingDividers ? _NoDividerH3Config(style: resolvedH3Style) : H3Config(style: resolvedH3Style),
+      H4Config(style: resolvedH4Style),
+      H5Config(style: resolvedH5Style),
+      H6Config(style: resolvedH6Style),
       PreConfig(
         decoration: BoxDecoration(
           color: resolvedCodeBlockSurfaceColor,
@@ -361,7 +371,7 @@ MarkdownConfig buildChatBubbleMarkdownConfig(
       ),
       PConfig(textStyle: paragraphStyle),
       CodeConfig(style: inlineCodeTextStyle),
-      BlockquoteConfig(textColor: mdColor),
+      BlockquoteConfig(sideColor: blockquoteSideColor ?? const Color(0xffd0d7de), textColor: mdColor),
       LinkConfig(
         style: paragraphStyle.copyWith(color: linkColor, decoration: TextDecoration.underline, decorationColor: linkColor),
       ),
@@ -404,4 +414,14 @@ class _NoDividerH2Config extends HeadingConfig {
 
   @override
   String get tag => MarkdownTag.h2.name;
+}
+
+class _NoDividerH3Config extends HeadingConfig {
+  const _NoDividerH3Config({required this.style});
+
+  @override
+  final TextStyle style;
+
+  @override
+  String get tag => MarkdownTag.h3.name;
 }
