@@ -5,10 +5,11 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 const String defaultThreadCodeFontFamily = 'SourceCodePro';
 
 class ThreadTypographyOverride extends InheritedWidget {
-  const ThreadTypographyOverride({super.key, required super.child, this.textFontFamily, this.codeFontFamily});
+  const ThreadTypographyOverride({super.key, required super.child, this.textFontFamily, this.codeFontFamily, this.mineBubbleColor});
 
   final String? textFontFamily;
   final String? codeFontFamily;
+  final Color? mineBubbleColor;
 
   static ThreadTypographyOverride? maybeOf(BuildContext context) {
     return context.dependOnInheritedWidgetOfExactType<ThreadTypographyOverride>();
@@ -22,9 +23,15 @@ class ThreadTypographyOverride extends InheritedWidget {
     return maybeOf(context)?.codeFontFamily;
   }
 
+  static Color? maybeMineBubbleColorOf(BuildContext context) {
+    return maybeOf(context)?.mineBubbleColor;
+  }
+
   @override
   bool updateShouldNotify(ThreadTypographyOverride oldWidget) {
-    return textFontFamily != oldWidget.textFontFamily || codeFontFamily != oldWidget.codeFontFamily;
+    return textFontFamily != oldWidget.textFontFamily ||
+        codeFontFamily != oldWidget.codeFontFamily ||
+        mineBubbleColor != oldWidget.mineBubbleColor;
   }
 }
 

@@ -6373,6 +6373,7 @@ class ChatThreadMessageView extends StatelessWidget {
   Widget build(BuildContext context) {
     final messageText = text;
     final hasText = messageText != null && messageText.trim().isNotEmpty;
+    final resolvedBubbleColor = bubbleColor ?? (mine ? ThreadTypographyOverride.maybeMineBubbleColorOf(context) : null);
     final headerLeftInset = mine ? chatBubbleHorizontalInset + chatBubbleActionRailWidth : chatBubbleHorizontalInset;
     final headerRightInset = mine || isAgentMessage ? chatBubbleHorizontalInset : chatBubbleHorizontalInset + chatBubbleActionRailWidth;
     return Column(
@@ -6401,7 +6402,7 @@ class ChatThreadMessageView extends StatelessWidget {
               reactionActionBuilder: reactionActionBuilder,
               showReactionAction: showReactionAction,
               onReactFromMenu: onReactFromMenu,
-              backgroundColor: bubbleColor,
+              backgroundColor: resolvedBubbleColor,
               textColor: textColor,
               selectable: selectable,
               showActionRail: showBubbleActions,
