@@ -293,42 +293,144 @@ class _FileDefaultAttachmentPreviewState extends State<FileDefaultAttachmentPrev
   }
 }
 
-class FileDefaultPreviewCard extends StatelessWidget {
-  const FileDefaultPreviewCard({super.key, required this.icon, required this.text, this.onClose, this.onDownload});
+class FileDefaultPreviewCard extends StatefulWidget {
+  const FileDefaultPreviewCard({
+    super.key,
+    required this.icon,
+    required this.text,
+    this.onClose,
+    this.onDownload,
+    this.useThreadAttachmentStyle = false,
+  });
 
   final IconData icon;
   final String text;
   final VoidCallback? onClose;
   final VoidCallback? onDownload;
+  final bool useThreadAttachmentStyle;
+
+  @override
+  State<FileDefaultPreviewCard> createState() => _FileDefaultPreviewCardState();
+}
+
+class _FileDefaultPreviewCardState extends State<FileDefaultPreviewCard> {
+  bool _hovered = false;
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) => ShadCard(
-        backgroundColor: Colors.transparent,
-        radius: BorderRadius.circular(16),
-        padding: EdgeInsets.only(left: 8, top: 8, bottom: 8, right: 8),
-        rowCrossAxisAlignment: CrossAxisAlignment.center,
-        trailing: onClose != null
-            ? ShadIconButton.ghost(width: 24, height: 24, icon: Icon(LucideIcons.x, size: 16), onPressed: onClose)
-            : null,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(width: 24, height: 24, child: Center(child: Icon(icon, size: 20))),
-            const SizedBox(width: 8),
-            ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: constraints.maxWidth - (24 + 16 + 16)),
-              child: Text(
-                text,
-                style: threadTypographyTextStyle(context, ShadTheme.of(context).textTheme.small),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+    final theme = ShadTheme.of(context);
+    final useThreadAttachmentStyle = widget.useThreadAttachmentStyle;
+    final attachmentSurfaceColor = useThreadAttachmentStyle ? ThreadTypographyOverride.maybeAttachmentSurfaceColorOf(context) : null;
+    final attachmentBorderColor = useThreadAttachmentStyle ? ThreadTypographyOverride.maybeAttachmentBorderColorOf(context) : null;
+    final attachmentIconColor = useThreadAttachmentStyle ? ThreadTypographyOverride.maybeAttachmentIconColorOf(context) : null;
+    final attachmentActionColor = useThreadAttachmentStyle ? ThreadTypographyOverride.maybeAttachmentActionColorOf(context) : null;
+    final attachmentHoverSurfaceColor = useThreadAttachmentStyle
+        ? ThreadTypographyOverride.maybeAttachmentHoverSurfaceColorOf(context)
+        : null;
+    final attachmentHoverShadows = useThreadAttachmentStyle ? ThreadTypographyOverride.maybeAttachmentHoverShadowsOf(context) : null;
+    final attachmentIconBuilder = useThreadAttachmentStyle ? ThreadTypographyOverride.maybeAttachmentIconBuilderOf(context) : null;
+    final attachmentActionIconBuilder = useThreadAttachmentStyle
+        ? ThreadTypographyOverride.maybeAttachmentActionIconBuilderOf(context)
+        : null;
+    final backgroundColor = attachmentSurfaceColor ?? Colors.transparent;
+    final hoverTintColor = attachmentActionColor ?? theme.colorScheme.foreground;
+    final effectiveBackgroundColor = useThreadAttachmentStyle && _hovered
+        ? attachmentHoverSurfaceColor ?? Color.lerp(backgroundColor, hoverTintColor, 0.03) ?? backgroundColor
+        : backgroundColor;
+    final effectiveBorderColor = attachmentBorderColor;
+    final border = effectiveBorderColor != null ? ShadBorder.all(color: effectiveBorderColor, width: 1) : null;
+    final cardPadding = useThreadAttachmentStyle
+        ? const EdgeInsets.symmetric(horizontal: 10, vertical: 9)
+        : const EdgeInsets.only(left: 8, top: 8, bottom: 8, right: 8);
+    final labelStyle = useThreadAttachmentStyle
+        ? threadTypographyTextStyle(context, theme.textTheme.small.copyWith(fontSize: 14, fontWeight: FontWeight.w600, height: 1.2))
+        : threadTypographyTextStyle(context, theme.textTheme.small);
+    final leadingIconColor = attachmentIconColor;
+    final actionIconColor = attachmentActionColor;
+    final leadingBoxSize = useThreadAttachmentStyle ? 32.0 : 24.0;
+    final contentGap = useThreadAttachmentStyle ? 10.0 : 8.0;
+    final actionGap = useThreadAttachmentStyle ? 10.0 : 0.0;
+    final actionBoxSize = useThreadAttachmentStyle ? 18.0 : 0.0;
+    final actionIcon = widget.onDownload != null && useThreadAttachmentStyle
+        ? IgnorePointer(
+            child: AnimatedOpacity(
+              duration: const Duration(milliseconds: 120),
+              opacity: _hovered ? 1.0 : 0.3,
+              child: SizedBox(
+                width: actionBoxSize,
+                height: 24,
+                child: Center(
+                  child:
+                      attachmentActionIconBuilder?.call(context, color: actionIconColor, hovered: _hovered) ??
+                      Icon(LucideIcons.arrowUpRight, size: 16, color: actionIconColor),
+                ),
               ),
             ),
-          ],
-        ),
+          )
+        : null;
+    final trailing = widget.onClose != null
+        ? ShadIconButton.ghost(width: 24, height: 24, icon: Icon(LucideIcons.x, size: 16), onPressed: widget.onClose)
+        : null;
+
+    final card = AnimatedSlide(
+      duration: const Duration(milliseconds: 160),
+      curve: Curves.easeOut,
+      offset: useThreadAttachmentStyle && _hovered ? const Offset(0, -0.03) : Offset.zero,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final textMaxWidth = constraints.maxWidth.isFinite
+              ? (constraints.maxWidth - (leadingBoxSize + contentGap + (actionIcon == null ? 0 : actionGap + actionBoxSize)))
+                    .clamp(0.0, double.infinity)
+                    .toDouble()
+              : double.infinity;
+          return ShadCard(
+            backgroundColor: effectiveBackgroundColor,
+            border: border,
+            shadows: useThreadAttachmentStyle && _hovered ? attachmentHoverShadows : (useThreadAttachmentStyle ? const [] : null),
+            radius: BorderRadius.circular(16),
+            padding: cardPadding,
+            rowCrossAxisAlignment: CrossAxisAlignment.center,
+            trailing: trailing,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: leadingBoxSize,
+                  height: leadingBoxSize,
+                  child: Center(
+                    child:
+                        attachmentIconBuilder?.call(
+                          context,
+                          fileName: widget.text,
+                          fallbackIcon: widget.icon,
+                          color: leadingIconColor,
+                          hovered: _hovered,
+                        ) ??
+                        Icon(widget.icon, size: 20, color: leadingIconColor),
+                  ),
+                ),
+                SizedBox(width: contentGap),
+                ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: textMaxWidth),
+                  child: Text(widget.text, style: labelStyle, maxLines: 1, overflow: TextOverflow.ellipsis),
+                ),
+                if (actionIcon != null) ...[SizedBox(width: actionGap), actionIcon],
+              ],
+            ),
+          );
+        },
       ),
+    );
+
+    if (widget.onDownload == null || !useThreadAttachmentStyle) {
+      return card;
+    }
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(onTap: widget.onDownload, behavior: HitTestBehavior.opaque, child: card),
     );
   }
 }

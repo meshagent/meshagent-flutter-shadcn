@@ -6429,18 +6429,20 @@ class ChatThreadMessageView extends StatelessWidget {
           ),
         for (var i = 0; i < attachmentWidgets.length; i++) ...[
           if (hasText || i > 0) const SizedBox(height: chatBubbleSiblingSpacing),
-          _buildAttachmentWidget(attachmentWidgets[i]),
+          _buildAttachmentWidget(context, attachmentWidgets[i]),
         ],
         ?trailing,
       ],
     );
   }
 
-  Widget _buildAttachmentWidget(Widget attachmentWidget) {
-    const attachmentInset = chatBubbleHorizontalInset + _chatBubbleContentHorizontalPadding;
+  Widget _buildAttachmentWidget(BuildContext context, Widget attachmentWidget) {
+    final attachmentInset = ThreadTypographyOverride.alignAttachmentEdgesWithBubblesOf(context)
+        ? chatBubbleHorizontalInset
+        : chatBubbleHorizontalInset + _chatBubbleContentHorizontalPadding;
     return Padding(
       key: attachmentWidget.key == null ? null : ValueKey<Object>(attachmentWidget.key!),
-      padding: const EdgeInsets.only(left: attachmentInset, right: attachmentInset),
+      padding: EdgeInsets.only(left: attachmentInset, right: attachmentInset),
       child: Align(alignment: mine ? Alignment.centerRight : Alignment.centerLeft, child: attachmentWidget),
     );
   }
@@ -6501,7 +6503,12 @@ class PendingChatThreadMessage extends StatelessWidget {
             imageUri: trimmed,
             onOpenFullscreen: canOpenInline ? () => unawaited(_showPendingAttachmentPreview(context, attachment)) : null,
           )
-        : FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: displayName);
+        : FileDefaultPreviewCard(
+            icon: LucideIcons.paperclip,
+            text: displayName,
+            useThreadAttachmentStyle: true,
+            onDownload: canOpenInline ? () => unawaited(_showPendingAttachmentPreview(context, attachment)) : null,
+          );
     final child = canOpenInline && !isInlineImage
         ? MouseRegion(
             cursor: SystemMouseCursors.click,
@@ -6567,7 +6574,7 @@ class _PendingAgentAttachmentViewer extends StatelessWidget {
             Expanded(
               child: decoded == null
                   ? Center(
-                      child: FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: displayName),
+                      child: FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: displayName, useThreadAttachmentStyle: true),
                     )
                   : _PendingAgentAttachmentPreview(mimeType: decoded.mimeType, data: decoded.data, displayName: displayName),
             ),
@@ -6603,7 +6610,7 @@ class _PendingAgentAttachmentPreview extends StatelessWidget {
       );
     }
     return Center(
-      child: FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: displayName),
+      child: FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: displayName, useThreadAttachmentStyle: true),
     );
   }
 }
@@ -12290,6 +12297,7 @@ class ChatThreadPreview extends StatelessWidget {
     return FileDefaultPreviewCard(
       icon: LucideIcons.file,
       text: path.split("/").last,
+      useThreadAttachmentStyle: true,
       onDownload: () async {
         final url = await room.storage.downloadUrl(path);
 

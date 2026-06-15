@@ -2618,7 +2618,12 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
               imageUri: previewPath,
               onOpenFullscreen: canOpen ? () => unawaited(_openAttachment(context, attachment)) : null,
             )
-          : FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: attachment.displayName),
+          : FileDefaultPreviewCard(
+              icon: LucideIcons.paperclip,
+              text: attachment.displayName,
+              useThreadAttachmentStyle: true,
+              onDownload: canOpen ? () => unawaited(_openAttachment(context, attachment)) : null,
+            ),
     );
     if (!canOpen) {
       return card;
@@ -3871,7 +3876,7 @@ class _InlineAttachmentPreview extends StatelessWidget {
       );
     }
     return Center(
-      child: FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: displayName),
+      child: FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: displayName, useThreadAttachmentStyle: true),
     );
   }
 }

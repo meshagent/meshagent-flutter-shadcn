@@ -4,6 +4,17 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 
 const String defaultThreadCodeFontFamily = 'SourceCodePro';
 
+typedef ThreadAttachmentIconBuilder =
+    Widget Function(
+      BuildContext context, {
+      required String fileName,
+      required IconData fallbackIcon,
+      required Color? color,
+      required bool hovered,
+    });
+
+typedef ThreadAttachmentActionIconBuilder = Widget Function(BuildContext context, {required Color? color, required bool hovered});
+
 class ThreadTypographyOverride extends InheritedWidget {
   const ThreadTypographyOverride({
     super.key,
@@ -14,6 +25,15 @@ class ThreadTypographyOverride extends InheritedWidget {
     this.agentBubbleColor,
     this.agentBubbleBorderColor,
     this.linkColor,
+    this.attachmentSurfaceColor,
+    this.attachmentBorderColor,
+    this.attachmentIconColor,
+    this.attachmentActionColor,
+    this.attachmentHoverSurfaceColor,
+    this.attachmentHoverShadows,
+    this.alignAttachmentEdgesWithBubbles = false,
+    this.attachmentIconBuilder,
+    this.attachmentActionIconBuilder,
   });
 
   final String? textFontFamily;
@@ -22,6 +42,15 @@ class ThreadTypographyOverride extends InheritedWidget {
   final Color? agentBubbleColor;
   final Color? agentBubbleBorderColor;
   final Color? linkColor;
+  final Color? attachmentSurfaceColor;
+  final Color? attachmentBorderColor;
+  final Color? attachmentIconColor;
+  final Color? attachmentActionColor;
+  final Color? attachmentHoverSurfaceColor;
+  final List<BoxShadow>? attachmentHoverShadows;
+  final bool alignAttachmentEdgesWithBubbles;
+  final ThreadAttachmentIconBuilder? attachmentIconBuilder;
+  final ThreadAttachmentActionIconBuilder? attachmentActionIconBuilder;
 
   static ThreadTypographyOverride? maybeOf(BuildContext context) {
     return context.dependOnInheritedWidgetOfExactType<ThreadTypographyOverride>();
@@ -51,6 +80,42 @@ class ThreadTypographyOverride extends InheritedWidget {
     return maybeOf(context)?.linkColor;
   }
 
+  static Color? maybeAttachmentSurfaceColorOf(BuildContext context) {
+    return maybeOf(context)?.attachmentSurfaceColor;
+  }
+
+  static Color? maybeAttachmentBorderColorOf(BuildContext context) {
+    return maybeOf(context)?.attachmentBorderColor;
+  }
+
+  static Color? maybeAttachmentIconColorOf(BuildContext context) {
+    return maybeOf(context)?.attachmentIconColor;
+  }
+
+  static Color? maybeAttachmentActionColorOf(BuildContext context) {
+    return maybeOf(context)?.attachmentActionColor;
+  }
+
+  static Color? maybeAttachmentHoverSurfaceColorOf(BuildContext context) {
+    return maybeOf(context)?.attachmentHoverSurfaceColor;
+  }
+
+  static List<BoxShadow>? maybeAttachmentHoverShadowsOf(BuildContext context) {
+    return maybeOf(context)?.attachmentHoverShadows;
+  }
+
+  static bool alignAttachmentEdgesWithBubblesOf(BuildContext context) {
+    return maybeOf(context)?.alignAttachmentEdgesWithBubbles ?? false;
+  }
+
+  static ThreadAttachmentIconBuilder? maybeAttachmentIconBuilderOf(BuildContext context) {
+    return maybeOf(context)?.attachmentIconBuilder;
+  }
+
+  static ThreadAttachmentActionIconBuilder? maybeAttachmentActionIconBuilderOf(BuildContext context) {
+    return maybeOf(context)?.attachmentActionIconBuilder;
+  }
+
   @override
   bool updateShouldNotify(ThreadTypographyOverride oldWidget) {
     return textFontFamily != oldWidget.textFontFamily ||
@@ -58,7 +123,16 @@ class ThreadTypographyOverride extends InheritedWidget {
         mineBubbleColor != oldWidget.mineBubbleColor ||
         agentBubbleColor != oldWidget.agentBubbleColor ||
         agentBubbleBorderColor != oldWidget.agentBubbleBorderColor ||
-        linkColor != oldWidget.linkColor;
+        linkColor != oldWidget.linkColor ||
+        attachmentSurfaceColor != oldWidget.attachmentSurfaceColor ||
+        attachmentBorderColor != oldWidget.attachmentBorderColor ||
+        attachmentIconColor != oldWidget.attachmentIconColor ||
+        attachmentActionColor != oldWidget.attachmentActionColor ||
+        attachmentHoverSurfaceColor != oldWidget.attachmentHoverSurfaceColor ||
+        attachmentHoverShadows != oldWidget.attachmentHoverShadows ||
+        alignAttachmentEdgesWithBubbles != oldWidget.alignAttachmentEdgesWithBubbles ||
+        attachmentIconBuilder != oldWidget.attachmentIconBuilder ||
+        attachmentActionIconBuilder != oldWidget.attachmentActionIconBuilder;
   }
 }
 
