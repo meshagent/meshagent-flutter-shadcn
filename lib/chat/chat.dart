@@ -11837,20 +11837,23 @@ class _EventLineState extends State<EventLine> {
     }
 
     final theme = ShadTheme.of(context);
-    const previewBackground = Color(0xFF050505);
-    const previewHeaderBackground = Color(0xFF111111);
+    final previewBackground = ThreadTypographyOverride.maybeCodeBlockSurfaceColorOf(context) ?? const Color(0xFF050505);
+    final previewHeaderBackground = ThreadTypographyOverride.maybeCodeBlockHeaderSurfaceColorOf(context) ?? const Color(0xFF111111);
+    final previewBorderColor = ThreadTypographyOverride.maybeCodeBlockBorderColorOf(context) ?? theme.colorScheme.border;
+    final previewTextColor = ThreadTypographyOverride.maybeCodeBlockTextColorOf(context) ?? const Color(0xFFE5E7EB);
+    final previewHeaderTextColor = ThreadTypographyOverride.maybeCodeBlockHeaderTextColorOf(context) ?? theme.colorScheme.mutedForeground;
+    final previewHighlightTheme = chatBubbleCodeHighlightTheme(context);
     final usesMobileTypography = chatBubbleMarkdownUsesMobileTypography(context);
     final codeTextStyle = threadTypographyCodeTextStyle(
       context,
-      fontSize: usesMobileTypography ? chatBubbleMarkdownMobileBaseFontSize : 12,
-      color: const Color(0xFFE5E7EB),
-      height: usesMobileTypography ? chatBubbleMarkdownMobileCodeLineHeight : 1.3,
+      fontSize:
+          ThreadTypographyOverride.maybeCodeBlockFontSizeOf(context) ?? (usesMobileTypography ? chatBubbleMarkdownMobileBaseFontSize : 12),
+      color: previewTextColor,
+      height:
+          ThreadTypographyOverride.maybeCodeBlockLineHeightOf(context) ??
+          (usesMobileTypography ? chatBubbleMarkdownMobileCodeLineHeight : 1.3),
     );
-    final headerTextStyle = threadTypographyCodeTextStyle(
-      context,
-      fontSize: usesMobileTypography ? 13 : 11,
-      color: theme.colorScheme.mutedForeground,
-    );
+    final headerTextStyle = threadTypographyCodeTextStyle(context, fontSize: usesMobileTypography ? 13 : 11, color: previewHeaderTextColor);
     final resolvedLanguageId = resolveLanguageIdForFilename(languageOrFilename) ?? fallbackLanguageId;
     final body = resolvedLanguageId == "diff"
         ? Container(
@@ -11878,7 +11881,7 @@ class _EventLineState extends State<EventLine> {
                               code: line.$2,
                               languageOrFilename: "diff",
                               textStyle: codeTextStyle,
-                              theme: monokaiSublimeTheme,
+                              theme: previewHighlightTheme,
                               fallbackLanguageId: "diff",
                             ),
                           ),
@@ -11898,7 +11901,7 @@ class _EventLineState extends State<EventLine> {
                 code: normalizedCode,
                 languageOrFilename: languageOrFilename,
                 textStyle: codeTextStyle,
-                theme: monokaiSublimeTheme,
+                theme: previewHighlightTheme,
                 fallbackLanguageId: fallbackLanguageId,
               ),
             ),
@@ -11955,7 +11958,7 @@ class _EventLineState extends State<EventLine> {
                   width: 24,
                   height: 24,
                   iconSize: 14,
-                  icon: const Icon(LucideIcons.copy, size: 14),
+                  icon: Icon(LucideIcons.copy, size: 14, color: previewHeaderTextColor),
                   onPressed: () {
                     Clipboard.setData(ClipboardData(text: normalizedCode));
                   },
@@ -11974,7 +11977,7 @@ class _EventLineState extends State<EventLine> {
       decoration: BoxDecoration(
         color: previewBackground,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: theme.colorScheme.border),
+        border: Border.all(color: previewBorderColor),
       ),
       child: Stack(
         children: [

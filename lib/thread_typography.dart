@@ -34,6 +34,22 @@ class ThreadTypographyOverride extends InheritedWidget {
     this.alignAttachmentEdgesWithBubbles = false,
     this.attachmentIconBuilder,
     this.attachmentActionIconBuilder,
+    this.codeBlockSurfaceColor,
+    this.codeBlockHeaderSurfaceColor,
+    this.codeBlockBorderColor,
+    this.codeBlockTextColor,
+    this.codeBlockHeaderTextColor,
+    this.codeBlockHighlightTheme,
+    this.codeBlockFontSize,
+    this.codeBlockLineHeight,
+    this.codeBlockUseTextFontSize = false,
+    this.codeBlockWrapLines = false,
+    this.codeBlockHeaderFontSize,
+    this.codeBlockActionIconSize,
+    this.codeBlockActionButtonSize,
+    this.inlineCodeTextColor,
+    this.inlineCodeBackgroundColor,
+    this.inlineCodeHorizontalPadding = false,
   });
 
   final String? textFontFamily;
@@ -51,6 +67,22 @@ class ThreadTypographyOverride extends InheritedWidget {
   final bool alignAttachmentEdgesWithBubbles;
   final ThreadAttachmentIconBuilder? attachmentIconBuilder;
   final ThreadAttachmentActionIconBuilder? attachmentActionIconBuilder;
+  final Color? codeBlockSurfaceColor;
+  final Color? codeBlockHeaderSurfaceColor;
+  final Color? codeBlockBorderColor;
+  final Color? codeBlockTextColor;
+  final Color? codeBlockHeaderTextColor;
+  final Map<String, TextStyle>? codeBlockHighlightTheme;
+  final double? codeBlockFontSize;
+  final double? codeBlockLineHeight;
+  final bool codeBlockUseTextFontSize;
+  final bool codeBlockWrapLines;
+  final double? codeBlockHeaderFontSize;
+  final double? codeBlockActionIconSize;
+  final double? codeBlockActionButtonSize;
+  final Color? inlineCodeTextColor;
+  final Color? inlineCodeBackgroundColor;
+  final bool inlineCodeHorizontalPadding;
 
   static ThreadTypographyOverride? maybeOf(BuildContext context) {
     return context.dependOnInheritedWidgetOfExactType<ThreadTypographyOverride>();
@@ -116,6 +148,70 @@ class ThreadTypographyOverride extends InheritedWidget {
     return maybeOf(context)?.attachmentActionIconBuilder;
   }
 
+  static Color? maybeCodeBlockSurfaceColorOf(BuildContext context) {
+    return maybeOf(context)?.codeBlockSurfaceColor;
+  }
+
+  static Color? maybeCodeBlockHeaderSurfaceColorOf(BuildContext context) {
+    return maybeOf(context)?.codeBlockHeaderSurfaceColor;
+  }
+
+  static Color? maybeCodeBlockBorderColorOf(BuildContext context) {
+    return maybeOf(context)?.codeBlockBorderColor;
+  }
+
+  static Color? maybeCodeBlockTextColorOf(BuildContext context) {
+    return maybeOf(context)?.codeBlockTextColor;
+  }
+
+  static Color? maybeCodeBlockHeaderTextColorOf(BuildContext context) {
+    return maybeOf(context)?.codeBlockHeaderTextColor;
+  }
+
+  static Map<String, TextStyle>? maybeCodeBlockHighlightThemeOf(BuildContext context) {
+    return maybeOf(context)?.codeBlockHighlightTheme;
+  }
+
+  static double? maybeCodeBlockFontSizeOf(BuildContext context) {
+    return maybeOf(context)?.codeBlockFontSize;
+  }
+
+  static double? maybeCodeBlockLineHeightOf(BuildContext context) {
+    return maybeOf(context)?.codeBlockLineHeight;
+  }
+
+  static bool codeBlockUseTextFontSizeOf(BuildContext context) {
+    return maybeOf(context)?.codeBlockUseTextFontSize ?? false;
+  }
+
+  static bool codeBlockWrapLinesOf(BuildContext context) {
+    return maybeOf(context)?.codeBlockWrapLines ?? false;
+  }
+
+  static double? maybeCodeBlockHeaderFontSizeOf(BuildContext context) {
+    return maybeOf(context)?.codeBlockHeaderFontSize;
+  }
+
+  static double? maybeCodeBlockActionIconSizeOf(BuildContext context) {
+    return maybeOf(context)?.codeBlockActionIconSize;
+  }
+
+  static double? maybeCodeBlockActionButtonSizeOf(BuildContext context) {
+    return maybeOf(context)?.codeBlockActionButtonSize;
+  }
+
+  static Color? maybeInlineCodeTextColorOf(BuildContext context) {
+    return maybeOf(context)?.inlineCodeTextColor;
+  }
+
+  static Color? maybeInlineCodeBackgroundColorOf(BuildContext context) {
+    return maybeOf(context)?.inlineCodeBackgroundColor;
+  }
+
+  static bool inlineCodeHorizontalPaddingOf(BuildContext context) {
+    return maybeOf(context)?.inlineCodeHorizontalPadding ?? false;
+  }
+
   @override
   bool updateShouldNotify(ThreadTypographyOverride oldWidget) {
     return textFontFamily != oldWidget.textFontFamily ||
@@ -132,7 +228,23 @@ class ThreadTypographyOverride extends InheritedWidget {
         attachmentHoverShadows != oldWidget.attachmentHoverShadows ||
         alignAttachmentEdgesWithBubbles != oldWidget.alignAttachmentEdgesWithBubbles ||
         attachmentIconBuilder != oldWidget.attachmentIconBuilder ||
-        attachmentActionIconBuilder != oldWidget.attachmentActionIconBuilder;
+        attachmentActionIconBuilder != oldWidget.attachmentActionIconBuilder ||
+        codeBlockSurfaceColor != oldWidget.codeBlockSurfaceColor ||
+        codeBlockHeaderSurfaceColor != oldWidget.codeBlockHeaderSurfaceColor ||
+        codeBlockBorderColor != oldWidget.codeBlockBorderColor ||
+        codeBlockTextColor != oldWidget.codeBlockTextColor ||
+        codeBlockHeaderTextColor != oldWidget.codeBlockHeaderTextColor ||
+        codeBlockHighlightTheme != oldWidget.codeBlockHighlightTheme ||
+        codeBlockFontSize != oldWidget.codeBlockFontSize ||
+        codeBlockLineHeight != oldWidget.codeBlockLineHeight ||
+        codeBlockUseTextFontSize != oldWidget.codeBlockUseTextFontSize ||
+        codeBlockWrapLines != oldWidget.codeBlockWrapLines ||
+        codeBlockHeaderFontSize != oldWidget.codeBlockHeaderFontSize ||
+        codeBlockActionIconSize != oldWidget.codeBlockActionIconSize ||
+        codeBlockActionButtonSize != oldWidget.codeBlockActionButtonSize ||
+        inlineCodeTextColor != oldWidget.inlineCodeTextColor ||
+        inlineCodeBackgroundColor != oldWidget.inlineCodeBackgroundColor ||
+        inlineCodeHorizontalPadding != oldWidget.inlineCodeHorizontalPadding;
   }
 }
 

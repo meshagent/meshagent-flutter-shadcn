@@ -2,6 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:markdown_widget/markdown_widget.dart';
 import 'package:meshagent_flutter_shadcn/chat_bubble_markdown_config.dart';
 import 'package:meshagent_flutter_shadcn/data_grid/in_memory_table.dart';
+import 'package:meshagent_flutter_shadcn/thread_typography.dart';
 import 'package:meshagent_flutter_shadcn/ui/coordinated_context_menu.dart';
 
 class MarkdownViewer extends StatelessWidget {
@@ -44,7 +45,7 @@ class MarkdownViewer extends StatelessWidget {
           horizontalRuleColor: horizontalRuleColor,
           horizontalRuleHeight: horizontalRuleHeight,
         ),
-        markdownGenerator: _buildMarkdownGenerator(),
+        markdownGenerator: _buildMarkdownGenerator(context),
         shrinkWrap: shrinkWrap,
         selectable: selectable,
         physics: physics,
@@ -54,10 +55,33 @@ class MarkdownViewer extends StatelessWidget {
   }
 }
 
-MarkdownGenerator _buildMarkdownGenerator() {
+MarkdownGenerator _buildMarkdownGenerator(BuildContext context) {
+  final inlineCodeHasHorizontalPadding = ThreadTypographyOverride.inlineCodeHorizontalPaddingOf(context);
   return MarkdownGenerator(
-    generators: [SpanNodeGeneratorWithTag(tag: MarkdownTag.table.name, generator: (element, config, visitor) => _MarkdownTableNode())],
+    generators: [
+      SpanNodeGeneratorWithTag(tag: MarkdownTag.table.name, generator: (element, config, visitor) => _MarkdownTableNode()),
+      if (inlineCodeHasHorizontalPadding)
+        SpanNodeGeneratorWithTag(
+          tag: MarkdownTag.code.name,
+          generator: (element, config, visitor) => _PaddedInlineCodeNode(element.textContent, config.code),
+        ),
+    ],
   );
+}
+
+class _PaddedInlineCodeNode extends ElementNode {
+  _PaddedInlineCodeNode(this.text, this.codeConfig);
+
+  static const String _inlinePadding = '\u2009';
+
+  final String text;
+  final CodeConfig codeConfig;
+
+  @override
+  InlineSpan build() => TextSpan(style: style, text: '$_inlinePadding$text$_inlinePadding');
+
+  @override
+  TextStyle get style => codeConfig.style.merge(parentStyle);
 }
 
 class _MarkdownTableNode extends ElementNode {

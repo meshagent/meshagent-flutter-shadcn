@@ -69,7 +69,6 @@ import 'package:meshagent_flutter_shadcn/file_preview/file_preview.dart';
 import 'package:meshagent_flutter_shadcn/thread_typography.dart';
 import 'package:mime/mime.dart';
 import 'package:pdfrx/pdfrx.dart';
-import 'package:re_highlight/styles/monokai-sublime.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:uuid/uuid.dart';
 
@@ -3518,17 +3517,28 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     }
 
     final theme = ShadTheme.of(context);
-    final codeTextStyle = threadTypographyCodeTextStyle(context, fontSize: 12, color: const Color(0xFFE5E7EB), height: 1.3);
-    final headerTextStyle = threadTypographyCodeTextStyle(context, fontSize: 11, color: theme.colorScheme.mutedForeground);
+    final previewBackground = ThreadTypographyOverride.maybeCodeBlockSurfaceColorOf(context) ?? const Color(0xFF050505);
+    final previewHeaderBackground = ThreadTypographyOverride.maybeCodeBlockHeaderSurfaceColorOf(context) ?? const Color(0xFF111111);
+    final previewBorderColor = ThreadTypographyOverride.maybeCodeBlockBorderColorOf(context) ?? theme.colorScheme.border;
+    final previewTextColor = ThreadTypographyOverride.maybeCodeBlockTextColorOf(context) ?? const Color(0xFFE5E7EB);
+    final previewHeaderTextColor = ThreadTypographyOverride.maybeCodeBlockHeaderTextColorOf(context) ?? theme.colorScheme.mutedForeground;
+    final previewHighlightTheme = chatBubbleCodeHighlightTheme(context);
+    final codeTextStyle = threadTypographyCodeTextStyle(
+      context,
+      fontSize: ThreadTypographyOverride.maybeCodeBlockFontSizeOf(context) ?? 12,
+      color: previewTextColor,
+      height: ThreadTypographyOverride.maybeCodeBlockLineHeightOf(context) ?? 1.3,
+    );
+    final headerTextStyle = threadTypographyCodeTextStyle(context, fontSize: 11, color: previewHeaderTextColor);
     final headerCounterStyle = headerTextStyle.copyWith(fontWeight: FontWeight.w700);
     final lines = normalizedCode.split('\n');
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(top: 6),
       decoration: BoxDecoration(
-        color: const Color(0xFF050505),
+        color: previewBackground,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: theme.colorScheme.border),
+        border: Border.all(color: previewBorderColor),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3536,9 +3546,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: _datasetDiffPreviewHorizontalPadding, vertical: 6),
-            decoration: const BoxDecoration(
-              color: Color(0xFF111111),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
+            decoration: BoxDecoration(
+              color: previewHeaderBackground,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
             ),
             child: SelectionArea(
               child: Row(
@@ -3575,7 +3585,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                           code: line.$2,
                           languageOrFilename: 'diff',
                           textStyle: codeTextStyle,
-                          theme: monokaiSublimeTheme,
+                          theme: previewHighlightTheme,
                           fallbackLanguageId: 'diff',
                         ),
                       ),
