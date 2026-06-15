@@ -212,6 +212,7 @@ MarkdownConfig buildChatBubbleMarkdownConfig(
       height: threadTypography ? chatBubbleMarkdownThreadLineHeight : null,
     ),
   );
+  final linkColor = ThreadTypographyOverride.maybeLinkColorOf(context) ?? theme.linkButtonTheme.foregroundColor;
 
   final headingBase = threadTypographyTextStyle(
     context,
@@ -280,10 +281,7 @@ MarkdownConfig buildChatBubbleMarkdownConfig(
       CodeConfig(style: codeTextStyle),
       BlockquoteConfig(textColor: mdColor),
       LinkConfig(
-        style: threadTypographyTextStyle(
-          context,
-          TextStyle(color: theme.linkButtonTheme.foregroundColor, decoration: TextDecoration.underline),
-        ),
+        style: paragraphStyle.copyWith(color: linkColor, decoration: TextDecoration.underline, decorationColor: linkColor),
       ),
       ListConfig(
         marker: (isOrdered, depth, index) {

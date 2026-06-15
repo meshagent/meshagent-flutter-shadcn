@@ -13,6 +13,7 @@ class ThreadTypographyOverride extends InheritedWidget {
     this.mineBubbleColor,
     this.agentBubbleColor,
     this.agentBubbleBorderColor,
+    this.linkColor,
   });
 
   final String? textFontFamily;
@@ -20,6 +21,7 @@ class ThreadTypographyOverride extends InheritedWidget {
   final Color? mineBubbleColor;
   final Color? agentBubbleColor;
   final Color? agentBubbleBorderColor;
+  final Color? linkColor;
 
   static ThreadTypographyOverride? maybeOf(BuildContext context) {
     return context.dependOnInheritedWidgetOfExactType<ThreadTypographyOverride>();
@@ -45,13 +47,18 @@ class ThreadTypographyOverride extends InheritedWidget {
     return maybeOf(context)?.agentBubbleBorderColor;
   }
 
+  static Color? maybeLinkColorOf(BuildContext context) {
+    return maybeOf(context)?.linkColor;
+  }
+
   @override
   bool updateShouldNotify(ThreadTypographyOverride oldWidget) {
     return textFontFamily != oldWidget.textFontFamily ||
         codeFontFamily != oldWidget.codeFontFamily ||
         mineBubbleColor != oldWidget.mineBubbleColor ||
         agentBubbleColor != oldWidget.agentBubbleColor ||
-        agentBubbleBorderColor != oldWidget.agentBubbleBorderColor;
+        agentBubbleBorderColor != oldWidget.agentBubbleBorderColor ||
+        linkColor != oldWidget.linkColor;
   }
 }
 
