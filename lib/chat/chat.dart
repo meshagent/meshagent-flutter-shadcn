@@ -4922,6 +4922,7 @@ class ChatBubble extends StatefulWidget {
     this.fullWidth = false,
     this.accented = false,
     this.backgroundColor,
+    this.borderColor,
     this.textColor,
     this.selectable = true,
     this.showActionRail = true,
@@ -4939,6 +4940,7 @@ class ChatBubble extends StatefulWidget {
   final bool fullWidth;
   final bool accented;
   final Color? backgroundColor;
+  final Color? borderColor;
   final Color? textColor;
   final bool selectable;
   final bool showActionRail;
@@ -5106,6 +5108,7 @@ class _ChatBubble extends State<ChatBubble> {
     final text = widget.text;
     final mine = widget.mine;
     final bubbleColor = widget.backgroundColor ?? (widget.accented || mine ? cs.accent : cs.background);
+    final bubbleBorderColor = widget.borderColor;
     final showActions =
         widget.showActionRail && (hovering || optionsController.isOpen || reactionController.isOpen || _keepingActionsVisible);
     final canLongPressReact =
@@ -5186,7 +5189,11 @@ class _ChatBubble extends State<ChatBubble> {
 
     final bubble = Container(
       padding: _chatBubbleContentPadding,
-      decoration: BoxDecoration(color: bubbleColor, borderRadius: BorderRadius.circular(_bubbleRadius)),
+      decoration: BoxDecoration(
+        color: bubbleColor,
+        borderRadius: BorderRadius.circular(_bubbleRadius),
+        border: bubbleBorderColor == null ? null : Border.all(color: bubbleBorderColor),
+      ),
       child: MediaQuery(
         data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
         child: MarkdownViewer(
@@ -6337,6 +6344,7 @@ class ChatThreadMessageView extends StatelessWidget {
     this.onReactFromMenu,
     this.mobileStorageSaveSurfacePresenter,
     this.bubbleColor,
+    this.bubbleBorderColor,
     this.textColor,
     this.selectable = true,
     this.showBubbleActions = true,
@@ -6364,6 +6372,7 @@ class ChatThreadMessageView extends StatelessWidget {
   final VoidCallback? onReactFromMenu;
   final ThreadStorageSaveSurfacePresenter? mobileStorageSaveSurfacePresenter;
   final Color? bubbleColor;
+  final Color? bubbleBorderColor;
   final Color? textColor;
   final bool selectable;
   final bool showBubbleActions;
@@ -6373,7 +6382,15 @@ class ChatThreadMessageView extends StatelessWidget {
   Widget build(BuildContext context) {
     final messageText = text;
     final hasText = messageText != null && messageText.trim().isNotEmpty;
-    final resolvedBubbleColor = bubbleColor ?? (mine ? ThreadTypographyOverride.maybeMineBubbleColorOf(context) : null);
+    final resolvedBubbleColor =
+        bubbleColor ??
+        (mine
+            ? ThreadTypographyOverride.maybeMineBubbleColorOf(context)
+            : isAgentMessage
+            ? ThreadTypographyOverride.maybeAgentBubbleColorOf(context)
+            : null);
+    final resolvedBubbleBorderColor =
+        bubbleBorderColor ?? (isAgentMessage ? ThreadTypographyOverride.maybeAgentBubbleBorderColorOf(context) : null);
     final headerLeftInset = mine ? chatBubbleHorizontalInset + chatBubbleActionRailWidth : chatBubbleHorizontalInset;
     final headerRightInset = mine || isAgentMessage ? chatBubbleHorizontalInset : chatBubbleHorizontalInset + chatBubbleActionRailWidth;
     return Column(
@@ -6403,6 +6420,7 @@ class ChatThreadMessageView extends StatelessWidget {
               showReactionAction: showReactionAction,
               onReactFromMenu: onReactFromMenu,
               backgroundColor: resolvedBubbleColor,
+              borderColor: resolvedBubbleBorderColor,
               textColor: textColor,
               selectable: selectable,
               showActionRail: showBubbleActions,

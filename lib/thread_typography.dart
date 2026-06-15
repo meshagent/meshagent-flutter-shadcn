@@ -5,11 +5,21 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 const String defaultThreadCodeFontFamily = 'SourceCodePro';
 
 class ThreadTypographyOverride extends InheritedWidget {
-  const ThreadTypographyOverride({super.key, required super.child, this.textFontFamily, this.codeFontFamily, this.mineBubbleColor});
+  const ThreadTypographyOverride({
+    super.key,
+    required super.child,
+    this.textFontFamily,
+    this.codeFontFamily,
+    this.mineBubbleColor,
+    this.agentBubbleColor,
+    this.agentBubbleBorderColor,
+  });
 
   final String? textFontFamily;
   final String? codeFontFamily;
   final Color? mineBubbleColor;
+  final Color? agentBubbleColor;
+  final Color? agentBubbleBorderColor;
 
   static ThreadTypographyOverride? maybeOf(BuildContext context) {
     return context.dependOnInheritedWidgetOfExactType<ThreadTypographyOverride>();
@@ -27,11 +37,21 @@ class ThreadTypographyOverride extends InheritedWidget {
     return maybeOf(context)?.mineBubbleColor;
   }
 
+  static Color? maybeAgentBubbleColorOf(BuildContext context) {
+    return maybeOf(context)?.agentBubbleColor;
+  }
+
+  static Color? maybeAgentBubbleBorderColorOf(BuildContext context) {
+    return maybeOf(context)?.agentBubbleBorderColor;
+  }
+
   @override
   bool updateShouldNotify(ThreadTypographyOverride oldWidget) {
     return textFontFamily != oldWidget.textFontFamily ||
         codeFontFamily != oldWidget.codeFontFamily ||
-        mineBubbleColor != oldWidget.mineBubbleColor;
+        mineBubbleColor != oldWidget.mineBubbleColor ||
+        agentBubbleColor != oldWidget.agentBubbleColor ||
+        agentBubbleBorderColor != oldWidget.agentBubbleBorderColor;
   }
 }
 
