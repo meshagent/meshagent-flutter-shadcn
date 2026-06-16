@@ -20,7 +20,7 @@ Color chatBubbleMarkdownColor(BuildContext context) {
 }
 
 const double chatBubbleMarkdownMobileBaseFontSize = 16;
-const double chatBubbleMarkdownThreadLineHeight = 1.45;
+const double chatBubbleMarkdownThreadLineHeight = 1.46;
 const double chatBubbleMarkdownMobileCodeLineHeight = 1.4;
 
 bool chatBubbleMarkdownUsesMobileTypography(BuildContext context) {
