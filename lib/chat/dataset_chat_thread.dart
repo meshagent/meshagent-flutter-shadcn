@@ -3980,29 +3980,24 @@ class _DatasetDetailLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
-    final textStyle = threadTypographyTextStyle(
-      context,
-      theme.textTheme.muted.copyWith(color: theme.colorScheme.mutedForeground, fontSize: 13, height: 1.35),
-    );
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.only(left: 5, right: 5),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ChatThreadAuthorHeader(authorName: authorName, createdAt: createdAt, text: text),
-              const SizedBox(height: 6),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 18),
-                child: Text(text, style: textStyle, maxLines: 1, overflow: TextOverflow.ellipsis),
-              ),
-            ],
-          ),
+        child: ChatThreadMessageView(
+          mine: false,
+          isAgentMessage: true,
+          text: text,
+          authorName: authorName,
+          createdAt: createdAt,
+          bubbleColor: Colors.transparent,
+          textColor: theme.colorScheme.mutedForeground,
+          selectable: false,
+          showBubbleActions: false,
+          onTap: onTap,
+          useDefaultBubbleBorder: false,
+          header: ChatThreadAuthorHeader(authorName: authorName, createdAt: createdAt, text: text),
         ),
       ),
     );
