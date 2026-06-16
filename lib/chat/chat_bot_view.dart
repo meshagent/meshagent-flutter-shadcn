@@ -395,6 +395,7 @@ class _ChatBotViewState extends State<ChatBotView> {
       fileDropOverlayBuilder: widget.fileDropOverlayBuilder,
       toolsBuilder: widget.toolsBuilder,
       modelController: _newThreadModelController,
+      customInputBuilder: widget.customInputBuilder,
       newThreadWrapperBuilder: widget.datasetNewThreadWrapperBuilder,
       builder: (context, path, controller, composerKey) => _buildThread(context, path, controller, composerKey: composerKey),
     );
