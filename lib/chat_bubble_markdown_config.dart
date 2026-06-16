@@ -20,6 +20,7 @@ Color chatBubbleMarkdownColor(BuildContext context) {
 }
 
 const double chatBubbleMarkdownMobileBaseFontSize = 16;
+const double chatBubbleMarkdownDesktopBaseFontSize = 14;
 const double chatBubbleMarkdownThreadLineHeight = 1.46;
 const double chatBubbleMarkdownMobileCodeLineHeight = 1.4;
 
@@ -29,8 +30,8 @@ bool chatBubbleMarkdownUsesMobileTypography(BuildContext context) {
 }
 
 double chatBubbleMarkdownBaseFontSize(BuildContext context, {bool threadTypography = false}) {
-  if (threadTypography && chatBubbleMarkdownUsesMobileTypography(context)) {
-    return chatBubbleMarkdownMobileBaseFontSize;
+  if (threadTypography) {
+    return chatBubbleMarkdownUsesMobileTypography(context) ? chatBubbleMarkdownMobileBaseFontSize : chatBubbleMarkdownDesktopBaseFontSize;
   }
 
   final defaultFontSize = DefaultTextStyle.of(context).style.fontSize ?? 14;
