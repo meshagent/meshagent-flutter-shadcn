@@ -521,6 +521,7 @@ class DatasetChatThread extends StatefulWidget {
     this.toolsBuilder,
     this.inputPlaceholder,
     this.attachmentBuilder,
+    this.customInputBuilder,
     this.inputContextMenuBuilder,
     this.inputOnPressedOutside,
     this.rowsLoader,
@@ -550,6 +551,7 @@ class DatasetChatThread extends StatefulWidget {
   final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
   final Widget? inputPlaceholder;
   final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
+  final ChatThreadCustomInputBuilder? customInputBuilder;
   final EditableTextContextMenuBuilder? inputContextMenuBuilder;
   final TapRegionCallback? inputOnPressedOutside;
   final DatasetChatRowsLoader? rowsLoader;
@@ -606,6 +608,7 @@ class RoomDatasetChatThread extends StatefulWidget {
     this.toolsBuilder,
     this.inputPlaceholder,
     this.attachmentBuilder,
+    this.customInputBuilder,
     this.inputContextMenuBuilder,
     this.inputOnPressedOutside,
     this.fileDropOverlayBuilder,
@@ -626,6 +629,7 @@ class RoomDatasetChatThread extends StatefulWidget {
   final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
   final Widget? inputPlaceholder;
   final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
+  final ChatThreadCustomInputBuilder? customInputBuilder;
   final EditableTextContextMenuBuilder? inputContextMenuBuilder;
   final TapRegionCallback? inputOnPressedOutside;
   final FileDropOverlayBuilder? fileDropOverlayBuilder;
@@ -691,6 +695,7 @@ class _RoomDatasetChatThreadState extends State<RoomDatasetChatThread> {
       toolsBuilder: widget.toolsBuilder,
       inputPlaceholder: widget.inputPlaceholder,
       attachmentBuilder: widget.attachmentBuilder,
+      customInputBuilder: widget.customInputBuilder,
       inputContextMenuBuilder: widget.inputContextMenuBuilder,
       inputOnPressedOutside: widget.inputOnPressedOutside,
       rowsLoader: ({required namespace, required table}) {
@@ -2892,29 +2897,57 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         final toolArea = resolveChatThreadToolArea(
           widget.toolsBuilder == null ? null : widget.toolsBuilder!(context, _controller, snapshot),
         );
-        return ChatThreadInput(
-          key: _composerInputKey,
-          focusTrigger: _controller,
+        final sendEnabled = !loading && waitingForOnlineMessage == null;
+        final sendDisabledReason = loading
+            ? 'Thread is loading.'
+            : waitingForOnlineMessage == null
+            ? null
+            : 'Waiting for ${_displayAgentName(widget.agentName ?? "agent")} to come online.';
+        final config = ChatThreadInputConfig(
+          controller: _controller,
+          snapshot: snapshot,
+          placeholder: widget.inputPlaceholder,
           sendEnabled: sendEnabled,
           sendDisabledReason: sendDisabledReason,
+          readOnly: false,
           onCancelSend: null,
           onInterrupt: _canInterruptActiveTurn() ? _cancelTurn : null,
           sendPendingText: waitingForOnlineMessage == null
               ? null
               : 'Waiting for ${_displayAgentName(widget.agentName ?? "agent")} to come online.',
-          placeholder: widget.inputPlaceholder,
           leading: toolArea.leading,
           footer: toolArea.footer,
           audioInputEnabled: widget.chatClient != null && _modelController.supportsAudioInput,
           automaticAudioTurnDetection: _modelController.activeTurnDetection == 'automatic',
           onAudioChunk: _sendRealtimeAudioChunk,
           room: null,
-          controller: _controller,
           attachmentBuilder: widget.attachmentBuilder,
           contextMenuBuilder: widget.inputContextMenuBuilder,
           onPressedOutside: widget.inputOnPressedOutside,
           onSend: _send,
         );
+        final defaultInput = ChatThreadInput(
+          key: _composerInputKey,
+          focusTrigger: _controller,
+          sendEnabled: config.sendEnabled,
+          sendDisabledReason: config.sendDisabledReason,
+          onCancelSend: config.onCancelSend,
+          onInterrupt: config.onInterrupt,
+          sendPendingText: config.sendPendingText,
+          placeholder: config.placeholder,
+          leading: config.leading,
+          footer: config.footer,
+          audioInputEnabled: config.audioInputEnabled,
+          automaticAudioTurnDetection: config.automaticAudioTurnDetection,
+          onAudioChunk: config.onAudioChunk,
+          room: config.room,
+          controller: _controller,
+          attachmentBuilder: config.attachmentBuilder,
+          contextMenuBuilder: config.contextMenuBuilder,
+          onPressedOutside: config.onPressedOutside,
+          onSend: config.onSend,
+        );
+        return widget.customInputBuilder?.call(context, config, defaultInput) ?? defaultInput;
       },
     );
   }
