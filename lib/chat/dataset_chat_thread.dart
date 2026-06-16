@@ -3189,6 +3189,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         authorName: group.authorName,
         createdAt: group.createdAt,
         showBubbleActions: false,
+        header: ChatThreadAuthorHeader(authorName: group.authorName, createdAt: group.createdAt, text: group.collapsedText),
       ),
     ];
     for (final item in group.messages.indexed) {
