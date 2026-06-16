@@ -6386,16 +6386,16 @@ class ChatThreadMessageView extends StatelessWidget {
     final hasText = messageText != null && messageText.trim().isNotEmpty;
     final resolvedBubbleColor =
         bubbleColor ??
-        (mine
-            ? ThreadTypographyOverride.maybeMineBubbleColorOf(context)
-            : isAgentMessage
+        (isAgentMessage
             ? ThreadTypographyOverride.maybeAgentBubbleColorOf(context)
-            : null);
+            : ThreadTypographyOverride.maybeMineBubbleColorOf(context));
     final resolvedBubbleBorderColor =
         bubbleBorderColor ??
         (useDefaultBubbleBorder && isAgentMessage ? ThreadTypographyOverride.maybeAgentBubbleBorderColorOf(context) : null);
     final headerLeftInset = mine ? chatBubbleHorizontalInset + chatBubbleActionRailWidth : chatBubbleHorizontalInset;
-    final headerRightInset = mine || isAgentMessage ? chatBubbleHorizontalInset : chatBubbleHorizontalInset + chatBubbleActionRailWidth;
+    final headerRightInset = mine || isAgentMessage || !showBubbleActions
+        ? chatBubbleHorizontalInset
+        : chatBubbleHorizontalInset + chatBubbleActionRailWidth;
     return Column(
       mainAxisAlignment: MainAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
