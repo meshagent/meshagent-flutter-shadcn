@@ -24,6 +24,8 @@ class ThreadTypographyOverride extends InheritedWidget {
     required super.child,
     this.textFontFamily,
     this.codeFontFamily,
+    this.narrowDesktopParagraphBaseFontSize,
+    this.useDesktopAuthorHeaderAtNarrowWidths = false,
     this.mineBubbleColor,
     this.mineBubbleTextColor,
     this.otherHumanBubbleColor,
@@ -68,6 +70,8 @@ class ThreadTypographyOverride extends InheritedWidget {
 
   final String? textFontFamily;
   final String? codeFontFamily;
+  final double? narrowDesktopParagraphBaseFontSize;
+  final bool useDesktopAuthorHeaderAtNarrowWidths;
   final Color? mineBubbleColor;
   final Color? mineBubbleTextColor;
   final Color? otherHumanBubbleColor;
@@ -119,6 +123,14 @@ class ThreadTypographyOverride extends InheritedWidget {
 
   static String? maybeCodeFontFamilyOf(BuildContext context) {
     return maybeOf(context)?.codeFontFamily;
+  }
+
+  static double? maybeNarrowDesktopParagraphBaseFontSizeOf(BuildContext context) {
+    return maybeOf(context)?.narrowDesktopParagraphBaseFontSize;
+  }
+
+  static bool useDesktopAuthorHeaderAtNarrowWidthsOf(BuildContext context) {
+    return maybeOf(context)?.useDesktopAuthorHeaderAtNarrowWidths ?? false;
   }
 
   static Color? maybeMineBubbleColorOf(BuildContext context) {
@@ -285,6 +297,8 @@ class ThreadTypographyOverride extends InheritedWidget {
   bool updateShouldNotify(ThreadTypographyOverride oldWidget) {
     return textFontFamily != oldWidget.textFontFamily ||
         codeFontFamily != oldWidget.codeFontFamily ||
+        narrowDesktopParagraphBaseFontSize != oldWidget.narrowDesktopParagraphBaseFontSize ||
+        useDesktopAuthorHeaderAtNarrowWidths != oldWidget.useDesktopAuthorHeaderAtNarrowWidths ||
         mineBubbleColor != oldWidget.mineBubbleColor ||
         agentBubbleColor != oldWidget.agentBubbleColor ||
         agentBubbleBorderColor != oldWidget.agentBubbleBorderColor ||

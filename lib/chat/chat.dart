@@ -10762,7 +10762,8 @@ class ChatThreadAuthorHeader extends StatelessWidget {
     final theme = ShadTheme.of(context);
     final tt = theme.textTheme;
     final cs = theme.colorScheme;
-    final isDesktopScreen = MediaQuery.sizeOf(context).width >= 600;
+    final isDesktopScreen =
+        ThreadTypographyOverride.useDesktopAuthorHeaderAtNarrowWidthsOf(context) || MediaQuery.sizeOf(context).width >= 600;
 
     return Container(
       padding: _chatBubbleContentPadding,

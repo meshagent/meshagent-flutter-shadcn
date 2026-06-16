@@ -279,10 +279,13 @@ MarkdownConfig buildChatBubbleMarkdownConfig(
     backgroundColor: ThreadTypographyOverride.maybeInlineCodeBackgroundColorOf(context),
     height: codeTextStyle.height,
   );
+  final paragraphBaseFontSize = usesMobileThreadTypography
+      ? (ThreadTypographyOverride.maybeNarrowDesktopParagraphBaseFontSizeOf(context) ?? resolvedBaseFontSize)
+      : resolvedBaseFontSize;
   final paragraphStyle = threadTypographyTextStyle(
     context,
     TextStyle(
-      fontSize: resolvedBaseFontSize,
+      fontSize: paragraphBaseFontSize,
       color: mdColor,
       inherit: false,
       height: threadTypography ? chatBubbleMarkdownThreadLineHeight : null,
