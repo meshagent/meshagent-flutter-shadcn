@@ -6388,7 +6388,16 @@ class ChatThreadMessageView extends StatelessWidget {
         bubbleColor ??
         (isAgentMessage
             ? ThreadTypographyOverride.maybeAgentBubbleColorOf(context)
-            : ThreadTypographyOverride.maybeMineBubbleColorOf(context));
+            : mine
+            ? ThreadTypographyOverride.maybeMineBubbleColorOf(context)
+            : ThreadTypographyOverride.maybeOtherHumanBubbleColorOf(context));
+    final resolvedTextColor =
+        textColor ??
+        (isAgentMessage
+            ? null
+            : mine
+            ? ThreadTypographyOverride.maybeMineBubbleTextColorOf(context)
+            : ThreadTypographyOverride.maybeOtherHumanBubbleTextColorOf(context));
     final resolvedBubbleBorderColor =
         bubbleBorderColor ??
         (useDefaultBubbleBorder && isAgentMessage ? ThreadTypographyOverride.maybeAgentBubbleBorderColorOf(context) : null);
@@ -6424,7 +6433,7 @@ class ChatThreadMessageView extends StatelessWidget {
               onReactFromMenu: onReactFromMenu,
               backgroundColor: resolvedBubbleColor,
               borderColor: resolvedBubbleBorderColor,
-              textColor: textColor,
+              textColor: resolvedTextColor,
               selectable: selectable,
               showActionRail: showBubbleActions,
               onTap: onTap,

@@ -25,6 +25,9 @@ class ThreadTypographyOverride extends InheritedWidget {
     this.textFontFamily,
     this.codeFontFamily,
     this.mineBubbleColor,
+    this.mineBubbleTextColor,
+    this.otherHumanBubbleColor,
+    this.otherHumanBubbleTextColor,
     this.agentBubbleColor,
     this.agentBubbleBorderColor,
     this.linkColor,
@@ -66,6 +69,9 @@ class ThreadTypographyOverride extends InheritedWidget {
   final String? textFontFamily;
   final String? codeFontFamily;
   final Color? mineBubbleColor;
+  final Color? mineBubbleTextColor;
+  final Color? otherHumanBubbleColor;
+  final Color? otherHumanBubbleTextColor;
   final Color? agentBubbleColor;
   final Color? agentBubbleBorderColor;
   final Color? linkColor;
@@ -117,6 +123,18 @@ class ThreadTypographyOverride extends InheritedWidget {
 
   static Color? maybeMineBubbleColorOf(BuildContext context) {
     return maybeOf(context)?.mineBubbleColor;
+  }
+
+  static Color? maybeMineBubbleTextColorOf(BuildContext context) {
+    return maybeOf(context)?.mineBubbleTextColor;
+  }
+
+  static Color? maybeOtherHumanBubbleColorOf(BuildContext context) {
+    return maybeOf(context)?.otherHumanBubbleColor;
+  }
+
+  static Color? maybeOtherHumanBubbleTextColorOf(BuildContext context) {
+    return maybeOf(context)?.otherHumanBubbleTextColor;
   }
 
   static Color? maybeAgentBubbleColorOf(BuildContext context) {
