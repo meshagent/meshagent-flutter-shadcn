@@ -79,7 +79,6 @@ import 'tool_call_summary.dart';
 import 'usage_footer_tooltip.dart';
 
 const double _datasetDiffPreviewHorizontalPadding = 16;
-const double _datasetThreadFeedSpacing = 32;
 
 typedef DatasetChatAttachmentRenderer = Widget Function(BuildContext context, String path);
 typedef DatasetChatRowsLoader = Stream<List<Map<String, Object?>>> Function({required List<String>? namespace, required String table});
@@ -2621,7 +2620,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
           : FileDefaultPreviewCard(
               icon: LucideIcons.paperclip,
               text: attachment.displayName,
-              useThreadAttachmentStyle: true,
+              useThreadAttachmentStyle: ThreadTypographyOverride.useThreadAttachmentStyleOf(context),
               showActionIcon: canOpen,
             ),
     );
@@ -3088,7 +3087,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     final feedItems = _buildFeedItems(messages);
     for (final item in feedItems.indexed) {
       if (messageWidgets.isNotEmpty) {
-        messageWidgets.insert(0, SizedBox(height: _datasetThreadFeedItemSpacing(feedItems[item.$1 - 1], item.$2)));
+        messageWidgets.insert(0, SizedBox(height: _datasetThreadFeedItemSpacing(context, feedItems[item.$1 - 1], item.$2)));
       }
       final feedItem = item.$2;
       switch (feedItem) {
@@ -3134,7 +3133,10 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     });
     for (final pending in pendingFeedMessages) {
       if (messageWidgets.isNotEmpty) {
-        messageWidgets.insert(0, const SizedBox(height: _datasetThreadFeedSpacing));
+        messageWidgets.insert(
+          0,
+          SizedBox(height: ThreadTypographyOverride.maybeThreadFeedItemSpacingOf(context) ?? ChatThreadMessageView.chatMessageStackSpacing),
+        );
       }
       messageWidgets.insert(0, PendingChatThreadMessage(room: null, message: pending));
     }
@@ -3189,7 +3191,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         authorName: group.authorName,
         createdAt: group.createdAt,
         showBubbleActions: false,
-        header: ChatThreadAuthorHeader(authorName: group.authorName, createdAt: group.createdAt, text: group.collapsedText),
+        header: ThreadTypographyOverride.showInlineDisclosureCueOf(context)
+            ? ChatThreadAuthorHeader(authorName: group.authorName, createdAt: group.createdAt, text: group.collapsedText)
+            : null,
       ),
     ];
     for (final item in group.messages.indexed) {
@@ -3411,8 +3415,18 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return ChatThreadMessageView.chatMessageStackSpacing;
   }
 
-  double _datasetThreadFeedItemSpacing(_DatasetThreadFeedItem previous, _DatasetThreadFeedItem next) {
-    return _datasetThreadFeedSpacing;
+  double _datasetThreadFeedItemSpacing(BuildContext context, _DatasetThreadFeedItem previous, _DatasetThreadFeedItem next) {
+    final spacingOverride = ThreadTypographyOverride.maybeThreadFeedItemSpacingOf(context);
+    if (spacingOverride != null) {
+      return spacingOverride;
+    }
+
+    final previousMessage = previous is _DatasetThreadMessageFeedItem ? previous.message : null;
+    final nextMessage = next is _DatasetThreadMessageFeedItem ? next.message : null;
+    if (previousMessage == null || nextMessage == null) {
+      return 10;
+    }
+    return _datasetThreadMessageSpacing(previousMessage, nextMessage);
   }
 
   Widget _buildToolCallSummaryText(
@@ -3423,7 +3437,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }) {
     final theme = ShadTheme.of(context);
     final baseStyle = theme.textTheme.muted.copyWith(color: theme.colorScheme.mutedForeground);
-    final highlightStyle = baseStyle.copyWith(fontWeight: FontWeight.w700);
+    final highlightStyle = ThreadTypographyOverride.showInlineDisclosureCueOf(context)
+        ? baseStyle.copyWith(fontWeight: FontWeight.w700)
+        : baseStyle.copyWith(color: theme.colorScheme.foreground, fontWeight: FontWeight.w700);
     final detailLines = display.detailLines;
     final headlineRest = display.headline.rest;
     final lineCountStyle = baseStyle.copyWith(fontWeight: FontWeight.w700);
@@ -3901,7 +3917,11 @@ class _InlineAttachmentPreview extends StatelessWidget {
       );
     }
     return Center(
-      child: FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: displayName, useThreadAttachmentStyle: true),
+      child: FileDefaultPreviewCard(
+        icon: LucideIcons.paperclip,
+        text: displayName,
+        useThreadAttachmentStyle: ThreadTypographyOverride.useThreadAttachmentStyleOf(context),
+      ),
     );
   }
 }
@@ -3977,7 +3997,7 @@ class _DatasetDetailLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
-    final displayText = '$text ›';
+    final displayText = ThreadTypographyOverride.showInlineDisclosureCueOf(context) ? '$text ›' : text;
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       child: GestureDetector(

@@ -20,8 +20,7 @@ Color chatBubbleMarkdownColor(BuildContext context) {
 }
 
 const double chatBubbleMarkdownMobileBaseFontSize = 16;
-const double chatBubbleMarkdownDesktopBaseFontSize = 14;
-const double chatBubbleMarkdownThreadLineHeight = 1.46;
+const double chatBubbleMarkdownThreadLineHeight = 1.45;
 const double chatBubbleMarkdownMobileCodeLineHeight = 1.4;
 
 bool chatBubbleMarkdownUsesMobileTypography(BuildContext context) {
@@ -31,7 +30,13 @@ bool chatBubbleMarkdownUsesMobileTypography(BuildContext context) {
 
 double chatBubbleMarkdownBaseFontSize(BuildContext context, {bool threadTypography = false}) {
   if (threadTypography) {
-    return chatBubbleMarkdownUsesMobileTypography(context) ? chatBubbleMarkdownMobileBaseFontSize : chatBubbleMarkdownDesktopBaseFontSize;
+    final overrideBaseFontSize = ThreadTypographyOverride.maybeThreadParagraphBaseFontSizeOf(context);
+    if (overrideBaseFontSize != null) {
+      return overrideBaseFontSize;
+    }
+    if (chatBubbleMarkdownUsesMobileTypography(context)) {
+      return chatBubbleMarkdownMobileBaseFontSize;
+    }
   }
 
   final defaultFontSize = DefaultTextStyle.of(context).style.fontSize ?? 14;
@@ -254,6 +259,7 @@ MarkdownConfig buildChatBubbleMarkdownConfig(
   BuildContext context, {
   Color? color,
   double? baseFontSize,
+  Color? linkColor,
   bool threadTypography = false,
   Color? horizontalRuleColor,
   double horizontalRuleHeight = 1,
@@ -279,19 +285,18 @@ MarkdownConfig buildChatBubbleMarkdownConfig(
     backgroundColor: ThreadTypographyOverride.maybeInlineCodeBackgroundColorOf(context),
     height: codeTextStyle.height,
   );
-  final paragraphBaseFontSize = usesMobileThreadTypography
-      ? (ThreadTypographyOverride.maybeNarrowDesktopParagraphBaseFontSizeOf(context) ?? resolvedBaseFontSize)
-      : resolvedBaseFontSize;
   final paragraphStyle = threadTypographyTextStyle(
     context,
     TextStyle(
-      fontSize: paragraphBaseFontSize,
+      fontSize: resolvedBaseFontSize,
       color: mdColor,
       inherit: false,
-      height: threadTypography ? chatBubbleMarkdownThreadLineHeight : null,
+      height: threadTypography
+          ? ThreadTypographyOverride.maybeThreadParagraphLineHeightOf(context) ?? chatBubbleMarkdownThreadLineHeight
+          : null,
     ),
   );
-  final linkColor = ThreadTypographyOverride.maybeLinkColorOf(context) ?? theme.linkButtonTheme.foregroundColor;
+  final resolvedLinkColor = linkColor ?? ThreadTypographyOverride.maybeLinkColorOf(context) ?? theme.linkButtonTheme.foregroundColor;
 
   final headingBase = threadTypographyTextStyle(
     context,
@@ -377,7 +382,7 @@ MarkdownConfig buildChatBubbleMarkdownConfig(
       CodeConfig(style: inlineCodeTextStyle),
       BlockquoteConfig(sideColor: blockquoteSideColor ?? const Color(0xffd0d7de), textColor: mdColor),
       LinkConfig(
-        style: paragraphStyle.copyWith(color: linkColor, decoration: TextDecoration.underline, decorationColor: linkColor),
+        style: paragraphStyle.copyWith(color: resolvedLinkColor, decoration: TextDecoration.underline, decorationColor: resolvedLinkColor),
       ),
       ListConfig(
         marker: (isOrdered, depth, index) {

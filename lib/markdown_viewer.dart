@@ -15,6 +15,7 @@ class MarkdownViewer extends StatelessWidget {
     this.threadTypography = false,
     this.color,
     this.baseFontSize,
+    this.linkColor,
     this.horizontalRuleColor,
     this.horizontalRuleHeight = 1,
     this.physics,
@@ -27,6 +28,7 @@ class MarkdownViewer extends StatelessWidget {
   final bool threadTypography;
   final Color? color;
   final double? baseFontSize;
+  final Color? linkColor;
   final Color? horizontalRuleColor;
   final double horizontalRuleHeight;
   final ScrollPhysics? physics;
@@ -41,6 +43,7 @@ class MarkdownViewer extends StatelessWidget {
           context,
           color: color,
           baseFontSize: baseFontSize,
+          linkColor: linkColor,
           threadTypography: threadTypography,
           horizontalRuleColor: horizontalRuleColor,
           horizontalRuleHeight: horizontalRuleHeight,

@@ -97,9 +97,9 @@ import 'usage_footer_tooltip.dart';
 
 const webPDFFormat = SimpleFileFormat(uniformTypeIdentifiers: ['com.adobe.pdf'], mimeTypes: ['web application/pdf']);
 const List<String> _emojiFontFamilyFallback = <String>['Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji'];
-const double _chatBubbleContentHorizontalPadding = 18;
-const double _chatBubbleContentTopPadding = 8;
-const double _chatBubbleContentBottomPadding = 8;
+const double _chatBubbleContentHorizontalPadding = 16;
+const double _chatBubbleContentTopPadding = 4;
+const double _chatBubbleContentBottomPadding = 2;
 const double _mobileReactionFlowDialogMaxWidth = 420;
 const double _mobileReactionFlowDialogViewportTopGap = 20;
 const double _mobileReactionFlowDialogMaxHeightFactor = 0.72;
@@ -123,6 +123,14 @@ const EdgeInsets _chatBubbleContentPadding = EdgeInsets.only(
   top: _chatBubbleContentTopPadding,
   bottom: _chatBubbleContentBottomPadding,
 );
+
+EdgeInsets _resolvedChatBubbleContentPadding(BuildContext context) {
+  return ThreadTypographyOverride.maybeBubbleContentPaddingOf(context) ?? _chatBubbleContentPadding;
+}
+
+double _resolvedChatBubbleHorizontalPadding(BuildContext context) {
+  return _resolvedChatBubbleContentPadding(context).left;
+}
 
 enum UploadStatus { initial, uploading, completed, failed }
 
@@ -730,9 +738,9 @@ bool _supportsMcp(Participant participant) {
   return participant.getAttribute("supports_mcp") == true;
 }
 
-String _displayParticipantName(String name) {
+String _displayParticipantName(BuildContext context, String name) {
   final baseName = name.split("@").first.trim();
-  if (baseName.isEmpty) {
+  if (baseName.isEmpty || !ThreadTypographyOverride.normalizeParticipantDisplayNameOf(context)) {
     return baseName;
   }
 
@@ -5128,6 +5136,9 @@ class _ChatBubble extends State<ChatBubble> {
     final mine = widget.mine;
     final bubbleColor = widget.backgroundColor ?? (widget.accented || mine ? cs.accent : cs.background);
     final bubbleBorderColor = widget.borderColor;
+    final markdownLinkColor = mine
+        ? ThreadTypographyOverride.maybeMineBubbleLinkColorOf(context) ?? ThreadTypographyOverride.maybeLinkColorOf(context)
+        : ThreadTypographyOverride.maybeLinkColorOf(context);
     final showActions =
         widget.showActionRail && (hovering || optionsController.isOpen || reactionController.isOpen || _keepingActionsVisible);
     final canLongPressReact =
@@ -5207,7 +5218,7 @@ class _ChatBubble extends State<ChatBubble> {
     );
 
     final bubble = Container(
-      padding: _chatBubbleContentPadding,
+      padding: _resolvedChatBubbleContentPadding(context),
       decoration: BoxDecoration(
         color: bubbleColor,
         borderRadius: BorderRadius.circular(_bubbleRadius),
@@ -5222,6 +5233,7 @@ class _ChatBubble extends State<ChatBubble> {
           shrinkWrap: true,
           selectable: widget.selectable && kIsWeb,
           color: widget.textColor,
+          linkColor: markdownLinkColor,
         ),
       ),
     );
@@ -5915,7 +5927,7 @@ class _ChatThreadState extends State<ChatThread> {
           : null,
       sendPendingText: waitingForOnlineMessage == null
           ? null
-          : "Waiting for ${_displayParticipantName(widget.agentName ?? "agent")} to come online.",
+          : "Waiting for ${_displayParticipantName(context, widget.agentName ?? "agent")} to come online.",
       leading: toolArea.leading,
       footer: toolArea.footer,
       trailing: null,
@@ -6118,12 +6130,12 @@ class _ChatThreadState extends State<ChatThread> {
                                             padding: const EdgeInsets.only(bottom: 4),
                                             child: Text(
                                               [
-                                                if (pending.senderName != null) "${_displayParticipantName(pending.senderName!)}:",
+                                                if (pending.senderName != null) "${_displayParticipantName(context, pending.senderName!)}:",
                                                 if (pending.text.trim().isNotEmpty) pending.text.trim(),
                                                 if (pending.attachments.isNotEmpty)
                                                   "${pending.attachments.length} attachment${pending.attachments.length == 1 ? "" : "s"}",
                                                 if (pending.awaitingOnline)
-                                                  "(waiting for @${_displayParticipantName(widget.agentName ?? "agent")} to come online)",
+                                                  "(waiting for @${_displayParticipantName(context, widget.agentName ?? "agent")} to come online)",
                                               ].join(" "),
                                               style: threadTypographyTextStyle(
                                                 context,
@@ -6470,7 +6482,7 @@ class ChatThreadMessageView extends StatelessWidget {
   Widget _buildAttachmentWidget(BuildContext context, Widget attachmentWidget) {
     final attachmentInset = ThreadTypographyOverride.alignAttachmentEdgesWithBubblesOf(context)
         ? chatBubbleHorizontalInset
-        : chatBubbleHorizontalInset + _chatBubbleContentHorizontalPadding;
+        : chatBubbleHorizontalInset + _resolvedChatBubbleHorizontalPadding(context);
     return Padding(
       key: attachmentWidget.key == null ? null : ValueKey<Object>(attachmentWidget.key!),
       padding: EdgeInsets.only(left: attachmentInset, right: attachmentInset),
@@ -6537,7 +6549,7 @@ class PendingChatThreadMessage extends StatelessWidget {
         : FileDefaultPreviewCard(
             icon: LucideIcons.paperclip,
             text: displayName,
-            useThreadAttachmentStyle: true,
+            useThreadAttachmentStyle: ThreadTypographyOverride.useThreadAttachmentStyleOf(context),
             showActionIcon: canOpenInline,
           );
     final child = canOpenInline && !isInlineImage
@@ -6605,7 +6617,11 @@ class _PendingAgentAttachmentViewer extends StatelessWidget {
             Expanded(
               child: decoded == null
                   ? Center(
-                      child: FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: displayName, useThreadAttachmentStyle: true),
+                      child: FileDefaultPreviewCard(
+                        icon: LucideIcons.paperclip,
+                        text: displayName,
+                        useThreadAttachmentStyle: ThreadTypographyOverride.useThreadAttachmentStyleOf(context),
+                      ),
                     )
                   : _PendingAgentAttachmentPreview(mimeType: decoded.mimeType, data: decoded.data, displayName: displayName),
             ),
@@ -6641,7 +6657,11 @@ class _PendingAgentAttachmentPreview extends StatelessWidget {
       );
     }
     return Center(
-      child: FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: displayName, useThreadAttachmentStyle: true),
+      child: FileDefaultPreviewCard(
+        icon: LucideIcons.paperclip,
+        text: displayName,
+        useThreadAttachmentStyle: ThreadTypographyOverride.useThreadAttachmentStyleOf(context),
+      ),
     );
   }
 }
@@ -6665,7 +6685,6 @@ class _PendingAgentAttachmentPreview extends StatelessWidget {
 }
 
 class _ChatThreadMessagesState extends State<ChatThreadMessages> {
-  static const double _threadFeedItemSpacing = 32;
   static const double _statusBottomSpacer = 20;
   static const Duration _statusCollapseDelay = Duration(milliseconds: 500);
   static const Duration _statusAnimationDuration = Duration(seconds: 1);
@@ -6901,7 +6920,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
       return 0.0;
     }
 
-    return _threadFeedItemSpacing;
+    return ThreadTypographyOverride.maybeThreadFeedItemSpacingOf(context) ?? ChatThreadMessageView.chatMessageStackSpacing;
   }
 
   String? _normalizeReactionUserName(Object? value) {
@@ -8082,7 +8101,10 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     );
     for (final pending in pendingFeedMessages) {
       if (messageWidgets.isNotEmpty) {
-        messageWidgets.insert(0, const SizedBox(height: _threadFeedItemSpacing));
+        messageWidgets.insert(
+          0,
+          SizedBox(height: ThreadTypographyOverride.maybeThreadFeedItemSpacingOf(context) ?? ChatThreadMessageView.chatMessageStackSpacing),
+        );
       }
       messageWidgets.insert(
         0,
@@ -10766,7 +10788,7 @@ class ChatThreadAuthorHeader extends StatelessWidget {
         ThreadTypographyOverride.useDesktopAuthorHeaderAtNarrowWidthsOf(context) || MediaQuery.sizeOf(context).width >= 600;
 
     return Container(
-      padding: _chatBubbleContentPadding,
+      padding: _resolvedChatBubbleContentPadding(context),
       width: ((text)?.isEmpty ?? true) ? 250 : double.infinity,
       child: SelectionArea(
         child: Row(
@@ -10774,7 +10796,7 @@ class ChatThreadAuthorHeader extends StatelessWidget {
           children: [
             Expanded(
               child: Text(
-                _displayParticipantName(authorName),
+                _displayParticipantName(context, authorName),
                 style: isDesktopScreen
                     ? tt.small.copyWith(fontSize: 15, fontWeight: FontWeight.w700, color: cs.foreground)
                     : tt.small.copyWith(color: cs.foreground),
@@ -11898,7 +11920,7 @@ class _EventLineState extends State<EventLine> {
     final body = resolvedLanguageId == "diff"
         ? Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: _chatBubbleContentHorizontalPadding, vertical: 8),
+            padding: EdgeInsets.symmetric(horizontal: _resolvedChatBubbleHorizontalPadding(context), vertical: 8),
             child: Builder(
               builder: (context) {
                 final lines = normalizedCode.split("\n");
@@ -11934,7 +11956,7 @@ class _EventLineState extends State<EventLine> {
           )
         : SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: _chatBubbleContentHorizontalPadding, vertical: 8),
+            padding: EdgeInsets.symmetric(horizontal: _resolvedChatBubbleHorizontalPadding(context), vertical: 8),
             child: SelectableText.rich(
               highlightCodeSpanWithReHighlight(
                 context: context,
@@ -11949,7 +11971,12 @@ class _EventLineState extends State<EventLine> {
     final logsBody = hasLogs
         ? Container(
             width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(_chatBubbleContentHorizontalPadding, 0, _chatBubbleContentHorizontalPadding, 8),
+            padding: EdgeInsets.fromLTRB(
+              _resolvedChatBubbleHorizontalPadding(context),
+              0,
+              _resolvedChatBubbleHorizontalPadding(context),
+              8,
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -11983,7 +12010,7 @@ class _EventLineState extends State<EventLine> {
       children: [
         Container(
           width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: _chatBubbleContentHorizontalPadding, vertical: 6),
+          padding: EdgeInsets.symmetric(horizontal: _resolvedChatBubbleHorizontalPadding(context), vertical: 6),
           decoration: BoxDecoration(
             color: previewHeaderBackground,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
@@ -12150,7 +12177,7 @@ class _EventLineState extends State<EventLine> {
     final showPreviewOverlay = itemId.isNotEmpty && widget.pendingItemId != null && widget.pendingItemId == itemId;
     final canApprove = kind == "approval" && inProgress && approvalId.isNotEmpty;
     final canOpenPath = eventPath != null && widget.openFile != null && ((kind == "thread" && eventPath != widget.path) || kind == "file");
-    const eventTextPadding = EdgeInsets.only(left: _chatBubbleContentHorizontalPadding);
+    final eventTextPadding = EdgeInsets.only(left: _resolvedChatBubbleHorizontalPadding(context));
 
     Color textColor;
     if (state == "failed") {
@@ -12337,7 +12364,13 @@ class ChatThreadPreview extends StatelessWidget {
       );
     }
 
-    return FileDefaultPreviewCard(icon: LucideIcons.file, text: path.split("/").last, useThreadAttachmentStyle: true, showActionIcon: true);
+    final useThreadAttachmentStyle = ThreadTypographyOverride.useThreadAttachmentStyleOf(context);
+    return FileDefaultPreviewCard(
+      icon: LucideIcons.file,
+      text: path.split("/").last,
+      useThreadAttachmentStyle: useThreadAttachmentStyle,
+      showActionIcon: useThreadAttachmentStyle,
+    );
   }
 }
 

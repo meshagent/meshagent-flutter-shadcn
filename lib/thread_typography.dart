@@ -24,10 +24,18 @@ class ThreadTypographyOverride extends InheritedWidget {
     required super.child,
     this.textFontFamily,
     this.codeFontFamily,
+    this.threadParagraphBaseFontSize,
+    this.threadParagraphLineHeight,
     this.narrowDesktopParagraphBaseFontSize,
+    this.bubbleContentPadding,
+    this.threadFeedItemSpacing,
+    this.useThreadAttachmentStyle = false,
+    this.normalizeParticipantDisplayName = false,
+    this.showInlineDisclosureCue = false,
     this.useDesktopAuthorHeaderAtNarrowWidths = false,
     this.mineBubbleColor,
     this.mineBubbleTextColor,
+    this.mineBubbleLinkColor,
     this.otherHumanBubbleColor,
     this.otherHumanBubbleTextColor,
     this.agentBubbleColor,
@@ -70,10 +78,18 @@ class ThreadTypographyOverride extends InheritedWidget {
 
   final String? textFontFamily;
   final String? codeFontFamily;
+  final double? threadParagraphBaseFontSize;
+  final double? threadParagraphLineHeight;
   final double? narrowDesktopParagraphBaseFontSize;
+  final EdgeInsets? bubbleContentPadding;
+  final double? threadFeedItemSpacing;
+  final bool useThreadAttachmentStyle;
+  final bool normalizeParticipantDisplayName;
+  final bool showInlineDisclosureCue;
   final bool useDesktopAuthorHeaderAtNarrowWidths;
   final Color? mineBubbleColor;
   final Color? mineBubbleTextColor;
+  final Color? mineBubbleLinkColor;
   final Color? otherHumanBubbleColor;
   final Color? otherHumanBubbleTextColor;
   final Color? agentBubbleColor;
@@ -129,6 +145,34 @@ class ThreadTypographyOverride extends InheritedWidget {
     return maybeOf(context)?.narrowDesktopParagraphBaseFontSize;
   }
 
+  static double? maybeThreadParagraphBaseFontSizeOf(BuildContext context) {
+    return maybeOf(context)?.threadParagraphBaseFontSize;
+  }
+
+  static double? maybeThreadParagraphLineHeightOf(BuildContext context) {
+    return maybeOf(context)?.threadParagraphLineHeight;
+  }
+
+  static EdgeInsets? maybeBubbleContentPaddingOf(BuildContext context) {
+    return maybeOf(context)?.bubbleContentPadding;
+  }
+
+  static double? maybeThreadFeedItemSpacingOf(BuildContext context) {
+    return maybeOf(context)?.threadFeedItemSpacing;
+  }
+
+  static bool useThreadAttachmentStyleOf(BuildContext context) {
+    return maybeOf(context)?.useThreadAttachmentStyle ?? false;
+  }
+
+  static bool normalizeParticipantDisplayNameOf(BuildContext context) {
+    return maybeOf(context)?.normalizeParticipantDisplayName ?? false;
+  }
+
+  static bool showInlineDisclosureCueOf(BuildContext context) {
+    return maybeOf(context)?.showInlineDisclosureCue ?? false;
+  }
+
   static bool useDesktopAuthorHeaderAtNarrowWidthsOf(BuildContext context) {
     return maybeOf(context)?.useDesktopAuthorHeaderAtNarrowWidths ?? false;
   }
@@ -139,6 +183,10 @@ class ThreadTypographyOverride extends InheritedWidget {
 
   static Color? maybeMineBubbleTextColorOf(BuildContext context) {
     return maybeOf(context)?.mineBubbleTextColor;
+  }
+
+  static Color? maybeMineBubbleLinkColorOf(BuildContext context) {
+    return maybeOf(context)?.mineBubbleLinkColor;
   }
 
   static Color? maybeOtherHumanBubbleColorOf(BuildContext context) {
@@ -297,9 +345,18 @@ class ThreadTypographyOverride extends InheritedWidget {
   bool updateShouldNotify(ThreadTypographyOverride oldWidget) {
     return textFontFamily != oldWidget.textFontFamily ||
         codeFontFamily != oldWidget.codeFontFamily ||
+        threadParagraphBaseFontSize != oldWidget.threadParagraphBaseFontSize ||
+        threadParagraphLineHeight != oldWidget.threadParagraphLineHeight ||
         narrowDesktopParagraphBaseFontSize != oldWidget.narrowDesktopParagraphBaseFontSize ||
+        bubbleContentPadding != oldWidget.bubbleContentPadding ||
+        threadFeedItemSpacing != oldWidget.threadFeedItemSpacing ||
+        useThreadAttachmentStyle != oldWidget.useThreadAttachmentStyle ||
+        normalizeParticipantDisplayName != oldWidget.normalizeParticipantDisplayName ||
+        showInlineDisclosureCue != oldWidget.showInlineDisclosureCue ||
         useDesktopAuthorHeaderAtNarrowWidths != oldWidget.useDesktopAuthorHeaderAtNarrowWidths ||
         mineBubbleColor != oldWidget.mineBubbleColor ||
+        mineBubbleTextColor != oldWidget.mineBubbleTextColor ||
+        mineBubbleLinkColor != oldWidget.mineBubbleLinkColor ||
         agentBubbleColor != oldWidget.agentBubbleColor ||
         agentBubbleBorderColor != oldWidget.agentBubbleBorderColor ||
         linkColor != oldWidget.linkColor ||
