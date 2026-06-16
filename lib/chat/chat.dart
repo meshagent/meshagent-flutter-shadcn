@@ -6510,7 +6510,7 @@ class PendingChatThreadMessage extends StatelessWidget {
             icon: LucideIcons.paperclip,
             text: displayName,
             useThreadAttachmentStyle: true,
-            onDownload: canOpenInline ? () => unawaited(_showPendingAttachmentPreview(context, attachment)) : null,
+            showActionIcon: canOpenInline,
           );
     final child = canOpenInline && !isInlineImage
         ? MouseRegion(
@@ -12300,16 +12300,7 @@ class ChatThreadPreview extends StatelessWidget {
       );
     }
 
-    return FileDefaultPreviewCard(
-      icon: LucideIcons.file,
-      text: path.split("/").last,
-      useThreadAttachmentStyle: true,
-      onDownload: () async {
-        final url = await room.storage.downloadUrl(path);
-
-        launchUrl(Uri.parse(url));
-      },
-    );
+    return FileDefaultPreviewCard(icon: LucideIcons.file, text: path.split("/").last, useThreadAttachmentStyle: true, showActionIcon: true);
   }
 }
 

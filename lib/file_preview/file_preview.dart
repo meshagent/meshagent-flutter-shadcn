@@ -300,6 +300,7 @@ class FileDefaultPreviewCard extends StatefulWidget {
     required this.text,
     this.onClose,
     this.onDownload,
+    this.showActionIcon = false,
     this.useThreadAttachmentStyle = false,
   });
 
@@ -307,6 +308,7 @@ class FileDefaultPreviewCard extends StatefulWidget {
   final String text;
   final VoidCallback? onClose;
   final VoidCallback? onDownload;
+  final bool showActionIcon;
   final bool useThreadAttachmentStyle;
 
   @override
@@ -351,7 +353,8 @@ class _FileDefaultPreviewCardState extends State<FileDefaultPreviewCard> {
     final contentGap = useThreadAttachmentStyle ? 10.0 : 8.0;
     final actionGap = useThreadAttachmentStyle ? 10.0 : 0.0;
     final actionBoxSize = useThreadAttachmentStyle ? 18.0 : 0.0;
-    final actionIcon = widget.onDownload != null && useThreadAttachmentStyle
+    final showActionIcon = useThreadAttachmentStyle && (widget.showActionIcon || widget.onDownload != null);
+    final actionIcon = showActionIcon
         ? IgnorePointer(
             child: AnimatedOpacity(
               duration: const Duration(milliseconds: 120),
@@ -422,15 +425,16 @@ class _FileDefaultPreviewCardState extends State<FileDefaultPreviewCard> {
       ),
     );
 
-    if (widget.onDownload == null || !useThreadAttachmentStyle) {
+    if (!showActionIcon) {
       return card;
     }
 
+    final onDownload = widget.onDownload;
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
-      child: GestureDetector(onTap: widget.onDownload, behavior: HitTestBehavior.opaque, child: card),
+      child: onDownload == null ? card : GestureDetector(onTap: onDownload, behavior: HitTestBehavior.opaque, child: card),
     );
   }
 }

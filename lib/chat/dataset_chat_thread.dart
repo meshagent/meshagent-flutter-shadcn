@@ -2621,7 +2621,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
               icon: LucideIcons.paperclip,
               text: attachment.displayName,
               useThreadAttachmentStyle: true,
-              onDownload: canOpen ? () => unawaited(_openAttachment(context, attachment)) : null,
+              showActionIcon: canOpen,
             ),
     );
     if (!canOpen) {
