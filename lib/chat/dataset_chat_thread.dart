@@ -79,6 +79,7 @@ import 'tool_call_summary.dart';
 import 'usage_footer_tooltip.dart';
 
 const double _datasetDiffPreviewHorizontalPadding = 16;
+const double _datasetThreadFeedSpacing = 32;
 
 typedef DatasetChatAttachmentRenderer = Widget Function(BuildContext context, String path);
 typedef DatasetChatRowsLoader = Stream<List<Map<String, Object?>>> Function({required List<String>? namespace, required String table});
@@ -3133,7 +3134,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     });
     for (final pending in pendingFeedMessages) {
       if (messageWidgets.isNotEmpty) {
-        messageWidgets.insert(0, const SizedBox(height: ChatThreadMessageView.chatMessageStackSpacing));
+        messageWidgets.insert(0, const SizedBox(height: _datasetThreadFeedSpacing));
       }
       messageWidgets.insert(0, PendingChatThreadMessage(room: null, message: pending));
     }
@@ -3410,12 +3411,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   double _datasetThreadFeedItemSpacing(_DatasetThreadFeedItem previous, _DatasetThreadFeedItem next) {
-    final previousMessage = previous is _DatasetThreadMessageFeedItem ? previous.message : null;
-    final nextMessage = next is _DatasetThreadMessageFeedItem ? next.message : null;
-    if (previousMessage == null || nextMessage == null) {
-      return 10;
-    }
-    return _datasetThreadMessageSpacing(previousMessage, nextMessage);
+    return _datasetThreadFeedSpacing;
   }
 
   Widget _buildToolCallSummaryText(

@@ -6637,7 +6637,7 @@ class _PendingAgentAttachmentPreview extends StatelessWidget {
 }
 
 class _ChatThreadMessagesState extends State<ChatThreadMessages> {
-  static const double _chatMessageStackSpacing = ChatThreadMessageView.chatMessageStackSpacing;
+  static const double _threadFeedItemSpacing = 32;
   static const double _statusBottomSpacer = 20;
   static const Duration _statusCollapseDelay = Duration(milliseconds: 500);
   static const Duration _statusAnimationDuration = Duration(seconds: 1);
@@ -6867,6 +6867,14 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   }
 
   bool _isTerminalStackMessage(MeshElement? message) => message?.tagName == "exec";
+
+  double _threadFeedStackSpacingBetween(MeshElement? previous, MeshElement current) {
+    if (_isTerminalStackMessage(previous) && _isTerminalStackMessage(current)) {
+      return 0.0;
+    }
+
+    return _threadFeedItemSpacing;
+  }
 
   String? _normalizeReactionUserName(Object? value) {
     if (value is! String) {
@@ -8036,7 +8044,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
       );
 
       if (messageWidgets.isNotEmpty) {
-        final stackSpacing = _isTerminalStackMessage(previous) && _isTerminalStackMessage(message.$2) ? 0.0 : _chatMessageStackSpacing;
+        final stackSpacing = _threadFeedStackSpacingBetween(previous, message.$2);
         messageWidgets.insert(0, SizedBox(height: stackSpacing));
       }
       messageWidgets.insert(0, messageWidget);
@@ -8046,7 +8054,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     );
     for (final pending in pendingFeedMessages) {
       if (messageWidgets.isNotEmpty) {
-        messageWidgets.insert(0, const SizedBox(height: _chatMessageStackSpacing));
+        messageWidgets.insert(0, const SizedBox(height: _threadFeedItemSpacing));
       }
       messageWidgets.insert(
         0,
