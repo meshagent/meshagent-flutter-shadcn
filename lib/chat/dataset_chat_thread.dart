@@ -3422,7 +3422,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }) {
     final theme = ShadTheme.of(context);
     final baseStyle = theme.textTheme.muted.copyWith(color: theme.colorScheme.mutedForeground);
-    final highlightStyle = baseStyle.copyWith(color: theme.colorScheme.foreground, fontWeight: FontWeight.w700);
+    final highlightStyle = baseStyle.copyWith(fontWeight: FontWeight.w700);
     final detailLines = display.detailLines;
     final headlineRest = display.headline.rest;
     final lineCountStyle = baseStyle.copyWith(fontWeight: FontWeight.w700);
@@ -3976,6 +3976,7 @@ class _DatasetDetailLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
+    final displayText = '$text ›';
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
@@ -3984,7 +3985,7 @@ class _DatasetDetailLine extends StatelessWidget {
         child: ChatThreadMessageView(
           mine: false,
           isAgentMessage: true,
-          text: text,
+          text: displayText,
           authorName: authorName,
           createdAt: createdAt,
           bubbleColor: Colors.transparent,
@@ -3993,7 +3994,7 @@ class _DatasetDetailLine extends StatelessWidget {
           showBubbleActions: false,
           onTap: onTap,
           useDefaultBubbleBorder: false,
-          header: ChatThreadAuthorHeader(authorName: authorName, createdAt: createdAt, text: text),
+          header: ChatThreadAuthorHeader(authorName: authorName, createdAt: createdAt, text: displayText),
         ),
       ),
     );
