@@ -731,7 +731,26 @@ bool _supportsMcp(Participant participant) {
 }
 
 String _displayParticipantName(String name) {
-  return name.split("@").first.trim();
+  final baseName = name.split("@").first.trim();
+  if (baseName.isEmpty) {
+    return baseName;
+  }
+
+  final buffer = StringBuffer();
+  var capitalizeNext = true;
+  for (final char in baseName.characters) {
+    final isLetter = RegExp(r'[A-Za-z]').hasMatch(char);
+    if (capitalizeNext && isLetter) {
+      buffer.write(char.toUpperCase());
+      capitalizeNext = false;
+      continue;
+    }
+
+    buffer.write(char);
+    capitalizeNext = char == '.' || char == ' ' || char == '_' || char == '-';
+  }
+
+  return buffer.toString();
 }
 
 String? _normalizeAgentAttachmentUrl(String path) {
