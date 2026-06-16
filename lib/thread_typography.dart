@@ -53,6 +53,8 @@ class ThreadTypographyOverride extends InheritedWidget {
     this.inlineCodeTextColor,
     this.inlineCodeBackgroundColor,
     this.inlineCodeHorizontalPadding = false,
+    this.threadErrorSurfaceColor,
+    this.threadErrorTextColor,
     this.markdownHorizontalRuleColor,
     this.markdownBlockquoteSideColor,
     this.markdownBlockquoteBackgroundColor,
@@ -92,6 +94,8 @@ class ThreadTypographyOverride extends InheritedWidget {
   final Color? inlineCodeTextColor;
   final Color? inlineCodeBackgroundColor;
   final bool inlineCodeHorizontalPadding;
+  final Color? threadErrorSurfaceColor;
+  final Color? threadErrorTextColor;
   final Color? markdownHorizontalRuleColor;
   final Color? markdownBlockquoteSideColor;
   final Color? markdownBlockquoteBackgroundColor;
@@ -227,6 +231,14 @@ class ThreadTypographyOverride extends InheritedWidget {
     return maybeOf(context)?.inlineCodeHorizontalPadding ?? false;
   }
 
+  static Color? maybeThreadErrorSurfaceColorOf(BuildContext context) {
+    return maybeOf(context)?.threadErrorSurfaceColor;
+  }
+
+  static Color? maybeThreadErrorTextColorOf(BuildContext context) {
+    return maybeOf(context)?.threadErrorTextColor;
+  }
+
   static Color? maybeMarkdownHorizontalRuleColorOf(BuildContext context) {
     return maybeOf(context)?.markdownHorizontalRuleColor;
   }
@@ -284,6 +296,8 @@ class ThreadTypographyOverride extends InheritedWidget {
         inlineCodeTextColor != oldWidget.inlineCodeTextColor ||
         inlineCodeBackgroundColor != oldWidget.inlineCodeBackgroundColor ||
         inlineCodeHorizontalPadding != oldWidget.inlineCodeHorizontalPadding ||
+        threadErrorSurfaceColor != oldWidget.threadErrorSurfaceColor ||
+        threadErrorTextColor != oldWidget.threadErrorTextColor ||
         markdownHorizontalRuleColor != oldWidget.markdownHorizontalRuleColor ||
         markdownBlockquoteSideColor != oldWidget.markdownBlockquoteSideColor ||
         markdownBlockquoteBackgroundColor != oldWidget.markdownBlockquoteBackgroundColor ||

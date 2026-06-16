@@ -6345,6 +6345,7 @@ class ChatThreadMessageView extends StatelessWidget {
     this.mobileStorageSaveSurfacePresenter,
     this.bubbleColor,
     this.bubbleBorderColor,
+    this.useDefaultBubbleBorder = true,
     this.textColor,
     this.selectable = true,
     this.showBubbleActions = true,
@@ -6373,6 +6374,7 @@ class ChatThreadMessageView extends StatelessWidget {
   final ThreadStorageSaveSurfacePresenter? mobileStorageSaveSurfacePresenter;
   final Color? bubbleColor;
   final Color? bubbleBorderColor;
+  final bool useDefaultBubbleBorder;
   final Color? textColor;
   final bool selectable;
   final bool showBubbleActions;
@@ -6390,7 +6392,8 @@ class ChatThreadMessageView extends StatelessWidget {
             ? ThreadTypographyOverride.maybeAgentBubbleColorOf(context)
             : null);
     final resolvedBubbleBorderColor =
-        bubbleBorderColor ?? (isAgentMessage ? ThreadTypographyOverride.maybeAgentBubbleBorderColorOf(context) : null);
+        bubbleBorderColor ??
+        (useDefaultBubbleBorder && isAgentMessage ? ThreadTypographyOverride.maybeAgentBubbleBorderColorOf(context) : null);
     final headerLeftInset = mine ? chatBubbleHorizontalInset + chatBubbleActionRailWidth : chatBubbleHorizontalInset;
     final headerRightInset = mine || isAgentMessage ? chatBubbleHorizontalInset : chatBubbleHorizontalInset + chatBubbleActionRailWidth;
     return Column(

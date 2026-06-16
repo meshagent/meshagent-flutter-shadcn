@@ -2967,6 +2967,24 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         );
       }
       if (message.kind == 'error') {
+        final errorSurfaceColor = ThreadTypographyOverride.maybeThreadErrorSurfaceColorOf(context);
+        final errorTextColor = ThreadTypographyOverride.maybeThreadErrorTextColorOf(context);
+        if (errorSurfaceColor != null || errorTextColor != null) {
+          return ChatThreadMessageView(
+            key: ValueKey(message.id),
+            room: null,
+            mine: false,
+            isAgentMessage: true,
+            text: message.text,
+            authorName: '',
+            createdAt: message.createdAt,
+            shouldShowHeader: false,
+            bubbleColor: errorSurfaceColor ?? theme.colorScheme.destructive.withValues(alpha: 0.08),
+            useDefaultBubbleBorder: false,
+            textColor: errorTextColor ?? theme.colorScheme.destructive,
+            showBubbleActions: false,
+          );
+        }
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
           child: SizedBox(
