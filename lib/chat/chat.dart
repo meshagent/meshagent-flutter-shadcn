@@ -97,9 +97,9 @@ import 'usage_footer_tooltip.dart';
 
 const webPDFFormat = SimpleFileFormat(uniformTypeIdentifiers: ['com.adobe.pdf'], mimeTypes: ['web application/pdf']);
 const List<String> _emojiFontFamilyFallback = <String>['Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji'];
-const double _chatBubbleContentHorizontalPadding = 16;
-const double _chatBubbleContentTopPadding = 4;
-const double _chatBubbleContentBottomPadding = 2;
+const double _chatBubbleContentHorizontalPadding = 18;
+const double _chatBubbleContentTopPadding = 8;
+const double _chatBubbleContentBottomPadding = 8;
 const double _mobileReactionFlowDialogMaxWidth = 420;
 const double _mobileReactionFlowDialogViewportTopGap = 20;
 const double _mobileReactionFlowDialogMaxHeightFactor = 0.72;
