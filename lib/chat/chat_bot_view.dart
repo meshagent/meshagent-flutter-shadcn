@@ -46,6 +46,7 @@ class ChatBotView extends StatefulWidget {
     this.onAttachmentRemoved,
     this.fileInThreadBuilder,
     this.chatInputBoxBuilder,
+    this.customInputBuilder,
     this.openFile,
     this.fileDropOverlayBuilder,
     this.toolsBuilder,
@@ -97,6 +98,7 @@ class ChatBotView extends StatefulWidget {
   final ValueChanged<FileAttachment>? onAttachmentRemoved;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
   final Widget Function(BuildContext context, Widget chatBox)? chatInputBoxBuilder;
+  final ChatThreadCustomInputBuilder? customInputBuilder;
   final FutureOr<void> Function(String path)? openFile;
   final FileDropOverlayBuilder? fileDropOverlayBuilder;
   final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
@@ -263,6 +265,7 @@ class _ChatBotViewState extends State<ChatBotView> {
       attachmentBuilder: widget.attachmentBuilder,
       inputContextMenuBuilder: widget.inputContextMenuBuilder,
       inputOnPressedOutside: widget.inputOnPressedOutside,
+      customInputBuilder: widget.customInputBuilder,
       onFileDrop: (name, dataStream, size) => controller.uploadFile(name, dataStream, size ?? 0),
       fileDropOverlayBuilder: widget.fileDropOverlayBuilder,
       localParticipant: widget.room.localParticipant,
@@ -312,6 +315,7 @@ class _ChatBotViewState extends State<ChatBotView> {
         attachmentBuilder: widget.attachmentBuilder,
         inputContextMenuBuilder: widget.inputContextMenuBuilder,
         inputOnPressedOutside: widget.inputOnPressedOutside,
+        customInputBuilder: widget.customInputBuilder,
         fileDropOverlayBuilder: widget.fileDropOverlayBuilder,
         modelController: modelController,
         initialShowCompletedToolCalls: widget.initialShowCompletedToolCalls,
@@ -339,6 +343,7 @@ class _ChatBotViewState extends State<ChatBotView> {
       onAttachmentRemoved: widget.onAttachmentRemoved,
       fileInThreadBuilder: widget.fileInThreadBuilder,
       chatInputBoxBuilder: (context, chatBox) => _buildChatInputBox(context, chatBox),
+      customInputBuilder: widget.customInputBuilder,
       openFile: widget.openFile,
       fileDropOverlayBuilder: widget.fileDropOverlayBuilder,
       toolsBuilder: widget.toolsBuilder,
@@ -390,6 +395,7 @@ class _ChatBotViewState extends State<ChatBotView> {
       fileDropOverlayBuilder: widget.fileDropOverlayBuilder,
       toolsBuilder: widget.toolsBuilder,
       modelController: _newThreadModelController,
+      customInputBuilder: widget.customInputBuilder,
       newThreadWrapperBuilder: widget.datasetNewThreadWrapperBuilder,
       builder: (context, path, controller, composerKey) => _buildThread(context, path, controller, composerKey: composerKey),
     );

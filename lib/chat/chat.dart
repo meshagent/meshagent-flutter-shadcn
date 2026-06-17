@@ -2828,6 +2828,74 @@ ChatThreadToolArea resolveChatThreadToolArea(Widget? tools) {
   return ChatThreadToolArea(leading: tools);
 }
 
+typedef ChatThreadCustomInputBuilder = Widget Function(BuildContext context, ChatThreadInputConfig config, Widget defaultInput);
+
+class ChatThreadInputConfig {
+  const ChatThreadInputConfig({
+    required this.controller,
+    required this.snapshot,
+    required this.placeholder,
+    required this.sendEnabled,
+    required this.sendDisabledReason,
+    required this.readOnly,
+    required this.onSend,
+    this.onChanged,
+    this.onClear,
+    this.onInterrupt,
+    this.onCancelSend,
+    this.sendPendingText,
+    this.attachmentBuilder,
+    this.onAttachmentOpen,
+    this.onAttachmentRemoved,
+    this.onFileDrop,
+    this.leading,
+    this.trailing,
+    this.header,
+    this.footer,
+    this.audioInputEnabled = false,
+    this.automaticAudioTurnDetection = false,
+    this.onAudioRecordingStart,
+    this.onExternalAudioRecordingStart,
+    this.onExternalAudioRecordingStop,
+    this.onAudioChunk,
+    this.contextMenuBuilder,
+    this.onPressedOutside,
+    this.tapRegionGroupId,
+    this.room,
+  });
+
+  final ChatThreadController controller;
+  final ChatThreadSnapshot snapshot;
+  final Widget? placeholder;
+  final bool sendEnabled;
+  final String? sendDisabledReason;
+  final bool readOnly;
+  final Future<void> Function(String, List<FileAttachment>) onSend;
+  final void Function(String, List<FileAttachment>)? onChanged;
+  final VoidCallback? onClear;
+  final VoidCallback? onInterrupt;
+  final VoidCallback? onCancelSend;
+  final String? sendPendingText;
+  final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
+  final ValueChanged<FileAttachment>? onAttachmentOpen;
+  final ValueChanged<FileAttachment>? onAttachmentRemoved;
+  final Future<void> Function(String name, Stream<Uint8List> dataStream, int size)? onFileDrop;
+  final Widget? leading;
+  final Widget? trailing;
+  final Widget? header;
+  final Widget? footer;
+  final bool audioInputEnabled;
+  final bool automaticAudioTurnDetection;
+  final Future<void> Function()? onAudioRecordingStart;
+  final Future<void> Function()? onExternalAudioRecordingStart;
+  final Future<void> Function()? onExternalAudioRecordingStop;
+  final Future<void> Function(Uint8List chunk, {required bool finalChunk})? onAudioChunk;
+  final EditableTextContextMenuBuilder? contextMenuBuilder;
+  final TapRegionCallback? onPressedOutside;
+  final Object? tapRegionGroupId;
+  final RoomClient? room;
+}
+
 typedef ChatThreadAttachmentMenuItemsBuilder =
     List<ShadContextMenuItem> Function(BuildContext context, ChatThreadController controller, ShadPopoverController popoverController);
 
@@ -4876,6 +4944,7 @@ class ChatThread extends StatefulWidget {
     this.onAttachmentRemoved,
     this.fileInThreadBuilder,
     this.chatInputBoxBuilder,
+    this.customInputBuilder,
     this.openFile,
     this.fileDropOverlayBuilder,
     this.toolsBuilder,
@@ -4923,6 +4992,7 @@ class ChatThread extends StatefulWidget {
   final ValueChanged<FileAttachment>? onAttachmentRemoved;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
   final Widget Function(BuildContext context, Widget chatBox)? chatInputBoxBuilder;
+  final ChatThreadCustomInputBuilder? customInputBuilder;
   final FutureOr<void> Function(String path)? openFile;
   final FileDropOverlayBuilder? fileDropOverlayBuilder;
   final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
@@ -5899,13 +5969,13 @@ class _ChatThreadState extends State<ChatThread> {
     final waitingForOnlineMessage = pendingMessages.firstWhereOrNull((message) => message.awaitingOnline);
     final canInterruptActiveTurn = _canInterruptActiveTurn(state: state, pendingMessages: pendingMessages);
     final toolArea = _buildToolArea(context, state);
-
-    return ChatThreadInput(
-      key: _composerInputKey,
-      focusTrigger: controller,
+    final config = ChatThreadInputConfig(
+      controller: controller,
+      snapshot: state,
+      placeholder: widget.inputPlaceholder,
       sendEnabled: !waitingForTurnStart,
       sendDisabledReason: waitingForTurnStart ? "Wait for the previous message to start before sending another one." : null,
-      placeholder: widget.inputPlaceholder,
+      readOnly: false,
       onClear: () {
         _clearThread(document, state);
       },
@@ -5930,7 +6000,6 @@ class _ChatThreadState extends State<ChatThread> {
           : "Waiting for ${_displayParticipantName(context, widget.agentName ?? "agent")} to come online.",
       leading: toolArea.leading,
       footer: toolArea.footer,
-      trailing: null,
       room: widget.room,
       onSend: (value, attachments) async {
         final messageType = state.threadStatusMode == "steerable" && state.threadTurnId != null ? "steer" : "chat";
@@ -5959,7 +6028,6 @@ class _ChatThreadState extends State<ChatThread> {
           }
         }
       },
-      controller: controller,
       attachmentBuilder: widget.attachmentBuilder,
       onAttachmentOpen: widget.onAttachmentOpen,
       onAttachmentRemoved: widget.onAttachmentRemoved,
@@ -5967,29 +6035,75 @@ class _ChatThreadState extends State<ChatThread> {
       onPressedOutside: widget.inputOnPressedOutside,
       tapRegionGroupId: _composerTapRegionGroupId,
     );
+    final defaultInput = ChatThreadInput(
+      key: _composerInputKey,
+      focusTrigger: controller,
+      sendEnabled: config.sendEnabled,
+      sendDisabledReason: config.sendDisabledReason,
+      placeholder: config.placeholder,
+      onClear: config.onClear,
+      onInterrupt: config.onInterrupt,
+      onCancelSend: config.onCancelSend,
+      sendPendingText: config.sendPendingText,
+      leading: config.leading,
+      footer: config.footer,
+      trailing: null,
+      room: config.room,
+      onSend: config.onSend,
+      onChanged: config.onChanged,
+      controller: config.controller,
+      attachmentBuilder: config.attachmentBuilder,
+      onAttachmentOpen: config.onAttachmentOpen,
+      onAttachmentRemoved: config.onAttachmentRemoved,
+      contextMenuBuilder: config.contextMenuBuilder,
+      onPressedOutside: config.onPressedOutside,
+      tapRegionGroupId: config.tapRegionGroupId,
+    );
+    return widget.customInputBuilder?.call(context, config, defaultInput) ?? defaultInput;
   }
 
   Widget _buildConnectingInputBox(BuildContext context) {
     final state = _buildLoadingSnapshot();
     final toolArea = _buildToolArea(context, state);
-    return ChatThreadInput(
-      key: _composerInputKey,
-      focusTrigger: controller,
+    final config = ChatThreadInputConfig(
+      controller: controller,
+      snapshot: state,
+      placeholder: widget.inputPlaceholder,
       sendEnabled: false,
       sendDisabledReason: _documentError == null ? "Thread is loading." : "Thread is reconnecting.",
       readOnly: false,
-      placeholder: widget.inputPlaceholder,
       leading: toolArea.leading,
       footer: toolArea.footer,
-      trailing: null,
       room: widget.room,
       onSend: (value, attachments) async {},
-      controller: controller,
       attachmentBuilder: widget.attachmentBuilder,
       onAttachmentOpen: widget.onAttachmentOpen,
       onAttachmentRemoved: widget.onAttachmentRemoved,
+      contextMenuBuilder: widget.inputContextMenuBuilder,
+      onPressedOutside: widget.inputOnPressedOutside,
       tapRegionGroupId: _composerTapRegionGroupId,
     );
+    final defaultInput = ChatThreadInput(
+      key: _composerInputKey,
+      focusTrigger: controller,
+      sendEnabled: config.sendEnabled,
+      sendDisabledReason: config.sendDisabledReason,
+      readOnly: config.readOnly,
+      placeholder: config.placeholder,
+      leading: config.leading,
+      footer: config.footer,
+      trailing: null,
+      room: config.room,
+      onSend: config.onSend,
+      controller: config.controller,
+      attachmentBuilder: config.attachmentBuilder,
+      onAttachmentOpen: config.onAttachmentOpen,
+      onAttachmentRemoved: config.onAttachmentRemoved,
+      contextMenuBuilder: config.contextMenuBuilder,
+      onPressedOutside: config.onPressedOutside,
+      tapRegionGroupId: config.tapRegionGroupId,
+    );
+    return widget.customInputBuilder?.call(context, config, defaultInput) ?? defaultInput;
   }
 
   Widget _buildResolvedThread(BuildContext context, MeshDocument document) {

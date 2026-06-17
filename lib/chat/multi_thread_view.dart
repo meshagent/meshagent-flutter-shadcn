@@ -36,6 +36,7 @@ class MultiThreadView extends StatefulWidget {
     this.onAttachmentRemoved,
     this.fileDropOverlayBuilder,
     this.modelController,
+    this.customInputBuilder,
     this.newThreadWrapperBuilder,
   });
 
@@ -63,6 +64,7 @@ class MultiThreadView extends StatefulWidget {
   final ValueChanged<FileAttachment>? onAttachmentRemoved;
   final FileDropOverlayBuilder? fileDropOverlayBuilder;
   final DatasetChatModelController? modelController;
+  final ChatThreadCustomInputBuilder? customInputBuilder;
   final NewChatThreadWrapperBuilder? newThreadWrapperBuilder;
 
   @override
@@ -148,6 +150,7 @@ class _MultiThreadViewState extends State<MultiThreadView> {
       onAttachmentRemoved: widget.onAttachmentRemoved,
       fileDropOverlayBuilder: widget.fileDropOverlayBuilder,
       modelController: widget.modelController,
+      customInputBuilder: widget.customInputBuilder,
       newThreadWrapperBuilder: widget.newThreadWrapperBuilder,
       builder: (context, threadPath) => widget.builder(context, threadPath, _controller, _composerKey),
     );
