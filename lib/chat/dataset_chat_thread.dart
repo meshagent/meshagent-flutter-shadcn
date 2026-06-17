@@ -2885,12 +2885,6 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         break;
       }
     }
-    final sendEnabled = !loading && waitingForOnlineMessage == null;
-    final sendDisabledReason = loading
-        ? 'Thread is loading.'
-        : waitingForOnlineMessage == null
-        ? null
-        : 'Waiting for ${_displayAgentName(widget.agentName ?? "agent")} to come online.';
     return AnimatedBuilder(
       animation: Listenable.merge([_modelController, _controller]),
       builder: (context, _) {
