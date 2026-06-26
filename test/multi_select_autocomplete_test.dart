@@ -168,6 +168,63 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('select subjects includes all service accounts userset when allowed', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(800, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final selected = <AccessSubject>[];
+    final client = Meshagent(
+      baseUrl: 'http://example.test',
+      token: 'test-token',
+      client: MockClient((request) async {
+        if (request.url.path.endsWith('/service-accounts')) {
+          return http.Response(jsonEncode({'service_accounts': []}), 200);
+        }
+        return http.Response(jsonEncode({}), 404);
+      }),
+    );
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: Align(
+            alignment: Alignment.topCenter,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 40),
+              child: SizedBox(
+                width: 500,
+                child: SelectSubjects(
+                  client: client,
+                  projectId: 'project-1',
+                  allowedTypes: const {SelectSubjectType.projectServiceAccounts},
+                  onChanged: (subjects) => selected
+                    ..clear()
+                    ..addAll(subjects),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byType(EditableText));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('All service accounts'), findsOneWidget);
+    expect(find.text('All project users'), findsNothing);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(selected.single.type, 'userset');
+    expect(selected.single.id, 'project-1');
+    expect(selected.single.objectType, 'project');
+    expect(selected.single.relation, 'service_account');
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('select subjects resolves service account emails', (tester) async {
     await tester.binding.setSurfaceSize(const Size(800, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));

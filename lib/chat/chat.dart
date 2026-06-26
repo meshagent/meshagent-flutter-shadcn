@@ -10,7 +10,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:interactive_viewer_2/interactive_viewer_2.dart';
 import 'package:meshagent/meshagent.dart';
@@ -69,6 +68,7 @@ import 'package:meshagent_flutter_shadcn/code_editor.dart';
 import 'package:meshagent_flutter_shadcn/code_language_resolver.dart';
 import 'package:meshagent_flutter_shadcn/markdown_viewer.dart';
 import 'package:meshagent_flutter_shadcn/storage/file_browser.dart';
+import 'package:meshagent_flutter_shadcn/thread_typography.dart';
 import 'package:meshagent_flutter_shadcn/ui/coordinated_context_menu.dart';
 import 'package:meshagent_flutter_shadcn/ui/ui.dart';
 import 'package:meshagent_flutter_shadcn/src/web_context_menu_manager/enable_web_context_menu.dart';
@@ -123,6 +123,14 @@ const EdgeInsets _chatBubbleContentPadding = EdgeInsets.only(
   top: _chatBubbleContentTopPadding,
   bottom: _chatBubbleContentBottomPadding,
 );
+
+EdgeInsets _resolvedChatBubbleContentPadding(BuildContext context) {
+  return ThreadTypographyOverride.maybeBubbleContentPaddingOf(context) ?? _chatBubbleContentPadding;
+}
+
+double _resolvedChatBubbleHorizontalPadding(BuildContext context) {
+  return _resolvedChatBubbleContentPadding(context).left;
+}
 
 enum UploadStatus { initial, uploading, completed, failed }
 
@@ -730,8 +738,27 @@ bool _supportsMcp(Participant participant) {
   return participant.getAttribute("supports_mcp") == true;
 }
 
-String _displayParticipantName(String name) {
-  return name.split("@").first.trim();
+String _displayParticipantName(BuildContext context, String name) {
+  final baseName = name.split("@").first.trim();
+  if (baseName.isEmpty || !ThreadTypographyOverride.normalizeParticipantDisplayNameOf(context)) {
+    return baseName;
+  }
+
+  final buffer = StringBuffer();
+  var capitalizeNext = true;
+  for (final char in baseName.characters) {
+    final isLetter = RegExp(r'[A-Za-z]').hasMatch(char);
+    if (capitalizeNext && isLetter) {
+      buffer.write(char.toUpperCase());
+      capitalizeNext = false;
+      continue;
+    }
+
+    buffer.write(char);
+    capitalizeNext = char == '.' || char == ' ' || char == '_' || char == '-';
+  }
+
+  return buffer.toString();
 }
 
 String? _normalizeAgentAttachmentUrl(String path) {
@@ -2801,6 +2828,74 @@ ChatThreadToolArea resolveChatThreadToolArea(Widget? tools) {
   return ChatThreadToolArea(leading: tools);
 }
 
+typedef ChatThreadCustomInputBuilder = Widget Function(BuildContext context, ChatThreadInputConfig config, Widget defaultInput);
+
+class ChatThreadInputConfig {
+  const ChatThreadInputConfig({
+    required this.controller,
+    required this.snapshot,
+    required this.placeholder,
+    required this.sendEnabled,
+    required this.sendDisabledReason,
+    required this.readOnly,
+    required this.onSend,
+    this.onChanged,
+    this.onClear,
+    this.onInterrupt,
+    this.onCancelSend,
+    this.sendPendingText,
+    this.attachmentBuilder,
+    this.onAttachmentOpen,
+    this.onAttachmentRemoved,
+    this.onFileDrop,
+    this.leading,
+    this.trailing,
+    this.header,
+    this.footer,
+    this.audioInputEnabled = false,
+    this.automaticAudioTurnDetection = false,
+    this.onAudioRecordingStart,
+    this.onExternalAudioRecordingStart,
+    this.onExternalAudioRecordingStop,
+    this.onAudioChunk,
+    this.contextMenuBuilder,
+    this.onPressedOutside,
+    this.tapRegionGroupId,
+    this.room,
+  });
+
+  final ChatThreadController controller;
+  final ChatThreadSnapshot snapshot;
+  final Widget? placeholder;
+  final bool sendEnabled;
+  final String? sendDisabledReason;
+  final bool readOnly;
+  final Future<void> Function(String, List<FileAttachment>) onSend;
+  final void Function(String, List<FileAttachment>)? onChanged;
+  final VoidCallback? onClear;
+  final VoidCallback? onInterrupt;
+  final VoidCallback? onCancelSend;
+  final String? sendPendingText;
+  final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
+  final ValueChanged<FileAttachment>? onAttachmentOpen;
+  final ValueChanged<FileAttachment>? onAttachmentRemoved;
+  final Future<void> Function(String name, Stream<Uint8List> dataStream, int size)? onFileDrop;
+  final Widget? leading;
+  final Widget? trailing;
+  final Widget? header;
+  final Widget? footer;
+  final bool audioInputEnabled;
+  final bool automaticAudioTurnDetection;
+  final Future<void> Function()? onAudioRecordingStart;
+  final Future<void> Function()? onExternalAudioRecordingStart;
+  final Future<void> Function()? onExternalAudioRecordingStop;
+  final Future<void> Function(Uint8List chunk, {required bool finalChunk})? onAudioChunk;
+  final EditableTextContextMenuBuilder? contextMenuBuilder;
+  final TapRegionCallback? onPressedOutside;
+  final Object? tapRegionGroupId;
+  final RoomClient? room;
+}
+
 typedef ChatThreadAttachmentMenuItemsBuilder =
     List<ShadContextMenuItem> Function(BuildContext context, ChatThreadController controller, ShadPopoverController popoverController);
 
@@ -2887,7 +2982,7 @@ class ClientResponseDialogTool extends FunctionTool {
                     child: CodeEditor(
                       style: CodeEditorStyle(
                         fontSize: 14,
-                        fontFamily: "SourceCodePro",
+                        fontFamily: ThreadTypographyOverride.maybeCodeFontFamilyOf(context) ?? defaultThreadCodeFontFamily,
                         codeTheme: CodeHighlightTheme(
                           languages: {'default': CodeHighlightThemeMode(mode: langJson)},
                           theme: monokaiSublimeTheme,
@@ -4849,6 +4944,7 @@ class ChatThread extends StatefulWidget {
     this.onAttachmentRemoved,
     this.fileInThreadBuilder,
     this.chatInputBoxBuilder,
+    this.customInputBuilder,
     this.openFile,
     this.fileDropOverlayBuilder,
     this.toolsBuilder,
@@ -4896,6 +4992,7 @@ class ChatThread extends StatefulWidget {
   final ValueChanged<FileAttachment>? onAttachmentRemoved;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
   final Widget Function(BuildContext context, Widget chatBox)? chatInputBoxBuilder;
+  final ChatThreadCustomInputBuilder? customInputBuilder;
   final FutureOr<void> Function(String path)? openFile;
   final FileDropOverlayBuilder? fileDropOverlayBuilder;
   final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
@@ -4922,6 +5019,7 @@ class ChatBubble extends StatefulWidget {
     this.fullWidth = false,
     this.accented = false,
     this.backgroundColor,
+    this.borderColor,
     this.textColor,
     this.selectable = true,
     this.showActionRail = true,
@@ -4939,6 +5037,7 @@ class ChatBubble extends StatefulWidget {
   final bool fullWidth;
   final bool accented;
   final Color? backgroundColor;
+  final Color? borderColor;
   final Color? textColor;
   final bool selectable;
   final bool showActionRail;
@@ -5106,6 +5205,10 @@ class _ChatBubble extends State<ChatBubble> {
     final text = widget.text;
     final mine = widget.mine;
     final bubbleColor = widget.backgroundColor ?? (widget.accented || mine ? cs.accent : cs.background);
+    final bubbleBorderColor = widget.borderColor;
+    final markdownLinkColor = mine
+        ? ThreadTypographyOverride.maybeMineBubbleLinkColorOf(context) ?? ThreadTypographyOverride.maybeLinkColorOf(context)
+        : ThreadTypographyOverride.maybeLinkColorOf(context);
     final showActions =
         widget.showActionRail && (hovering || optionsController.isOpen || reactionController.isOpen || _keepingActionsVisible);
     final canLongPressReact =
@@ -5185,8 +5288,12 @@ class _ChatBubble extends State<ChatBubble> {
     );
 
     final bubble = Container(
-      padding: _chatBubbleContentPadding,
-      decoration: BoxDecoration(color: bubbleColor, borderRadius: BorderRadius.circular(_bubbleRadius)),
+      padding: _resolvedChatBubbleContentPadding(context),
+      decoration: BoxDecoration(
+        color: bubbleColor,
+        borderRadius: BorderRadius.circular(_bubbleRadius),
+        border: bubbleBorderColor == null ? null : Border.all(color: bubbleBorderColor),
+      ),
       child: MediaQuery(
         data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
         child: MarkdownViewer(
@@ -5196,6 +5303,7 @@ class _ChatBubble extends State<ChatBubble> {
           shrinkWrap: true,
           selectable: widget.selectable && kIsWeb,
           color: widget.textColor,
+          linkColor: markdownLinkColor,
         ),
       ),
     );
@@ -5861,13 +5969,13 @@ class _ChatThreadState extends State<ChatThread> {
     final waitingForOnlineMessage = pendingMessages.firstWhereOrNull((message) => message.awaitingOnline);
     final canInterruptActiveTurn = _canInterruptActiveTurn(state: state, pendingMessages: pendingMessages);
     final toolArea = _buildToolArea(context, state);
-
-    return ChatThreadInput(
-      key: _composerInputKey,
-      focusTrigger: controller,
+    final config = ChatThreadInputConfig(
+      controller: controller,
+      snapshot: state,
+      placeholder: widget.inputPlaceholder,
       sendEnabled: !waitingForTurnStart,
       sendDisabledReason: waitingForTurnStart ? "Wait for the previous message to start before sending another one." : null,
-      placeholder: widget.inputPlaceholder,
+      readOnly: false,
       onClear: () {
         _clearThread(document, state);
       },
@@ -5889,10 +5997,9 @@ class _ChatThreadState extends State<ChatThread> {
           : null,
       sendPendingText: waitingForOnlineMessage == null
           ? null
-          : "Waiting for ${_displayParticipantName(widget.agentName ?? "agent")} to come online.",
+          : "Waiting for ${_displayParticipantName(context, widget.agentName ?? "agent")} to come online.",
       leading: toolArea.leading,
       footer: toolArea.footer,
-      trailing: null,
       room: widget.room,
       onSend: (value, attachments) async {
         final messageType = state.threadStatusMode == "steerable" && state.threadTurnId != null ? "steer" : "chat";
@@ -5921,7 +6028,6 @@ class _ChatThreadState extends State<ChatThread> {
           }
         }
       },
-      controller: controller,
       attachmentBuilder: widget.attachmentBuilder,
       onAttachmentOpen: widget.onAttachmentOpen,
       onAttachmentRemoved: widget.onAttachmentRemoved,
@@ -5929,29 +6035,75 @@ class _ChatThreadState extends State<ChatThread> {
       onPressedOutside: widget.inputOnPressedOutside,
       tapRegionGroupId: _composerTapRegionGroupId,
     );
+    final defaultInput = ChatThreadInput(
+      key: _composerInputKey,
+      focusTrigger: controller,
+      sendEnabled: config.sendEnabled,
+      sendDisabledReason: config.sendDisabledReason,
+      placeholder: config.placeholder,
+      onClear: config.onClear,
+      onInterrupt: config.onInterrupt,
+      onCancelSend: config.onCancelSend,
+      sendPendingText: config.sendPendingText,
+      leading: config.leading,
+      footer: config.footer,
+      trailing: null,
+      room: config.room,
+      onSend: config.onSend,
+      onChanged: config.onChanged,
+      controller: config.controller,
+      attachmentBuilder: config.attachmentBuilder,
+      onAttachmentOpen: config.onAttachmentOpen,
+      onAttachmentRemoved: config.onAttachmentRemoved,
+      contextMenuBuilder: config.contextMenuBuilder,
+      onPressedOutside: config.onPressedOutside,
+      tapRegionGroupId: config.tapRegionGroupId,
+    );
+    return widget.customInputBuilder?.call(context, config, defaultInput) ?? defaultInput;
   }
 
   Widget _buildConnectingInputBox(BuildContext context) {
     final state = _buildLoadingSnapshot();
     final toolArea = _buildToolArea(context, state);
-    return ChatThreadInput(
-      key: _composerInputKey,
-      focusTrigger: controller,
+    final config = ChatThreadInputConfig(
+      controller: controller,
+      snapshot: state,
+      placeholder: widget.inputPlaceholder,
       sendEnabled: false,
       sendDisabledReason: _documentError == null ? "Thread is loading." : "Thread is reconnecting.",
       readOnly: false,
-      placeholder: widget.inputPlaceholder,
       leading: toolArea.leading,
       footer: toolArea.footer,
-      trailing: null,
       room: widget.room,
       onSend: (value, attachments) async {},
-      controller: controller,
       attachmentBuilder: widget.attachmentBuilder,
       onAttachmentOpen: widget.onAttachmentOpen,
       onAttachmentRemoved: widget.onAttachmentRemoved,
+      contextMenuBuilder: widget.inputContextMenuBuilder,
+      onPressedOutside: widget.inputOnPressedOutside,
       tapRegionGroupId: _composerTapRegionGroupId,
     );
+    final defaultInput = ChatThreadInput(
+      key: _composerInputKey,
+      focusTrigger: controller,
+      sendEnabled: config.sendEnabled,
+      sendDisabledReason: config.sendDisabledReason,
+      readOnly: config.readOnly,
+      placeholder: config.placeholder,
+      leading: config.leading,
+      footer: config.footer,
+      trailing: null,
+      room: config.room,
+      onSend: config.onSend,
+      controller: config.controller,
+      attachmentBuilder: config.attachmentBuilder,
+      onAttachmentOpen: config.onAttachmentOpen,
+      onAttachmentRemoved: config.onAttachmentRemoved,
+      contextMenuBuilder: config.contextMenuBuilder,
+      onPressedOutside: config.onPressedOutside,
+      tapRegionGroupId: config.tapRegionGroupId,
+    );
+    return widget.customInputBuilder?.call(context, config, defaultInput) ?? defaultInput;
   }
 
   Widget _buildResolvedThread(BuildContext context, MeshDocument document) {
@@ -6081,7 +6233,10 @@ class _ChatThreadState extends State<ChatThread> {
                                       children: [
                                         Text(
                                           "Pending messages:",
-                                          style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                                          style: threadTypographyTextStyle(
+                                            context,
+                                            TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                                          ),
                                         ),
                                         const SizedBox(height: 4),
                                         for (final pending in queuedPendingMessages)
@@ -6089,14 +6244,17 @@ class _ChatThreadState extends State<ChatThread> {
                                             padding: const EdgeInsets.only(bottom: 4),
                                             child: Text(
                                               [
-                                                if (pending.senderName != null) "${_displayParticipantName(pending.senderName!)}:",
+                                                if (pending.senderName != null) "${_displayParticipantName(context, pending.senderName!)}:",
                                                 if (pending.text.trim().isNotEmpty) pending.text.trim(),
                                                 if (pending.attachments.isNotEmpty)
                                                   "${pending.attachments.length} attachment${pending.attachments.length == 1 ? "" : "s"}",
                                                 if (pending.awaitingOnline)
-                                                  "(waiting for @${_displayParticipantName(widget.agentName ?? "agent")} to come online)",
+                                                  "(waiting for @${_displayParticipantName(context, widget.agentName ?? "agent")} to come online)",
                                               ].join(" "),
-                                              style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                                              style: threadTypographyTextStyle(
+                                                context,
+                                                TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                                              ),
                                             ),
                                           ),
                                         if (canInterruptActiveTurn)
@@ -6104,7 +6262,10 @@ class _ChatThreadState extends State<ChatThread> {
                                             padding: const EdgeInsets.only(top: 8),
                                             child: _ProcessingStatusText(
                                               text: "Messages will be processed shortly. Press Esc to interrupt and send now.",
-                                              style: TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                                              style: threadTypographyTextStyle(
+                                                context,
+                                                TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground),
+                                              ),
                                             ),
                                           ),
                                       ],
@@ -6328,6 +6489,8 @@ class ChatThreadMessageView extends StatelessWidget {
     this.onReactFromMenu,
     this.mobileStorageSaveSurfacePresenter,
     this.bubbleColor,
+    this.bubbleBorderColor,
+    this.useDefaultBubbleBorder = true,
     this.textColor,
     this.selectable = true,
     this.showBubbleActions = true,
@@ -6355,6 +6518,8 @@ class ChatThreadMessageView extends StatelessWidget {
   final VoidCallback? onReactFromMenu;
   final ThreadStorageSaveSurfacePresenter? mobileStorageSaveSurfacePresenter;
   final Color? bubbleColor;
+  final Color? bubbleBorderColor;
+  final bool useDefaultBubbleBorder;
   final Color? textColor;
   final bool selectable;
   final bool showBubbleActions;
@@ -6364,8 +6529,27 @@ class ChatThreadMessageView extends StatelessWidget {
   Widget build(BuildContext context) {
     final messageText = text;
     final hasText = messageText != null && messageText.trim().isNotEmpty;
+    final resolvedBubbleColor =
+        bubbleColor ??
+        (isAgentMessage
+            ? ThreadTypographyOverride.maybeAgentBubbleColorOf(context)
+            : mine
+            ? ThreadTypographyOverride.maybeMineBubbleColorOf(context)
+            : ThreadTypographyOverride.maybeOtherHumanBubbleColorOf(context));
+    final resolvedTextColor =
+        textColor ??
+        (isAgentMessage
+            ? null
+            : mine
+            ? ThreadTypographyOverride.maybeMineBubbleTextColorOf(context)
+            : ThreadTypographyOverride.maybeOtherHumanBubbleTextColorOf(context));
+    final resolvedBubbleBorderColor =
+        bubbleBorderColor ??
+        (useDefaultBubbleBorder && isAgentMessage ? ThreadTypographyOverride.maybeAgentBubbleBorderColorOf(context) : null);
     final headerLeftInset = mine ? chatBubbleHorizontalInset + chatBubbleActionRailWidth : chatBubbleHorizontalInset;
-    final headerRightInset = mine || isAgentMessage ? chatBubbleHorizontalInset : chatBubbleHorizontalInset + chatBubbleActionRailWidth;
+    final headerRightInset = mine || isAgentMessage || !showBubbleActions
+        ? chatBubbleHorizontalInset
+        : chatBubbleHorizontalInset + chatBubbleActionRailWidth;
     return Column(
       mainAxisAlignment: MainAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -6392,8 +6576,9 @@ class ChatThreadMessageView extends StatelessWidget {
               reactionActionBuilder: reactionActionBuilder,
               showReactionAction: showReactionAction,
               onReactFromMenu: onReactFromMenu,
-              backgroundColor: bubbleColor,
-              textColor: textColor,
+              backgroundColor: resolvedBubbleColor,
+              borderColor: resolvedBubbleBorderColor,
+              textColor: resolvedTextColor,
               selectable: selectable,
               showActionRail: showBubbleActions,
               onTap: onTap,
@@ -6401,18 +6586,20 @@ class ChatThreadMessageView extends StatelessWidget {
           ),
         for (var i = 0; i < attachmentWidgets.length; i++) ...[
           if (hasText || i > 0) const SizedBox(height: chatBubbleSiblingSpacing),
-          _buildAttachmentWidget(attachmentWidgets[i]),
+          _buildAttachmentWidget(context, attachmentWidgets[i]),
         ],
         ?trailing,
       ],
     );
   }
 
-  Widget _buildAttachmentWidget(Widget attachmentWidget) {
-    const attachmentInset = chatBubbleHorizontalInset + _chatBubbleContentHorizontalPadding;
+  Widget _buildAttachmentWidget(BuildContext context, Widget attachmentWidget) {
+    final attachmentInset = ThreadTypographyOverride.alignAttachmentEdgesWithBubblesOf(context)
+        ? chatBubbleHorizontalInset
+        : chatBubbleHorizontalInset + _resolvedChatBubbleHorizontalPadding(context);
     return Padding(
       key: attachmentWidget.key == null ? null : ValueKey<Object>(attachmentWidget.key!),
-      padding: const EdgeInsets.only(left: attachmentInset, right: attachmentInset),
+      padding: EdgeInsets.only(left: attachmentInset, right: attachmentInset),
       child: Align(alignment: mine ? Alignment.centerRight : Alignment.centerLeft, child: attachmentWidget),
     );
   }
@@ -6473,7 +6660,12 @@ class PendingChatThreadMessage extends StatelessWidget {
             imageUri: trimmed,
             onOpenFullscreen: canOpenInline ? () => unawaited(_showPendingAttachmentPreview(context, attachment)) : null,
           )
-        : FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: displayName);
+        : FileDefaultPreviewCard(
+            icon: LucideIcons.paperclip,
+            text: displayName,
+            useThreadAttachmentStyle: ThreadTypographyOverride.useThreadAttachmentStyleOf(context),
+            showActionIcon: canOpenInline,
+          );
     final child = canOpenInline && !isInlineImage
         ? MouseRegion(
             cursor: SystemMouseCursors.click,
@@ -6528,7 +6720,7 @@ class _PendingAgentAttachmentViewer extends StatelessWidget {
                   Expanded(
                     child: Text(
                       displayName,
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                      style: threadTypographyTextStyle(context, const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -6539,7 +6731,11 @@ class _PendingAgentAttachmentViewer extends StatelessWidget {
             Expanded(
               child: decoded == null
                   ? Center(
-                      child: FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: displayName),
+                      child: FileDefaultPreviewCard(
+                        icon: LucideIcons.paperclip,
+                        text: displayName,
+                        useThreadAttachmentStyle: ThreadTypographyOverride.useThreadAttachmentStyleOf(context),
+                      ),
                     )
                   : _PendingAgentAttachmentPreview(mimeType: decoded.mimeType, data: decoded.data, displayName: displayName),
             ),
@@ -6566,10 +6762,20 @@ class _PendingAgentAttachmentPreview extends StatelessWidget {
       return PdfViewer.data(data, sourceName: displayName);
     }
     if (mimeType.startsWith('text/') || mimeType == 'application/json' || mimeType == 'application/yaml') {
-      return SingleChildScrollView(padding: const EdgeInsets.all(24), child: SelectableText(utf8.decode(data, allowMalformed: true)));
+      return SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: SelectableText(
+          utf8.decode(data, allowMalformed: true),
+          style: threadTypographyTextStyle(context, ShadTheme.of(context).textTheme.p),
+        ),
+      );
     }
     return Center(
-      child: FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: displayName),
+      child: FileDefaultPreviewCard(
+        icon: LucideIcons.paperclip,
+        text: displayName,
+        useThreadAttachmentStyle: ThreadTypographyOverride.useThreadAttachmentStyleOf(context),
+      ),
     );
   }
 }
@@ -6593,7 +6799,6 @@ class _PendingAgentAttachmentPreview extends StatelessWidget {
 }
 
 class _ChatThreadMessagesState extends State<ChatThreadMessages> {
-  static const double _chatMessageStackSpacing = ChatThreadMessageView.chatMessageStackSpacing;
   static const double _statusBottomSpacer = 20;
   static const Duration _statusCollapseDelay = Duration(milliseconds: 500);
   static const Duration _statusAnimationDuration = Duration(seconds: 1);
@@ -6823,6 +7028,14 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   }
 
   bool _isTerminalStackMessage(MeshElement? message) => message?.tagName == "exec";
+
+  double _threadFeedStackSpacingBetween(MeshElement? previous, MeshElement current) {
+    if (_isTerminalStackMessage(previous) && _isTerminalStackMessage(current)) {
+      return 0.0;
+    }
+
+    return ThreadTypographyOverride.maybeThreadFeedItemSpacingOf(context) ?? ChatThreadMessageView.chatMessageStackSpacing;
+  }
 
   String? _normalizeReactionUserName(Object? value) {
     if (value is! String) {
@@ -7992,7 +8205,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
       );
 
       if (messageWidgets.isNotEmpty) {
-        final stackSpacing = _isTerminalStackMessage(previous) && _isTerminalStackMessage(message.$2) ? 0.0 : _chatMessageStackSpacing;
+        final stackSpacing = _threadFeedStackSpacingBetween(previous, message.$2);
         messageWidgets.insert(0, SizedBox(height: stackSpacing));
       }
       messageWidgets.insert(0, messageWidget);
@@ -8002,7 +8215,10 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
     );
     for (final pending in pendingFeedMessages) {
       if (messageWidgets.isNotEmpty) {
-        messageWidgets.insert(0, const SizedBox(height: _chatMessageStackSpacing));
+        messageWidgets.insert(
+          0,
+          SizedBox(height: ThreadTypographyOverride.maybeThreadFeedItemSpacingOf(context) ?? ChatThreadMessageView.chatMessageStackSpacing),
+        );
       }
       messageWidgets.insert(
         0,
@@ -10160,7 +10376,7 @@ class _ChatThreadProcessingStatusRowState extends State<ChatThreadProcessingStat
     final cancelButtonColor = widget.cancelEnabled ? theme.colorScheme.foreground : theme.colorScheme.muted;
     final cancelIconColor = widget.cancelEnabled ? theme.colorScheme.background : theme.colorScheme.mutedForeground;
     final displayText = _displayText();
-    final statusTextStyle = TextStyle(fontSize: 13, color: theme.colorScheme.mutedForeground);
+    final statusTextStyle = threadTypographyTextStyle(context, TextStyle(fontSize: 13, color: theme.colorScheme.mutedForeground));
     final elapsedSeconds = widget.startedAt == null || _shouldDisplayBytes || _shouldDisplayLineCounts
         ? 0
         : _clampedElapsedSeconds(DateTime.now().difference(widget.startedAt!));
@@ -10682,10 +10898,11 @@ class ChatThreadAuthorHeader extends StatelessWidget {
     final theme = ShadTheme.of(context);
     final tt = theme.textTheme;
     final cs = theme.colorScheme;
-    final isDesktopScreen = MediaQuery.sizeOf(context).width >= 600;
+    final isDesktopScreen =
+        ThreadTypographyOverride.useDesktopAuthorHeaderAtNarrowWidthsOf(context) || MediaQuery.sizeOf(context).width >= 600;
 
     return Container(
-      padding: _chatBubbleContentPadding,
+      padding: _resolvedChatBubbleContentPadding(context),
       width: ((text)?.isEmpty ?? true) ? 250 : double.infinity,
       child: SelectionArea(
         child: Row(
@@ -10693,7 +10910,7 @@ class ChatThreadAuthorHeader extends StatelessWidget {
           children: [
             Expanded(
               child: Text(
-                _displayParticipantName(authorName),
+                _displayParticipantName(context, authorName),
                 style: isDesktopScreen
                     ? tt.small.copyWith(fontSize: 15, fontWeight: FontWeight.w700, color: cs.foreground)
                     : tt.small.copyWith(color: cs.foreground),
@@ -11393,22 +11610,22 @@ class _ShellLineState extends State<ShellLine> {
                     maxLines: expanded ? null : 1,
                     TextSpan(
                       children: [
-                        TextSpan(text: widget.message.getAttribute("command"), style: GoogleFonts.sourceCodePro()),
+                        TextSpan(text: widget.message.getAttribute("command"), style: threadTypographyCodeTextStyle(context)),
                         if (expanded) ...[
                           TextSpan(text: "\n"),
                           if (widget.message.getAttribute("result") != null) ...[
                             TextSpan(text: "\n"),
-                            TextSpan(text: trim(widget.message.getAttribute("result")), style: GoogleFonts.sourceCodePro()),
+                            TextSpan(text: trim(widget.message.getAttribute("result")), style: threadTypographyCodeTextStyle(context)),
                           ],
                           if (widget.message.getAttribute("stdout") != null) ...[
                             TextSpan(text: "\n"),
-                            TextSpan(text: trim(widget.message.getAttribute("stdout")), style: GoogleFonts.sourceCodePro()),
+                            TextSpan(text: trim(widget.message.getAttribute("stdout")), style: threadTypographyCodeTextStyle(context)),
                           ],
                           if (widget.message.getAttribute("stderr") != null) ...[
                             TextSpan(text: "\n"),
                             TextSpan(
                               text: trim(widget.message.getAttribute("stderr")),
-                              style: GoogleFonts.sourceCodePro(color: Colors.red),
+                              style: threadTypographyCodeTextStyle(context, color: Colors.red),
                             ),
                           ],
                         ],
@@ -11796,20 +12013,28 @@ class _EventLineState extends State<EventLine> {
     }
 
     final theme = ShadTheme.of(context);
-    const previewBackground = Color(0xFF050505);
-    const previewHeaderBackground = Color(0xFF111111);
+    final previewBackground = ThreadTypographyOverride.maybeCodeBlockSurfaceColorOf(context) ?? const Color(0xFF050505);
+    final previewHeaderBackground = ThreadTypographyOverride.maybeCodeBlockHeaderSurfaceColorOf(context) ?? const Color(0xFF111111);
+    final previewBorderColor = ThreadTypographyOverride.maybeCodeBlockBorderColorOf(context) ?? theme.colorScheme.border;
+    final previewTextColor = ThreadTypographyOverride.maybeCodeBlockTextColorOf(context) ?? const Color(0xFFE5E7EB);
+    final previewHeaderTextColor = ThreadTypographyOverride.maybeCodeBlockHeaderTextColorOf(context) ?? theme.colorScheme.mutedForeground;
+    final previewHighlightTheme = chatBubbleCodeHighlightTheme(context);
     final usesMobileTypography = chatBubbleMarkdownUsesMobileTypography(context);
-    final codeTextStyle = GoogleFonts.sourceCodePro(
-      fontSize: usesMobileTypography ? chatBubbleMarkdownMobileBaseFontSize : 12,
-      color: const Color(0xFFE5E7EB),
-      height: usesMobileTypography ? chatBubbleMarkdownMobileCodeLineHeight : 1.3,
+    final codeTextStyle = threadTypographyCodeTextStyle(
+      context,
+      fontSize:
+          ThreadTypographyOverride.maybeCodeBlockFontSizeOf(context) ?? (usesMobileTypography ? chatBubbleMarkdownMobileBaseFontSize : 12),
+      color: previewTextColor,
+      height:
+          ThreadTypographyOverride.maybeCodeBlockLineHeightOf(context) ??
+          (usesMobileTypography ? chatBubbleMarkdownMobileCodeLineHeight : 1.3),
     );
-    final headerTextStyle = GoogleFonts.sourceCodePro(fontSize: usesMobileTypography ? 13 : 11, color: theme.colorScheme.mutedForeground);
+    final headerTextStyle = threadTypographyCodeTextStyle(context, fontSize: usesMobileTypography ? 13 : 11, color: previewHeaderTextColor);
     final resolvedLanguageId = resolveLanguageIdForFilename(languageOrFilename) ?? fallbackLanguageId;
     final body = resolvedLanguageId == "diff"
         ? Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: _chatBubbleContentHorizontalPadding, vertical: 8),
+            padding: EdgeInsets.symmetric(horizontal: _resolvedChatBubbleHorizontalPadding(context), vertical: 8),
             child: Builder(
               builder: (context) {
                 final lines = normalizedCode.split("\n");
@@ -11832,7 +12057,7 @@ class _EventLineState extends State<EventLine> {
                               code: line.$2,
                               languageOrFilename: "diff",
                               textStyle: codeTextStyle,
-                              theme: monokaiSublimeTheme,
+                              theme: previewHighlightTheme,
                               fallbackLanguageId: "diff",
                             ),
                           ),
@@ -11845,14 +12070,14 @@ class _EventLineState extends State<EventLine> {
           )
         : SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: _chatBubbleContentHorizontalPadding, vertical: 8),
+            padding: EdgeInsets.symmetric(horizontal: _resolvedChatBubbleHorizontalPadding(context), vertical: 8),
             child: SelectableText.rich(
               highlightCodeSpanWithReHighlight(
                 context: context,
                 code: normalizedCode,
                 languageOrFilename: languageOrFilename,
                 textStyle: codeTextStyle,
-                theme: monokaiSublimeTheme,
+                theme: previewHighlightTheme,
                 fallbackLanguageId: fallbackLanguageId,
               ),
             ),
@@ -11860,7 +12085,12 @@ class _EventLineState extends State<EventLine> {
     final logsBody = hasLogs
         ? Container(
             width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(_chatBubbleContentHorizontalPadding, 0, _chatBubbleContentHorizontalPadding, 8),
+            padding: EdgeInsets.fromLTRB(
+              _resolvedChatBubbleHorizontalPadding(context),
+              0,
+              _resolvedChatBubbleHorizontalPadding(context),
+              8,
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -11894,7 +12124,7 @@ class _EventLineState extends State<EventLine> {
       children: [
         Container(
           width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: _chatBubbleContentHorizontalPadding, vertical: 6),
+          padding: EdgeInsets.symmetric(horizontal: _resolvedChatBubbleHorizontalPadding(context), vertical: 6),
           decoration: BoxDecoration(
             color: previewHeaderBackground,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
@@ -11909,7 +12139,7 @@ class _EventLineState extends State<EventLine> {
                   width: 24,
                   height: 24,
                   iconSize: 14,
-                  icon: const Icon(LucideIcons.copy, size: 14),
+                  icon: Icon(LucideIcons.copy, size: 14, color: previewHeaderTextColor),
                   onPressed: () {
                     Clipboard.setData(ClipboardData(text: normalizedCode));
                   },
@@ -11928,7 +12158,7 @@ class _EventLineState extends State<EventLine> {
       decoration: BoxDecoration(
         color: previewBackground,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: theme.colorScheme.border),
+        border: Border.all(color: previewBorderColor),
       ),
       child: Stack(
         children: [
@@ -12061,7 +12291,7 @@ class _EventLineState extends State<EventLine> {
     final showPreviewOverlay = itemId.isNotEmpty && widget.pendingItemId != null && widget.pendingItemId == itemId;
     final canApprove = kind == "approval" && inProgress && approvalId.isNotEmpty;
     final canOpenPath = eventPath != null && widget.openFile != null && ((kind == "thread" && eventPath != widget.path) || kind == "file");
-    const eventTextPadding = EdgeInsets.only(left: _chatBubbleContentHorizontalPadding);
+    final eventTextPadding = EdgeInsets.only(left: _resolvedChatBubbleHorizontalPadding(context));
 
     Color textColor;
     if (state == "failed") {
@@ -12104,12 +12334,15 @@ class _EventLineState extends State<EventLine> {
                                   Expanded(
                                     child: Text(
                                       displayText,
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                        color: textColor,
-                                        height: 1.3,
-                                        decoration: TextDecoration.underline,
+                                      style: threadTypographyTextStyle(
+                                        context,
+                                        TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: textColor,
+                                          height: 1.3,
+                                          decoration: TextDecoration.underline,
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -12124,7 +12357,10 @@ class _EventLineState extends State<EventLine> {
                             child: SelectionArea(
                               child: Text(
                                 displayText,
-                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: textColor, height: 1.3),
+                                style: threadTypographyTextStyle(
+                                  context,
+                                  TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: textColor, height: 1.3),
+                                ),
                               ),
                             ),
                           ),
@@ -12165,7 +12401,10 @@ class _EventLineState extends State<EventLine> {
                 child: Padding(
                   padding: eventTextPadding,
                   child: SelectionArea(
-                    child: Text(renderedDetailLines.join("\n"), style: TextStyle(color: textColor.withAlpha(220), height: 1.3)),
+                    child: Text(
+                      renderedDetailLines.join("\n"),
+                      style: threadTypographyTextStyle(context, TextStyle(color: textColor.withAlpha(220), height: 1.3)),
+                    ),
                   ),
                 ),
               ),
@@ -12239,14 +12478,12 @@ class ChatThreadPreview extends StatelessWidget {
       );
     }
 
+    final useThreadAttachmentStyle = ThreadTypographyOverride.useThreadAttachmentStyleOf(context);
     return FileDefaultPreviewCard(
       icon: LucideIcons.file,
       text: path.split("/").last,
-      onDownload: () async {
-        final url = await room.storage.downloadUrl(path);
-
-        launchUrl(Uri.parse(url));
-      },
+      useThreadAttachmentStyle: useThreadAttachmentStyle,
+      showActionIcon: useThreadAttachmentStyle,
     );
   }
 }

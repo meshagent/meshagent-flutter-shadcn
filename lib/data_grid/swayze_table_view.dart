@@ -27,6 +27,7 @@ class SwayzeTableView extends StatefulWidget {
     required this.room,
     required this.tableName,
     required this.namespace,
+    this.sqliteDatabase,
     this.filter,
     this.sqlQuery,
     this.sqlTables,
@@ -54,6 +55,7 @@ class SwayzeTableView extends StatefulWidget {
   final RoomClient room;
   final String tableName;
   final List<String>? namespace;
+  final String? sqliteDatabase;
   final String? filter;
   final String? sqlQuery;
   final List<TableRef>? sqlTables;
@@ -210,6 +212,7 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.room != widget.room ||
         oldWidget.tableName != widget.tableName ||
+        oldWidget.sqliteDatabase != widget.sqliteDatabase ||
         !listEquals(oldWidget.namespace, widget.namespace) ||
         oldWidget.filter != widget.filter ||
         oldWidget.sqlQuery != widget.sqlQuery ||
@@ -445,7 +448,11 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
 
   Future<void> _cancelSqlQueryQuietly(String queryId) async {
     try {
-      await widget.room.datasets.cancelSqlQuery(queryId: queryId);
+      if (widget.sqliteDatabase == null) {
+        await widget.room.datasets.cancelSqlQuery(queryId: queryId);
+      } else {
+        await widget.room.sqlite.cancelSqlQuery(queryId: queryId);
+      }
     } catch (_) {
       // Cancellation is best effort; stale handles may already be closed.
     }
@@ -480,21 +487,26 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
   int? _statementRowsAffected;
 
   Future<void> _reloadTable(int generation) async {
-    final schema = await widget.room.datasets.inspect(
-      widget.tableName,
-      namespace: widget.namespace,
-      branch: widget.branch,
-      version: widget.version,
-    );
+    final sqliteDatabase = widget.sqliteDatabase;
+    final schema = sqliteDatabase == null
+        ? await widget.room.datasets.inspect(widget.tableName, namespace: widget.namespace, branch: widget.branch, version: widget.version)
+        : await widget.room.sqlite.inspect(database: sqliteDatabase, table: widget.tableName, namespace: widget.namespace);
     final columns = _selectableColumns(schema);
     final columnDisplays = _columnDisplaysForSchema(schema, columns);
-    final rowCount = await widget.room.datasets.count(
-      table: widget.tableName,
-      where: _normalizedFilter,
-      namespace: widget.namespace,
-      branch: widget.branch,
-      version: widget.version,
-    );
+    final rowCount = sqliteDatabase == null
+        ? await widget.room.datasets.count(
+            table: widget.tableName,
+            where: _normalizedFilter,
+            namespace: widget.namespace,
+            branch: widget.branch,
+            version: widget.version,
+          )
+        : await widget.room.sqlite.count(
+            database: sqliteDatabase,
+            table: widget.tableName,
+            where: _normalizedFilter,
+            namespace: widget.namespace,
+          );
 
     if (!mounted || generation != _loadGeneration) {
       return;
@@ -502,7 +514,7 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
 
     final controller = columns.isNotEmpty && rowCount > 0
         ? _SharedSwayzeController(
-            id: 'room-table:${widget.namespace?.join("/") ?? ""}:${widget.tableName}',
+            id: '${sqliteDatabase == null ? "room-table" : "room-sqlite"}:${widget.namespace?.join("/") ?? ""}:${sqliteDatabase ?? ""}:${widget.tableName}',
             columns: columns,
             columnDisplays: columnDisplays,
             rowCount: rowCount,
@@ -526,55 +538,62 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
     }
 
     var rowOffset = 0;
-    _rowsSubscription = widget.room.datasets
-        .searchStream(
-          table: widget.tableName,
-          where: _normalizedFilter,
-          select: columns,
-          namespace: widget.namespace,
-          branch: widget.branch,
-          version: widget.version,
-        )
-        .listen(
-          (batch) {
-            if (!mounted || generation != _loadGeneration) {
-              return;
-            }
+    final rowsStream = sqliteDatabase == null
+        ? widget.room.datasets.searchStream(
+            table: widget.tableName,
+            where: _normalizedFilter,
+            select: columns,
+            namespace: widget.namespace,
+            branch: widget.branch,
+            version: widget.version,
+          )
+        : widget.room.sqlite.searchStream(
+            database: sqliteDatabase,
+            table: widget.tableName,
+            where: _normalizedFilter,
+            select: columns,
+            namespace: widget.namespace,
+          );
+    _rowsSubscription = rowsStream.listen(
+      (batch) {
+        if (!mounted || generation != _loadGeneration) {
+          return;
+        }
 
-            final rows = batch.toRows();
-            if (rows.isEmpty) {
-              return;
-            }
+        final rows = batch.toRows();
+        if (rows.isEmpty) {
+          return;
+        }
 
-            _applyBatchSchemaDisplay(controller, batch.schema, columns, displaySchema: widget.displaySchema);
-            _putRows(controller: controller, rows: rows, columns: columns, rowOffset: rowOffset);
+        _applyBatchSchemaDisplay(controller, batch.schema, columns, displaySchema: widget.displaySchema);
+        _putRows(controller: controller, rows: rows, columns: columns, rowOffset: rowOffset);
 
-            rowOffset += rows.length;
-            setState(() {
-              _loadedRowCount = rowOffset;
-              _loadedByteCount += batch.ipcBytes.length;
-            });
-          },
-          onError: (Object error, StackTrace stackTrace) {
-            if (!mounted || generation != _loadGeneration) {
-              return;
-            }
-            setState(() {
-              _error = error;
-              _isLoadingRows = false;
-            });
-          },
-          onDone: () {
-            if (!mounted || generation != _loadGeneration) {
-              return;
-            }
-            setState(() {
-              _isLoadingRows = false;
-            });
-            _applyPendingWatchBatches();
-          },
-          cancelOnError: false,
-        );
+        rowOffset += rows.length;
+        setState(() {
+          _loadedRowCount = rowOffset;
+          _loadedByteCount += batch.ipcBytes.length;
+        });
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        if (!mounted || generation != _loadGeneration) {
+          return;
+        }
+        setState(() {
+          _error = error;
+          _isLoadingRows = false;
+        });
+      },
+      onDone: () {
+        if (!mounted || generation != _loadGeneration) {
+          return;
+        }
+        setState(() {
+          _isLoadingRows = false;
+        });
+        _applyPendingWatchBatches();
+      },
+      cancelOnError: false,
+    );
   }
 
   Future<void> _reloadSql(int generation) async {
@@ -583,19 +602,18 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
       return;
     }
 
-    final execution = await widget.room.datasets.executeSql(
-      query: query,
-      tables: widget.sqlTables,
-      namespace: widget.namespace,
-      branch: widget.branch,
-    );
+    final sqliteDatabase = widget.sqliteDatabase;
+    final execution = sqliteDatabase == null
+        ? await widget.room.datasets.executeSql(query: query, tables: widget.sqlTables, namespace: widget.namespace, branch: widget.branch)
+        : await widget.room.sqlite.executeSql(database: sqliteDatabase, query: query, namespace: widget.namespace);
 
-    if (execution is DatasetSqlStatement) {
+    if (execution is DatasetSqlStatement || execution is SqliteSqlStatement) {
       if (!mounted || generation != _loadGeneration) {
         return;
       }
+      final rowsAffected = execution is DatasetSqlStatement ? execution.rowsAffected : (execution as SqliteSqlStatement).rowsAffected;
       setState(() {
-        _statementRowsAffected = execution.rowsAffected;
+        _statementRowsAffected = rowsAffected;
         _rowCount = 0;
         _loadedRowCount = 0;
         _loadedByteCount = 0;
@@ -605,13 +623,17 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
       return;
     }
 
-    final opened = execution as DatasetSqlQuery;
+    final queryId = execution is DatasetSqlQuery ? execution.queryId : (execution as SqliteSqlQuery).queryId;
+    final schema = execution is DatasetSqlQuery ? execution.schema : (execution as SqliteSqlQuery).schema;
     if (!mounted || generation != _loadGeneration) {
-      await widget.room.datasets.cancelSqlQuery(queryId: opened.queryId);
+      if (sqliteDatabase == null) {
+        await widget.room.datasets.cancelSqlQuery(queryId: queryId);
+      } else {
+        await widget.room.sqlite.cancelSqlQuery(queryId: queryId);
+      }
       return;
     }
-    _activeSqlQueryId = opened.queryId;
-    final schema = opened.schema;
+    _activeSqlQueryId = queryId;
     final columns = _selectableColumns(schema, displaySchema: widget.displaySchema);
     final columnDisplays = _columnDisplaysForSchema(schema, columns, displaySchema: widget.displaySchema);
     final rows = <Map<String, Object?>>[];
@@ -628,9 +650,16 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
     }
 
     try {
-      await for (final batch in widget.room.datasets.readSqlQuery(queryId: opened.queryId)) {
+      final batches = sqliteDatabase == null
+          ? widget.room.datasets.readSqlQuery(queryId: queryId)
+          : widget.room.sqlite.readSqlQuery(queryId: queryId);
+      await for (final batch in batches) {
         if (!mounted || generation != _loadGeneration) {
-          await widget.room.datasets.cancelSqlQuery(queryId: opened.queryId);
+          if (sqliteDatabase == null) {
+            await widget.room.datasets.cancelSqlQuery(queryId: queryId);
+          } else {
+            await widget.room.sqlite.cancelSqlQuery(queryId: queryId);
+          }
           return;
         }
         rows.addAll(batch.toRows());
@@ -640,10 +669,14 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
         });
       }
     } finally {
-      if (_activeSqlQueryId == opened.queryId) {
+      if (_activeSqlQueryId == queryId) {
         _activeSqlQueryId = null;
       }
-      await widget.room.datasets.closeSqlQuery(queryId: opened.queryId);
+      if (sqliteDatabase == null) {
+        await widget.room.datasets.closeSqlQuery(queryId: queryId);
+      } else {
+        await widget.room.sqlite.closeSqlQuery(queryId: queryId);
+      }
     }
 
     if (!mounted || generation != _loadGeneration) {
@@ -652,7 +685,7 @@ class _SwayzeTableViewState extends State<SwayzeTableView> {
 
     final controller = columns.isNotEmpty && rows.isNotEmpty
         ? _SharedSwayzeController(
-            id: 'room-sql:${widget.namespace?.join("/") ?? ""}:${widget.tableName}:${widget.reloadToken}',
+            id: '${sqliteDatabase == null ? "room-sql" : "room-sqlite-sql"}:${widget.namespace?.join("/") ?? ""}:${sqliteDatabase ?? ""}:${widget.tableName}:${widget.reloadToken}',
             columns: columns,
             columnDisplays: columnDisplays,
             rowCount: rows.length,

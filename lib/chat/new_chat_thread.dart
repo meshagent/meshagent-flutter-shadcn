@@ -48,6 +48,7 @@ class NewChatThread extends StatefulWidget {
     this.onThreadPathChanged,
     this.onThreadResolved,
     this.centerComposer = true,
+    this.showCenteredComposerTitle = true,
     this.showUsageFooter = false,
     this.emptyState,
     this.inputPlaceholder,
@@ -57,6 +58,7 @@ class NewChatThread extends StatefulWidget {
     this.onAttachmentRemoved,
     this.fileDropOverlayBuilder,
     this.modelController,
+    this.customInputBuilder,
     this.newThreadWrapperBuilder,
   });
 
@@ -74,6 +76,7 @@ class NewChatThread extends StatefulWidget {
   final ValueChanged<String?>? onThreadPathChanged;
   final void Function(String? path, String? displayName)? onThreadResolved;
   final bool centerComposer;
+  final bool showCenteredComposerTitle;
   final bool showUsageFooter;
   final Widget? emptyState;
   final Widget? inputPlaceholder;
@@ -83,6 +86,7 @@ class NewChatThread extends StatefulWidget {
   final ValueChanged<FileAttachment>? onAttachmentRemoved;
   final FileDropOverlayBuilder? fileDropOverlayBuilder;
   final DatasetChatModelController? modelController;
+  final ChatThreadCustomInputBuilder? customInputBuilder;
   final NewChatThreadWrapperBuilder? newThreadWrapperBuilder;
 
   @override
@@ -1051,18 +1055,15 @@ class _NewChatThreadState extends State<NewChatThread> {
       builder: (context, _) {
         final toolsBuilder = widget.toolsBuilder;
         final toolArea = resolveChatThreadToolArea(toolsBuilder == null ? null : toolsBuilder(context, _controller, snapshot));
-        return ChatThreadInput(
-          key: _composerInputKey,
-          focusTrigger: _controller,
-          room: widget.room,
+        final config = ChatThreadInputConfig(
           controller: _controller,
+          snapshot: snapshot,
+          placeholder: widget.inputPlaceholder,
           sendEnabled: !_composerLocked,
           sendDisabledReason: _waitingForAgent ? "Waiting for ${widget.agentName} to be ready." : "Wait for the message to be accepted.",
-          sendPendingText: _waitingForAgent ? "Waiting for ${widget.agentName} to be ready." : "Wait for the message to be accepted.",
-          onCancelSend: _composerLocked ? _cancelPendingNewThread : null,
           readOnly: false,
-          clearOnSend: false,
-          placeholder: widget.inputPlaceholder,
+          onCancelSend: _composerLocked ? _cancelPendingNewThread : null,
+          sendPendingText: _waitingForAgent ? "Waiting for ${widget.agentName} to be ready." : "Wait for the message to be accepted.",
           leading: toolArea.leading,
           footer: toolArea.footer,
           audioInputEnabled: (widget.room != null || widget.chatClient != null) && _modelController.supportsAudioInput,
@@ -1083,6 +1084,7 @@ class _NewChatThreadState extends State<NewChatThread> {
               ? () => _ensureRealtimeAudioThread(resolveWhenStarted: true)
               : null,
           onAudioChunk: _sendRealtimeAudioChunk,
+          room: widget.room,
           onSend: (value, attachments) async {
             if (value.isEmpty && attachments.isEmpty) {
               return;
@@ -1096,6 +1098,33 @@ class _NewChatThreadState extends State<NewChatThread> {
           contextMenuBuilder: widget.inputContextMenuBuilder,
           onPressedOutside: widget.inputOnPressedOutside,
         );
+        final defaultInput = ChatThreadInput(
+          key: _composerInputKey,
+          focusTrigger: _controller,
+          room: config.room,
+          controller: config.controller,
+          sendEnabled: config.sendEnabled,
+          sendDisabledReason: config.sendDisabledReason,
+          sendPendingText: config.sendPendingText,
+          onCancelSend: config.onCancelSend,
+          readOnly: config.readOnly,
+          clearOnSend: false,
+          placeholder: config.placeholder,
+          leading: config.leading,
+          footer: config.footer,
+          audioInputEnabled: config.audioInputEnabled,
+          automaticAudioTurnDetection: config.automaticAudioTurnDetection,
+          onExternalAudioRecordingStart: config.onExternalAudioRecordingStart,
+          onExternalAudioRecordingStop: config.onExternalAudioRecordingStop,
+          onAudioRecordingStart: config.onAudioRecordingStart,
+          onAudioChunk: config.onAudioChunk,
+          onSend: config.onSend,
+          onAttachmentOpen: config.onAttachmentOpen,
+          onAttachmentRemoved: config.onAttachmentRemoved,
+          contextMenuBuilder: config.contextMenuBuilder,
+          onPressedOutside: config.onPressedOutside,
+        );
+        return widget.customInputBuilder?.call(context, config, defaultInput) ?? defaultInput;
       },
     );
     final composer = _buildComposerWithUsageFooter(context, input);
@@ -1143,7 +1172,7 @@ class _NewChatThreadState extends State<NewChatThread> {
                   mainAxisSize: MainAxisSize.min,
                   spacing: 12,
                   children: [
-                    Text("Start a new thread", style: headingStyle),
+                    if (widget.showCenteredComposerTitle) Text("Start a new thread", style: headingStyle),
                     composer,
                     if (_newThreadError != null) ...[
                       ShadAlert.destructive(title: const Text("Unable to start thread"), description: Text(_newThreadError!)),

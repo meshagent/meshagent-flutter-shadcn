@@ -155,7 +155,7 @@ class _SelectUsersState extends State<SelectUsers> {
   );
 }
 
-enum SelectSubjectType { user, agent, group, serviceAccount, projectUsers, projectDevelopers, projectAgents }
+enum SelectSubjectType { user, agent, group, serviceAccount, projectUsers, projectDevelopers, projectServiceAccounts }
 
 class SelectSubjectsController extends MultiSelectController {
   SelectSubjectsController({required this.subjectsByKey, required this.allowNewUserEmail, super.initialValue});
@@ -178,7 +178,7 @@ class SelectSubjects extends StatefulWidget {
     required this.client,
     required this.projectId,
     required this.onChanged,
-    this.allowedTypes = const {SelectSubjectType.user, SelectSubjectType.agent, SelectSubjectType.group},
+    this.allowedTypes = const {SelectSubjectType.user, SelectSubjectType.group},
     this.controller,
     this.textController,
     this.autofocus = false,
@@ -319,10 +319,15 @@ class _SelectSubjectsState extends State<SelectSubjects> {
         label: switch (subject.relation) {
           'agent' => 'All project agents',
           'developer' => 'All project developers',
+          'service_account' => 'All service accounts',
           _ => 'All project users',
         },
         kindLabel: 'Project',
-        icon: subject.relation == 'agent' ? LucideIcons.bot : LucideIcons.users,
+        icon: switch (subject.relation) {
+          'agent' => LucideIcons.bot,
+          'service_account' => LucideIcons.keyRound,
+          _ => LucideIcons.users,
+        },
       ),
       _ => _SubjectOption(
         key: _subjectKey(subject),
@@ -405,10 +410,11 @@ class _SelectSubjectsState extends State<SelectSubjects> {
     if (widget.allowedTypes.contains(SelectSubjectType.projectDevelopers)) {
       options.add(_optionFromSubject(AccessSubject(type: 'userset', id: widget.projectId, objectType: 'project', relation: 'developer')));
     }
-    if (widget.allowedTypes.contains(SelectSubjectType.projectAgents)) {
-      options.add(_optionFromSubject(AccessSubject(type: 'userset', id: widget.projectId, objectType: 'project', relation: 'agent')));
+    if (widget.allowedTypes.contains(SelectSubjectType.projectServiceAccounts)) {
+      options.add(
+        _optionFromSubject(AccessSubject(type: 'userset', id: widget.projectId, objectType: 'project', relation: 'service_account')),
+      );
     }
-
     final futures = <Future<void>>[];
     if (widget.allowedTypes.contains(SelectSubjectType.user)) {
       futures.add(() async {

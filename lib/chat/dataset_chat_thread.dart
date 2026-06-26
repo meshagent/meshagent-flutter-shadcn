@@ -6,7 +6,6 @@ import 'dart:typed_data';
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:meshagent_agents/meshagent_agents.dart'
     show
         ToolkitCapabilities,
@@ -67,9 +66,9 @@ import 'package:meshagent_agents/meshagent_agents.dart' as agent_sessions;
 import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_flutter_shadcn/chat_bubble_markdown_config.dart';
 import 'package:meshagent_flutter_shadcn/file_preview/file_preview.dart';
+import 'package:meshagent_flutter_shadcn/thread_typography.dart';
 import 'package:mime/mime.dart';
 import 'package:pdfrx/pdfrx.dart';
-import 'package:re_highlight/styles/monokai-sublime.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:uuid/uuid.dart';
 
@@ -521,6 +520,7 @@ class DatasetChatThread extends StatefulWidget {
     this.toolsBuilder,
     this.inputPlaceholder,
     this.attachmentBuilder,
+    this.customInputBuilder,
     this.inputContextMenuBuilder,
     this.inputOnPressedOutside,
     this.rowsLoader,
@@ -550,6 +550,7 @@ class DatasetChatThread extends StatefulWidget {
   final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
   final Widget? inputPlaceholder;
   final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
+  final ChatThreadCustomInputBuilder? customInputBuilder;
   final EditableTextContextMenuBuilder? inputContextMenuBuilder;
   final TapRegionCallback? inputOnPressedOutside;
   final DatasetChatRowsLoader? rowsLoader;
@@ -606,6 +607,7 @@ class RoomDatasetChatThread extends StatefulWidget {
     this.toolsBuilder,
     this.inputPlaceholder,
     this.attachmentBuilder,
+    this.customInputBuilder,
     this.inputContextMenuBuilder,
     this.inputOnPressedOutside,
     this.fileDropOverlayBuilder,
@@ -626,6 +628,7 @@ class RoomDatasetChatThread extends StatefulWidget {
   final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
   final Widget? inputPlaceholder;
   final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
+  final ChatThreadCustomInputBuilder? customInputBuilder;
   final EditableTextContextMenuBuilder? inputContextMenuBuilder;
   final TapRegionCallback? inputOnPressedOutside;
   final FileDropOverlayBuilder? fileDropOverlayBuilder;
@@ -691,6 +694,7 @@ class _RoomDatasetChatThreadState extends State<RoomDatasetChatThread> {
       toolsBuilder: widget.toolsBuilder,
       inputPlaceholder: widget.inputPlaceholder,
       attachmentBuilder: widget.attachmentBuilder,
+      customInputBuilder: widget.customInputBuilder,
       inputContextMenuBuilder: widget.inputContextMenuBuilder,
       inputOnPressedOutside: widget.inputOnPressedOutside,
       rowsLoader: ({required namespace, required table}) {
@@ -2618,7 +2622,12 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
               imageUri: previewPath,
               onOpenFullscreen: canOpen ? () => unawaited(_openAttachment(context, attachment)) : null,
             )
-          : FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: attachment.displayName),
+          : FileDefaultPreviewCard(
+              icon: LucideIcons.paperclip,
+              text: attachment.displayName,
+              useThreadAttachmentStyle: ThreadTypographyOverride.useThreadAttachmentStyleOf(context),
+              showActionIcon: canOpen,
+            ),
     );
     if (!canOpen) {
       return card;
@@ -2880,41 +2889,63 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         break;
       }
     }
-    final sendEnabled = !loading && waitingForOnlineMessage == null;
-    final sendDisabledReason = loading
-        ? 'Thread is loading.'
-        : waitingForOnlineMessage == null
-        ? null
-        : 'Waiting for ${_displayAgentName(widget.agentName ?? "agent")} to come online.';
     return AnimatedBuilder(
       animation: Listenable.merge([_modelController, _controller]),
       builder: (context, _) {
         final toolArea = resolveChatThreadToolArea(
           widget.toolsBuilder == null ? null : widget.toolsBuilder!(context, _controller, snapshot),
         );
-        return ChatThreadInput(
-          key: _composerInputKey,
-          focusTrigger: _controller,
+        final sendEnabled = !loading && waitingForOnlineMessage == null;
+        final sendDisabledReason = loading
+            ? 'Thread is loading.'
+            : waitingForOnlineMessage == null
+            ? null
+            : 'Waiting for ${_displayAgentName(widget.agentName ?? "agent")} to come online.';
+        final config = ChatThreadInputConfig(
+          controller: _controller,
+          snapshot: snapshot,
+          placeholder: widget.inputPlaceholder,
           sendEnabled: sendEnabled,
           sendDisabledReason: sendDisabledReason,
+          readOnly: false,
           onCancelSend: null,
           onInterrupt: _canInterruptActiveTurn() ? _cancelTurn : null,
           sendPendingText: waitingForOnlineMessage == null
               ? null
               : 'Waiting for ${_displayAgentName(widget.agentName ?? "agent")} to come online.',
-          placeholder: widget.inputPlaceholder,
           leading: toolArea.leading,
           footer: toolArea.footer,
           audioInputEnabled: widget.chatClient != null && _modelController.supportsAudioInput,
           automaticAudioTurnDetection: _modelController.activeTurnDetection == 'automatic',
           onAudioChunk: _sendRealtimeAudioChunk,
           room: null,
-          controller: _controller,
           attachmentBuilder: widget.attachmentBuilder,
           contextMenuBuilder: widget.inputContextMenuBuilder,
           onPressedOutside: widget.inputOnPressedOutside,
           onSend: _send,
         );
+        final defaultInput = ChatThreadInput(
+          key: _composerInputKey,
+          focusTrigger: _controller,
+          sendEnabled: config.sendEnabled,
+          sendDisabledReason: config.sendDisabledReason,
+          onCancelSend: config.onCancelSend,
+          onInterrupt: config.onInterrupt,
+          sendPendingText: config.sendPendingText,
+          placeholder: config.placeholder,
+          leading: config.leading,
+          footer: config.footer,
+          audioInputEnabled: config.audioInputEnabled,
+          automaticAudioTurnDetection: config.automaticAudioTurnDetection,
+          onAudioChunk: config.onAudioChunk,
+          room: config.room,
+          controller: _controller,
+          attachmentBuilder: config.attachmentBuilder,
+          contextMenuBuilder: config.contextMenuBuilder,
+          onPressedOutside: config.onPressedOutside,
+          onSend: config.onSend,
+        );
+        return widget.customInputBuilder?.call(context, config, defaultInput) ?? defaultInput;
       },
     );
   }
@@ -2963,6 +2994,24 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         );
       }
       if (message.kind == 'error') {
+        final errorSurfaceColor = ThreadTypographyOverride.maybeThreadErrorSurfaceColorOf(context);
+        final errorTextColor = ThreadTypographyOverride.maybeThreadErrorTextColorOf(context);
+        if (errorSurfaceColor != null || errorTextColor != null) {
+          return ChatThreadMessageView(
+            key: ValueKey(message.id),
+            room: null,
+            mine: false,
+            isAgentMessage: true,
+            text: message.text,
+            authorName: '',
+            createdAt: message.createdAt,
+            shouldShowHeader: false,
+            bubbleColor: errorSurfaceColor ?? theme.colorScheme.destructive.withValues(alpha: 0.08),
+            useDefaultBubbleBorder: false,
+            textColor: errorTextColor ?? theme.colorScheme.destructive,
+            showBubbleActions: false,
+          );
+        }
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
           child: SizedBox(
@@ -3065,7 +3114,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     final feedItems = _buildFeedItems(messages);
     for (final item in feedItems.indexed) {
       if (messageWidgets.isNotEmpty) {
-        messageWidgets.insert(0, SizedBox(height: _datasetThreadFeedItemSpacing(feedItems[item.$1 - 1], item.$2)));
+        messageWidgets.insert(0, SizedBox(height: _datasetThreadFeedItemSpacing(context, feedItems[item.$1 - 1], item.$2)));
       }
       final feedItem = item.$2;
       switch (feedItem) {
@@ -3111,7 +3160,10 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     });
     for (final pending in pendingFeedMessages) {
       if (messageWidgets.isNotEmpty) {
-        messageWidgets.insert(0, const SizedBox(height: ChatThreadMessageView.chatMessageStackSpacing));
+        messageWidgets.insert(
+          0,
+          SizedBox(height: ThreadTypographyOverride.maybeThreadFeedItemSpacingOf(context) ?? ChatThreadMessageView.chatMessageStackSpacing),
+        );
       }
       messageWidgets.insert(0, PendingChatThreadMessage(room: null, message: pending));
     }
@@ -3166,6 +3218,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         authorName: group.authorName,
         createdAt: group.createdAt,
         showBubbleActions: false,
+        header: ThreadTypographyOverride.showInlineDisclosureCueOf(context)
+            ? ChatThreadAuthorHeader(authorName: group.authorName, createdAt: group.createdAt, text: group.collapsedText)
+            : null,
       ),
     ];
     for (final item in group.messages.indexed) {
@@ -3387,7 +3442,12 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return ChatThreadMessageView.chatMessageStackSpacing;
   }
 
-  double _datasetThreadFeedItemSpacing(_DatasetThreadFeedItem previous, _DatasetThreadFeedItem next) {
+  double _datasetThreadFeedItemSpacing(BuildContext context, _DatasetThreadFeedItem previous, _DatasetThreadFeedItem next) {
+    final spacingOverride = ThreadTypographyOverride.maybeThreadFeedItemSpacingOf(context);
+    if (spacingOverride != null) {
+      return spacingOverride;
+    }
+
     final previousMessage = previous is _DatasetThreadMessageFeedItem ? previous.message : null;
     final nextMessage = next is _DatasetThreadMessageFeedItem ? next.message : null;
     if (previousMessage == null || nextMessage == null) {
@@ -3404,7 +3464,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }) {
     final theme = ShadTheme.of(context);
     final baseStyle = theme.textTheme.muted.copyWith(color: theme.colorScheme.mutedForeground);
-    final highlightStyle = baseStyle.copyWith(color: theme.colorScheme.foreground, fontWeight: FontWeight.w700);
+    final highlightStyle = ThreadTypographyOverride.showInlineDisclosureCueOf(context)
+        ? baseStyle.copyWith(fontWeight: FontWeight.w700)
+        : baseStyle.copyWith(color: theme.colorScheme.foreground, fontWeight: FontWeight.w700);
     final detailLines = display.detailLines;
     final headlineRest = display.headline.rest;
     final lineCountStyle = baseStyle.copyWith(fontWeight: FontWeight.w700);
@@ -3499,7 +3561,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (languageOrFilename == null) {
       return SelectableText(text, style: style, textAlign: TextAlign.left);
     }
-    final codeStyle = GoogleFonts.sourceCodePro(textStyle: style);
+    final codeStyle = threadTypographyCodeTextStyle(context, textStyle: style);
     return SelectableText.rich(
       highlightCodeSpanWithReHighlight(context: context, code: text, languageOrFilename: languageOrFilename, textStyle: codeStyle),
       textAlign: TextAlign.left,
@@ -3513,17 +3575,28 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     }
 
     final theme = ShadTheme.of(context);
-    final codeTextStyle = GoogleFonts.sourceCodePro(fontSize: 12, color: const Color(0xFFE5E7EB), height: 1.3);
-    final headerTextStyle = GoogleFonts.sourceCodePro(fontSize: 11, color: theme.colorScheme.mutedForeground);
+    final previewBackground = ThreadTypographyOverride.maybeCodeBlockSurfaceColorOf(context) ?? const Color(0xFF050505);
+    final previewHeaderBackground = ThreadTypographyOverride.maybeCodeBlockHeaderSurfaceColorOf(context) ?? const Color(0xFF111111);
+    final previewBorderColor = ThreadTypographyOverride.maybeCodeBlockBorderColorOf(context) ?? theme.colorScheme.border;
+    final previewTextColor = ThreadTypographyOverride.maybeCodeBlockTextColorOf(context) ?? const Color(0xFFE5E7EB);
+    final previewHeaderTextColor = ThreadTypographyOverride.maybeCodeBlockHeaderTextColorOf(context) ?? theme.colorScheme.mutedForeground;
+    final previewHighlightTheme = chatBubbleCodeHighlightTheme(context);
+    final codeTextStyle = threadTypographyCodeTextStyle(
+      context,
+      fontSize: ThreadTypographyOverride.maybeCodeBlockFontSizeOf(context) ?? 12,
+      color: previewTextColor,
+      height: ThreadTypographyOverride.maybeCodeBlockLineHeightOf(context) ?? 1.3,
+    );
+    final headerTextStyle = threadTypographyCodeTextStyle(context, fontSize: 11, color: previewHeaderTextColor);
     final headerCounterStyle = headerTextStyle.copyWith(fontWeight: FontWeight.w700);
     final lines = normalizedCode.split('\n');
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(top: 6),
       decoration: BoxDecoration(
-        color: const Color(0xFF050505),
+        color: previewBackground,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: theme.colorScheme.border),
+        border: Border.all(color: previewBorderColor),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3531,9 +3604,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: _datasetDiffPreviewHorizontalPadding, vertical: 6),
-            decoration: const BoxDecoration(
-              color: Color(0xFF111111),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
+            decoration: BoxDecoration(
+              color: previewHeaderBackground,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
             ),
             child: SelectionArea(
               child: Row(
@@ -3570,7 +3643,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                           code: line.$2,
                           languageOrFilename: 'diff',
                           textStyle: codeTextStyle,
-                          theme: monokaiSublimeTheme,
+                          theme: previewHighlightTheme,
                           fallbackLanguageId: 'diff',
                         ),
                       ),
@@ -3607,7 +3680,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (queuedPendingMessages.isEmpty) {
       return null;
     }
-    final textStyle = TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground);
+    final textStyle = threadTypographyTextStyle(context, TextStyle(fontSize: 13, color: ShadTheme.of(context).colorScheme.mutedForeground));
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(
@@ -3862,10 +3935,20 @@ class _InlineAttachmentPreview extends StatelessWidget {
       return PdfViewer.data(data, sourceName: displayName);
     }
     if (mimeType.startsWith('text/') || mimeType == 'application/json' || mimeType == 'application/yaml') {
-      return SingleChildScrollView(padding: const EdgeInsets.all(24), child: SelectableText(utf8.decode(data, allowMalformed: true)));
+      return SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: SelectableText(
+          utf8.decode(data, allowMalformed: true),
+          style: threadTypographyTextStyle(context, ShadTheme.of(context).textTheme.p),
+        ),
+      );
     }
     return Center(
-      child: FileDefaultPreviewCard(icon: LucideIcons.paperclip, text: displayName),
+      child: FileDefaultPreviewCard(
+        icon: LucideIcons.paperclip,
+        text: displayName,
+        useThreadAttachmentStyle: ThreadTypographyOverride.useThreadAttachmentStyleOf(context),
+      ),
     );
   }
 }
@@ -3941,6 +4024,7 @@ class _DatasetDetailLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
+    final displayText = ThreadTypographyOverride.showInlineDisclosureCueOf(context) ? '$text ›' : text;
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
@@ -3949,7 +4033,7 @@ class _DatasetDetailLine extends StatelessWidget {
         child: ChatThreadMessageView(
           mine: false,
           isAgentMessage: true,
-          text: text,
+          text: displayText,
           authorName: authorName,
           createdAt: createdAt,
           bubbleColor: Colors.transparent,
@@ -3957,7 +4041,8 @@ class _DatasetDetailLine extends StatelessWidget {
           selectable: false,
           showBubbleActions: false,
           onTap: onTap,
-          header: ChatThreadAuthorHeader(authorName: authorName, createdAt: createdAt, text: text),
+          useDefaultBubbleBorder: false,
+          header: ChatThreadAuthorHeader(authorName: authorName, createdAt: createdAt, text: displayText),
         ),
       ),
     );

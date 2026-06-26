@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:markdown_widget/markdown_widget.dart';
 import 'package:meshagent_flutter_shadcn/code_language_resolver.dart';
+import 'package:meshagent_flutter_shadcn/thread_typography.dart';
 import 'package:re_highlight/languages/all.dart';
 import 'package:re_highlight/re_highlight.dart';
 import 'package:re_highlight/styles/monokai-sublime.dart';
@@ -29,8 +29,14 @@ bool chatBubbleMarkdownUsesMobileTypography(BuildContext context) {
 }
 
 double chatBubbleMarkdownBaseFontSize(BuildContext context, {bool threadTypography = false}) {
-  if (threadTypography && chatBubbleMarkdownUsesMobileTypography(context)) {
-    return chatBubbleMarkdownMobileBaseFontSize;
+  if (threadTypography) {
+    final overrideBaseFontSize = ThreadTypographyOverride.maybeThreadParagraphBaseFontSizeOf(context);
+    if (overrideBaseFontSize != null) {
+      return overrideBaseFontSize;
+    }
+    if (chatBubbleMarkdownUsesMobileTypography(context)) {
+      return chatBubbleMarkdownMobileBaseFontSize;
+    }
   }
 
   final defaultFontSize = DefaultTextStyle.of(context).style.fontSize ?? 14;
@@ -38,7 +44,11 @@ double chatBubbleMarkdownBaseFontSize(BuildContext context, {bool threadTypograp
 }
 
 Map<String, TextStyle> _codeTheme(BuildContext context) {
-  return monokaiSublimeTheme;
+  return ThreadTypographyOverride.maybeCodeBlockHighlightThemeOf(context) ?? monokaiSublimeTheme;
+}
+
+Map<String, TextStyle> chatBubbleCodeHighlightTheme(BuildContext context) {
+  return _codeTheme(context);
 }
 
 Color? diffLineBackgroundColor(BuildContext context, String line) {
@@ -95,41 +105,109 @@ Widget _buildHighlightedCodeBlock({
   }
   final normalizedCode = lines.join("\n");
   final usesMobileTypography = chatBubbleMarkdownUsesMobileTypography(context);
-  final resolvedBackgroundColor = backgroundColor ?? theme.cardTheme.backgroundColor;
-  final headerTextStyle = GoogleFonts.sourceCodePro(fontSize: usesMobileTypography ? 13 : 11, color: theme.colorScheme.mutedForeground);
+  final codeBlockSurfaceColor = ThreadTypographyOverride.maybeCodeBlockSurfaceColorOf(context);
+  final codeBlockHeaderSurfaceColor = ThreadTypographyOverride.maybeCodeBlockHeaderSurfaceColorOf(context);
+  final codeBlockBorderColor = ThreadTypographyOverride.maybeCodeBlockBorderColorOf(context);
+  final codeBlockTextColor = ThreadTypographyOverride.maybeCodeBlockTextColorOf(context);
+  final codeBlockHeaderTextColor = ThreadTypographyOverride.maybeCodeBlockHeaderTextColorOf(context);
+  final codeBlockTheme = _codeTheme(context);
+  final codeBlockWrapLines = ThreadTypographyOverride.codeBlockWrapLinesOf(context);
+  final codeBlockHeaderFontSize = ThreadTypographyOverride.maybeCodeBlockHeaderFontSizeOf(context);
+  final codeBlockActionIconSize = ThreadTypographyOverride.maybeCodeBlockActionIconSizeOf(context) ?? 14;
+  final codeBlockActionButtonSize = ThreadTypographyOverride.maybeCodeBlockActionButtonSizeOf(context) ?? 24;
+  final resolvedBackgroundColor = codeBlockSurfaceColor ?? backgroundColor ?? theme.cardTheme.backgroundColor;
+  final resolvedTextStyle = codeBlockTextColor == null ? textStyle : textStyle.copyWith(color: codeBlockTextColor);
+  final headerTextStyle = threadTypographyCodeTextStyle(
+    context,
+    fontSize: codeBlockHeaderFontSize ?? (usesMobileTypography ? 13 : 11),
+    color: codeBlockHeaderTextColor ?? theme.colorScheme.mutedForeground,
+  );
   final body = languageId == "diff"
-      ? SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              for (final line in lines.indexed)
-                Padding(
-                  padding: EdgeInsets.only(bottom: line.$1 < lines.length - 1 ? 2 : 0),
-                  child: Container(
-                    decoration: BoxDecoration(color: diffLineBackgroundColor(context, line.$2), borderRadius: BorderRadius.circular(4)),
-                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                    child: SelectableText.rich(
-                      highlightCodeSpanWithReHighlight(
-                        context: context,
-                        code: line.$2,
-                        languageOrFilename: "diff",
-                        textStyle: textStyle.copyWith(color: const Color(0xFFE5E7EB)),
-                        theme: monokaiSublimeTheme,
-                        fallbackLanguageId: "diff",
+      ? codeBlockWrapLines
+            ? Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (final line in lines.indexed)
+                      Padding(
+                        padding: EdgeInsets.only(bottom: line.$1 < lines.length - 1 ? 2 : 0),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: diffLineBackgroundColor(context, line.$2),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                          child: SelectableText.rich(
+                            highlightCodeSpanWithReHighlight(
+                              context: context,
+                              code: line.$2,
+                              languageOrFilename: "diff",
+                              textStyle: resolvedTextStyle,
+                              theme: codeBlockTheme,
+                              fallbackLanguageId: "diff",
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
+                  ],
                 ),
-            ],
+              )
+            : SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (final line in lines.indexed)
+                      Padding(
+                        padding: EdgeInsets.only(bottom: line.$1 < lines.length - 1 ? 2 : 0),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: diffLineBackgroundColor(context, line.$2),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                          child: SelectableText.rich(
+                            highlightCodeSpanWithReHighlight(
+                              context: context,
+                              code: line.$2,
+                              languageOrFilename: "diff",
+                              textStyle: resolvedTextStyle,
+                              theme: codeBlockTheme,
+                              fallbackLanguageId: "diff",
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              )
+      : codeBlockWrapLines
+      ? Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16.0),
+          child: SelectableText.rich(
+            highlightCodeSpanWithReHighlight(
+              context: context,
+              code: normalizedCode,
+              languageOrFilename: language,
+              textStyle: resolvedTextStyle,
+              theme: codeBlockTheme,
+            ),
           ),
         )
       : SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.all(16.0),
           child: SelectableText.rich(
-            highlightCodeSpanWithReHighlight(context: context, code: normalizedCode, languageOrFilename: language, textStyle: textStyle),
+            highlightCodeSpanWithReHighlight(
+              context: context,
+              code: normalizedCode,
+              languageOrFilename: language,
+              textStyle: resolvedTextStyle,
+              theme: codeBlockTheme,
+            ),
           ),
         );
 
@@ -138,7 +216,7 @@ Widget _buildHighlightedCodeBlock({
     decoration: BoxDecoration(
       color: resolvedBackgroundColor,
       borderRadius: const BorderRadius.all(Radius.circular(8.0)),
-      border: Border.all(color: theme.colorScheme.border, width: 1),
+      border: Border.all(color: codeBlockBorderColor ?? theme.colorScheme.border, width: 1),
     ),
     clipBehavior: Clip.antiAlias,
     width: double.infinity,
@@ -148,7 +226,7 @@ Widget _buildHighlightedCodeBlock({
       children: [
         Container(
           padding: const EdgeInsets.only(left: 12, right: 6, top: 4, bottom: 4),
-          decoration: BoxDecoration(color: theme.colorScheme.background.withAlpha(150)),
+          decoration: BoxDecoration(color: codeBlockHeaderSurfaceColor ?? theme.colorScheme.background.withAlpha(150)),
           child: Row(
             children: [
               Expanded(
@@ -160,10 +238,10 @@ Widget _buildHighlightedCodeBlock({
                 ),
               ),
               ShadIconButton.ghost(
-                width: 24,
-                height: 24,
-                iconSize: 14,
-                icon: const Icon(LucideIcons.copy, size: 14),
+                width: codeBlockActionButtonSize,
+                height: codeBlockActionButtonSize,
+                iconSize: codeBlockActionIconSize,
+                icon: Icon(LucideIcons.copy, size: codeBlockActionIconSize, color: codeBlockHeaderTextColor),
                 onPressed: () {
                   Clipboard.setData(ClipboardData(text: normalizedCode));
                 },
@@ -181,6 +259,7 @@ MarkdownConfig buildChatBubbleMarkdownConfig(
   BuildContext context, {
   Color? color,
   double? baseFontSize,
+  Color? linkColor,
   bool threadTypography = false,
   Color? horizontalRuleColor,
   double horizontalRuleHeight = 1,
@@ -189,7 +268,8 @@ MarkdownConfig buildChatBubbleMarkdownConfig(
   final mdColor = color ?? chatBubbleMarkdownColor(context);
   final usesMobileThreadTypography = threadTypography && chatBubbleMarkdownUsesMobileTypography(context);
   final resolvedBaseFontSize = baseFontSize ?? chatBubbleMarkdownBaseFontSize(context, threadTypography: threadTypography);
-  final codeTextStyle = GoogleFonts.sourceCodePro(
+  final codeTextStyle = threadTypographyCodeTextStyle(
+    context,
     fontSize: usesMobileThreadTypography
         ? resolvedBaseFontSize
         : threadTypography
@@ -198,62 +278,95 @@ MarkdownConfig buildChatBubbleMarkdownConfig(
     color: mdColor,
     height: usesMobileThreadTypography ? chatBubbleMarkdownMobileCodeLineHeight : null,
   );
-  final paragraphStyle = TextStyle(
-    fontSize: resolvedBaseFontSize,
-    color: mdColor,
-    inherit: false,
-    height: threadTypography ? chatBubbleMarkdownThreadLineHeight : null,
+  final inlineCodeTextStyle = threadTypographyCodeTextStyle(
+    context,
+    fontSize: codeTextStyle.fontSize,
+    color: ThreadTypographyOverride.maybeInlineCodeTextColorOf(context) ?? mdColor,
+    backgroundColor: ThreadTypographyOverride.maybeInlineCodeBackgroundColorOf(context),
+    height: codeTextStyle.height,
   );
+  final paragraphStyle = threadTypographyTextStyle(
+    context,
+    TextStyle(
+      fontSize: resolvedBaseFontSize,
+      color: mdColor,
+      inherit: false,
+      height: threadTypography
+          ? ThreadTypographyOverride.maybeThreadParagraphLineHeightOf(context) ?? chatBubbleMarkdownThreadLineHeight
+          : null,
+    ),
+  );
+  final resolvedLinkColor = linkColor ?? ThreadTypographyOverride.maybeLinkColorOf(context) ?? theme.linkButtonTheme.foregroundColor;
 
-  final headingBase = TextStyle(
-    color: mdColor,
-    inherit: false,
-    height: threadTypography ? 1.25 : null,
-    fontWeight: threadTypography ? FontWeight.w600 : null,
+  final headingBase = threadTypographyTextStyle(
+    context,
+    TextStyle(
+      color: mdColor,
+      inherit: false,
+      height: threadTypography ? 1.25 : null,
+      fontWeight: threadTypography ? FontWeight.w600 : null,
+    ),
   );
   final h1Style = threadTypography
       ? headingBase.copyWith(fontSize: (resolvedBaseFontSize * 1.55).clamp(20.0, 30.0).toDouble(), height: 1.2, fontWeight: FontWeight.w700)
-      : TextStyle(fontSize: resolvedBaseFontSize * 2, color: mdColor, fontWeight: FontWeight.bold);
+      : threadTypographyTextStyle(context, TextStyle(fontSize: resolvedBaseFontSize * 2, color: mdColor, fontWeight: FontWeight.bold));
   final h2Style = threadTypography
       ? headingBase.copyWith(fontSize: (resolvedBaseFontSize * 1.35).clamp(18.0, 26.0).toDouble())
-      : TextStyle(fontSize: resolvedBaseFontSize * 1.8, color: mdColor, inherit: false);
+      : threadTypographyTextStyle(context, TextStyle(fontSize: resolvedBaseFontSize * 1.8, color: mdColor, inherit: false));
   final h3Style = threadTypography
       ? headingBase.copyWith(fontSize: (resolvedBaseFontSize * 1.2).clamp(16.0, 22.0).toDouble())
-      : TextStyle(fontSize: resolvedBaseFontSize * 1.6, color: mdColor, inherit: false);
+      : threadTypographyTextStyle(context, TextStyle(fontSize: resolvedBaseFontSize * 1.6, color: mdColor, inherit: false));
   final h4Style = threadTypography
       ? headingBase.copyWith(fontSize: (resolvedBaseFontSize * 1.1).clamp(15.0, 20.0).toDouble())
-      : TextStyle(fontSize: resolvedBaseFontSize * 1.4, color: mdColor, inherit: false);
+      : threadTypographyTextStyle(context, TextStyle(fontSize: resolvedBaseFontSize * 1.4, color: mdColor, inherit: false));
   final h5Style = threadTypography
       ? headingBase.copyWith(fontSize: resolvedBaseFontSize.clamp(14.0, 18.0).toDouble())
-      : TextStyle(fontSize: resolvedBaseFontSize * 1.2, color: mdColor, inherit: false);
+      : threadTypographyTextStyle(context, TextStyle(fontSize: resolvedBaseFontSize * 1.2, color: mdColor, inherit: false));
   final h6Style = threadTypography
       ? headingBase.copyWith(fontSize: (resolvedBaseFontSize * 0.95).clamp(13.0, 16.0).toDouble(), fontWeight: FontWeight.w500)
-      : TextStyle(fontSize: resolvedBaseFontSize * 1.0, color: mdColor, inherit: false);
-  final preStyle = TextStyle(
-    fontSize: codeTextStyle.fontSize,
-    color: mdColor,
+      : threadTypographyTextStyle(context, TextStyle(fontSize: resolvedBaseFontSize * 1.0, color: mdColor, inherit: false));
+  final resolvedH1Style = ThreadTypographyOverride.maybeMarkdownHeadingStyleOf(context, MarkdownTag.h1.name, h1Style) ?? h1Style;
+  final resolvedH2Style = ThreadTypographyOverride.maybeMarkdownHeadingStyleOf(context, MarkdownTag.h2.name, h2Style) ?? h2Style;
+  final resolvedH3Style = ThreadTypographyOverride.maybeMarkdownHeadingStyleOf(context, MarkdownTag.h3.name, h3Style) ?? h3Style;
+  final resolvedH4Style = ThreadTypographyOverride.maybeMarkdownHeadingStyleOf(context, MarkdownTag.h4.name, h4Style) ?? h4Style;
+  final resolvedH5Style = ThreadTypographyOverride.maybeMarkdownHeadingStyleOf(context, MarkdownTag.h5.name, h5Style) ?? h5Style;
+  final resolvedH6Style = ThreadTypographyOverride.maybeMarkdownHeadingStyleOf(context, MarkdownTag.h6.name, h6Style) ?? h6Style;
+  final preStyle = threadTypographyCodeTextStyle(
+    context,
+    fontSize:
+        ThreadTypographyOverride.maybeCodeBlockFontSizeOf(context) ??
+        (ThreadTypographyOverride.codeBlockUseTextFontSizeOf(context) ? resolvedBaseFontSize : codeTextStyle.fontSize),
+    color: ThreadTypographyOverride.maybeCodeBlockTextColorOf(context) ?? mdColor,
     inherit: false,
-    fontFamily: 'SourceCodePro',
-    height: usesMobileThreadTypography
-        ? chatBubbleMarkdownMobileCodeLineHeight
-        : threadTypography
-        ? chatBubbleMarkdownThreadLineHeight
-        : null,
+    height:
+        ThreadTypographyOverride.maybeCodeBlockLineHeightOf(context) ??
+        (usesMobileThreadTypography
+            ? chatBubbleMarkdownMobileCodeLineHeight
+            : threadTypography
+            ? chatBubbleMarkdownThreadLineHeight
+            : null),
   );
+  final codeBlockSurfaceColor = ThreadTypographyOverride.maybeCodeBlockSurfaceColorOf(context);
+  final codeBlockBorderColor = ThreadTypographyOverride.maybeCodeBlockBorderColorOf(context);
+  final resolvedCodeBlockSurfaceColor = codeBlockSurfaceColor ?? theme.cardTheme.backgroundColor;
+  final resolvedHorizontalRuleColor =
+      horizontalRuleColor ?? ThreadTypographyOverride.maybeMarkdownHorizontalRuleColorOf(context) ?? mdColor.withAlpha(100);
+  final suppressHeadingDividers = ThreadTypographyOverride.markdownSuppressHeadingDividersOf(context);
+  final blockquoteSideColor = ThreadTypographyOverride.maybeMarkdownBlockquoteSideColorOf(context);
 
   return MarkdownConfig(
     configs: [
-      HrConfig(color: horizontalRuleColor ?? mdColor.withAlpha(100), height: horizontalRuleHeight),
-      _NoDividerH1Config(style: h1Style),
-      _NoDividerH2Config(style: h2Style),
-      H3Config(style: h3Style),
-      H4Config(style: h4Style),
-      H5Config(style: h5Style),
-      H6Config(style: h6Style),
+      HrConfig(color: resolvedHorizontalRuleColor, height: horizontalRuleHeight),
+      _NoDividerH1Config(style: resolvedH1Style),
+      _NoDividerH2Config(style: resolvedH2Style),
+      suppressHeadingDividers ? _NoDividerH3Config(style: resolvedH3Style) : H3Config(style: resolvedH3Style),
+      H4Config(style: resolvedH4Style),
+      H5Config(style: resolvedH5Style),
+      H6Config(style: resolvedH6Style),
       PreConfig(
         decoration: BoxDecoration(
-          color: theme.cardTheme.backgroundColor,
-          border: Border.all(color: theme.colorScheme.border, width: 1),
+          color: resolvedCodeBlockSurfaceColor,
+          border: Border.all(color: codeBlockBorderColor ?? theme.colorScheme.border, width: 1),
           borderRadius: const BorderRadius.all(Radius.circular(8.0)),
         ),
         textStyle: preStyle,
@@ -261,15 +374,15 @@ MarkdownConfig buildChatBubbleMarkdownConfig(
           context: context,
           code: code,
           language: language,
-          textStyle: codeTextStyle,
-          backgroundColor: theme.cardTheme.backgroundColor,
+          textStyle: preStyle,
+          backgroundColor: resolvedCodeBlockSurfaceColor,
         ),
       ),
       PConfig(textStyle: paragraphStyle),
-      CodeConfig(style: codeTextStyle),
-      BlockquoteConfig(textColor: mdColor),
+      CodeConfig(style: inlineCodeTextStyle),
+      BlockquoteConfig(sideColor: blockquoteSideColor ?? const Color(0xffd0d7de), textColor: mdColor),
       LinkConfig(
-        style: TextStyle(color: theme.linkButtonTheme.foregroundColor, decoration: TextDecoration.underline),
+        style: paragraphStyle.copyWith(color: resolvedLinkColor, decoration: TextDecoration.underline, decorationColor: resolvedLinkColor),
       ),
       ListConfig(
         marker: (isOrdered, depth, index) {
@@ -310,4 +423,14 @@ class _NoDividerH2Config extends HeadingConfig {
 
   @override
   String get tag => MarkdownTag.h2.name;
+}
+
+class _NoDividerH3Config extends HeadingConfig {
+  const _NoDividerH3Config({required this.style});
+
+  @override
+  final TextStyle style;
+
+  @override
+  String get tag => MarkdownTag.h3.name;
 }
