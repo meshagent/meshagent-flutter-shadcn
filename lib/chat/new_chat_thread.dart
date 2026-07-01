@@ -202,6 +202,7 @@ class _NewChatThreadState extends State<NewChatThread> {
       _newThreadOperationId++;
       _roomSubscription?.cancel();
       oldWidget.room?.messaging.removeListener(_onMessagingChanged);
+      oldWidget.chatClient?.removeListener(_onChatClientChanged);
       _bindRoom();
       _bindChatClient();
 
@@ -251,6 +252,7 @@ class _NewChatThreadState extends State<NewChatThread> {
     _roomSubscription?.cancel();
     _chatClientSubscription?.cancel();
     widget.room?.messaging.removeListener(_onMessagingChanged);
+    widget.chatClient?.removeListener(_onChatClientChanged);
     if (widget.disposeChatClient) {
       unawaited(widget.chatClient?.stop());
     }
@@ -287,6 +289,7 @@ class _NewChatThreadState extends State<NewChatThread> {
       return;
     }
     _agent = null;
+    chatClient.addListener(_onChatClientChanged);
     unawaited(chatClient.start());
     _chatClientSubscription = chatClient.events.listen((event) {
       final payload = event.payload;
@@ -298,6 +301,24 @@ class _NewChatThreadState extends State<NewChatThread> {
       _signalWaitingForAgentReady();
     });
     _requestModels();
+  }
+
+  void _onChatClientChanged() {
+    if (!mounted) {
+      return;
+    }
+    final chatClient = widget.chatClient;
+    if (chatClient == null) {
+      return;
+    }
+    final nextAgent = chatClient.agentParticipant();
+    if (nextAgent != _agent) {
+      setState(() {
+        _agent = nextAgent;
+      });
+      _requestModels();
+    }
+    _signalWaitingForAgentReady();
   }
 
   void _resetRealtimeAudioThreadState() {
@@ -396,10 +417,30 @@ class _NewChatThreadState extends State<NewChatThread> {
   }
 
   void _signalWaitingForAgentReady() {
+    final chatClient = widget.chatClient;
+    if (chatClient != null && chatClient.agentParticipant() == null) {
+      return;
+    }
     final completer = _waitForAgentReadyCompleter;
     if (completer != null && !completer.isCompleted) {
       completer.complete();
     }
+  }
+
+  Future<void> _waitForInjectedChatClientAgentReady() {
+    final chatClient = widget.chatClient;
+    if (chatClient == null || chatClient.agentParticipant() != null) {
+      return Future.value();
+    }
+
+    final existing = _waitForAgentReadyCompleter;
+    if (existing != null) {
+      return existing.future;
+    }
+
+    final completer = Completer<void>();
+    _waitForAgentReadyCompleter = completer;
+    return completer.future;
   }
 
   Future<void> _selectModelForNewThread(DatasetChatModelOption option) async {
@@ -822,7 +863,7 @@ class _NewChatThreadState extends State<NewChatThread> {
     }
 
     final operationId = ++_newThreadOperationId;
-    final waitingForAgent = !_usesInjectedChatClient && _agent == null;
+    final waitingForAgent = _usesInjectedChatClient ? widget.chatClient?.agentParticipant() == null : _agent == null;
     final senderName = _localSenderName();
     final pendingFirstMessage = PendingAgentMessage(
       messageId: pendingMessageId,
@@ -847,6 +888,9 @@ class _NewChatThreadState extends State<NewChatThread> {
 
     try {
       final agent = _usesInjectedChatClient ? null : _agent ?? await _waitForAgentOnline();
+      if (_usesInjectedChatClient) {
+        await _waitForInjectedChatClientAgentReady();
+      }
       final readyAgent = agent;
       if (!mounted || operationId != _newThreadOperationId) {
         return;
