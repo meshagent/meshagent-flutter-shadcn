@@ -10758,37 +10758,40 @@ class _StatusCounterWheelDigit extends StatelessWidget {
     final startDigit = _positiveModulo(startPlaceValue, 10);
     final wheelDelta = endPlaceValue - startPlaceValue;
     final virtualDigit = startDigit + (wheelDelta * progress);
-    final firstStripValue = math.min(startDigit, startDigit + wheelDelta) - 10;
-    final lastStripValue = math.max(startDigit, startDigit + wheelDelta) + 10;
-    final stripOffset = -((virtualDigit - firstStripValue) * height);
     return SizedBox(
       width: width,
       height: height,
       child: ClipRect(
-        child: OverflowBox(
-          minHeight: 0,
-          maxHeight: double.infinity,
-          alignment: Alignment.topCenter,
-          child: Transform.translate(
-            offset: Offset(0, stripOffset),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                for (var value = firstStripValue; value <= lastStripValue; value++)
-                  SizedBox(
-                    width: width,
-                    height: height,
-                    child: Center(
-                      child: Text("${_positiveModulo(value, 10)}", style: style, maxLines: 1, overflow: TextOverflow.clip),
-                    ),
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            for (var digit = 0; digit < 10; digit++)
+              Transform.translate(
+                offset: Offset(0, _wrappedDigitOffset(digit: digit, virtualDigit: virtualDigit) * height),
+                child: SizedBox(
+                  width: width,
+                  height: height,
+                  child: Center(
+                    child: Text("$digit", style: style, maxLines: 1, overflow: TextOverflow.clip),
                   ),
-              ],
-            ),
-          ),
+                ),
+              ),
+          ],
         ),
       ),
     );
   }
+}
+
+double _wrappedDigitOffset({required int digit, required double virtualDigit}) {
+  final normalized = virtualDigit % 10;
+  var offset = digit - normalized;
+  if (offset > 5) {
+    offset -= 10;
+  } else if (offset <= -5) {
+    offset += 10;
+  }
+  return offset;
 }
 
 int _positiveModulo(int value, int modulus) => ((value % modulus) + modulus) % modulus;
