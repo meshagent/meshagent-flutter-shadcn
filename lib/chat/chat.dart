@@ -10618,25 +10618,31 @@ abstract class _AnimatedStatusValueCounterState<T extends StatefulWidget> extend
         final digitCount = _transitioning
             ? math.max(_transitionStartValue.floor().toString().length, _transitionEndValue.floor().toString().length)
             : _displayValue.toString().length;
-        return Row(
-          mainAxisSize: MainAxisSize.min,
+        return Stack(
           children: [
-            Text(prefixForValue(_displayValue), style: numberStyle, maxLines: 1, overflow: TextOverflow.clip),
-            for (var index = 0; index < digitCount; index++) ...[
-              if (index > 0 && (digitCount - index) % 3 == 0) Text(",", style: numberStyle, maxLines: 1, overflow: TextOverflow.clip),
-              _StatusCounterWheelDigit(
-                startValue: _transitioning ? _transitionStartValue : _displayValue.toDouble(),
-                endValue: _transitioning ? _transitionEndValue : _displayValue.toDouble(),
-                progress: progress,
-                digitIndex: index,
-                digitCount: digitCount,
-                style: numberStyle,
-                width: digitSize.width,
-                height: wheelHeight,
-                fadeColor: ShadTheme.of(context).colorScheme.background,
-              ),
-            ],
-            Text(suffixForValue(_displayValue), style: counterStyle, maxLines: 1, overflow: TextOverflow.clip),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(prefixForValue(_displayValue), style: numberStyle, maxLines: 1, overflow: TextOverflow.clip),
+                for (var index = 0; index < digitCount; index++) ...[
+                  if (index > 0 && (digitCount - index) % 3 == 0) Text(",", style: numberStyle, maxLines: 1, overflow: TextOverflow.clip),
+                  _StatusCounterWheelDigit(
+                    startValue: _transitioning ? _transitionStartValue : _displayValue.toDouble(),
+                    endValue: _transitioning ? _transitionEndValue : _displayValue.toDouble(),
+                    progress: progress,
+                    digitIndex: index,
+                    digitCount: digitCount,
+                    style: numberStyle,
+                    width: digitSize.width,
+                    height: wheelHeight,
+                  ),
+                ],
+                Text(suffixForValue(_displayValue), style: counterStyle, maxLines: 1, overflow: TextOverflow.clip),
+              ],
+            ),
+            Positioned.fill(
+              child: IgnorePointer(child: _StatusCounterWheelFade(color: ShadTheme.of(context).colorScheme.background)),
+            ),
           ],
         );
       },
@@ -10733,7 +10739,6 @@ class _StatusCounterWheelDigit extends StatelessWidget {
     required this.style,
     required this.width,
     required this.height,
-    required this.fadeColor,
   });
 
   final double startValue;
@@ -10744,7 +10749,6 @@ class _StatusCounterWheelDigit extends StatelessWidget {
   final TextStyle style;
   final double width;
   final double height;
-  final Color fadeColor;
 
   @override
   Widget build(BuildContext context) {
@@ -10761,33 +10765,26 @@ class _StatusCounterWheelDigit extends StatelessWidget {
       width: width,
       height: height,
       child: ClipRect(
-        child: Stack(
-          children: [
-            OverflowBox(
-              minHeight: 0,
-              maxHeight: double.infinity,
-              alignment: Alignment.topCenter,
-              child: Transform.translate(
-                offset: Offset(0, stripOffset),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    for (var value = firstStripValue; value <= lastStripValue; value++)
-                      SizedBox(
-                        width: width,
-                        height: height,
-                        child: Center(
-                          child: Text("${_positiveModulo(value, 10)}", style: style, maxLines: 1, overflow: TextOverflow.clip),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
+        child: OverflowBox(
+          minHeight: 0,
+          maxHeight: double.infinity,
+          alignment: Alignment.topCenter,
+          child: Transform.translate(
+            offset: Offset(0, stripOffset),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (var value = firstStripValue; value <= lastStripValue; value++)
+                  SizedBox(
+                    width: width,
+                    height: height,
+                    child: Center(
+                      child: Text("${_positiveModulo(value, 10)}", style: style, maxLines: 1, overflow: TextOverflow.clip),
+                    ),
+                  ),
+              ],
             ),
-            Positioned.fill(
-              child: IgnorePointer(child: _StatusCounterWheelFade(color: fadeColor)),
-            ),
-          ],
+          ),
         ),
       ),
     );
