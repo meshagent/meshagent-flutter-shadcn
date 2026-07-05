@@ -236,13 +236,7 @@ void main() {
           return _json(_secretJson(name: secretName));
         }
         if (request.method == 'POST' && request.url.path == '/accounts/users/me/secrets/secret-1/versions') {
-          return _json({
-            'id': 'version-2',
-            'secret_id': 'secret-1',
-            'version': 2,
-            'encryption_key_id': 'key-1',
-            'created_at': '2026-01-01T00:00:00Z',
-          });
+          return _json({'id': 'version-2', 'secret_id': 'secret-1', 'version': 2, 'created_at': '2026-01-01T00:00:00Z'});
         }
         if (request.method == 'DELETE' && request.url.path == '/accounts/users/me/secrets/secret-1') {
           return _json({});
