@@ -1,58 +1,107 @@
 import 'dart:async';
 
 import 'package:code_forge/code_forge.dart' as forge;
+import 'package:code_forge_web/code_forge_web.dart' as web_forge;
 import 'package:flutter/material.dart';
 
 import 'code_editor_types.dart';
 
+Future<void>? _initialization;
+bool _useTestBackend = false;
+
+Future<void> initializeCodeEditor() {
+  return _initialization ??= forge.RustLib.init();
+}
+
+Future<void> initializeCodeEditorForTesting() async {
+  _useTestBackend = true;
+}
+
 class PlatformCodeLineEditingController {
-  PlatformCodeLineEditingController({required String initialText}) : _delegate = forge.CodeForgeController() {
-    _delegate.text = initialText;
+  PlatformCodeLineEditingController({required String initialText})
+    : _nativeDelegate = _useTestBackend ? null : forge.CodeForgeController(),
+      _testDelegate = _useTestBackend ? web_forge.CodeForgeWebController() : null {
+    text = initialText;
   }
 
-  final forge.CodeForgeController _delegate;
+  final forge.CodeForgeController? _nativeDelegate;
+  final web_forge.CodeForgeWebController? _testDelegate;
 
   void addListener(VoidCallback listener) {
-    _delegate.addListener(listener);
+    if (_nativeDelegate != null) {
+      _nativeDelegate.addListener(listener);
+    } else {
+      _testDelegate!.addListener(listener);
+    }
   }
 
   void removeListener(VoidCallback listener) {
-    _delegate.removeListener(listener);
+    if (_nativeDelegate != null) {
+      _nativeDelegate.removeListener(listener);
+    } else {
+      _testDelegate!.removeListener(listener);
+    }
   }
 
-  String get text => _delegate.text;
+  String get text => _nativeDelegate?.text ?? _testDelegate!.text;
 
   set text(String value) {
-    _delegate.text = value;
+    if (_nativeDelegate != null) {
+      _nativeDelegate.text = value;
+    } else {
+      _testDelegate!.text = value;
+    }
   }
 
-  TextSelection get selection => _delegate.selection;
+  TextSelection get selection => _nativeDelegate?.selection ?? _testDelegate!.selection;
 
   set selection(TextSelection value) {
-    _delegate.selection = value;
+    if (_nativeDelegate != null) {
+      _nativeDelegate.selection = value;
+    } else {
+      _testDelegate!.selection = value;
+    }
   }
 
   Future<void> copy() {
-    return Future.sync(_delegate.copy);
+    return _nativeDelegate != null ? Future.sync(_nativeDelegate.copy) : Future.sync(_testDelegate!.copy);
   }
 
   void cut() {
-    _delegate.cut();
+    if (_nativeDelegate != null) {
+      _nativeDelegate.cut();
+    } else {
+      _testDelegate!.cut();
+    }
   }
 
   void paste() {
-    _delegate.paste();
+    if (_nativeDelegate != null) {
+      _nativeDelegate.paste();
+    } else {
+      _testDelegate!.paste();
+    }
   }
 
   void selectAll() {
-    _delegate.selectAll();
+    if (_nativeDelegate != null) {
+      _nativeDelegate.selectAll();
+    } else {
+      _testDelegate!.selectAll();
+    }
   }
 
   void dispose() {
-    _delegate.dispose();
+    if (_nativeDelegate != null) {
+      _nativeDelegate.dispose();
+    } else {
+      _testDelegate!.dispose();
+    }
   }
 
-  forge.CodeForgeController get rawController => _delegate;
+  forge.CodeForgeController get nativeDelegate => _nativeDelegate!;
+
+  web_forge.CodeForgeWebController get testDelegate => _testDelegate!;
 }
 
 Widget buildCodeEditor({
@@ -67,29 +116,51 @@ Widget buildCodeEditor({
   final codeTheme = style?.codeTheme;
   final defaultMode = codeTheme?.languages['default']?.mode;
   final textStyle = TextStyle(fontFamily: style?.fontFamily, fontSize: style?.fontSize, color: style?.textColor);
-  final editor = forge.CodeForge(
-    controller: controller.rawController,
-    language: defaultMode,
-    editorTheme: codeTheme?.theme,
-    focusNode: focusNode,
-    textStyle: textStyle,
-    innerPadding: padding is EdgeInsets ? padding : null,
-    readOnly: readOnly,
-    lineWrap: wordWrap,
-    enableGutter: showGutter,
-    enableGutterDivider: showGutter,
-    selectionStyle: forge.CodeSelectionStyle(
-      cursorColor: style?.cursorColor ?? textStyle.color ?? Colors.blue,
-      selectionColor: _selectionColor(style?.cursorColor ?? textStyle.color ?? Colors.blue),
-    ),
-    gutterStyle: showGutter
-        ? forge.GutterStyle(
-            backgroundColor: style?.backgroundColor,
-            lineNumberStyle: textStyle.copyWith(color: textStyle.color?.withValues(alpha: 0.7)),
-            activeLineNumberColor: textStyle.color,
-          )
-        : null,
-  );
+  final cursorColor = style?.cursorColor ?? textStyle.color ?? Colors.blue;
+  final Widget editor;
+  if (_useTestBackend) {
+    editor = web_forge.CodeForgeWeb(
+      controller: controller.testDelegate,
+      language: defaultMode,
+      editorTheme: codeTheme?.theme,
+      focusNode: focusNode,
+      textStyle: textStyle,
+      innerPadding: padding is EdgeInsets ? padding : null,
+      readOnly: readOnly,
+      lineWrap: wordWrap,
+      enableGutter: showGutter,
+      enableGutterDivider: showGutter,
+      selectionStyle: web_forge.CodeSelectionStyle(cursorColor: cursorColor, selectionColor: _selectionColor(cursorColor)),
+      gutterStyle: showGutter
+          ? web_forge.GutterStyle(
+              backgroundColor: style?.backgroundColor,
+              lineNumberStyle: textStyle.copyWith(color: textStyle.color?.withValues(alpha: 0.7)),
+              activeLineNumberColor: textStyle.color,
+            )
+          : null,
+    );
+  } else {
+    editor = forge.CodeForge(
+      controller: controller.nativeDelegate,
+      language: defaultMode,
+      editorTheme: codeTheme?.theme,
+      focusNode: focusNode,
+      textStyle: textStyle,
+      innerPadding: padding is EdgeInsets ? padding : null,
+      readOnly: readOnly,
+      lineWrap: wordWrap,
+      enableGutter: showGutter,
+      enableGutterDivider: showGutter,
+      selectionStyle: forge.CodeSelectionStyle(cursorColor: cursorColor, selectionColor: _selectionColor(cursorColor)),
+      gutterStyle: showGutter
+          ? forge.GutterStyle(
+              backgroundColor: style?.backgroundColor,
+              lineNumberStyle: textStyle.copyWith(color: textStyle.color?.withValues(alpha: 0.7)),
+              activeLineNumberColor: textStyle.color,
+            )
+          : null,
+    );
+  }
 
   final scopedEditor = LayoutBuilder(
     builder: (context, constraints) {

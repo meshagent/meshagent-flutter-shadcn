@@ -3,6 +3,19 @@ import 'package:flutter/material.dart';
 import 'code_editor_platform.dart' as platform;
 import 'code_editor_types.dart';
 
+/// Initializes the native code editor runtime.
+///
+/// Call this after Flutter bindings are initialized and before constructing a
+/// [CodeLineEditingController]. On web, this is a no-op.
+Future<void> initializeCodeEditor() {
+  return platform.initializeCodeEditor();
+}
+
+@visibleForTesting
+Future<void> initializeCodeEditorForTesting() {
+  return platform.initializeCodeEditorForTesting();
+}
+
 class CodeLines {
   const CodeLines._(this.text);
 

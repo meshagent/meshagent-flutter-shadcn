@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 
 import 'code_editor_types.dart';
 
+Future<void> initializeCodeEditor() async {}
+Future<void> initializeCodeEditorForTesting() async {}
+
 class PlatformCodeLineEditingController {
   PlatformCodeLineEditingController({required String initialText}) : _delegate = forge.CodeForgeWebController() {
     _delegate.text = initialText;

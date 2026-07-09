@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_flutter/meshagent_flutter.dart';
+import 'package:meshagent_flutter_shadcn/code_editor.dart';
 import 'package:meshagent_flutter_shadcn/meshagent_flutter_shadcn.dart';
 import 'package:meshagent_flutter_shadcn/storage/file_browser.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
@@ -15,7 +16,9 @@ const roomName = 'insert-room-name';
 const roomUrl = 'wss://api.meshagent.com/rooms/$roomName';
 const apiKey = '';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await initializeCodeEditor();
   runApp(const MeshagentExampleApp());
 }
 

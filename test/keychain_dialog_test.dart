@@ -13,6 +13,8 @@ import 'package:meshagent_flutter_shadcn/secrets/keychain_dialog.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 void main() {
+  setUpAll(initializeCodeEditorForTesting);
+
   testWidgets('metadata editor uses shad input decoration and editor surface colors', (tester) async {
     final restoreCodeForgeAssets = await _installCodeForgeFontAssets();
     addTearDown(restoreCodeForgeAssets);
@@ -366,16 +368,16 @@ Future<VoidCallback> _installCodeForgeFontAssets() async {
   }
   final fontBytes = resolvedFontFile.readAsBytesSync();
   const assets = [
-    'packages/code_forge/assets/icons/method.ttf',
-    'packages/code_forge/assets/icons/variable.ttf',
-    'packages/code_forge/assets/icons/class.ttf',
-    'packages/code_forge/assets/icons/reference.ttf',
-    'packages/code_forge/assets/icons/struct.ttf',
-    'packages/code_forge/assets/icons/event.ttf',
-    'packages/code_forge/assets/icons/operator.ttf',
-    'packages/code_forge/assets/icons/parameter.ttf',
-    'packages/code_forge/assets/icons/interface.ttf',
-    'packages/code_forge/assets/icons/field.ttf',
+    'packages/code_forge_web/assets/icons/method.ttf',
+    'packages/code_forge_web/assets/icons/variable.ttf',
+    'packages/code_forge_web/assets/icons/class.ttf',
+    'packages/code_forge_web/assets/icons/reference.ttf',
+    'packages/code_forge_web/assets/icons/struct.ttf',
+    'packages/code_forge_web/assets/icons/event.ttf',
+    'packages/code_forge_web/assets/icons/operator.ttf',
+    'packages/code_forge_web/assets/icons/parameter.ttf',
+    'packages/code_forge_web/assets/icons/interface.ttf',
+    'packages/code_forge_web/assets/icons/field.ttf',
   ];
   final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   messenger.setMockMessageHandler('flutter/assets', (message) async {
