@@ -3393,7 +3393,7 @@ class _ChatThreadAttachButton extends State<ChatThreadAttachButton> {
                   child: const Text("Add from room..."),
                 ),
             ],
-            if (additionalItems != null) ...additionalItems,
+            ...?additionalItems,
             if (showMcpMenuItem)
               ShadContextMenuItem(
                 leading: const Icon(LucideIcons.plug),
