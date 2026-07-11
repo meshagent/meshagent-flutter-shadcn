@@ -1879,6 +1879,26 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       case agentToolCallEndedType:
         final itemId = _payloadItemId(payload);
         final existingData = _mapValue(_agentRowsByItemId[itemId]?['data']);
+        final fileAttachment = type == agentToolCallEndedType ? _roomFileAttachmentFromToolResult(payload) : null;
+        if (fileAttachment != null) {
+          changed =
+              _upsertAgentRow(
+                itemId: itemId,
+                turnId: _payloadTurnId(payload),
+                timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
+                data: {
+                  'kind': 'message',
+                  'role': 'assistant',
+                  'text': '',
+                  'attachments': [
+                    {'url': fileAttachment.url, if (fileAttachment.name != null) 'name': fileAttachment.name},
+                  ],
+                  'sender_name': _senderNameFromPayload(payload),
+                },
+              ) ||
+              changed;
+          break;
+        }
         final tool = payload['tool']?.toString() ?? payload['tool_name']?.toString() ?? payload['name']?.toString() ?? '';
         final resolvedTool = tool.trim().isEmpty ? (existingData?['tool']?.toString() ?? '') : tool;
         final toolkit = payload['toolkit']?.toString() ?? payload['toolkit_name']?.toString() ?? existingData?['toolkit']?.toString() ?? '';
@@ -2464,7 +2484,19 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       }
       if (type == agentToolCallEndedType) {
         final state = toolCallsByItemId.remove(itemId);
-        final message = _messageForToolCallEndRow(row: row, payload: data, state: state);
+        final fileAttachment = _roomFileAttachmentFromToolResult(data!);
+        final message = fileAttachment == null
+            ? _messageForToolCallEndRow(row: row, payload: data, state: state)
+            : _DatasetThreadMessage(
+                id: itemId,
+                kind: 'message',
+                role: 'agent',
+                text: '',
+                authorName: data['sender_name']?.toString() ?? state?.authorName,
+                attachments: [fileAttachment],
+                createdAt: _rowTimestamp(row),
+                turnId: row['turn_id']?.toString() ?? data['turn_id']?.toString(),
+              );
         messages.add((row: row, message: message));
         continue;
       }
@@ -3825,7 +3857,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }) {
     final showStatus = !loading && shouldShowChatThreadStatus(_status);
     final feedImages = _collectThreadImages(messages);
-    final children = loading
+    final children = loading && messages.isEmpty
         ? const <Widget>[_DatasetThreadLoadingRow()]
         : _buildMessageWidgets(context, messages, pendingMessages, feedImages: feedImages);
     final threadView = ChatThreadViewportBody(
@@ -5182,6 +5214,19 @@ _DatasetThreadMessage? _messageForAgentPayload(Map<String, Object?> row, Map<Str
     case agentToolCallLogDeltaType:
       return null;
     case agentToolCallEndedType:
+      final fileAttachment = _roomFileAttachmentFromToolResult(payload);
+      if (fileAttachment != null) {
+        return _DatasetThreadMessage(
+          id: itemId,
+          kind: 'message',
+          role: 'agent',
+          text: '',
+          authorName: payload['sender_name']?.toString(),
+          attachments: [fileAttachment],
+          createdAt: createdAt,
+          turnId: turnId,
+        );
+      }
       return _messageForToolCallEndRow(row: row, payload: payload, state: null);
     case agentContextCompactedType:
       return _DatasetThreadMessage(
@@ -5215,6 +5260,28 @@ _DatasetThreadMessage? _messageForAgentPayload(Map<String, Object?> row, Map<Str
 
 bool _isDatasetToolCallStartType(String? type) {
   return type == agentToolCallPendingType || type == agentToolCallInProgressType || type == agentToolCallStartedType;
+}
+
+_DatasetThreadAttachment? _roomFileAttachmentFromToolResult(Map<String, Object?> payload) {
+  final result = _mapValue(payload['result']);
+  if (result == null) {
+    return null;
+  }
+
+  Map<String, Object?>? attachment;
+  if (result['type']?.toString() == 'link') {
+    attachment = result;
+  } else if (result['type']?.toString() == 'json') {
+    final json = _mapValue(result['json']);
+    attachment = _mapValue(json?['attachment']);
+  }
+
+  final url = attachment?['url']?.toString().trim();
+  if (url == null || url.isEmpty || !url.startsWith('room:')) {
+    return null;
+  }
+  final name = attachment?['name']?.toString().trim();
+  return _DatasetThreadAttachment(url: url, name: name == null || name.isEmpty ? null : name);
 }
 
 bool _toolCallStatusIsRunning(String? status) {

@@ -8,11 +8,15 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:meshagent_agents/meshagent_agents.dart' as agent_sessions;
 import 'package:meshagent_flutter_shadcn/chat/chat.dart';
 import 'package:meshagent_flutter_shadcn/chat/dataset_chat_thread.dart';
+import 'package:meshagent/meshagent.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 const _liveStatusFlushDelay = Duration(milliseconds: 150);
 
 class _FakeChatClient extends agent_sessions.BaseChatClient {
+  _FakeChatClient({this.completeOpenThread = true});
+
+  final bool completeOpenThread;
   final List<agent_sessions.AgentMessage> sentMessages = <agent_sessions.AgentMessage>[];
 
   @override
@@ -26,7 +30,7 @@ class _FakeChatClient extends agent_sessions.BaseChatClient {
   @override
   Future<void> sendAgentMessage(agent_sessions.AgentMessage message, {Uint8List? attachment}) async {
     sentMessages.add(message);
-    if (message is agent_sessions.OpenThread && message.load != false) {
+    if (completeOpenThread && message is agent_sessions.OpenThread && message.load != false) {
       scheduleMicrotask(() {
         handleAgentMessage(
           agent_sessions.ThreadLoaded(threadId: message.threadId, sourceMessageId: message.messageId, sinceTurn: message.sinceTurn),
@@ -84,6 +88,137 @@ void main() {
     await tester.pump();
 
     expect(find.text('Done from streaming rows'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('keeps cached thread rows visible while the thread session reconnects', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const ui.Size(1200, 1000);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final rowsController = StreamController<List<Map<String, Object?>>>.broadcast();
+    final chatClient = _FakeChatClient(completeOpenThread: false);
+    addTearDown(rowsController.close);
+    addTearDown(chatClient.stop);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 900,
+            height: 820,
+            child: DatasetChatThread(
+              path: 'dataset://agents/assistant/threads/thread-1',
+              chatClient: chatClient,
+              rowsLoader: ({required namespace, required table}) => rowsController.stream,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    rowsController.add([
+      {
+        'item_id': 'assistant-message-1',
+        'turn_id': 'turn-1',
+        'timestamp': '2026-06-23T19:35:00Z',
+        'data': {'kind': 'message', 'role': 'assistant', 'text': 'Cached website creation result', 'sender_name': 'Assistant'},
+      },
+    ]);
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Cached website creation result'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('renders a provided webserver file tool result as a clickable attachment', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const ui.Size(1200, 1000);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final rowsController = StreamController<List<Map<String, Object?>>>.broadcast();
+    final chatClient = _FakeChatClient();
+    final openedPaths = <String>[];
+    addTearDown(rowsController.close);
+    addTearDown(chatClient.stop);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 900,
+            height: 820,
+            child: DatasetChatThread(
+              path: 'dataset://agents/assistant/threads/thread-1',
+              chatClient: chatClient,
+              rowsLoader: ({required namespace, required table}) => rowsController.stream,
+              openFile: openedPaths.add,
+              attachmentRenderer: (context, path) => Text('attachment:$path'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    rowsController.add(const []);
+    await tester.pump();
+
+    chatClient.emit(
+      agent_sessions.AgentToolCallStarted(
+        threadId: 'dataset://agents/assistant/threads/thread-1',
+        turnId: 'turn-1',
+        itemId: 'tool-1',
+        toolkit: 'powerboards',
+        tool: 'open_webserver_file',
+      ),
+    );
+    await tester.pump();
+    chatClient.emit(
+      agent_sessions.AgentToolCallEnded(
+        threadId: 'dataset://agents/assistant/threads/thread-1',
+        turnId: 'turn-1',
+        itemId: 'tool-1',
+        result: LinkContent(url: 'room:///website/index.html', name: 'index.html'),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(_liveStatusFlushDelay);
+
+    expect(find.text('attachment:website/index.html'), findsOneWidget);
+    await tester.tap(find.text('attachment:website/index.html'));
+    await tester.pump();
+    expect(openedPaths, ['website/index.html']);
+
+    rowsController.add([
+      {
+        'item_id': 'tool-2',
+        'turn_id': 'turn-2',
+        'timestamp': '2026-06-23T19:36:00Z',
+        'data': {
+          'type': agent_sessions.agentToolCallEndedType,
+          'thread_id': 'dataset://agents/assistant/threads/thread-1',
+          'turn_id': 'turn-2',
+          'item_id': 'tool-2',
+          'result': {'type': 'link', 'url': 'room:///website/styles.css', 'name': 'styles.css'},
+        },
+      },
+    ]);
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('attachment:website/styles.css'), findsOneWidget);
+    await tester.tap(find.text('attachment:website/styles.css'));
+    await tester.pump();
+    expect(openedPaths, ['website/index.html', 'website/styles.css']);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 1));
