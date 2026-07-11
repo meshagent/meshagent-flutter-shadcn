@@ -16,6 +16,14 @@ typedef DatasetChatThreadWrapperBuilder =
 typedef DatasetChatNewThreadWrapperBuilder =
     Widget Function(BuildContext context, Widget newThread, DatasetChatModelController modelController);
 
+@visibleForTesting
+DatasetChatAttachmentRenderer resolveChatBotViewDatasetAttachmentRenderer({
+  required DatasetChatAttachmentRenderer fallback,
+  DatasetChatAttachmentRenderer? custom,
+}) {
+  return custom ?? fallback;
+}
+
 class ChatBotView extends StatefulWidget {
   const ChatBotView({
     super.key,
@@ -45,6 +53,8 @@ class ChatBotView extends StatefulWidget {
     this.onAttachmentOpen,
     this.onAttachmentRemoved,
     this.fileInThreadBuilder,
+    this.pendingFileInThreadBuilder,
+    this.datasetInlineAttachmentViewerPredicate,
     this.chatInputBoxBuilder,
     this.customInputBuilder,
     this.openFile,
@@ -97,6 +107,8 @@ class ChatBotView extends StatefulWidget {
   final ValueChanged<FileAttachment>? onAttachmentOpen;
   final ValueChanged<FileAttachment>? onAttachmentRemoved;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
+  final Widget? Function(BuildContext context, String path)? pendingFileInThreadBuilder;
+  final DatasetChatInlineAttachmentViewerPredicate? datasetInlineAttachmentViewerPredicate;
   final Widget Function(BuildContext context, Widget chatBox)? chatInputBoxBuilder;
   final ChatThreadCustomInputBuilder? customInputBuilder;
   final FutureOr<void> Function(String path)? openFile;
@@ -259,7 +271,11 @@ class _ChatBotViewState extends State<ChatBotView> {
       emptyStateTitle: widget.emptyStateTitle,
       emptyStateDescription: widget.emptyStateDescription,
       openFile: widget.openFile,
-      attachmentRenderer: (context, path) => ChatThreadPreview(room: widget.room, path: path),
+      attachmentRenderer: resolveChatBotViewDatasetAttachmentRenderer(
+        custom: widget.fileInThreadBuilder,
+        fallback: (context, path) => ChatThreadPreview(room: widget.room, path: path),
+      ),
+      inlineAttachmentViewerPredicate: widget.datasetInlineAttachmentViewerPredicate,
       toolsBuilder: widget.toolsBuilder,
       inputPlaceholder: widget.inputPlaceholder,
       attachmentBuilder: widget.attachmentBuilder,
@@ -310,6 +326,11 @@ class _ChatBotViewState extends State<ChatBotView> {
         emptyStateTitle: widget.emptyStateTitle,
         emptyStateDescription: widget.emptyStateDescription,
         openFile: widget.openFile,
+        attachmentRenderer: resolveChatBotViewDatasetAttachmentRenderer(
+          custom: widget.fileInThreadBuilder,
+          fallback: (context, path) => ChatThreadPreview(room: widget.room, path: path),
+        ),
+        inlineAttachmentViewerPredicate: widget.datasetInlineAttachmentViewerPredicate,
         toolsBuilder: widget.toolsBuilder,
         inputPlaceholder: widget.inputPlaceholder,
         attachmentBuilder: widget.attachmentBuilder,
@@ -342,6 +363,7 @@ class _ChatBotViewState extends State<ChatBotView> {
       onAttachmentOpen: widget.onAttachmentOpen,
       onAttachmentRemoved: widget.onAttachmentRemoved,
       fileInThreadBuilder: widget.fileInThreadBuilder,
+      pendingFileInThreadBuilder: widget.pendingFileInThreadBuilder,
       chatInputBoxBuilder: (context, chatBox) => _buildChatInputBox(context, chatBox),
       customInputBuilder: widget.customInputBuilder,
       openFile: widget.openFile,

@@ -3,6 +3,13 @@ import 'package:meshagent_flutter_shadcn/chat/file_prompt_actions.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('default folder prompt uses folder-specific wording', () {
+    final action = defaultChatFolderPromptAction(agentName: 'Reviewer');
+
+    expect(action.menuLabel, defaultChatFilePromptName);
+    expect(action.renderPrompt('design references/参考'), 'Please help me with this folder: design references/参考');
+  });
+
   group('resolveChatFilePromptActions', () {
     test('returns sorted matching prompt actions for file annotations', () {
       final services = [

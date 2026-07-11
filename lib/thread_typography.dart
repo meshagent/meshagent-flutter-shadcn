@@ -17,6 +17,7 @@ typedef ThreadAttachmentActionIconBuilder = Widget Function(BuildContext context
 
 typedef ThreadMarkdownHeadingPaddingResolver = EdgeInsets? Function(String tag);
 typedef ThreadMarkdownHeadingStyleResolver = TextStyle? Function(String tag, TextStyle defaultStyle);
+typedef ThreadMarkdownLinkHandler = bool Function(BuildContext context, String url);
 
 class ThreadTypographyOverride extends InheritedWidget {
   const ThreadTypographyOverride({
@@ -74,6 +75,7 @@ class ThreadTypographyOverride extends InheritedWidget {
     this.markdownSuppressHeadingDividers = false,
     this.markdownHeadingPaddingResolver,
     this.markdownHeadingStyleResolver,
+    this.markdownLinkHandler,
   });
 
   final String? textFontFamily;
@@ -128,6 +130,7 @@ class ThreadTypographyOverride extends InheritedWidget {
   final bool markdownSuppressHeadingDividers;
   final ThreadMarkdownHeadingPaddingResolver? markdownHeadingPaddingResolver;
   final ThreadMarkdownHeadingStyleResolver? markdownHeadingStyleResolver;
+  final ThreadMarkdownLinkHandler? markdownLinkHandler;
 
   static ThreadTypographyOverride? maybeOf(BuildContext context) {
     return context.dependOnInheritedWidgetOfExactType<ThreadTypographyOverride>();
@@ -341,6 +344,10 @@ class ThreadTypographyOverride extends InheritedWidget {
     return maybeOf(context)?.markdownHeadingStyleResolver?.call(tag, defaultStyle);
   }
 
+  static ThreadMarkdownLinkHandler? maybeMarkdownLinkHandlerOf(BuildContext context) {
+    return maybeOf(context)?.markdownLinkHandler;
+  }
+
   @override
   bool updateShouldNotify(ThreadTypographyOverride oldWidget) {
     return textFontFamily != oldWidget.textFontFamily ||
@@ -392,7 +399,8 @@ class ThreadTypographyOverride extends InheritedWidget {
         markdownBlockquoteBackgroundColor != oldWidget.markdownBlockquoteBackgroundColor ||
         markdownSuppressHeadingDividers != oldWidget.markdownSuppressHeadingDividers ||
         markdownHeadingPaddingResolver != oldWidget.markdownHeadingPaddingResolver ||
-        markdownHeadingStyleResolver != oldWidget.markdownHeadingStyleResolver;
+        markdownHeadingStyleResolver != oldWidget.markdownHeadingStyleResolver ||
+        markdownLinkHandler != oldWidget.markdownLinkHandler;
   }
 }
 

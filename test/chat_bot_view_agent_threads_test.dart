@@ -7,6 +7,7 @@ import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_agents/meshagent_agents.dart' as agent_sessions;
 import 'package:meshagent_flutter_shadcn/chat/chat_bot_view.dart';
 import 'package:meshagent_flutter_shadcn/chat/conversation_descriptor.dart';
+import 'package:meshagent_flutter_shadcn/chat/dataset_chat_thread.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 class _NoopProtocolChannel extends ProtocolChannel {
@@ -45,6 +46,35 @@ class _FakeChatClient extends agent_sessions.BaseChatClient {
 }
 
 void main() {
+  test('inline data attachments can delegate folder contexts to the application opener', () {
+    const folderContext = 'data:text/plain;base64,folder-context';
+
+    expect(datasetChatShouldShowInlineAttachmentViewer(folderContext), isTrue);
+    expect(datasetChatShouldShowInlineAttachmentViewer(folderContext, predicate: (path) => !path.contains('folder-context')), isFalse);
+    expect(datasetChatShouldShowInlineAttachmentViewer('files/notes.md'), isFalse);
+  });
+
+  testWidgets('agent-message threads prefer the supplied attachment renderer', (tester) async {
+    var customCalls = 0;
+    var fallbackCalls = 0;
+    final renderer = resolveChatBotViewDatasetAttachmentRenderer(
+      custom: (context, path) {
+        customCalls += 1;
+        return Text('Folder: $path');
+      },
+      fallback: (context, path) {
+        fallbackCalls += 1;
+        return Text('File: $path');
+      },
+    );
+
+    await tester.pumpWidget(ShadApp(home: Builder(builder: (context) => renderer(context, 'folder-context'))));
+
+    expect(find.text('Folder: folder-context'), findsOneWidget);
+    expect(customCalls, 1);
+    expect(fallbackCalls, 0);
+  });
+
   testWidgets('multi-thread ChatBotView loads selected threads through agent messages', (tester) async {
     final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     final chatClient = _FakeChatClient();

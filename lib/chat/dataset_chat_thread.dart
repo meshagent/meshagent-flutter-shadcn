@@ -81,12 +81,19 @@ import 'usage_footer_tooltip.dart';
 const double _datasetDiffPreviewHorizontalPadding = 16;
 
 typedef DatasetChatAttachmentRenderer = Widget Function(BuildContext context, String path);
+typedef DatasetChatInlineAttachmentViewerPredicate = bool Function(String path);
 typedef DatasetChatRowsLoader = Stream<List<Map<String, Object?>>> Function({required List<String>? namespace, required String table});
 typedef DatasetChatFileDropHandler = Future<void> Function(String name, Stream<Uint8List> dataStream, int? size);
 typedef DatasetChatGeneratedImageAttachmentRenderer =
     Widget Function(BuildContext context, DatasetThreadImage image, VoidCallback? onOpenFullscreen);
 typedef DatasetChatImageGalleryBuilder =
     Widget Function(BuildContext context, List<ChatThreadFeedImage> images, int initialIndex, VoidCallback onClose);
+
+@visibleForTesting
+bool datasetChatShouldShowInlineAttachmentViewer(String path, {DatasetChatInlineAttachmentViewerPredicate? predicate}) {
+  return _isDataUrl(path) && (predicate?.call(path) ?? true);
+}
+
 typedef DatasetChatSecretRequestHandler = Future<AgentSecretResponse> Function(BuildContext context, AgentSecretRequested request);
 typedef DatasetChatDebugRowsChanged = void Function(List<DatasetChatDebugRow> rows);
 
@@ -517,6 +524,7 @@ class DatasetChatThread extends StatefulWidget {
     this.emptyStateDescription,
     this.openFile,
     this.attachmentRenderer,
+    this.inlineAttachmentViewerPredicate,
     this.toolsBuilder,
     this.inputPlaceholder,
     this.attachmentBuilder,
@@ -547,6 +555,7 @@ class DatasetChatThread extends StatefulWidget {
   final String? emptyStateDescription;
   final FutureOr<void> Function(String path)? openFile;
   final DatasetChatAttachmentRenderer? attachmentRenderer;
+  final DatasetChatInlineAttachmentViewerPredicate? inlineAttachmentViewerPredicate;
   final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
   final Widget? inputPlaceholder;
   final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
@@ -604,6 +613,7 @@ class RoomDatasetChatThread extends StatefulWidget {
     this.emptyStateDescription,
     this.openFile,
     this.attachmentRenderer,
+    this.inlineAttachmentViewerPredicate,
     this.toolsBuilder,
     this.inputPlaceholder,
     this.attachmentBuilder,
@@ -625,6 +635,7 @@ class RoomDatasetChatThread extends StatefulWidget {
   final String? emptyStateDescription;
   final FutureOr<void> Function(String path)? openFile;
   final DatasetChatAttachmentRenderer? attachmentRenderer;
+  final DatasetChatInlineAttachmentViewerPredicate? inlineAttachmentViewerPredicate;
   final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
   final Widget? inputPlaceholder;
   final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
@@ -691,6 +702,7 @@ class _RoomDatasetChatThreadState extends State<RoomDatasetChatThread> {
       emptyStateDescription: widget.emptyStateDescription,
       openFile: widget.openFile,
       attachmentRenderer: widget.attachmentRenderer ?? (context, path) => ChatThreadPreview(room: widget.room, path: path),
+      inlineAttachmentViewerPredicate: widget.inlineAttachmentViewerPredicate,
       toolsBuilder: widget.toolsBuilder,
       inputPlaceholder: widget.inputPlaceholder,
       attachmentBuilder: widget.attachmentBuilder,
@@ -2640,7 +2652,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
 
   Future<void> _openAttachment(BuildContext context, _DatasetThreadAttachment attachment) async {
     final previewPath = _previewPath(attachment.url);
-    if (_isDataUrl(previewPath)) {
+    if (datasetChatShouldShowInlineAttachmentViewer(previewPath, predicate: widget.inlineAttachmentViewerPredicate)) {
       await _showInlineAttachmentViewer(context, attachment.copyWith(url: previewPath));
       return;
     }

@@ -4943,6 +4943,7 @@ class ChatThread extends StatefulWidget {
     this.onAttachmentOpen,
     this.onAttachmentRemoved,
     this.fileInThreadBuilder,
+    this.pendingFileInThreadBuilder,
     this.chatInputBoxBuilder,
     this.customInputBuilder,
     this.openFile,
@@ -4991,6 +4992,7 @@ class ChatThread extends StatefulWidget {
   final ValueChanged<FileAttachment>? onAttachmentOpen;
   final ValueChanged<FileAttachment>? onAttachmentRemoved;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
+  final Widget? Function(BuildContext context, String path)? pendingFileInThreadBuilder;
   final Widget Function(BuildContext context, Widget chatBox)? chatInputBoxBuilder;
   final ChatThreadCustomInputBuilder? customInputBuilder;
   final FutureOr<void> Function(String path)? openFile;
@@ -6187,6 +6189,7 @@ class _ChatThreadState extends State<ChatThread> {
                       },
                       messageHeaderBuilder: widget.messageHeaderBuilder,
                       fileInThreadBuilder: widget.fileInThreadBuilder,
+                      pendingFileInThreadBuilder: widget.pendingFileInThreadBuilder,
                       openFile: widget.openFile,
                       emptyStateTitle: widget.emptyStateTitle,
                       emptyStateDescription: widget.emptyStateDescription,
@@ -6330,6 +6333,7 @@ class _ChatThreadState extends State<ChatThread> {
               emptyStateDescription: widget.emptyStateDescription,
               emptyState: widget.emptyState,
               fileInThreadBuilder: widget.fileInThreadBuilder,
+              pendingFileInThreadBuilder: widget.pendingFileInThreadBuilder,
               openFile: widget.openFile,
               mobileStorageSaveSurfacePresenter: widget.mobileStorageSaveSurfacePresenter,
               mobileUnderHeaderContentPadding: widget.mobileUnderHeaderContentPadding,
@@ -6422,6 +6426,7 @@ class ChatThreadMessages extends StatefulWidget {
     this.agentName,
     this.messageHeaderBuilder,
     this.fileInThreadBuilder,
+    this.pendingFileInThreadBuilder,
     this.openFile,
     this.messageBuilders,
     this.emptyStateTitle,
@@ -6464,6 +6469,7 @@ class ChatThreadMessages extends StatefulWidget {
 
   final Widget Function(BuildContext, MeshDocument, MeshElement)? messageHeaderBuilder;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
+  final Widget? Function(BuildContext context, String path)? pendingFileInThreadBuilder;
   final FutureOr<void> Function(String path)? openFile;
 
   @override
@@ -6612,12 +6618,16 @@ class PendingChatThreadMessage extends StatelessWidget {
     required this.message,
     this.shouldShowAuthorNames = true,
     this.mobileStorageSaveSurfacePresenter,
+    this.pendingFileInThreadBuilder,
+    this.openFile,
   });
 
   final RoomClient? room;
   final PendingAgentMessage message;
   final bool shouldShowAuthorNames;
   final ThreadStorageSaveSurfacePresenter? mobileStorageSaveSurfacePresenter;
+  final Widget? Function(BuildContext context, String path)? pendingFileInThreadBuilder;
+  final FutureOr<void> Function(String path)? openFile;
 
   @override
   Widget build(BuildContext context) {
@@ -6653,20 +6663,29 @@ class PendingChatThreadMessage extends StatelessWidget {
     final isInlineImage = trimmed.startsWith("data:image/");
     final displayName = attachment.name?.trim().isNotEmpty == true ? attachment.name!.trim() : _defaultSuggestedFileNameFromPath(trimmed);
     final canOpenInline = trimmed.startsWith("data:");
-    final preview = isInlineImage
-        ? ChatThreadImageAttachment(
-            room: room,
-            imageId: null,
-            imageUri: trimmed,
-            onOpenFullscreen: canOpenInline ? () => unawaited(_showPendingAttachmentPreview(context, attachment)) : null,
+    final customPreview = pendingFileInThreadBuilder?.call(context, trimmed);
+    final preview =
+        customPreview ??
+        (isInlineImage
+            ? ChatThreadImageAttachment(
+                room: room,
+                imageId: null,
+                imageUri: trimmed,
+                onOpenFullscreen: canOpenInline ? () => unawaited(_showPendingAttachmentPreview(context, attachment)) : null,
+              )
+            : FileDefaultPreviewCard(
+                icon: LucideIcons.paperclip,
+                text: displayName,
+                useThreadAttachmentStyle: ThreadTypographyOverride.useThreadAttachmentStyleOf(context),
+                showActionIcon: canOpenInline,
+              ));
+    final canOpenCustomPreview = customPreview != null && openFile != null;
+    final child = canOpenCustomPreview
+        ? MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(onTap: () => unawaited(Future<void>.sync(() => openFile!(trimmed))), child: preview),
           )
-        : FileDefaultPreviewCard(
-            icon: LucideIcons.paperclip,
-            text: displayName,
-            useThreadAttachmentStyle: ThreadTypographyOverride.useThreadAttachmentStyleOf(context),
-            showActionIcon: canOpenInline,
-          );
-    final child = canOpenInline && !isInlineImage
+        : canOpenInline && !isInlineImage
         ? MouseRegion(
             cursor: SystemMouseCursors.click,
             child: GestureDetector(onTap: () => unawaited(_showPendingAttachmentPreview(context, attachment)), child: preview),
@@ -8227,6 +8246,8 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
           message: pending,
           shouldShowAuthorNames: widget.shouldShowAuthorNames,
           mobileStorageSaveSurfacePresenter: mobileStorageSaveSurfacePresenter,
+          pendingFileInThreadBuilder: widget.pendingFileInThreadBuilder,
+          openFile: widget.openFile,
         ),
       );
     }
