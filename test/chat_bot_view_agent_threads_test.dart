@@ -75,7 +75,7 @@ void main() {
     expect(fallbackCalls, 0);
   });
 
-  testWidgets('multi-thread ChatBotView loads selected threads through agent messages', (tester) async {
+  testWidgets('default-new ChatBotView loads selected threads through agent messages', (tester) async {
     final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     final chatClient = _FakeChatClient();
     addTearDown(room.dispose);
@@ -92,7 +92,7 @@ void main() {
               room: room,
               chatClient: chatClient,
               agentName: 'codex',
-              threadDisplayMode: ChatThreadDisplayMode.multiThreadComposer,
+              threadDisplayMode: chatThreadDisplayModeFromAnnotation('default-new'),
               selectedThreadPath: threadPath,
               showThreadList: false,
             ),
