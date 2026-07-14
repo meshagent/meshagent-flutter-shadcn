@@ -19,6 +19,7 @@ class ChatThreadListView extends StatefulWidget {
     this.onSelectedThreadResolved,
     this.selectedThreadDisplayName,
     this.agentName,
+    this.activeThreadPaths = const <String>{},
     this.showCreateItem = true,
     this.newThreadResetVersion = 0,
   });
@@ -29,6 +30,7 @@ class ChatThreadListView extends StatefulWidget {
   final String? agentName;
   final String? selectedThreadPath;
   final String? selectedThreadDisplayName;
+  final Set<String> activeThreadPaths;
   final ValueChanged<String?> onSelectedThreadPathChanged;
   final void Function(String? path, String? displayName)? onSelectedThreadResolved;
   final bool showCreateItem;
@@ -400,10 +402,15 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
     super.dispose();
   }
 
+  bool _isActiveThreadPath(String path) {
+    return widget.activeThreadPaths.any((activePath) => _normalizePath(activePath) == path);
+  }
+
   Widget _buildRow(
     BuildContext context, {
     required String title,
     required bool selected,
+    bool active = false,
     required VoidCallback onTap,
     IconData fallbackIcon = LucideIcons.messageSquare,
     Widget? trailing,
@@ -428,7 +435,11 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
                 children: [
                   SizedBox(
                     width: 18,
-                    child: Center(child: Icon(selected ? LucideIcons.check : fallbackIcon, size: 14, color: foreground)),
+                    child: Center(
+                      child: active
+                          ? _ThreadActivityIndicator(color: foreground)
+                          : Icon(selected ? LucideIcons.check : fallbackIcon, size: 14, color: foreground),
+                    ),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
@@ -492,6 +503,7 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
             context,
             title: entry.name,
             selected: entry.path == selectedThreadPath,
+            active: _isActiveThreadPath(entry.path),
             trailing: _ChatThreadListMenuButton(onRename: () => _renameThread(entry), onDelete: () => _deleteThread(entry)),
             onTap: () {
               widget.onSelectedThreadPathChanged(entry.path);
@@ -499,6 +511,39 @@ class _ChatThreadListViewState extends State<ChatThreadListView> {
             },
           ),
       ],
+    );
+  }
+}
+
+class _ThreadActivityIndicator extends StatefulWidget {
+  const _ThreadActivityIndicator({required this.color});
+
+  final Color color;
+
+  @override
+  State<_ThreadActivityIndicator> createState() => _ThreadActivityIndicatorState();
+}
+
+class _ThreadActivityIndicatorState extends State<_ThreadActivityIndicator> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 900))..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RotationTransition(
+      turns: _controller,
+      child: Icon(LucideIcons.loaderCircle, size: 14, color: widget.color),
     );
   }
 }

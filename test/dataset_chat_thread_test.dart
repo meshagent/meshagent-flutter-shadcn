@@ -1,7 +1,18 @@
+import 'dart:async';
+import 'dart:ui' as ui;
+
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:meshagent_agents/meshagent_agents.dart' as agent_sessions;
+import 'package:meshagent_flutter_shadcn/chat/chat.dart';
 import 'package:meshagent_flutter_shadcn/chat/dataset_chat_thread.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  GoogleFonts.config.allowRuntimeFetching = false;
+
   group('agentTurnEndedErrorMessage', () {
     test('extracts process turn errors from turn ended payloads', () {
       final message = agentTurnEndedErrorMessage({
@@ -88,6 +99,97 @@ diff --git a/lib/report.py b/lib/report.py
       });
 
       expect(timestamp.toUtc(), DateTime.utc(2026, 5, 3, 12, 30));
+    });
+  });
+
+  group('dataset message replay', () {
+    testWidgets('does not duplicate assistant text when stream and final rows replay together', (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const ui.Size(1200, 1000);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      const threadPath = 'dataset://agents/assistant/threads/thread-1';
+      const reply = '''
+Here's the webserver link:
+
+https://test-06x.meshagent.dev
+
+You can also open the preview/files here: [Add files here to preview](powerboards://files/webserver)''';
+      final rowsController = StreamController<List<Map<String, Object?>>>.broadcast();
+      addTearDown(() async {
+        if (!rowsController.isClosed) {
+          await rowsController.close();
+        }
+      });
+
+      await tester.pumpWidget(
+        ShadApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 900,
+              height: 820,
+              child: DatasetChatThread(path: threadPath, rowsLoader: ({required namespace, required table}) => rowsController.stream),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      rowsController.add([
+        {
+          'item_id': 'assistant-message-1',
+          'turn_id': 'turn-1',
+          'sequence': 1,
+          'timestamp': '2026-06-23T19:35:00Z',
+          'data': {
+            'type': agent_sessions.agentTextContentDeltaType,
+            'thread_id': threadPath,
+            'turn_id': 'turn-1',
+            'item_id': 'assistant-message-1',
+            'text': reply,
+            'sender_name': 'Assistant',
+          },
+        },
+        {
+          'item_id': 'assistant-message-1',
+          'turn_id': 'turn-1',
+          'sequence': 2,
+          'timestamp': '2026-06-23T19:35:01Z',
+          'data': {
+            'type': agent_sessions.agentTextContentEndedType,
+            'thread_id': threadPath,
+            'turn_id': 'turn-1',
+            'item_id': 'assistant-message-1',
+            'text': reply,
+            'sender_name': 'Assistant',
+            'phase': 'final_answer',
+          },
+        },
+        {
+          'item_id': 'assistant-message-1',
+          'turn_id': 'turn-1',
+          'sequence': 3,
+          'timestamp': '2026-06-23T19:35:02Z',
+          'data': {
+            'kind': 'message',
+            'role': 'assistant',
+            'status': 'completed',
+            'text': reply,
+            'sender_name': 'Assistant',
+            'phase': 'final_answer',
+          },
+        },
+      ]);
+      await rowsController.close();
+
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.byWidgetPredicate((widget) => widget is ChatThreadMessageView && widget.text == reply), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(seconds: 1));
     });
   });
 }

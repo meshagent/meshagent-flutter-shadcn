@@ -108,6 +108,67 @@ const double _mobileReactionFlowDialogTopPadding = 30;
 const double _mobileReactionFlowDialogBottomPadding = 28;
 const double _mobileStorageSaveFlowDialogMaxWidth = 420;
 const double _mobileStorageSaveFlowDialogViewportTopGap = 20;
+
+@visibleForTesting
+String deduplicateRepeatedChatBubbleText(String text) {
+  final trimmed = text.trim();
+  if (trimmed.length < 40) {
+    return text;
+  }
+
+  final starts = <String>[
+    'The web service has been successfully installed in this room.',
+    'The webserver service has been successfully installed in this room.',
+    'The webserver service is already installed in this room.',
+    'Installed the webserver service in this room.',
+    'I set up the webserver service for this room so we can publish the website here.',
+    'Created the ',
+    "Here's the link to your webserver:",
+    "Here\u2019s the link to your webserver:",
+    'The new webserver URL is:',
+  ];
+  for (final start in starts) {
+    final first = trimmed.indexOf(start);
+    if (first == -1) {
+      continue;
+    }
+    final second = trimmed.indexOf(start, first + start.length);
+    if (second == -1) {
+      continue;
+    }
+    final leading = trimmed.substring(0, second).trim();
+    final repeated = trimmed.substring(second).trim();
+    if (leading == repeated) {
+      return leading;
+    }
+  }
+
+  return text;
+}
+
+@visibleForTesting
+String suppressAgentOnlyChatContext(String text) {
+  const marker = '\n\nAdditional context:\n';
+  final markerIndex = text.indexOf(marker);
+  if (markerIndex == -1) {
+    return text;
+  }
+
+  final visibleText = text.substring(0, markerIndex).trimRight();
+  return visibleText.isEmpty ? text : visibleText;
+}
+
+String _visibleChatBubbleText(BuildContext context, String text) {
+  var visibleText = text;
+  if (ThreadTypographyOverride.suppressAgentOnlyChatContextOf(context)) {
+    visibleText = suppressAgentOnlyChatContext(visibleText);
+  }
+  if (ThreadTypographyOverride.suppressRepeatedChatBubbleTextOf(context)) {
+    visibleText = deduplicateRepeatedChatBubbleText(visibleText);
+  }
+  return visibleText;
+}
+
 const int _audioInputSampleRate = 24000;
 const int _audioInputChannels = 1;
 const Duration _audioInputFlushInterval = Duration(milliseconds: 250);
@@ -2420,23 +2481,27 @@ class ChatThreadController extends ChangeNotifier {
     TurnMcpConfig? mcp,
     List<ClientToolkitDescription>? clientToolkits,
     AgentToolChoice? toolChoice,
+    String? remoteMessageText,
     bool store = false,
   }) async {
     if (message.text.trim().isNotEmpty || message.attachments.isNotEmpty) {
       final room = _requireRoom('Sending a participant message');
+      final remoteMessage = remoteMessageText == null
+          ? message
+          : ChatMessage(id: message.id, text: remoteMessageText, attachments: message.attachments);
       if (useAgentMessages) {
         final isSteer = messageType == "steer";
         final payload = isSteer
             ? TurnSteer(
                 threadId: path,
-                messageId: message.id,
-                turnId: turnId != null && turnId.trim().isNotEmpty ? turnId.trim() : message.id,
-                content: _agentInputContentFromMessage(message),
+                messageId: remoteMessage.id,
+                turnId: turnId != null && turnId.trim().isNotEmpty ? turnId.trim() : remoteMessage.id,
+                content: _agentInputContentFromMessage(remoteMessage),
               )
             : TurnStart(
                 threadId: path,
-                messageId: message.id,
-                content: _agentInputContentFromMessage(message),
+                messageId: remoteMessage.id,
+                content: _agentInputContentFromMessage(remoteMessage),
                 mcp: mcp,
                 clientToolkits: clientToolkits != null && clientToolkits.isNotEmpty ? clientToolkits : null,
                 toolChoice: toolChoice == null ? null : ToolChoice(toolkitName: toolChoice.toolkitName, toolName: toolChoice.toolName),
@@ -2450,8 +2515,8 @@ class ChatThreadController extends ChangeNotifier {
         type: messageType,
         message: {
           "path": path,
-          "text": message.text,
-          "attachments": message.attachments.map((a) => {"path": a}).toList(),
+          "text": remoteMessage.text,
+          "attachments": remoteMessage.attachments.map((a) => {"path": a}).toList(),
           "store": store,
         },
       );
@@ -2499,6 +2564,7 @@ class ChatThreadController extends ChangeNotifier {
     TurnMcpConfig? mcp,
     List<ClientToolkitDescription>? clientToolkits,
     AgentToolChoice? toolChoice,
+    String? remoteMessageText,
     void Function(ChatMessage)? onMessageSent,
   }) async {
     if (message.text.trim().isNotEmpty || message.attachments.isNotEmpty) {
@@ -2566,6 +2632,7 @@ class ChatThreadController extends ChangeNotifier {
                 mcp: mcp,
                 clientToolkits: messageType == "steer" ? null : clientToolkits,
                 toolChoice: toolChoice,
+                remoteMessageText: remoteMessageText,
                 store: shouldStoreRemotely,
               ),
             );
@@ -2839,6 +2906,7 @@ class ChatThreadInputConfig {
     required this.sendDisabledReason,
     required this.readOnly,
     required this.onSend,
+    this.onSendWithAgentText,
     this.onChanged,
     this.onClear,
     this.onInterrupt,
@@ -2871,6 +2939,7 @@ class ChatThreadInputConfig {
   final String? sendDisabledReason;
   final bool readOnly;
   final Future<void> Function(String, List<FileAttachment>) onSend;
+  final Future<void> Function(String visibleText, String agentText, List<FileAttachment> attachments)? onSendWithAgentText;
   final void Function(String, List<FileAttachment>)? onChanged;
   final VoidCallback? onClear;
   final VoidCallback? onInterrupt;
@@ -5139,7 +5208,7 @@ class _ChatBubble extends State<ChatBubble> {
     final clipboard = SystemClipboard.instance;
     if (clipboard == null) return;
 
-    final text = widget.text;
+    final text = _visibleChatBubbleText(context, widget.text);
     final html = md.markdownToHtml(text, extensionSet: md.ExtensionSet.gitHubFlavored, inlineSyntaxes: const [], blockSyntaxes: const []);
 
     final reps = <raw.DataRepresentation>[
@@ -5202,7 +5271,7 @@ class _ChatBubble extends State<ChatBubble> {
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final cs = theme.colorScheme;
-    final text = widget.text;
+    final text = _visibleChatBubbleText(context, widget.text);
     final mine = widget.mine;
     final bubbleColor = widget.backgroundColor ?? (widget.accented || mine ? cs.accent : cs.background);
     final bubbleBorderColor = widget.borderColor;
@@ -6018,6 +6087,27 @@ class _ChatThreadState extends State<ChatThread> {
           turnId: state.threadTurnId,
           mcp: mcp,
           clientToolkits: messageType == "steer" || clientToolkits.isEmpty ? null : clientToolkits,
+          onMessageSent: widget.onMessageSent,
+        );
+      },
+      onSendWithAgentText: (visibleText, agentText, attachments) async {
+        final messageType = state.threadStatusMode == "steerable" && state.threadTurnId != null ? "steer" : "chat";
+        final normalizedAgentName = widget.agentName?.trim();
+        final hasConfiguredAgent = normalizedAgentName != null && normalizedAgentName.isNotEmpty;
+        final mcp = await _buildMcpTurnConfig(state: state);
+        final clientToolkits = controller.clientToolkitDescriptions;
+        await controller.send(
+          thread: document,
+          path: widget.path,
+          message: ChatMessage(id: const Uuid().v4(), text: visibleText, attachments: attachments.map((x) => x.path).toList()),
+          messageType: messageType,
+          remoteStoreParticipantName: hasConfiguredAgent ? normalizedAgentName : null,
+          storeLocally: _shouldStoreLocally(hasConfiguredAgent: hasConfiguredAgent, useAgentMessages: state.supportsAgentMessages),
+          useAgentMessages: state.supportsAgentMessages,
+          turnId: state.threadTurnId,
+          mcp: mcp,
+          clientToolkits: messageType == "steer" || clientToolkits.isEmpty ? null : clientToolkits,
+          remoteMessageText: agentText,
           onMessageSent: widget.onMessageSent,
         );
       },

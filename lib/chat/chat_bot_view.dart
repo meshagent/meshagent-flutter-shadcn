@@ -163,6 +163,7 @@ class _ChatBotViewState extends State<ChatBotView> {
     }
     _disposeOwnedChatClient(disposeInjected: widget.disposeChatClient);
     for (final controller in _datasetModelControllers.values) {
+      controller.removeListener(_handleDatasetModelControllerChanged);
       controller.dispose();
     }
     _datasetModelControllers.clear();
@@ -234,7 +235,24 @@ class _ChatBotViewState extends State<ChatBotView> {
   }
 
   DatasetChatModelController _datasetModelControllerFor(String path) {
-    return _datasetModelControllers.putIfAbsent(path, DatasetChatModelController.new);
+    return _datasetModelControllers.putIfAbsent(path, () {
+      final controller = DatasetChatModelController();
+      controller.addListener(_handleDatasetModelControllerChanged);
+      return controller;
+    });
+  }
+
+  void _handleDatasetModelControllerChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  Set<String> _activeDatasetThreadPaths() {
+    return {
+      for (final entry in _datasetModelControllers.entries)
+        if (entry.value.isLocked) entry.key,
+    };
   }
 
   void _seedResolvedThreadModelController(String? path) {
@@ -416,6 +434,7 @@ class _ChatBotViewState extends State<ChatBotView> {
           agentName: widget.agentName,
           selectedThreadPath: selectedThreadPath,
           selectedThreadDisplayName: widget.selectedThreadDisplayName,
+          activeThreadPaths: _activeDatasetThreadPaths(),
           onSelectedThreadPathChanged: widget.onSelectedThreadPathChanged ?? (_) {},
           onSelectedThreadResolved: widget.onSelectedThreadResolved,
           newThreadResetVersion: widget.newThreadResetVersion,

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -334,6 +335,36 @@ void main() {
     expect(harness.server.requests.map((request) => request.tool).toList(), ['enable', 'send']);
     expect(harness.server.requests.where((request) => request.tool == 'send'), hasLength(1));
     expect(harness.server.requests.last.input['to_participant_id'], 'remote-1');
+  });
+
+  test('ChatThreadController.send can send separate remote text', () async {
+    final harness = await _startMessagingHarness();
+    final controller = ChatThreadController(room: harness.room);
+    final document = _createThreadDocument();
+
+    addTearDown(controller.dispose);
+    addTearDown(document.dispose);
+    addTearDown(harness.dispose);
+
+    await harness.room.messaging.enable();
+    await _waitUntil(() => harness.room.messaging.remoteParticipants.isNotEmpty);
+
+    final members = _membersElement(document);
+    _insertElement(document: document, targetId: members.id, tagName: 'member', elementId: 'member-1', attributes: {'name': 'assistant'});
+
+    await controller.send(
+      thread: document,
+      path: '/threads/test.thread',
+      message: const ChatMessage(id: 'message-1', text: 'Create a one-page website'),
+      remoteStoreParticipantName: 'assistant',
+      remoteMessageText: 'Create a one-page website\n\nAdditional context:\nUse website/index.html.',
+      storeLocally: false,
+    );
+
+    final sendRequest = harness.server.requests.last;
+    expect(sendRequest.tool, 'send');
+    final message = jsonDecode(sendRequest.input['message_json'] as String) as Map;
+    expect(message['text'], contains('Additional context:'));
   });
 
   test('resolveChatThreadStatus reads status messages for the exact dataset thread path', () async {

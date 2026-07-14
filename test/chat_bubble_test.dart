@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:meshagent_flutter_shadcn/chat/chat.dart';
+import 'package:meshagent_flutter_shadcn/markdown_viewer.dart';
+import 'package:meshagent_flutter_shadcn/thread_typography.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 Color? _bubbleBackgroundColor(WidgetTester tester) {
@@ -113,5 +115,35 @@ void main() {
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(milliseconds: 600));
+  });
+
+  testWidgets('suppresses agent-only context when typography opts in', (tester) async {
+    const text = 'Please create a one-page site\n\nAdditional context:\nKeep this guidance hidden from the user bubble.';
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: ThreadTypographyOverride(suppressAgentOnlyChatContext: true, child: const ChatBubble(mine: true, text: text)),
+        ),
+      ),
+    );
+
+    final viewer = tester.widget<MarkdownViewer>(find.byType(MarkdownViewer));
+    expect(viewer.markdown, 'Please create a one-page site');
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 600));
+  });
+
+  test('deduplicates repeated webserver link replies', () {
+    final repeated = [
+      "Here's the link to your webserver:",
+      '',
+      'https://test.meshagent.dev',
+      '',
+      'You can also open the preview/files area here: [Open to view](powerboards://preview/webserver)',
+    ].join('\n');
+
+    expect(deduplicateRepeatedChatBubbleText('$repeated\n\n$repeated'), repeated);
   });
 }

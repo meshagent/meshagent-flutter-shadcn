@@ -45,10 +45,12 @@ import 'package:meshagent_agents/meshagent_agents.dart'
         agentTextContentStartedType,
         agentToolCallArgumentsDeltaType,
         agentToolCallEndedType,
+        agentToolCallApprovalRequestedType,
         agentToolCallInProgressType,
         agentToolCallLogDeltaType,
         agentToolCallPendingType,
         agentToolCallStartedType,
+        agentThreadClearedType,
         agentTurnEndedType,
         agentTurnInterruptedType,
         agentTurnInterruptAcceptedType,
@@ -74,11 +76,13 @@ import 'package:uuid/uuid.dart';
 
 import 'chat.dart';
 import 'agent_stream_accumulator.dart';
+import 'chat_turn_state_reducer.dart';
 import 'realtime_audio_output.dart';
 import 'tool_call_summary.dart';
 import 'usage_footer_tooltip.dart';
 
 const double _datasetDiffPreviewHorizontalPadding = 16;
+const Duration _liveStatusFlushDelay = Duration(milliseconds: 120);
 
 typedef DatasetChatAttachmentRenderer = Widget Function(BuildContext context, String path);
 typedef DatasetChatRowsLoader = Stream<List<Map<String, Object?>>> Function({required List<String>? namespace, required String table});
@@ -727,6 +731,8 @@ class _RoomDatasetChatThreadState extends State<RoomDatasetChatThread> {
 class _DatasetChatThreadState extends State<DatasetChatThread> {
   StreamSubscription<List<Map<String, Object?>>>? _rowsLoadSubscription;
   Timer? _tableLoadRetryTimer;
+  Timer? _liveStatusFlushTimer;
+  bool _pendingLiveScroll = false;
   agent_sessions.BaseChatClient? _chatClient;
   bool _ownsChatClient = false;
   final AgentThreadMessageStatusStore _statusStore = AgentThreadMessageStatusStore();
@@ -734,7 +740,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   final Map<String, Map<String, Object?>> _rowsByItemId = {};
   final Map<String, Map<String, Object?>> _agentRowsByItemId = {};
   final Map<String, Map<String, Object?>> _agentDebugRowsByKey = {};
+  final Map<String, Map<String, Object?>> _datasetStatusRowsByKey = {};
   final List<Map<String, dynamic>> _bufferedAgentPayloads = <Map<String, dynamic>>[];
+  final ChatTurnStateReducer _turnReducer = ChatTurnStateReducer();
   final TextStreamAccumulator _liveTextContent = TextStreamAccumulator();
   final TextStreamAccumulator _liveReasoningContent = TextStreamAccumulator();
   final FileStreamAccumulator _liveFileContent = FileStreamAccumulator();
@@ -823,6 +831,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   @override
   void dispose() {
     _tableLoadRetryTimer?.cancel();
+    _liveStatusFlushTimer?.cancel();
     _rowsLoadSubscription?.cancel();
     _closeChatSession();
     if (_ownsChatClient || widget.disposeChatClient) {
@@ -845,12 +854,17 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   void _startWatch() {
     _tableLoadGeneration += 1;
     _tableLoadRetryTimer?.cancel();
+    _liveStatusFlushTimer?.cancel();
+    _liveStatusFlushTimer = null;
+    _pendingLiveScroll = false;
     _rowsLoadSubscription?.cancel();
     _statusStore.clearThread(widget.path);
     _rowsByItemId.clear();
     _agentRowsByItemId.clear();
     _agentDebugRowsByKey.clear();
+    _datasetStatusRowsByKey.clear();
     _bufferedAgentPayloads.clear();
+    _turnReducer.clear();
     _liveTextContent.clear();
     _liveReasoningContent.clear();
     _liveFileContent.clear();
@@ -892,7 +906,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
           if (!mounted || generation != _tableLoadGeneration) {
             return;
           }
-          _applyRowsToMap(rows, loadedRowsByItemId);
+          final changed = _applyRowsToMap(rows, loadedRowsByItemId);
+          _publishLoadedRowsSnapshot(loadedRowsByItemId, generation: generation, force: !_ready, scroll: changed);
         },
         onError: (Object error, StackTrace stackTrace) {
           _handleTableLoadError(error, stackTrace, generation: generation);
@@ -937,28 +952,52 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   void _finishDatasetRowsLoad(Map<String, Map<String, Object?>> loadedRowsByItemId, {required int generation}) {
+    _publishLoadedRowsSnapshot(loadedRowsByItemId, generation: generation, force: true, scroll: false);
+  }
+
+  void _publishLoadedRowsSnapshot(
+    Map<String, Map<String, Object?>> loadedRowsByItemId, {
+    required int generation,
+    bool force = false,
+    bool scroll = true,
+  }) {
     if (!mounted || generation != _tableLoadGeneration) {
       return;
     }
+
+    final rowsChanged = !const DeepCollectionEquality().equals(_rowsByItemId, loadedRowsByItemId);
+    final becameReady = !_ready;
+    if (!force && !rowsChanged && !becameReady) {
+      return;
+    }
+
     _rowsByItemId
       ..clear()
       ..addAll(loadedRowsByItemId);
     _advanceNextAgentSequencePastDatasetRows();
 
-    // Mark the load as ready before draining so any agent events delivered while
-    // buffered events are being reconciled apply normally instead of being left
-    // behind in the buffer.
     _ready = true;
-    while (_bufferedAgentPayloads.isNotEmpty) {
-      final bufferedPayloads = List<Map<String, dynamic>>.from(_bufferedAgentPayloads);
-      _bufferedAgentPayloads.clear();
-      for (final payload in bufferedPayloads) {
-        _handleAgentMessagePayload(payload, notify: false, scroll: false);
+    if (becameReady) {
+      // Mark the load as ready before draining so any agent events delivered while
+      // buffered events are being reconciled apply normally instead of being left
+      // behind in the buffer.
+      while (_bufferedAgentPayloads.isNotEmpty) {
+        final bufferedPayloads = List<Map<String, dynamic>>.from(_bufferedAgentPayloads);
+        _bufferedAgentPayloads.clear();
+        for (final payload in bufferedPayloads) {
+          _handleAgentMessagePayload(payload, notify: false, scroll: false);
+        }
       }
     }
+    final statusChanged = _syncStatusFromDatasetRows();
     _usage = _latestUsageFromRows();
+    if (statusChanged) {
+      _refreshStatus();
+    }
     setState(() {});
-    _controller.scrollThreadToBottom(animated: false);
+    if (scroll && (rowsChanged || becameReady)) {
+      _controller.scrollThreadToBottom(animated: false);
+    }
   }
 
   bool _applyRowsToMap(Iterable<Map<String, Object?>> rows, Map<String, Map<String, Object?>> target) {
@@ -982,6 +1021,61 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       changed = _rebaseAgentRowsAfterDatasetRows() || changed;
     }
     return changed;
+  }
+
+  bool _syncStatusFromDatasetRows() {
+    final rows = _rowsByItemId.values.toList(growable: false)..sort(_compareDatasetThreadRows);
+    var changed = false;
+    for (final row in rows) {
+      final rowKey = _datasetRowKey(row);
+      if (rowKey == null) {
+        continue;
+      }
+      final previous = _datasetStatusRowsByKey[rowKey];
+      if (previous != null && const DeepCollectionEquality().equals(previous, row)) {
+        continue;
+      }
+      _datasetStatusRowsByKey[rowKey] = Map<String, Object?>.from(row);
+      changed = _applyDatasetStatusRow(row) || changed;
+    }
+    return changed;
+  }
+
+  bool _applyDatasetStatusRow(Map<String, Object?> row) {
+    final data = _rowData(row);
+    if (data == null) {
+      return false;
+    }
+    final type = data['type']?.toString();
+    final turnChanged = _turnReducer.applyDatasetRow(row);
+    if (!_datasetPayloadCanUpdateLiveStatus(type)) {
+      return turnChanged;
+    }
+    if (_turnReducer.shouldIgnoreStatusPayload(data)) {
+      return turnChanged;
+    }
+    try {
+      final statusChanged = trackAgentThreadStatusMessageInStore(
+        store: _statusStore,
+        message: agent_sessions.AgentMessage.fromJson(Map<String, dynamic>.from(data)),
+        path: widget.path,
+      );
+      return statusChanged || turnChanged;
+    } catch (error, stackTrace) {
+      debugPrint('DatasetChatThread failed to apply persisted status event ${type ?? 'unknown'}: $error\n$stackTrace');
+      return turnChanged;
+    }
+  }
+
+  bool _datasetPayloadCanUpdateLiveStatus(String? type) {
+    return type == agentToolCallApprovalRequestedType ||
+        type == agentToolCallArgumentsDeltaType ||
+        type == agentToolCallPendingType ||
+        type == agentToolCallInProgressType ||
+        type == agentToolCallStartedType ||
+        type == agentToolCallEndedType ||
+        type == agentTurnEndedType ||
+        type == agentThreadClearedType;
   }
 
   AgentUsageSnapshot? _latestUsageFromRows() {
@@ -1217,20 +1311,29 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     _threadSessionMessageCursor = messages.length;
     for (final event in pendingEvents) {
       _listenToThreadSessionMessageEvent(event);
-      final payload = event.payload;
-      trackAgentThreadStatusMessageInStore(store: _statusStore, message: event.message, path: widget.path);
-      if (_shouldBufferAgentPayload(payload)) {
-        _bufferedAgentPayloads.add(Map<String, dynamic>.from(payload));
-      } else {
-        _handleAgentMessagePayload(payload, attachment: event.attachment, notify: false, scroll: false);
+      try {
+        final payload = event.payload;
+        _turnReducer.applyLivePayload(payload);
+        final skipLiveStatus = _livePayloadShouldSkipStatusStore(payload);
+        final ignoreStatus = skipLiveStatus || _turnReducer.shouldIgnoreStatusPayload(payload);
+        if (!ignoreStatus) {
+          trackAgentThreadStatusMessageInStore(store: _statusStore, message: event.message, path: widget.path);
+        }
+        if (_shouldBufferAgentPayload(payload)) {
+          _bufferedAgentPayloads.add(Map<String, dynamic>.from(payload));
+        } else {
+          _handleAgentMessagePayload(payload, attachment: event.attachment, notify: false, scroll: false);
+        }
+        changed = true;
+      } catch (error, stackTrace) {
+        debugPrint('DatasetChatThread failed to process live agent event ${event.message.type}: $error\n$stackTrace');
       }
-      changed = true;
     }
-    _refreshStatus();
-    if (changed && notify && mounted) {
-      setState(() {});
-      if (scroll) {
-        _controller.scrollThreadToBottom(animated: false);
+    if (changed) {
+      if (notify && mounted) {
+        _scheduleLiveStatusFlush(scroll: scroll);
+      } else {
+        _refreshStatus();
       }
     }
     return changed;
@@ -1252,16 +1355,52 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (!mounted) {
       return;
     }
-    final payload = event.payload;
-    trackAgentThreadStatusMessageInStore(store: _statusStore, message: event.message, path: widget.path);
-    if (_shouldBufferAgentPayload(payload)) {
-      _bufferedAgentPayloads.add(Map<String, dynamic>.from(payload));
-    } else {
-      _handleAgentMessagePayload(payload, attachment: event.attachment, notify: false, scroll: false);
+    try {
+      final payload = event.payload;
+      _turnReducer.applyLivePayload(payload);
+      final skipLiveStatus = _livePayloadShouldSkipStatusStore(payload);
+      final ignoreStatus = skipLiveStatus || _turnReducer.shouldIgnoreStatusPayload(payload);
+      if (!ignoreStatus) {
+        trackAgentThreadStatusMessageInStore(store: _statusStore, message: event.message, path: widget.path);
+      }
+      if (_shouldBufferAgentPayload(payload)) {
+        _bufferedAgentPayloads.add(Map<String, dynamic>.from(payload));
+      } else {
+        _handleAgentMessagePayload(payload, attachment: event.attachment, notify: false, scroll: false);
+      }
+    } catch (error, stackTrace) {
+      debugPrint('DatasetChatThread failed to apply changed live agent event ${event.message.type}: $error\n$stackTrace');
     }
+    _scheduleLiveStatusFlush(scroll: true);
+  }
+
+  bool _livePayloadShouldSkipStatusStore(Map<String, dynamic> payload) {
+    return payload['type']?.toString() == agentToolCallArgumentsDeltaType;
+  }
+
+  void _scheduleLiveStatusFlush({required bool scroll}) {
+    if (!mounted) {
+      return;
+    }
+    _pendingLiveScroll = _pendingLiveScroll || scroll;
+    if (_liveStatusFlushTimer != null) {
+      return;
+    }
+    _liveStatusFlushTimer = Timer(_liveStatusFlushDelay, _flushLiveStatus);
+  }
+
+  void _flushLiveStatus() {
+    _liveStatusFlushTimer = null;
+    if (!mounted) {
+      return;
+    }
+    final shouldScroll = _pendingLiveScroll;
+    _pendingLiveScroll = false;
     _refreshStatus();
     setState(() {});
-    _controller.scrollThreadToBottom(animated: false);
+    if (shouldScroll) {
+      _controller.scrollThreadToBottom(animated: false);
+    }
   }
 
   bool _shouldBufferAgentPayload(Map<String, dynamic> payload) {
@@ -1805,15 +1944,6 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             changed;
         break;
       case agentToolCallArgumentsDeltaType:
-        changed =
-            _appendAgentToolArgumentDelta(
-              itemId: _payloadItemId(payload),
-              turnId: _payloadTurnId(payload),
-              timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
-              delta: payload['delta']?.toString() ?? '',
-              senderName: _senderNameFromPayload(payload),
-            ) ||
-            changed;
         break;
       case agentToolCallLogDeltaType:
         changed =
@@ -1901,7 +2031,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     for (final pending in _status.pendingMessages) {
       combined[pending.messageId] = pending;
     }
-    final currentStatus = resolveChatThreadStatusFromStore(store: _statusStore, path: widget.path, previous: _status);
+    final currentStatus = _turnReducer.reduceStatus(
+      resolveChatThreadStatusFromStore(store: _statusStore, path: widget.path, previous: _status),
+    );
     for (final pending in currentStatus.pendingMessages) {
       combined[pending.messageId] = pending;
     }
@@ -2129,56 +2261,6 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     );
   }
 
-  bool _appendAgentToolArgumentDelta({
-    required String itemId,
-    required String? turnId,
-    required DateTime timestamp,
-    required String delta,
-    required String? senderName,
-  }) {
-    if (itemId.trim().isEmpty || delta.isEmpty) {
-      return false;
-    }
-    final existingData = _mapValue(_agentRowsByItemId[itemId]?['data']);
-    final totalDeltaBytes = _intValue(existingData?['argument_delta_bytes']) + utf8.encode(delta).length;
-    final toolkit = existingData?['toolkit']?.toString() ?? '';
-    final tool = existingData?['tool']?.toString() ?? 'tool';
-    final existingArguments = _mapValue(existingData?['arguments']);
-    final argumentDeltaText = '${existingData?['argument_delta_text']?.toString() ?? ''}$delta';
-    final arguments = _toolArgumentsFromDeltaText(tool: tool, current: existingArguments, text: argumentDeltaText) ?? existingArguments;
-    final logs = _stringList(existingData?['logs']);
-    final status = existingData?['status']?.toString() ?? 'running';
-    final errorMessage = existingData?['error_message']?.toString();
-    return _upsertAgentRow(
-      itemId: itemId,
-      turnId: turnId,
-      timestamp: timestamp,
-      data: {
-        'kind': 'tool_call',
-        'role': 'assistant',
-        'toolkit': toolkit,
-        'tool': tool,
-        'status': status,
-        'arguments': arguments,
-        'logs': logs,
-        'argument_delta_bytes': totalDeltaBytes,
-        'argument_delta_text': argumentDeltaText,
-        if (errorMessage != null && errorMessage.trim().isNotEmpty) 'error_message': errorMessage,
-        'text': formatToolCallEntryText(
-          toolkit: toolkit,
-          tool: tool,
-          arguments: arguments,
-          logs: logs,
-          errorMessage: errorMessage,
-          completed: !_toolCallStatusIsRunning(status),
-          pending: _toolCallStatusIsPending(status),
-          argumentDeltaBytes: totalDeltaBytes,
-        ),
-        'sender_name': senderName ?? existingData?['sender_name']?.toString(),
-      },
-    );
-  }
-
   String _agentRowText(String itemId) {
     return _mapValue(_agentRowsByItemId[itemId]?['data'])?['text']?.toString() ?? '';
   }
@@ -2189,7 +2271,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   void _refreshStatus({bool notify = false}) {
-    final next = resolveChatThreadStatusFromStore(store: _statusStore, path: widget.path, previous: _status);
+    final raw = resolveChatThreadStatusFromStore(store: _statusStore, path: widget.path, previous: _status);
+    final next = _turnReducer.reduceStatus(raw);
     _status = next;
     _modelController.setLocked(next.turnId != null);
     if (notify && mounted) {
@@ -2540,12 +2623,18 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     await session.sendRealtimeAudioChunk(chunk: chunk, format: inputFormat.toJson());
   }
 
+  Future<void> _rejectSendWhileTurnActive(String value, List<FileAttachment> attachments) async {
+    throw StateError('Assistant is still working on this turn. Wait for it to finish, or start a new thread.');
+  }
+
   Future<void> _send(String value, List<FileAttachment> attachments) async {
     if (_threadSession?.isLoading == true) {
       throw StateError('Thread is loading.');
     }
+    if (_status.turnId?.trim().isNotEmpty == true) {
+      throw StateError('Assistant is still working on this turn. Wait for it to finish, or start a new thread.');
+    }
     final threadPath = widget.path;
-    final isSteer = _status.mode == 'steerable' && _status.turnId != null;
     final messageId = const Uuid().v4();
     final agentAttachments = attachments
         .map(
@@ -2559,7 +2648,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     _controller.markPendingAgentMessage(
       PendingAgentMessage(
         messageId: messageId,
-        messageType: isSteer ? agentTurnSteerType : agentTurnStartType,
+        messageType: agentTurnStartType,
         threadPath: threadPath,
         text: value,
         attachments: agentAttachments,
@@ -2581,14 +2670,14 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         messageId: messageId,
         text: value,
         attachments: agentAttachments,
-        steer: isSteer,
-        turnId: _status.turnId,
+        steer: false,
+        turnId: null,
         backend: activeModel?.backend,
         provider: activeModel?.provider,
         model: activeModel?.model,
-        outputModalities: isSteer ? null : [_modelController.activeModality],
+        outputModalities: [_modelController.activeModality],
         senderName: senderName,
-        clientToolkits: isSteer || clientToolkits.isEmpty ? null : clientToolkits,
+        clientToolkits: clientToolkits.isEmpty ? null : clientToolkits,
       );
       _controller.outboundStatus.markDelivered(messageId);
       _controller.clear();
@@ -2896,7 +2985,12 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
           widget.toolsBuilder == null ? null : widget.toolsBuilder!(context, _controller, snapshot),
         );
         final sendEnabled = !loading && waitingForOnlineMessage == null;
-        final sendDisabledReason = loading
+        final activeTurnLocked = _status.turnId?.trim().isNotEmpty == true;
+        final inputEnabled = sendEnabled && !activeTurnLocked;
+        final activeTurnDisabledReason = 'Assistant is still working on this turn. Wait for it to finish, or start a new thread.';
+        final sendDisabledReason = activeTurnLocked
+            ? activeTurnDisabledReason
+            : loading
             ? 'Thread is loading.'
             : waitingForOnlineMessage == null
             ? null
@@ -2905,9 +2999,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
           controller: _controller,
           snapshot: snapshot,
           placeholder: widget.inputPlaceholder,
-          sendEnabled: sendEnabled,
+          sendEnabled: inputEnabled,
           sendDisabledReason: sendDisabledReason,
-          readOnly: false,
+          readOnly: activeTurnLocked,
           onCancelSend: null,
           onInterrupt: _canInterruptActiveTurn() ? _cancelTurn : null,
           sendPendingText: waitingForOnlineMessage == null
@@ -2922,13 +3016,14 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
           attachmentBuilder: widget.attachmentBuilder,
           contextMenuBuilder: widget.inputContextMenuBuilder,
           onPressedOutside: widget.inputOnPressedOutside,
-          onSend: _send,
+          onSend: inputEnabled ? _send : _rejectSendWhileTurnActive,
         );
         final defaultInput = ChatThreadInput(
           key: _composerInputKey,
           focusTrigger: _controller,
           sendEnabled: config.sendEnabled,
           sendDisabledReason: config.sendDisabledReason,
+          readOnly: config.readOnly,
           onCancelSend: config.onCancelSend,
           onInterrupt: config.onInterrupt,
           sendPendingText: config.sendPendingText,
@@ -4150,7 +4245,7 @@ class _DatasetTextContentState {
   _DatasetThreadMessage? complete({required Map<String, Object?> row, required Map<String, Object?> payload}) {
     final endedText = payload['text']?.toString() ?? '';
     if (endedText.isNotEmpty) {
-      text = accumulateTextStreamDelta(text, endedText);
+      text = completeTextStream(text, endedText);
     }
     authorName ??= payload['sender_name']?.toString();
     phase ??= _agentMessagePhase(payload);
@@ -4230,7 +4325,7 @@ _DatasetThreadMessage _mergeDuplicateDatasetThreadMessage(_DatasetThreadMessage 
     id: existing.id,
     kind: existing.kind,
     role: existing.role,
-    text: existing.text.trim().isEmpty ? next.text : existing.text,
+    text: _mergeDuplicateDatasetThreadMessageText(existing.text, next.text),
     attachments: existing.attachments.isEmpty ? next.attachments : existing.attachments,
     createdAt: existing.createdAt.isBefore(next.createdAt) ? existing.createdAt : next.createdAt,
     image: existing.image ?? next.image,
@@ -4243,11 +4338,31 @@ _DatasetThreadMessage _mergeDuplicateDatasetThreadMessage(_DatasetThreadMessage 
   );
 }
 
+String _mergeDuplicateDatasetThreadMessageText(String existing, String next) {
+  if (existing.trim().isEmpty) {
+    return next;
+  }
+  if (next.trim().isEmpty) {
+    return existing;
+  }
+  if (next.startsWith(existing)) {
+    return next;
+  }
+  if (existing.startsWith(next)) {
+    return existing;
+  }
+  return existing;
+}
+
 String _datasetThreadMessageDedupeKey({required Map<String, Object?> row, required _DatasetThreadMessage message}) {
   if (message.role == 'user') {
     return 'user:${message.id}';
   }
-  return [message.role, message.kind, row['item_id']?.toString() ?? message.id, row['sequence']?.toString() ?? ''].join(':');
+  final itemId = row['item_id']?.toString().trim();
+  if (itemId != null && itemId.isNotEmpty) {
+    return [message.role, message.kind, itemId].join(':');
+  }
+  return [message.role, message.kind, message.id, row['sequence']?.toString() ?? ''].join(':');
 }
 
 bool _datasetThreadMessageReconcilesLiveMessage({
@@ -4863,6 +4978,34 @@ class _DatasetThreadRealtimeAudioPlayer {
       await _output.dispose();
     } catch (_) {}
   }
+}
+
+@visibleForTesting
+String completeTextStream(String current, String completed) {
+  if (completed.isEmpty) {
+    return current;
+  }
+  if (current.isEmpty) {
+    return completed;
+  }
+  if (completed.startsWith(current)) {
+    return completed;
+  }
+  if (current.endsWith(completed)) {
+    return current;
+  }
+  final normalizedCurrent = current.trim();
+  final normalizedCompleted = completed.trim();
+  if (normalizedCompleted == normalizedCurrent) {
+    return current;
+  }
+  if (normalizedCompleted.startsWith(normalizedCurrent)) {
+    return completed;
+  }
+  if (normalizedCurrent.endsWith(normalizedCompleted)) {
+    return current;
+  }
+  return accumulateTextStreamDelta(current, completed);
 }
 
 Uint8List _pcmAudioBytes({required Uint8List bytes, required String? mimeType}) {

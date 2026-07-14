@@ -17,6 +17,7 @@ typedef ThreadAttachmentActionIconBuilder = Widget Function(BuildContext context
 
 typedef ThreadMarkdownHeadingPaddingResolver = EdgeInsets? Function(String tag);
 typedef ThreadMarkdownHeadingStyleResolver = TextStyle? Function(String tag, TextStyle defaultStyle);
+typedef ThreadMarkdownLinkHandler = bool Function(BuildContext context, String url);
 
 class ThreadTypographyOverride extends InheritedWidget {
   const ThreadTypographyOverride({
@@ -66,6 +67,8 @@ class ThreadTypographyOverride extends InheritedWidget {
     this.inlineCodeTextColor,
     this.inlineCodeBackgroundColor,
     this.inlineCodeHorizontalPadding = false,
+    this.suppressRepeatedChatBubbleText = false,
+    this.suppressAgentOnlyChatContext = false,
     this.threadErrorSurfaceColor,
     this.threadErrorTextColor,
     this.markdownHorizontalRuleColor,
@@ -74,6 +77,7 @@ class ThreadTypographyOverride extends InheritedWidget {
     this.markdownSuppressHeadingDividers = false,
     this.markdownHeadingPaddingResolver,
     this.markdownHeadingStyleResolver,
+    this.markdownLinkHandler,
   });
 
   final String? textFontFamily;
@@ -120,6 +124,8 @@ class ThreadTypographyOverride extends InheritedWidget {
   final Color? inlineCodeTextColor;
   final Color? inlineCodeBackgroundColor;
   final bool inlineCodeHorizontalPadding;
+  final bool suppressRepeatedChatBubbleText;
+  final bool suppressAgentOnlyChatContext;
   final Color? threadErrorSurfaceColor;
   final Color? threadErrorTextColor;
   final Color? markdownHorizontalRuleColor;
@@ -128,6 +134,7 @@ class ThreadTypographyOverride extends InheritedWidget {
   final bool markdownSuppressHeadingDividers;
   final ThreadMarkdownHeadingPaddingResolver? markdownHeadingPaddingResolver;
   final ThreadMarkdownHeadingStyleResolver? markdownHeadingStyleResolver;
+  final ThreadMarkdownLinkHandler? markdownLinkHandler;
 
   static ThreadTypographyOverride? maybeOf(BuildContext context) {
     return context.dependOnInheritedWidgetOfExactType<ThreadTypographyOverride>();
@@ -309,6 +316,14 @@ class ThreadTypographyOverride extends InheritedWidget {
     return maybeOf(context)?.inlineCodeHorizontalPadding ?? false;
   }
 
+  static bool suppressRepeatedChatBubbleTextOf(BuildContext context) {
+    return maybeOf(context)?.suppressRepeatedChatBubbleText ?? false;
+  }
+
+  static bool suppressAgentOnlyChatContextOf(BuildContext context) {
+    return maybeOf(context)?.suppressAgentOnlyChatContext ?? false;
+  }
+
   static Color? maybeThreadErrorSurfaceColorOf(BuildContext context) {
     return maybeOf(context)?.threadErrorSurfaceColor;
   }
@@ -339,6 +354,10 @@ class ThreadTypographyOverride extends InheritedWidget {
 
   static TextStyle? maybeMarkdownHeadingStyleOf(BuildContext context, String tag, TextStyle defaultStyle) {
     return maybeOf(context)?.markdownHeadingStyleResolver?.call(tag, defaultStyle);
+  }
+
+  static ThreadMarkdownLinkHandler? maybeMarkdownLinkHandlerOf(BuildContext context) {
+    return maybeOf(context)?.markdownLinkHandler;
   }
 
   @override
@@ -385,6 +404,8 @@ class ThreadTypographyOverride extends InheritedWidget {
         inlineCodeTextColor != oldWidget.inlineCodeTextColor ||
         inlineCodeBackgroundColor != oldWidget.inlineCodeBackgroundColor ||
         inlineCodeHorizontalPadding != oldWidget.inlineCodeHorizontalPadding ||
+        suppressRepeatedChatBubbleText != oldWidget.suppressRepeatedChatBubbleText ||
+        suppressAgentOnlyChatContext != oldWidget.suppressAgentOnlyChatContext ||
         threadErrorSurfaceColor != oldWidget.threadErrorSurfaceColor ||
         threadErrorTextColor != oldWidget.threadErrorTextColor ||
         markdownHorizontalRuleColor != oldWidget.markdownHorizontalRuleColor ||
@@ -392,7 +413,8 @@ class ThreadTypographyOverride extends InheritedWidget {
         markdownBlockquoteBackgroundColor != oldWidget.markdownBlockquoteBackgroundColor ||
         markdownSuppressHeadingDividers != oldWidget.markdownSuppressHeadingDividers ||
         markdownHeadingPaddingResolver != oldWidget.markdownHeadingPaddingResolver ||
-        markdownHeadingStyleResolver != oldWidget.markdownHeadingStyleResolver;
+        markdownHeadingStyleResolver != oldWidget.markdownHeadingStyleResolver ||
+        markdownLinkHandler != oldWidget.markdownLinkHandler;
   }
 }
 
