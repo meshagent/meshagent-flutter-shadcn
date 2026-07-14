@@ -1,6 +1,7 @@
 ## [0.46.3]
 - Added `Meshagent.getProjectSettings(projectId)` to fetch project settings from the API and return them as a JSON map.
 - The Dart service webhook helper now merges optional headers with null-aware spread semantics.
+- Replaced the native Rust-backed `code_forge` editor with the pure-Dart `code_forge_web` implementation on all platforms.
 
 ## [0.46.2]
 - Stability
