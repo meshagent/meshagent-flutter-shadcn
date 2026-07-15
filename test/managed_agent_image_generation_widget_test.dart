@@ -13,7 +13,7 @@ import 'package:meshagent_flutter_shadcn/chat/new_chat_thread.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 class _FakeManagedAgentChatClient extends agent_sessions.BaseChatClient {
-  _FakeManagedAgentChatClient({this.participantName, this.autoCompleteThreadLoad = true});
+  _FakeManagedAgentChatClient({this.participantName, this.autoCompleteThreadLoad = true, super.deduplicateClientToolRequests});
 
   final String? participantName;
   final bool autoCompleteThreadLoad;
@@ -465,6 +465,70 @@ void main() {
     expect(responses.single.response, isA<JsonContent>());
     expect((responses.single.response as JsonContent).json, {'answer': 'test response'});
     expect(tool.responseSentCount, 1);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets('V1 client tool guard prevents a completed request from replaying after remount', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const ui.Size(1200, 1000);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final chatClient = _FakeManagedAgentChatClient(participantName: 'jesse.ezell', deduplicateClientToolRequests: true);
+    final controller = ChatThreadController(room: null);
+    final tool = _TestClientTool();
+    addTearDown(chatClient.stop);
+    addTearDown(controller.dispose);
+
+    controller.addClientToolkit(_TestClientToolkit(tool));
+
+    Widget buildThread() {
+      return ShadApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 900,
+            height: 820,
+            child: DatasetChatThread(
+              chatClient: chatClient,
+              path: 'thread-client-tool-remount',
+              agentName: 'agent',
+              controller: controller,
+              inputPlaceholder: const Text('Message agent'),
+            ),
+          ),
+        ),
+      );
+    }
+
+    await tester.pumpWidget(buildThread());
+    await tester.pump();
+
+    chatClient.emit(
+      agent_sessions.AgentClientToolCallRequested(
+        threadId: 'thread-client-tool-remount',
+        turnId: 'turn-client-tool-remount',
+        requestId: 'request-client-tool-remount',
+        toolkit: 'client',
+        tool: 'ask_user',
+        arguments: const <String, dynamic>{'prompt': 'Run once'},
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(tool.calls, hasLength(1));
+    expect(chatClient.sentMessages.whereType<agent_sessions.AgentClientToolCallResponse>(), hasLength(1));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    await tester.pumpWidget(buildThread());
+    await tester.pump();
+    await tester.pump();
+
+    expect(tool.calls, hasLength(1));
+    expect(chatClient.sentMessages.whereType<agent_sessions.AgentClientToolCallResponse>(), hasLength(1));
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 2));

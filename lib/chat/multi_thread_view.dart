@@ -24,7 +24,6 @@ class MultiThreadView extends StatefulWidget {
     this.selectedThreadPath,
     this.onSelectedThreadPathChanged,
     this.onSelectedThreadResolved,
-    this.onThreadStartActivityChanged,
     this.newThreadResetVersion = 0,
     this.centerComposer = true,
     this.showCenteredComposerTitle = true,
@@ -53,7 +52,6 @@ class MultiThreadView extends StatefulWidget {
   final String? selectedThreadPath;
   final ValueChanged<String?>? onSelectedThreadPathChanged;
   final void Function(String? path, String? displayName)? onSelectedThreadResolved;
-  final ValueChanged<bool>? onThreadStartActivityChanged;
   final int newThreadResetVersion;
   final bool centerComposer;
   final bool showCenteredComposerTitle;
@@ -141,7 +139,6 @@ class _MultiThreadViewState extends State<MultiThreadView> {
       selectedThreadPath: selectedThreadPath,
       onThreadPathChanged: widget.onSelectedThreadPathChanged,
       onThreadResolved: widget.onSelectedThreadResolved,
-      onThreadStartActivityChanged: widget.onThreadStartActivityChanged,
       centerComposer: widget.centerComposer,
       showCenteredComposerTitle: widget.showCenteredComposerTitle,
       showUsageFooter: widget.showUsageFooter,

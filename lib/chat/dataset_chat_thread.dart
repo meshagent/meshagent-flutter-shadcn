@@ -1539,12 +1539,17 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       return;
     }
 
-    final response = await _controller.executeClientToolCall(request);
+    if (!session.claimClientToolCall(request.requestId)) {
+      return;
+    }
+
     var responseSent = false;
     try {
+      final response = await _controller.executeClientToolCall(request);
       await session.respondToClientToolCall(turnId: request.turnId, requestId: request.requestId, response: response);
       responseSent = true;
     } finally {
+      session.finishClientToolCall(request.requestId, responseSent: responseSent);
       await _controller.finishClientToolCallResponse(request, responseSent: responseSent);
     }
   }
