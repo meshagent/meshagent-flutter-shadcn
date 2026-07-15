@@ -59,7 +59,7 @@ class _FakeManagedAgentChatClient extends agent_sessions.BaseChatClient {
   }
 }
 
-class _TestClientTool extends FunctionTool {
+class _TestClientTool extends FunctionTool implements ToolResponseSentListener {
   _TestClientTool() : super(name: 'ask_user', title: 'Ask User', description: 'Ask the user a question', inputSchema: _schema);
 
   static const Map<String, dynamic> _schema = {
@@ -72,11 +72,17 @@ class _TestClientTool extends FunctionTool {
   };
 
   final List<Map<String, dynamic>> calls = <Map<String, dynamic>>[];
+  int responseSentCount = 0;
 
   @override
   Future<Content> execute(ToolContext context, Map<String, dynamic> arguments) async {
     calls.add(arguments);
     return JsonContent(json: <String, dynamic>{'answer': 'test response'});
+  }
+
+  @override
+  void onToolResponseSent(ToolContext context, Content response) {
+    responseSentCount += 1;
   }
 }
 
@@ -458,6 +464,7 @@ void main() {
     expect(responses.single.requestId, 'request-client-tools');
     expect(responses.single.response, isA<JsonContent>());
     expect((responses.single.response as JsonContent).json, {'answer': 'test response'});
+    expect(tool.responseSentCount, 1);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 2));

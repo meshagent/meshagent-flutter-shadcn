@@ -1821,6 +1821,8 @@ class ChatThreadController extends ChangeNotifier {
   final Set<String> _enabledToolkits = <String>{};
   final LinkedHashMap<String, Connector> _selectedMcpConnectors = LinkedHashMap<String, Connector>();
   final LinkedHashMap<String, Toolkit> _clientToolkits = LinkedHashMap<String, Toolkit>();
+  final Map<String, ({ToolResponseSentListener listener, ToolContext context, Content response})> _pendingClientToolResponseCallbacks =
+      <String, ({ToolResponseSentListener listener, ToolContext context, Content response})>{};
 
   RoomClient _requireRoom(String operation) {
     final room = this.room;
@@ -1921,17 +1923,22 @@ class ChatThreadController extends ChangeNotifier {
 
   Future<Content> executeClientToolCall(AgentClientToolCallRequested request) async {
     for (final toolkit in _clientToolkits.values) {
-      final hasTool = toolkit.tools.any((tool) => tool.name == request.tool);
-      if (!hasTool) {
+      final tool = toolkit.tools.where((tool) => tool.name == request.tool).firstOrNull;
+      if (tool == null) {
         continue;
       }
       try {
+        final context = const ToolContext();
         final output = await toolkit.execute(
-          const ToolContext(),
+          context,
           request.tool,
           ToolContentInput(JsonContent(json: Map<String, dynamic>.from(request.arguments))),
         );
         if (output is ToolContentOutput) {
+          if (tool is ToolResponseSentListener) {
+            final listener = tool as ToolResponseSentListener;
+            _pendingClientToolResponseCallbacks[request.requestId] = (listener: listener, context: context, response: output.content);
+          }
           return output.content;
         }
         return ErrorContent(text: "Client toolkit '${request.tool}' returned a streaming response, which is not supported.");
@@ -1940,6 +1947,16 @@ class ChatThreadController extends ChangeNotifier {
       }
     }
     return ErrorContent(text: "Client toolkit '${request.tool}' is not registered.");
+  }
+
+  Future<void> finishClientToolCallResponse(AgentClientToolCallRequested request, {required bool responseSent}) async {
+    final pending = _pendingClientToolResponseCallbacks.remove(request.requestId);
+    if (!responseSent || pending == null) {
+      return;
+    }
+    try {
+      await pending.listener.onToolResponseSent(pending.context, pending.response);
+    } catch (_) {}
   }
 
   void scrollThreadToBottom({bool animated = true}) {
@@ -2660,6 +2677,7 @@ class ChatThreadController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _pendingClientToolResponseCallbacks.clear();
     textFieldController.removeListener(notifyListeners);
     threadScrollController.dispose();
     textFieldController.dispose();

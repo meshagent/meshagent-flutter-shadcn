@@ -1540,8 +1540,13 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     }
 
     final response = await _controller.executeClientToolCall(request);
-
-    await session.respondToClientToolCall(turnId: request.turnId, requestId: request.requestId, response: response);
+    var responseSent = false;
+    try {
+      await session.respondToClientToolCall(turnId: request.turnId, requestId: request.requestId, response: response);
+      responseSent = true;
+    } finally {
+      await _controller.finishClientToolCallResponse(request, responseSent: responseSent);
+    }
   }
 
   bool _handleUsagePayload(Map<String, dynamic> payload, {bool notify = true}) {
