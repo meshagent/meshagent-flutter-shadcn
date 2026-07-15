@@ -42,6 +42,32 @@ class _FakeChatClient extends agent_sessions.BaseChatClient {
         );
       });
     }
+    if (message is agent_sessions.ModelsRequest) {
+      scheduleMicrotask(() {
+        handleAgentMessage(
+          agent_sessions.ModelsResponse(
+            sourceMessageId: message.messageId,
+            providers: const <agent_sessions.AgentProviderInfo>[
+              agent_sessions.AgentProviderInfo(
+                name: 'openai',
+                friendlyName: 'OpenAI',
+                defaultModel: 'gpt-5.6-sol',
+                models: <agent_sessions.AgentModelInfo>[
+                  agent_sessions.AgentModelInfo(name: 'gpt-5.6-sol', active: true),
+                  agent_sessions.AgentModelInfo(name: 'gpt-5.5'),
+                ],
+              ),
+              agent_sessions.AgentProviderInfo(
+                name: 'anthropic',
+                friendlyName: 'Anthropic',
+                defaultModel: 'claude',
+                models: <agent_sessions.AgentModelInfo>[agent_sessions.AgentModelInfo(name: 'claude')],
+              ),
+            ],
+          ),
+        );
+      });
+    }
   }
 }
 
@@ -107,5 +133,49 @@ void main() {
     expect(openMessages.map((message) => message.threadId), contains(threadPath));
     expect(openMessages.singleWhere((message) => message.threadId == threadPath).load, isTrue);
     expect(find.text('Unable to load thread'), findsNothing);
+  });
+
+  testWidgets('selected threads refresh the current assistant model catalog', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final chatClient = _FakeChatClient();
+    addTearDown(room.dispose);
+
+    const threadPath = 'dataset://agents/codex/threads/12345678-1234-5678-1234-567812345678.thread';
+    chatClient.openThread(threadPath);
+    await tester.pump();
+    final initialRequestCount = chatClient.sentMessages.whereType<agent_sessions.ModelsRequest>().length;
+    expect(initialRequestCount, greaterThan(0));
+
+    DatasetChatModelController? modelController;
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 900,
+            height: 700,
+            child: ChatBotView(
+              room: room,
+              chatClient: chatClient,
+              agentName: 'codex',
+              threadDisplayMode: chatThreadDisplayModeFromAnnotation('default-new'),
+              selectedThreadPath: threadPath,
+              showThreadList: false,
+              datasetThreadWrapperBuilder: (context, path, thread, controller) {
+                modelController = controller;
+                return thread;
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(chatClient.sentMessages.whereType<agent_sessions.ModelsRequest>().length, greaterThan(initialRequestCount));
+    expect(
+      modelController?.models.map((model) => model.key),
+      containsAll(<String>['/openai/gpt-5.6-sol', '/openai/gpt-5.5', '/anthropic/claude']),
+    );
   });
 }
