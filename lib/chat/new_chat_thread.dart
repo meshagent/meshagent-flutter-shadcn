@@ -47,6 +47,7 @@ class NewChatThread extends StatefulWidget {
     this.selectedThreadPath,
     this.onThreadPathChanged,
     this.onThreadResolved,
+    this.onThreadStartActivityChanged,
     this.centerComposer = true,
     this.showCenteredComposerTitle = true,
     this.showUsageFooter = false,
@@ -75,6 +76,7 @@ class NewChatThread extends StatefulWidget {
   final String? selectedThreadPath;
   final ValueChanged<String?>? onThreadPathChanged;
   final void Function(String? path, String? displayName)? onThreadResolved;
+  final ValueChanged<bool>? onThreadStartActivityChanged;
   final bool centerComposer;
   final bool showCenteredComposerTitle;
   final bool showUsageFooter;
@@ -886,6 +888,7 @@ class _NewChatThreadState extends State<NewChatThread> {
     _modelController.setLocked(true);
     _controller.scrollThreadToBottom(animated: false);
 
+    var notifiedThreadStartActivity = false;
     try {
       final agent = _usesInjectedChatClient ? null : _agent ?? await _waitForAgentOnline();
       if (_usesInjectedChatClient) {
@@ -903,6 +906,8 @@ class _NewChatThreadState extends State<NewChatThread> {
         });
       }
 
+      notifiedThreadStartActivity = true;
+      widget.onThreadStartActivityChanged?.call(true);
       final path = await _sendStartThreadMessage(
         agent: readyAgent,
         messageId: pendingFirstMessage.messageId,
@@ -963,6 +968,10 @@ class _NewChatThreadState extends State<NewChatThread> {
         _pendingFirstMessage = null;
       });
       _modelController.setLocked(false);
+    } finally {
+      if (notifiedThreadStartActivity) {
+        widget.onThreadStartActivityChanged?.call(false);
+      }
     }
   }
 

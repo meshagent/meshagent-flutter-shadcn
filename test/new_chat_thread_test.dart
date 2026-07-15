@@ -5,6 +5,7 @@ import 'dart:ui' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:meshagent/meshagent.dart';
+import 'package:meshagent_agents/meshagent_agents.dart' as agent_sessions;
 import 'package:meshagent_flutter_shadcn/chat/chat.dart';
 import 'package:meshagent_flutter_shadcn/chat/multi_thread_view.dart';
 import 'package:meshagent_flutter_shadcn/chat/new_chat_thread.dart';
@@ -20,6 +21,21 @@ class _NoopProtocolChannel extends ProtocolChannel {
 
   @override
   void start(void Function(Uint8List data) onDataReceived, {void Function()? onDone, void Function(Object? error)? onError}) {}
+}
+
+class _PendingStartChatClient extends agent_sessions.BaseChatClient {
+  _PendingStartChatClient(this.room);
+
+  final RoomClient room;
+  final List<agent_sessions.AgentMessage> sentMessages = <agent_sessions.AgentMessage>[];
+
+  @override
+  RemoteParticipant? agentParticipant() => RemoteParticipant(client: room, id: 'assistant', role: 'agent', online: true);
+
+  @override
+  Future<void> sendAgentMessage(agent_sessions.AgentMessage message, {Uint8List? attachment}) async {
+    sentMessages.add(message);
+  }
 }
 
 class _MultiThreadFocusHarness extends StatefulWidget {
@@ -62,6 +78,45 @@ class _MultiThreadFocusHarnessState extends State<_MultiThreadFocusHarness> {
 }
 
 void main() {
+  testWidgets('reports new-thread start activity while the server path is pending', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final controller = ChatThreadController(room: room);
+    final chatClient = _PendingStartChatClient(room);
+    final activity = <bool>[];
+    addTearDown(room.dispose);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 640,
+            child: NewChatThread(
+              room: room,
+              chatClient: chatClient,
+              agentName: 'assistant',
+              controller: controller,
+              onThreadStartActivityChanged: activity.add,
+              builder: (context, threadPath) => const SizedBox.shrink(),
+            ),
+          ),
+        ),
+      ),
+    );
+    controller.textFieldController.text = 'Create a site';
+    await tester.pump();
+    final sendFuture = tester.widget<ChatThreadInput>(find.byType(ChatThreadInput)).onSend('Create a site', const []);
+    await tester.pump();
+
+    expect(activity, [true]);
+    final request = chatClient.sentMessages.whereType<agent_sessions.StartThread>().single;
+    chatClient.handleAgentMessage(agent_sessions.ThreadStarted(sourceMessageId: request.messageId, threadId: 'dataset://threads/new-site'));
+    await sendFuture;
+    await tester.pumpAndSettle();
+
+    expect(activity, [true, false]);
+  });
+
   test('controller clear preserves enabled toolkits and selected MCP connectors', () {
     final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     addTearDown(room.dispose);

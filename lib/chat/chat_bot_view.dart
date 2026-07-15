@@ -32,6 +32,7 @@ class ChatBotView extends StatefulWidget {
     this.selectedThreadDisplayName,
     this.onSelectedThreadPathChanged,
     this.onSelectedThreadResolved,
+    this.onThreadStartActivityChanged,
     this.newThreadResetVersion = 0,
     this.participants,
     this.participantNames,
@@ -84,6 +85,7 @@ class ChatBotView extends StatefulWidget {
   final String? selectedThreadDisplayName;
   final ValueChanged<String?>? onSelectedThreadPathChanged;
   final void Function(String? path, String? displayName)? onSelectedThreadResolved;
+  final ValueChanged<bool>? onThreadStartActivityChanged;
   final int newThreadResetVersion;
   final List<Participant>? participants;
   final List<String>? participantNames;
@@ -400,6 +402,7 @@ class _ChatBotViewState extends State<ChatBotView> {
         _seedResolvedThreadModelController(path);
         widget.onSelectedThreadResolved?.call(path, displayName);
       },
+      onThreadStartActivityChanged: widget.onThreadStartActivityChanged,
       newThreadResetVersion: widget.newThreadResetVersion,
       centerComposer: widget.centerComposer,
       showCenteredComposerTitle: widget.showCenteredComposerTitle,
