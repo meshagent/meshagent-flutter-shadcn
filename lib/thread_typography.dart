@@ -18,6 +18,7 @@ typedef ThreadAttachmentActionIconBuilder = Widget Function(BuildContext context
 typedef ThreadMarkdownHeadingPaddingResolver = EdgeInsets? Function(String tag);
 typedef ThreadMarkdownHeadingStyleResolver = TextStyle? Function(String tag, TextStyle defaultStyle);
 typedef ThreadMarkdownLinkHandler = bool Function(BuildContext context, String url);
+typedef ThreadErrorTextResolver = String Function(String errorMessage);
 
 class ThreadTypographyOverride extends InheritedWidget {
   const ThreadTypographyOverride({
@@ -71,6 +72,7 @@ class ThreadTypographyOverride extends InheritedWidget {
     this.suppressAgentOnlyChatContext = false,
     this.threadErrorSurfaceColor,
     this.threadErrorTextColor,
+    this.threadErrorTextResolver,
     this.markdownHorizontalRuleColor,
     this.markdownBlockquoteSideColor,
     this.markdownBlockquoteBackgroundColor,
@@ -128,6 +130,7 @@ class ThreadTypographyOverride extends InheritedWidget {
   final bool suppressAgentOnlyChatContext;
   final Color? threadErrorSurfaceColor;
   final Color? threadErrorTextColor;
+  final ThreadErrorTextResolver? threadErrorTextResolver;
   final Color? markdownHorizontalRuleColor;
   final Color? markdownBlockquoteSideColor;
   final Color? markdownBlockquoteBackgroundColor;
@@ -332,6 +335,10 @@ class ThreadTypographyOverride extends InheritedWidget {
     return maybeOf(context)?.threadErrorTextColor;
   }
 
+  static String resolveThreadErrorText(BuildContext context, String errorMessage) {
+    return maybeOf(context)?.threadErrorTextResolver?.call(errorMessage) ?? errorMessage;
+  }
+
   static Color? maybeMarkdownHorizontalRuleColorOf(BuildContext context) {
     return maybeOf(context)?.markdownHorizontalRuleColor;
   }
@@ -408,6 +415,7 @@ class ThreadTypographyOverride extends InheritedWidget {
         suppressAgentOnlyChatContext != oldWidget.suppressAgentOnlyChatContext ||
         threadErrorSurfaceColor != oldWidget.threadErrorSurfaceColor ||
         threadErrorTextColor != oldWidget.threadErrorTextColor ||
+        threadErrorTextResolver != oldWidget.threadErrorTextResolver ||
         markdownHorizontalRuleColor != oldWidget.markdownHorizontalRuleColor ||
         markdownBlockquoteSideColor != oldWidget.markdownBlockquoteSideColor ||
         markdownBlockquoteBackgroundColor != oldWidget.markdownBlockquoteBackgroundColor ||

@@ -3012,7 +3012,26 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return imagesInThread;
   }
 
-  Widget _buildInput(BuildContext context, ChatThreadSnapshot snapshot, List<PendingAgentMessage> pendingMessages, {bool loading = false}) {
+  String? _latestThreadErrorMessage(List<_DatasetThreadMessage> messages) {
+    for (final message in messages.reversed) {
+      if (message.kind != 'error') {
+        continue;
+      }
+      final text = message.text.trim();
+      if (text.isNotEmpty) {
+        return text;
+      }
+    }
+    return null;
+  }
+
+  Widget _buildInput(
+    BuildContext context,
+    ChatThreadSnapshot snapshot,
+    List<PendingAgentMessage> pendingMessages, {
+    bool loading = false,
+    String? threadErrorMessage,
+  }) {
     PendingAgentMessage? waitingForOnlineMessage;
     for (final pending in pendingMessages) {
       if (pending.awaitingOnline) {
@@ -3044,6 +3063,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
           sendEnabled: inputEnabled,
           sendDisabledReason: sendDisabledReason,
           readOnly: activeTurnLocked,
+          threadErrorMessage: threadErrorMessage,
           onCancelSend: null,
           onInterrupt: _canInterruptActiveTurn() ? _cancelTurn : null,
           sendPendingText: waitingForOnlineMessage == null
@@ -3133,13 +3153,14 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       if (message.kind == 'error') {
         final errorSurfaceColor = ThreadTypographyOverride.maybeThreadErrorSurfaceColorOf(context);
         final errorTextColor = ThreadTypographyOverride.maybeThreadErrorTextColorOf(context);
+        final errorText = ThreadTypographyOverride.resolveThreadErrorText(context, message.text);
         if (errorSurfaceColor != null || errorTextColor != null) {
           return ChatThreadMessageView(
             key: ValueKey(message.id),
             room: null,
             mine: false,
             isAgentMessage: true,
-            text: message.text,
+            text: errorText,
             authorName: '',
             createdAt: message.createdAt,
             shouldShowHeader: false,
@@ -3156,7 +3177,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             child: Align(
               alignment: Alignment.center,
               child: SelectableText(
-                message.text,
+                errorText,
                 style: theme.textTheme.muted.copyWith(color: theme.colorScheme.destructive),
                 textAlign: TextAlign.center,
               ),
@@ -3928,6 +3949,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       builder: (context, _) {
         final loading = _threadSession?.isLoading ?? false;
         final messages = _messages();
+        final threadErrorMessage = _latestThreadErrorMessage(messages);
         final debugRows = _debugRows();
         _notifyDebugRowsChanged(debugRows);
         final pendingMessages = loading ? const <PendingAgentMessage>[] : _combinedPendingMessages(messages);
@@ -3947,7 +3969,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                     ?_buildQueuedPendingMessages(context, messages, pendingMessages),
                     _buildComposerWithUsageFooter(
                       context,
-                      input: _buildInput(context, snapshot, pendingMessages, loading: loading),
+                      input: _buildInput(context, snapshot, pendingMessages, loading: loading, threadErrorMessage: threadErrorMessage),
                       usage: snapshot.usage,
                     ),
                   ],

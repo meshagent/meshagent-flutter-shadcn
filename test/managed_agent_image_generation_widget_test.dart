@@ -10,6 +10,7 @@ import 'package:meshagent_agents/meshagent_agents.dart' as agent_sessions;
 import 'package:meshagent_flutter_shadcn/chat/chat.dart';
 import 'package:meshagent_flutter_shadcn/chat/dataset_chat_thread.dart';
 import 'package:meshagent_flutter_shadcn/chat/new_chat_thread.dart';
+import 'package:meshagent_flutter_shadcn/thread_typography.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 class _FakeManagedAgentChatClient extends agent_sessions.BaseChatClient {
@@ -186,6 +187,60 @@ void main() {
     await tester.pump();
 
     expect(find.byType(CircularProgressIndicator), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets('managed agent thread exposes its latest error to a custom composer', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const ui.Size(1200, 1000);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final chatClient = _FakeManagedAgentChatClient();
+    addTearDown(chatClient.stop);
+    const errorMessage = 'Error from OpenAI websocket: No tool output found for function call call_example.';
+    final resolvedErrorMessages = <String>[];
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 900,
+            height: 820,
+            child: ThreadTypographyOverride(
+              threadErrorTextResolver: (errorMessage) {
+                resolvedErrorMessages.add(errorMessage);
+                return errorMessage;
+              },
+              child: DatasetChatThread(
+                chatClient: chatClient,
+                path: 'thread-error',
+                agentName: 'image-gen',
+                inputPlaceholder: const Text('Message agent'),
+                customInputBuilder: (context, config, defaultInput) => Text(config.threadErrorMessage ?? 'composer ready'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('composer ready'), findsOneWidget);
+
+    chatClient.emit(
+      agent_sessions.TurnEnded(
+        threadId: 'thread-error',
+        turnId: 'turn-error',
+        messageId: 'turn-ended-error',
+        error: agent_sessions.AgentError(code: 'RoomException', message: errorMessage),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 150));
+
+    expect(find.text(errorMessage), findsAtLeastNWidgets(1));
+    expect(resolvedErrorMessages, contains(errorMessage));
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 2));

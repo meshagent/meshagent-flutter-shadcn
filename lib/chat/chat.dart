@@ -2924,6 +2924,7 @@ class ChatThreadInputConfig {
     required this.sendDisabledReason,
     required this.readOnly,
     required this.onSend,
+    this.threadErrorMessage,
     this.onSendWithAgentText,
     this.onChanged,
     this.onClear,
@@ -2957,6 +2958,7 @@ class ChatThreadInputConfig {
   final String? sendDisabledReason;
   final bool readOnly;
   final Future<void> Function(String, List<FileAttachment>) onSend;
+  final String? threadErrorMessage;
   final Future<void> Function(String visibleText, String agentText, List<FileAttachment> attachments)? onSendWithAgentText;
   final void Function(String, List<FileAttachment>)? onChanged;
   final VoidCallback? onClear;
