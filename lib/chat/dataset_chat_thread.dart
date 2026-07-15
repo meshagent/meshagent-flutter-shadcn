@@ -728,6 +728,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   StreamSubscription<List<Map<String, Object?>>>? _rowsLoadSubscription;
   Timer? _tableLoadRetryTimer;
   agent_sessions.BaseChatClient? _chatClient;
+  StreamSubscription<agent_sessions.AgentMessageEvent>? _chatClientSubscription;
   bool _ownsChatClient = false;
   final AgentThreadMessageStatusStore _statusStore = AgentThreadMessageStatusStore();
   agent_sessions.ChatThreadSession? _threadSession;
@@ -1131,6 +1132,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     final injectedClient = widget.chatClient;
     final clientChanged = !identical(existingClient, injectedClient);
     if (clientChanged) {
+      unawaited(_chatClientSubscription?.cancel());
+      _chatClientSubscription = null;
       _threadSession?.removeListener(_onThreadSessionChanged);
       _removeThreadSessionMessageListeners();
       _threadSession = null;
@@ -1147,6 +1150,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       }
       final nextClient = _chatClient;
       if (nextClient != null) {
+        _chatClientSubscription = nextClient.events.listen(_handleChatClientEvent);
         unawaited(nextClient.start());
       }
     }
@@ -1162,10 +1166,14 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
 
     currentSession?.removeListener(_onThreadSessionChanged);
     _removeThreadSessionMessageListeners();
+    final sessionAlreadyExists = chatClient.sessions.any((session) => session.threadPath == widget.path);
     final nextSession = chatClient.openThread(widget.path);
     _threadSession = nextSession;
     _threadSessionMessageCursor = 0;
     nextSession.addListener(_onThreadSessionChanged);
+    if (sessionAlreadyExists) {
+      unawaited(nextSession.requestModels().catchError((_) {}));
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !identical(_threadSession, nextSession)) {
         return;
@@ -1175,6 +1183,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   void _closeChatSession() {
+    unawaited(_chatClientSubscription?.cancel());
+    _chatClientSubscription = null;
     final session = _threadSession;
     _threadSession = null;
     _threadSessionMessageCursor = 0;
@@ -1182,6 +1192,16 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     _removeThreadSessionMessageListeners();
     if (session != null) {
       unawaited(session.close());
+    }
+  }
+
+  void _handleChatClientEvent(agent_sessions.AgentMessageEvent event) {
+    if (!mounted) {
+      return;
+    }
+    final payload = event.payload;
+    if (payload['type'] == agentModelsResponseType) {
+      _modelController.applyModelsResponse(payload);
     }
   }
 
