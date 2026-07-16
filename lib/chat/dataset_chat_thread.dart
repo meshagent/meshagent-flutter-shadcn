@@ -768,6 +768,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   int _threadSessionMessageCursor = 0;
   final Map<agent_sessions.AgentMessageEvent, VoidCallback> _threadSessionMessageListeners =
       <agent_sessions.AgentMessageEvent, VoidCallback>{};
+  final Map<agent_sessions.AgentMessageEvent, int> _consumedToolArgumentDeltaLengths = <agent_sessions.AgentMessageEvent, int>{};
   String? _lastDebugRowsSignature;
   final OverlayPortalController _imageViewerController = OverlayPortalController();
   LocalHistoryEntry? _imageViewerHistoryEntry;
@@ -1222,6 +1223,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       entry.key.removeEventListener(entry.value);
     }
     _threadSessionMessageListeners.clear();
+    _consumedToolArgumentDeltaLengths.clear();
   }
 
   void _onThreadSessionChanged() {
@@ -1256,6 +1258,10 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       } else {
         _handleAgentMessagePayload(payload, attachment: event.attachment, notify: false, scroll: false);
       }
+      final message = event.message;
+      if (message is agent_sessions.AgentToolCallArgumentsDelta) {
+        _consumedToolArgumentDeltaLengths[event] = message.delta.length;
+      }
       changed = true;
     }
     _refreshStatus();
@@ -1284,8 +1290,20 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (!mounted) {
       return;
     }
-    final payload = event.payload;
-    trackAgentThreadStatusMessageInStore(store: _statusStore, message: event.message, path: widget.path);
+    var message = event.message;
+    var payload = event.payload;
+    if (message is agent_sessions.AgentToolCallArgumentsDelta) {
+      final consumedLength = _consumedToolArgumentDeltaLengths[event] ?? 0;
+      final cumulativeDelta = message.delta;
+      final nextDelta = consumedLength <= cumulativeDelta.length ? cumulativeDelta.substring(consumedLength) : cumulativeDelta;
+      _consumedToolArgumentDeltaLengths[event] = cumulativeDelta.length;
+      if (nextDelta.isEmpty) {
+        return;
+      }
+      payload = <String, dynamic>{...payload, 'delta': nextDelta};
+      message = agent_sessions.AgentMessage.fromJson(payload);
+    }
+    trackAgentThreadStatusMessageInStore(store: _statusStore, message: message, path: widget.path);
     if (_shouldBufferAgentPayload(payload)) {
       _bufferedAgentPayloads.add(Map<String, dynamic>.from(payload));
     } else {
@@ -1422,7 +1440,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
 
   Future<void> _handleClientToolCallRequestPayload(Map<String, dynamic> payload) async {
     final session = _threadSession;
-    if (session == null) {
+    final chatClient = _chatClient;
+    if (session == null || chatClient == null) {
       return;
     }
     AgentClientToolCallRequested request;
@@ -1432,9 +1451,23 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       return;
     }
 
-    final response = await _controller.executeClientToolCall(request);
+    final targetParticipantId = request.targetParticipantId?.trim();
+    if (targetParticipantId != null && targetParticipantId.isNotEmpty && targetParticipantId != chatClient.localParticipantId()) {
+      return;
+    }
+    if (!session.claimClientToolCall(request.requestId)) {
+      return;
+    }
 
-    await session.respondToClientToolCall(turnId: request.turnId, requestId: request.requestId, response: response);
+    var responseSent = false;
+    try {
+      final response = await _controller.executeClientToolCall(request);
+      await session.respondToClientToolCall(turnId: request.turnId, requestId: request.requestId, response: response);
+      responseSent = true;
+      await _controller.notifyClientToolResponseSent(request, response);
+    } finally {
+      session.finishClientToolCall(request.requestId, responseSent: responseSent);
+    }
   }
 
   bool _handleUsagePayload(Map<String, dynamic> payload, {bool notify = true}) {

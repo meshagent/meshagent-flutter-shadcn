@@ -1881,6 +1881,16 @@ class ChatThreadController extends ChangeNotifier {
     return ErrorContent(text: "Client toolkit '${request.tool}' is not registered.");
   }
 
+  Future<void> notifyClientToolResponseSent(AgentClientToolCallRequested request, Content response) async {
+    for (final toolkit in _clientToolkits.values) {
+      final tool = toolkit.tools.where((tool) => tool.name == request.tool).firstOrNull;
+      if (tool is ToolResponseSentListener) {
+        await (tool as ToolResponseSentListener).onToolResponseSent(const ToolContext(), response);
+        return;
+      }
+    }
+  }
+
   void scrollThreadToBottom({bool animated = true}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!threadScrollController.hasClients) {
