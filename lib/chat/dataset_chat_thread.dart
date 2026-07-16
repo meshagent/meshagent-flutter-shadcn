@@ -81,12 +81,19 @@ import 'usage_footer_tooltip.dart';
 const double _datasetDiffPreviewHorizontalPadding = 16;
 
 typedef DatasetChatAttachmentRenderer = Widget Function(BuildContext context, String path);
+typedef DatasetChatInlineAttachmentViewerPredicate = bool Function(String path);
 typedef DatasetChatRowsLoader = Stream<List<Map<String, Object?>>> Function({required List<String>? namespace, required String table});
 typedef DatasetChatFileDropHandler = Future<void> Function(String name, Stream<Uint8List> dataStream, int? size);
 typedef DatasetChatGeneratedImageAttachmentRenderer =
     Widget Function(BuildContext context, DatasetThreadImage image, VoidCallback? onOpenFullscreen);
 typedef DatasetChatImageGalleryBuilder =
     Widget Function(BuildContext context, List<ChatThreadFeedImage> images, int initialIndex, VoidCallback onClose);
+
+@visibleForTesting
+bool datasetChatShouldShowInlineAttachmentViewer(String path, {DatasetChatInlineAttachmentViewerPredicate? predicate}) {
+  return _isDataUrl(path) && (predicate?.call(path) ?? true);
+}
+
 typedef DatasetChatSecretRequestHandler = Future<AgentSecretResponse> Function(BuildContext context, AgentSecretRequested request);
 typedef DatasetChatDebugRowsChanged = void Function(List<DatasetChatDebugRow> rows);
 
@@ -517,6 +524,7 @@ class DatasetChatThread extends StatefulWidget {
     this.emptyStateDescription,
     this.openFile,
     this.attachmentRenderer,
+    this.inlineAttachmentViewerPredicate,
     this.toolsBuilder,
     this.inputPlaceholder,
     this.attachmentBuilder,
@@ -547,6 +555,7 @@ class DatasetChatThread extends StatefulWidget {
   final String? emptyStateDescription;
   final FutureOr<void> Function(String path)? openFile;
   final DatasetChatAttachmentRenderer? attachmentRenderer;
+  final DatasetChatInlineAttachmentViewerPredicate? inlineAttachmentViewerPredicate;
   final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
   final Widget? inputPlaceholder;
   final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
@@ -604,6 +613,7 @@ class RoomDatasetChatThread extends StatefulWidget {
     this.emptyStateDescription,
     this.openFile,
     this.attachmentRenderer,
+    this.inlineAttachmentViewerPredicate,
     this.toolsBuilder,
     this.inputPlaceholder,
     this.attachmentBuilder,
@@ -625,6 +635,7 @@ class RoomDatasetChatThread extends StatefulWidget {
   final String? emptyStateDescription;
   final FutureOr<void> Function(String path)? openFile;
   final DatasetChatAttachmentRenderer? attachmentRenderer;
+  final DatasetChatInlineAttachmentViewerPredicate? inlineAttachmentViewerPredicate;
   final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
   final Widget? inputPlaceholder;
   final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
@@ -691,6 +702,7 @@ class _RoomDatasetChatThreadState extends State<RoomDatasetChatThread> {
       emptyStateDescription: widget.emptyStateDescription,
       openFile: widget.openFile,
       attachmentRenderer: widget.attachmentRenderer ?? (context, path) => ChatThreadPreview(room: widget.room, path: path),
+      inlineAttachmentViewerPredicate: widget.inlineAttachmentViewerPredicate,
       toolsBuilder: widget.toolsBuilder,
       inputPlaceholder: widget.inputPlaceholder,
       attachmentBuilder: widget.attachmentBuilder,
@@ -728,6 +740,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   StreamSubscription<List<Map<String, Object?>>>? _rowsLoadSubscription;
   Timer? _tableLoadRetryTimer;
   agent_sessions.BaseChatClient? _chatClient;
+  StreamSubscription<agent_sessions.AgentMessageEvent>? _chatClientSubscription;
   bool _ownsChatClient = false;
   final AgentThreadMessageStatusStore _statusStore = AgentThreadMessageStatusStore();
   agent_sessions.ChatThreadSession? _threadSession;
@@ -755,6 +768,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   int _threadSessionMessageCursor = 0;
   final Map<agent_sessions.AgentMessageEvent, VoidCallback> _threadSessionMessageListeners =
       <agent_sessions.AgentMessageEvent, VoidCallback>{};
+  final Map<agent_sessions.AgentMessageEvent, int> _consumedToolArgumentDeltaLengths = <agent_sessions.AgentMessageEvent, int>{};
   String? _lastDebugRowsSignature;
   final OverlayPortalController _imageViewerController = OverlayPortalController();
   LocalHistoryEntry? _imageViewerHistoryEntry;
@@ -1131,6 +1145,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     final injectedClient = widget.chatClient;
     final clientChanged = !identical(existingClient, injectedClient);
     if (clientChanged) {
+      unawaited(_chatClientSubscription?.cancel());
+      _chatClientSubscription = null;
       _threadSession?.removeListener(_onThreadSessionChanged);
       _removeThreadSessionMessageListeners();
       _threadSession = null;
@@ -1147,6 +1163,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       }
       final nextClient = _chatClient;
       if (nextClient != null) {
+        _chatClientSubscription = nextClient.events.listen(_handleChatClientEvent);
         unawaited(nextClient.start());
       }
     }
@@ -1162,10 +1179,14 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
 
     currentSession?.removeListener(_onThreadSessionChanged);
     _removeThreadSessionMessageListeners();
+    final sessionAlreadyExists = chatClient.sessions.any((session) => session.threadPath == widget.path);
     final nextSession = chatClient.openThread(widget.path);
     _threadSession = nextSession;
     _threadSessionMessageCursor = 0;
     nextSession.addListener(_onThreadSessionChanged);
+    if (sessionAlreadyExists) {
+      unawaited(nextSession.requestModels().catchError((_) {}));
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !identical(_threadSession, nextSession)) {
         return;
@@ -1175,6 +1196,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   void _closeChatSession() {
+    unawaited(_chatClientSubscription?.cancel());
+    _chatClientSubscription = null;
     final session = _threadSession;
     _threadSession = null;
     _threadSessionMessageCursor = 0;
@@ -1185,11 +1208,22 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     }
   }
 
+  void _handleChatClientEvent(agent_sessions.AgentMessageEvent event) {
+    if (!mounted) {
+      return;
+    }
+    final payload = event.payload;
+    if (payload['type'] == agentModelsResponseType) {
+      _modelController.applyModelsResponse(payload);
+    }
+  }
+
   void _removeThreadSessionMessageListeners() {
     for (final entry in _threadSessionMessageListeners.entries) {
       entry.key.removeEventListener(entry.value);
     }
     _threadSessionMessageListeners.clear();
+    _consumedToolArgumentDeltaLengths.clear();
   }
 
   void _onThreadSessionChanged() {
@@ -1224,6 +1258,10 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       } else {
         _handleAgentMessagePayload(payload, attachment: event.attachment, notify: false, scroll: false);
       }
+      final message = event.message;
+      if (message is agent_sessions.AgentToolCallArgumentsDelta) {
+        _consumedToolArgumentDeltaLengths[event] = message.delta.length;
+      }
       changed = true;
     }
     _refreshStatus();
@@ -1252,8 +1290,20 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (!mounted) {
       return;
     }
-    final payload = event.payload;
-    trackAgentThreadStatusMessageInStore(store: _statusStore, message: event.message, path: widget.path);
+    var message = event.message;
+    var payload = event.payload;
+    if (message is agent_sessions.AgentToolCallArgumentsDelta) {
+      final consumedLength = _consumedToolArgumentDeltaLengths[event] ?? 0;
+      final cumulativeDelta = message.delta;
+      final nextDelta = consumedLength <= cumulativeDelta.length ? cumulativeDelta.substring(consumedLength) : cumulativeDelta;
+      _consumedToolArgumentDeltaLengths[event] = cumulativeDelta.length;
+      if (nextDelta.isEmpty) {
+        return;
+      }
+      payload = <String, dynamic>{...payload, 'delta': nextDelta};
+      message = agent_sessions.AgentMessage.fromJson(payload);
+    }
+    trackAgentThreadStatusMessageInStore(store: _statusStore, message: message, path: widget.path);
     if (_shouldBufferAgentPayload(payload)) {
       _bufferedAgentPayloads.add(Map<String, dynamic>.from(payload));
     } else {
@@ -1390,7 +1440,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
 
   Future<void> _handleClientToolCallRequestPayload(Map<String, dynamic> payload) async {
     final session = _threadSession;
-    if (session == null) {
+    final chatClient = _chatClient;
+    if (session == null || chatClient == null) {
       return;
     }
     AgentClientToolCallRequested request;
@@ -1400,9 +1451,23 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       return;
     }
 
-    final response = await _controller.executeClientToolCall(request);
+    final targetParticipantId = request.targetParticipantId?.trim();
+    if (targetParticipantId != null && targetParticipantId.isNotEmpty && targetParticipantId != chatClient.localParticipantId()) {
+      return;
+    }
+    if (!session.claimClientToolCall(request.requestId)) {
+      return;
+    }
 
-    await session.respondToClientToolCall(turnId: request.turnId, requestId: request.requestId, response: response);
+    var responseSent = false;
+    try {
+      final response = await _controller.executeClientToolCall(request);
+      await session.respondToClientToolCall(turnId: request.turnId, requestId: request.requestId, response: response);
+      responseSent = true;
+      await _controller.notifyClientToolResponseSent(request, response);
+    } finally {
+      session.finishClientToolCall(request.requestId, responseSent: responseSent);
+    }
   }
 
   bool _handleUsagePayload(Map<String, dynamic> payload, {bool notify = true}) {
@@ -2640,7 +2705,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
 
   Future<void> _openAttachment(BuildContext context, _DatasetThreadAttachment attachment) async {
     final previewPath = _previewPath(attachment.url);
-    if (_isDataUrl(previewPath)) {
+    if (datasetChatShouldShowInlineAttachmentViewer(previewPath, predicate: widget.inlineAttachmentViewerPredicate)) {
       await _showInlineAttachmentViewer(context, attachment.copyWith(url: previewPath));
       return;
     }
