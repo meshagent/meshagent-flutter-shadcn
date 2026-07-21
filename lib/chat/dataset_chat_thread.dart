@@ -5675,6 +5675,9 @@ String? _datasetRowKey(Map<String, Object?> row) {
 }
 
 Map<String, Object?>? _mapValue(Object? raw) {
+  if (raw is DatasetJson) {
+    return _mapValue(raw.toJson());
+  }
   if (raw is Map<String, Object?>) {
     return raw;
   }
