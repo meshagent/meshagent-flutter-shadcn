@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:markdown_widget/markdown_widget.dart';
@@ -7,6 +9,7 @@ import 'package:re_highlight/languages/all.dart';
 import 'package:re_highlight/re_highlight.dart';
 import 'package:re_highlight/styles/monokai-sublime.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 final Highlight _markdownHighlighter = () {
   final highlight = Highlight();
@@ -297,6 +300,7 @@ MarkdownConfig buildChatBubbleMarkdownConfig(
     ),
   );
   final resolvedLinkColor = linkColor ?? ThreadTypographyOverride.maybeLinkColorOf(context) ?? theme.linkButtonTheme.foregroundColor;
+  final markdownLinkHandler = ThreadTypographyOverride.maybeMarkdownLinkHandlerOf(context);
 
   final headingBase = threadTypographyTextStyle(
     context,
@@ -383,6 +387,17 @@ MarkdownConfig buildChatBubbleMarkdownConfig(
       BlockquoteConfig(sideColor: blockquoteSideColor ?? const Color(0xffd0d7de), textColor: mdColor),
       LinkConfig(
         style: paragraphStyle.copyWith(color: resolvedLinkColor, decoration: TextDecoration.underline, decorationColor: resolvedLinkColor),
+        onTap: markdownLinkHandler == null
+            ? null
+            : (url) {
+                if (markdownLinkHandler(context, url)) {
+                  return;
+                }
+                final uri = threadMarkdownExternalUri(url);
+                if (uri != null) {
+                  unawaited(_launchThreadMarkdownExternalUri(uri));
+                }
+              },
       ),
       ListConfig(
         marker: (isOrdered, depth, index) {
@@ -403,6 +418,20 @@ MarkdownConfig buildChatBubbleMarkdownConfig(
       ),
     ],
   );
+}
+
+@visibleForTesting
+Uri? threadMarkdownExternalUri(String value) {
+  return Uri.tryParse(value.trim());
+}
+
+Future<void> _launchThreadMarkdownExternalUri(Uri uri) async {
+  try {
+    await launchUrl(uri);
+  } catch (_) {
+    // A malformed or unsupported response link must not replace the thread
+    // surface with an asynchronous Flutter error.
+  }
 }
 
 class _NoDividerH1Config extends HeadingConfig {

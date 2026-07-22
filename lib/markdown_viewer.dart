@@ -35,6 +35,7 @@ class MarkdownViewer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final markdownTextTransformer = ThreadTypographyOverride.maybeMarkdownTextTransformerOf(context);
     return MediaQuery(
       data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
       child: MarkdownWidget(
@@ -52,7 +53,7 @@ class MarkdownViewer extends StatelessWidget {
         shrinkWrap: shrinkWrap,
         selectable: selectable,
         physics: physics,
-        data: markdown,
+        data: markdownTextTransformer?.call(markdown) ?? markdown,
       ),
     );
   }

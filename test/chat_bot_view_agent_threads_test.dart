@@ -7,6 +7,7 @@ import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_agents/meshagent_agents.dart' as agent_sessions;
 import 'package:meshagent_flutter_shadcn/chat/chat_bot_view.dart';
 import 'package:meshagent_flutter_shadcn/chat/conversation_descriptor.dart';
+import 'package:meshagent_flutter_shadcn/chat/dataset_chat_thread.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 class _NoopProtocolChannel extends ProtocolChannel {
@@ -41,11 +42,66 @@ class _FakeChatClient extends agent_sessions.BaseChatClient {
         );
       });
     }
+    if (message is agent_sessions.ModelsRequest) {
+      scheduleMicrotask(() {
+        handleAgentMessage(
+          agent_sessions.ModelsResponse(
+            sourceMessageId: message.messageId,
+            providers: const <agent_sessions.AgentProviderInfo>[
+              agent_sessions.AgentProviderInfo(
+                name: 'openai',
+                friendlyName: 'OpenAI',
+                defaultModel: 'gpt-5.6-sol',
+                models: <agent_sessions.AgentModelInfo>[
+                  agent_sessions.AgentModelInfo(name: 'gpt-5.6-sol', active: true),
+                  agent_sessions.AgentModelInfo(name: 'gpt-5.5'),
+                ],
+              ),
+              agent_sessions.AgentProviderInfo(
+                name: 'anthropic',
+                friendlyName: 'Anthropic',
+                defaultModel: 'claude',
+                models: <agent_sessions.AgentModelInfo>[agent_sessions.AgentModelInfo(name: 'claude')],
+              ),
+            ],
+          ),
+        );
+      });
+    }
   }
 }
 
 void main() {
-  testWidgets('multi-thread ChatBotView loads selected threads through agent messages', (tester) async {
+  test('inline data attachments can delegate folder contexts to the application opener', () {
+    const folderContext = 'data:text/plain;base64,folder-context';
+
+    expect(datasetChatShouldShowInlineAttachmentViewer(folderContext), isTrue);
+    expect(datasetChatShouldShowInlineAttachmentViewer(folderContext, predicate: (path) => !path.contains('folder-context')), isFalse);
+    expect(datasetChatShouldShowInlineAttachmentViewer('files/notes.md'), isFalse);
+  });
+
+  testWidgets('agent-message threads prefer the supplied attachment renderer', (tester) async {
+    var customCalls = 0;
+    var fallbackCalls = 0;
+    final renderer = resolveChatBotViewDatasetAttachmentRenderer(
+      custom: (context, path) {
+        customCalls += 1;
+        return Text('Folder: $path');
+      },
+      fallback: (context, path) {
+        fallbackCalls += 1;
+        return Text('File: $path');
+      },
+    );
+
+    await tester.pumpWidget(ShadApp(home: Builder(builder: (context) => renderer(context, 'folder-context'))));
+
+    expect(find.text('Folder: folder-context'), findsOneWidget);
+    expect(customCalls, 1);
+    expect(fallbackCalls, 0);
+  });
+
+  testWidgets('default-new ChatBotView loads selected threads through agent messages', (tester) async {
     final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     final chatClient = _FakeChatClient();
     addTearDown(room.dispose);
@@ -62,7 +118,7 @@ void main() {
               room: room,
               chatClient: chatClient,
               agentName: 'codex',
-              threadDisplayMode: ChatThreadDisplayMode.multiThreadComposer,
+              threadDisplayMode: chatThreadDisplayModeFromAnnotation('default-new'),
               selectedThreadPath: threadPath,
               showThreadList: false,
             ),
@@ -77,5 +133,49 @@ void main() {
     expect(openMessages.map((message) => message.threadId), contains(threadPath));
     expect(openMessages.singleWhere((message) => message.threadId == threadPath).load, isTrue);
     expect(find.text('Unable to load thread'), findsNothing);
+  });
+
+  testWidgets('selected threads refresh the current assistant model catalog', (tester) async {
+    final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
+    final chatClient = _FakeChatClient();
+    addTearDown(room.dispose);
+
+    const threadPath = 'dataset://agents/codex/threads/12345678-1234-5678-1234-567812345678.thread';
+    chatClient.openThread(threadPath);
+    await tester.pump();
+    final initialRequestCount = chatClient.sentMessages.whereType<agent_sessions.ModelsRequest>().length;
+    expect(initialRequestCount, greaterThan(0));
+
+    DatasetChatModelController? modelController;
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 900,
+            height: 700,
+            child: ChatBotView(
+              room: room,
+              chatClient: chatClient,
+              agentName: 'codex',
+              threadDisplayMode: chatThreadDisplayModeFromAnnotation('default-new'),
+              selectedThreadPath: threadPath,
+              showThreadList: false,
+              datasetThreadWrapperBuilder: (context, path, thread, controller) {
+                modelController = controller;
+                return thread;
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(chatClient.sentMessages.whereType<agent_sessions.ModelsRequest>().length, greaterThan(initialRequestCount));
+    expect(
+      modelController?.models.map((model) => model.key),
+      containsAll(<String>['/openai/gpt-5.6-sol', '/openai/gpt-5.5', '/anthropic/claude']),
+    );
   });
 }

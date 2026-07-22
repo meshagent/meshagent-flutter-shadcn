@@ -381,8 +381,11 @@ class _FileDefaultPreviewCardState extends State<FileDefaultPreviewCard> {
       offset: useThreadAttachmentStyle && _hovered ? const Offset(0, -0.03) : Offset.zero,
       child: LayoutBuilder(
         builder: (context, constraints) {
+          final cardHorizontalChrome = useThreadAttachmentStyle ? cardPadding.horizontal + (border == null ? 0 : 2) : 0.0;
           final textMaxWidth = constraints.maxWidth.isFinite
-              ? (constraints.maxWidth - (leadingBoxSize + contentGap + (actionIcon == null ? 0 : actionGap + actionBoxSize)))
+              ? (constraints.maxWidth -
+                        cardHorizontalChrome -
+                        (leadingBoxSize + contentGap + (actionIcon == null ? 0 : actionGap + actionBoxSize)))
                     .clamp(0.0, double.infinity)
                     .toDouble()
               : double.infinity;

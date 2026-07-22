@@ -9,6 +9,7 @@ import 'package:uuid/uuid.dart';
 const String annotationFilePrompt = "meshagent.prompt.file.matches.regex";
 const String defaultChatFilePromptName = "Ask agent";
 const String defaultChatFilePromptTemplate = "Please help me with this file: {{file}}";
+const String defaultChatFolderPromptTemplate = "Please help me with this folder: {{file}}";
 
 class ChatFilePromptAction {
   const ChatFilePromptAction({
@@ -36,6 +37,15 @@ ChatFilePromptAction defaultChatFilePromptAction({required String agentName}) {
     promptName: defaultChatFilePromptName,
     promptDescription: null,
     promptTemplate: defaultChatFilePromptTemplate,
+  );
+}
+
+ChatFilePromptAction defaultChatFolderPromptAction({required String agentName}) {
+  return ChatFilePromptAction(
+    agentName: agentName,
+    promptName: defaultChatFilePromptName,
+    promptDescription: null,
+    promptTemplate: defaultChatFolderPromptTemplate,
   );
 }
 

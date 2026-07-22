@@ -13,9 +13,11 @@ import 'package:meshagent_flutter_shadcn/chat/new_chat_thread.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 class _FakeManagedAgentChatClient extends agent_sessions.BaseChatClient {
-  _FakeManagedAgentChatClient({this.participantName, this.autoCompleteThreadLoad = true});
+  _FakeManagedAgentChatClient({this.participantName, this.participantId, this.autoCompleteThreadLoad = true})
+    : super(deduplicateClientToolRequests: true);
 
   final String? participantName;
+  final String? participantId;
   final bool autoCompleteThreadLoad;
   final List<agent_sessions.AgentMessage> sentMessages = <agent_sessions.AgentMessage>[];
   int _threadCounter = 0;
@@ -30,6 +32,9 @@ class _FakeManagedAgentChatClient extends agent_sessions.BaseChatClient {
 
   @override
   String? localParticipantName() => participantName;
+
+  @override
+  String? localParticipantId() => participantId;
 
   @override
   Future<void> sendAgentMessage(agent_sessions.AgentMessage message, {Uint8List? attachment}) async {
@@ -59,7 +64,7 @@ class _FakeManagedAgentChatClient extends agent_sessions.BaseChatClient {
   }
 }
 
-class _TestClientTool extends FunctionTool {
+class _TestClientTool extends FunctionTool implements ToolResponseSentListener {
   _TestClientTool() : super(name: 'ask_user', title: 'Ask User', description: 'Ask the user a question', inputSchema: _schema);
 
   static const Map<String, dynamic> _schema = {
@@ -72,11 +77,17 @@ class _TestClientTool extends FunctionTool {
   };
 
   final List<Map<String, dynamic>> calls = <Map<String, dynamic>>[];
+  int responseSentCount = 0;
 
   @override
   Future<Content> execute(ToolContext context, Map<String, dynamic> arguments) async {
     calls.add(arguments);
     return JsonContent(json: <String, dynamic>{'answer': 'test response'});
+  }
+
+  @override
+  void onToolResponseSent(ToolContext context, Content response) {
+    responseSentCount += 1;
   }
 }
 
@@ -408,7 +419,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final chatClient = _FakeManagedAgentChatClient(participantName: 'jesse.ezell');
+    final chatClient = _FakeManagedAgentChatClient(participantName: 'jesse.ezell', participantId: 'participant-current');
     final controller = ChatThreadController(room: null);
     final tool = _TestClientTool();
     addTearDown(chatClient.stop);
@@ -435,14 +446,26 @@ void main() {
     );
     await tester.pump();
 
+    final request = agent_sessions.AgentClientToolCallRequested(
+      threadId: 'thread-client-tools',
+      turnId: 'turn-client-tools',
+      requestId: 'request-client-tools',
+      toolkit: 'client',
+      tool: 'ask_user',
+      arguments: const <String, dynamic>{'prompt': 'What should I ask?'},
+      targetParticipantId: 'participant-current',
+    );
+    chatClient.emit(request);
+    chatClient.emit(request);
     chatClient.emit(
       agent_sessions.AgentClientToolCallRequested(
         threadId: 'thread-client-tools',
         turnId: 'turn-client-tools',
-        requestId: 'request-client-tools',
+        requestId: 'request-for-stale-page',
         toolkit: 'client',
         tool: 'ask_user',
-        arguments: const <String, dynamic>{'prompt': 'What should I ask?'},
+        arguments: const <String, dynamic>{'prompt': 'Stale request'},
+        targetParticipantId: 'participant-stale',
       ),
     );
     await tester.pump();
@@ -458,6 +481,61 @@ void main() {
     expect(responses.single.requestId, 'request-client-tools');
     expect(responses.single.response, isA<JsonContent>());
     expect((responses.single.response as JsonContent).json, {'answer': 'test response'});
+    expect(tool.responseSentCount, 1);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets('managed agent widget consumes only the new suffix from merged tool argument deltas', (tester) async {
+    final chatClient = _FakeManagedAgentChatClient();
+    final debugRows = <List<DatasetChatDebugRow>>[];
+    addTearDown(chatClient.stop);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: DatasetChatThread(
+          chatClient: chatClient,
+          path: 'thread-tool-deltas',
+          agentName: 'agent',
+          inputPlaceholder: const Text('Message agent'),
+          onDebugRowsChanged: debugRows.add,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    chatClient.emit(agent_sessions.TurnStarted(threadId: 'thread-tool-deltas', turnId: 'turn-1', sourceMessageId: 'source-1'));
+    chatClient.emit(
+      agent_sessions.AgentThreadStatus(threadId: 'thread-tool-deltas', turnId: 'turn-1', status: 'Preparing', pendingItemId: 'tool-1'),
+    );
+    chatClient.emit(
+      agent_sessions.AgentToolCallArgumentsDelta(
+        threadId: 'thread-tool-deltas',
+        turnId: 'turn-1',
+        itemId: 'tool-1',
+        messageId: 'delta-1',
+        delta: '0123456789',
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    final firstDeltaRow = debugRows.last.lastWhere((row) => row.type == agent_sessions.agentToolCallArgumentsDeltaType);
+    expect(firstDeltaRow.data['delta'], '0123456789');
+    chatClient.emit(
+      agent_sessions.AgentToolCallArgumentsDelta(
+        threadId: 'thread-tool-deltas',
+        turnId: 'turn-1',
+        itemId: 'tool-1',
+        messageId: 'delta-2',
+        delta: 'abcde',
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    final deltaRow = debugRows.last.lastWhere((row) => row.type == agent_sessions.agentToolCallArgumentsDeltaType);
+    expect(deltaRow.data['delta'], 'abcde');
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 2));

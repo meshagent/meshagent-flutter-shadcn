@@ -2559,6 +2559,9 @@ String _rawClipboardFieldText(_SharedSwayzeCellData? cell) {
   if (cell.display == _ColumnDisplay.image) {
     return cell.preview;
   }
+  if (cell.display == _ColumnDisplay.json) {
+    return _jsonCompactTextForCellValue(cell.value) ?? _stringifyTableValue(cell.value, pretty: false);
+  }
 
   return _stringifyTableValue(cell.value, pretty: false);
 }
