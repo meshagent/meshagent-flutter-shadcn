@@ -5,6 +5,7 @@ import 'dart:ui' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:meshagent/meshagent.dart';
+import 'package:meshagent_agents/meshagent_agents.dart';
 import 'package:meshagent_flutter_shadcn/chat/chat.dart';
 import 'package:meshagent_flutter_shadcn/chat/multi_thread_view.dart';
 import 'package:meshagent_flutter_shadcn/chat/new_chat_thread.dart';
@@ -20,6 +21,19 @@ class _NoopProtocolChannel extends ProtocolChannel {
 
   @override
   void start(void Function(Uint8List data) onDataReceived, {void Function()? onDone, void Function(Object? error)? onError}) {}
+}
+
+class _NoParticipantChatClient extends BaseChatClient {
+  int startedThreadCount = 0;
+
+  @override
+  Future<void> sendAgentMessage(AgentMessage message, {Uint8List? attachment}) async {
+    if (message is! StartThread) {
+      return;
+    }
+    startedThreadCount += 1;
+    handleAgentMessage(ThreadStarted(sourceMessageId: message.messageId, threadId: 'dataset://threads/first-send'));
+  }
 }
 
 class _MultiThreadFocusHarness extends StatefulWidget {
@@ -134,6 +148,40 @@ void main() {
     expect(controller.attachmentUploads, isEmpty);
     expect(controller.text, 'keep this draft');
     expect(find.text('keep this draft'), findsOneWidget);
+  });
+
+  testWidgets('injected websocket-style clients can send without a room agent participant', (tester) async {
+    final chatClient = _NoParticipantChatClient();
+    final controller = ChatThreadController(room: null);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 640,
+            child: NewChatThread(
+              chatClient: chatClient,
+              waitForInjectedAgentParticipant: false,
+              agentName: 'assistant',
+              controller: controller,
+              builder: (context, threadPath) => Text('Resolved $threadPath'),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    controller.textFieldController.text = 'send once';
+    await tester.pump();
+    final sendGesture = tester.widget<ShadGestureDetector>(
+      find.ancestor(of: find.byIcon(LucideIcons.arrowUp), matching: find.byType(ShadGestureDetector)),
+    );
+    sendGesture.onTap!.call();
+    await tester.pumpAndSettle();
+
+    expect(chatClient.startedThreadCount, 1);
+    expect(find.text('Resolved dataset://threads/first-send'), findsOneWidget);
   });
 
   testWidgets('wraps the new thread composer in a file drop area', (tester) async {

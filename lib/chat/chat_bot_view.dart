@@ -10,6 +10,7 @@ import 'conversation_descriptor.dart';
 import 'dataset_chat_thread.dart';
 import 'multi_thread_view.dart';
 import 'thread_list_view.dart';
+import 'tool_call_rendering.dart';
 
 typedef DatasetChatThreadWrapperBuilder =
     Widget Function(BuildContext context, String path, Widget thread, DatasetChatModelController modelController);
@@ -77,6 +78,8 @@ class ChatBotView extends StatefulWidget {
     this.initialShowCompletedToolCalls = false,
     this.shouldShowAuthorNames = true,
     this.showUsageFooter = false,
+    this.toolCallRenderers,
+    this.toolCallVisibilityPredicate,
     this.datasetThreadWrapperBuilder,
     this.datasetNewThreadWrapperBuilder,
   });
@@ -131,6 +134,8 @@ class ChatBotView extends StatefulWidget {
   final bool initialShowCompletedToolCalls;
   final bool shouldShowAuthorNames;
   final bool showUsageFooter;
+  final ChatToolCallRendererRegistry? toolCallRenderers;
+  final ChatToolCallVisibilityPredicate? toolCallVisibilityPredicate;
   final DatasetChatThreadWrapperBuilder? datasetThreadWrapperBuilder;
   final DatasetChatNewThreadWrapperBuilder? datasetNewThreadWrapperBuilder;
 
@@ -302,6 +307,8 @@ class _ChatBotViewState extends State<ChatBotView> {
       modelController: modelController,
       initialShowCompletedToolCalls: widget.initialShowCompletedToolCalls,
       showUsageFooter: widget.showUsageFooter,
+      toolCallRenderers: widget.toolCallRenderers,
+      toolCallVisibilityPredicate: widget.toolCallVisibilityPredicate,
     );
     if (!path.startsWith('dataset://') && !path.startsWith('tmp://')) {
       return thread;
@@ -341,6 +348,8 @@ class _ChatBotViewState extends State<ChatBotView> {
         modelController: modelController,
         initialShowCompletedToolCalls: widget.initialShowCompletedToolCalls,
         showUsageFooter: widget.showUsageFooter,
+        toolCallRenderers: widget.toolCallRenderers,
+        toolCallVisibilityPredicate: widget.toolCallVisibilityPredicate,
       );
       return widget.datasetThreadWrapperBuilder?.call(context, path, thread, modelController) ?? thread;
     }

@@ -297,6 +297,7 @@ MarkdownConfig buildChatBubbleMarkdownConfig(
       height: threadTypography
           ? ThreadTypographyOverride.maybeThreadParagraphLineHeightOf(context) ?? chatBubbleMarkdownThreadLineHeight
           : null,
+      leadingDistribution: threadTypography ? TextLeadingDistribution.even : null,
     ),
   );
   final resolvedLinkColor = linkColor ?? ThreadTypographyOverride.maybeLinkColorOf(context) ?? theme.linkButtonTheme.foregroundColor;

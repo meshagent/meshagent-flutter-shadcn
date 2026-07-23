@@ -76,6 +76,7 @@ import 'chat.dart';
 import 'agent_stream_accumulator.dart';
 import 'realtime_audio_output.dart';
 import 'tool_call_summary.dart';
+import 'tool_call_rendering.dart';
 import 'usage_footer_tooltip.dart';
 
 const double _datasetDiffPreviewHorizontalPadding = 16;
@@ -541,6 +542,8 @@ class DatasetChatThread extends StatefulWidget {
     this.secretRequestHandler,
     this.onDebugRowsChanged,
     this.modelController,
+    this.toolCallRenderers,
+    this.toolCallVisibilityPredicate,
     this.initialShowCompletedToolCalls = false,
     this.showUsageFooter = false,
   });
@@ -572,6 +575,8 @@ class DatasetChatThread extends StatefulWidget {
   final DatasetChatSecretRequestHandler? secretRequestHandler;
   final DatasetChatDebugRowsChanged? onDebugRowsChanged;
   final DatasetChatModelController? modelController;
+  final ChatToolCallRendererRegistry? toolCallRenderers;
+  final ChatToolCallVisibilityPredicate? toolCallVisibilityPredicate;
   final bool initialShowCompletedToolCalls;
   final bool showUsageFooter;
 
@@ -622,6 +627,8 @@ class RoomDatasetChatThread extends StatefulWidget {
     this.inputOnPressedOutside,
     this.fileDropOverlayBuilder,
     this.modelController,
+    this.toolCallRenderers,
+    this.toolCallVisibilityPredicate,
     this.initialShowCompletedToolCalls = false,
     this.showUsageFooter = false,
   });
@@ -644,6 +651,8 @@ class RoomDatasetChatThread extends StatefulWidget {
   final TapRegionCallback? inputOnPressedOutside;
   final FileDropOverlayBuilder? fileDropOverlayBuilder;
   final DatasetChatModelController? modelController;
+  final ChatToolCallRendererRegistry? toolCallRenderers;
+  final ChatToolCallVisibilityPredicate? toolCallVisibilityPredicate;
   final bool initialShowCompletedToolCalls;
   final bool showUsageFooter;
 
@@ -730,6 +739,8 @@ class _RoomDatasetChatThreadState extends State<RoomDatasetChatThread> {
       imageGalleryBuilder: (context, images, initialIndex, onClose) =>
           ChatThreadImageGalleryPage(room: widget.room, images: images, initialIndex: initialIndex, onClose: onClose),
       modelController: widget.modelController,
+      toolCallRenderers: widget.toolCallRenderers,
+      toolCallVisibilityPredicate: widget.toolCallVisibilityPredicate,
       initialShowCompletedToolCalls: widget.initialShowCompletedToolCalls,
       showUsageFooter: widget.showUsageFooter,
     );
@@ -1804,6 +1815,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       case agentToolCallStartedType:
       case agentToolCallEndedType:
         final itemId = _payloadItemId(payload);
+        final eventTimestamp = _timestampFromPayload(payload) ?? DateTime.now().toUtc();
         final existingData = _mapValue(_agentRowsByItemId[itemId]?['data']);
         final tool = payload['tool']?.toString() ?? payload['tool_name']?.toString() ?? payload['name']?.toString() ?? '';
         final resolvedTool = tool.trim().isEmpty ? (existingData?['tool']?.toString() ?? '') : tool;
@@ -1821,6 +1833,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         final errorMessage = _agentToolCallErrorMessage(payload['error']);
         final errorData = errorMessage == null ? const <String, Object?>{} : <String, Object?>{'error_message': errorMessage};
         final logs = _stringList(existingData?['logs']);
+        final logEntries = existingData?['log_entries'];
         final isImageGeneration = tool.trim().toLowerCase() == 'image_generation';
         final status = type == agentToolCallEndedType
             ? (errorMessage == null ? 'completed' : 'failed')
@@ -1832,7 +1845,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             _upsertAgentRow(
               itemId: itemId,
               turnId: _payloadTurnId(payload),
-              timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
+              timestamp: eventTimestamp,
               data: isImageGeneration
                   ? {
                       'kind': 'image_generation',
@@ -1845,14 +1858,21 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                   : {
                       'kind': 'tool_call',
                       'role': 'assistant',
+                      'thread_id': payload['thread_id']?.toString(),
+                      'namespace': payload['namespace']?.toString() ?? existingData?['namespace']?.toString() ?? 'meshagent',
+                      'call_id': payload['call_id']?.toString() ?? existingData?['call_id']?.toString(),
                       'toolkit': toolkit,
                       'tool': resolvedTool,
                       'status': status,
+                      'started_at': existingData?['started_at'] ?? eventTimestamp.toIso8601String(),
                       'arguments': arguments,
                       'logs': logs,
+                      if (logEntries is List) 'log_entries': logEntries,
                       if (_intValue(existingData?['argument_delta_bytes']) > 0)
                         'argument_delta_bytes': _intValue(existingData?['argument_delta_bytes']),
                       if (existingArgumentDeltaText.isNotEmpty) 'argument_delta_text': existingArgumentDeltaText,
+                      if (payload['result'] != null) 'result': payload['result'],
+                      if (type == agentToolCallEndedType && _agentErrorIsCancellation(payload['error'])) 'cancelled': true,
                       ...errorData,
                       'text': formatToolCallEntryText(
                         toolkit: toolkit,
@@ -1887,6 +1907,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
               turnId: _payloadTurnId(payload),
               timestamp: _timestampFromPayload(payload) ?? DateTime.now().toUtc(),
               lines: _agentToolCallLogLines(payload['lines']),
+              entries: _chatToolCallLogEntries(payload['lines'], null),
               senderName: _senderNameFromPayload(payload),
             ) ||
             changed;
@@ -2152,6 +2173,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     required String? turnId,
     required DateTime timestamp,
     required List<String> lines,
+    required List<ChatToolCallLogEntry> entries,
     required String? senderName,
   }) {
     if (itemId.trim().isEmpty || lines.isEmpty) {
@@ -2159,6 +2181,12 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     }
     final existingData = _mapValue(_agentRowsByItemId[itemId]?['data']);
     final logs = _stringList(existingData?['logs']).toList(growable: true)..addAll(lines);
+    final logEntries = <Map<String, Object?>>[
+      if (existingData?['log_entries'] is List)
+        for (final entry in existingData?['log_entries'] as List)
+          if (entry is Map) Map<String, Object?>.from(entry),
+      for (final entry in entries) <String, Object?>{'source': entry.source, 'text': entry.text},
+    ];
     final toolkit = existingData?['toolkit']?.toString() ?? '';
     final tool = existingData?['tool']?.toString() ?? 'tool';
     final arguments = _mapValue(existingData?['arguments']);
@@ -2172,11 +2200,16 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       data: {
         'kind': 'tool_call',
         'role': 'assistant',
+        if (existingData?['thread_id'] != null) 'thread_id': existingData?['thread_id'],
+        if (existingData?['namespace'] != null) 'namespace': existingData?['namespace'],
+        if (existingData?['call_id'] != null) 'call_id': existingData?['call_id'],
+        if (existingData?['started_at'] != null) 'started_at': existingData?['started_at'],
         'toolkit': toolkit,
         'tool': tool,
         'status': status,
         'arguments': arguments,
         'logs': logs,
+        if (logEntries.isNotEmpty) 'log_entries': logEntries,
         if (argumentDeltaBytes > 0) 'argument_delta_bytes': argumentDeltaBytes,
         if (errorMessage != null && errorMessage.trim().isNotEmpty) 'error_message': errorMessage,
         'text': formatToolCallEntryText(
@@ -2221,11 +2254,16 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       data: {
         'kind': 'tool_call',
         'role': 'assistant',
+        if (existingData?['thread_id'] != null) 'thread_id': existingData?['thread_id'],
+        if (existingData?['namespace'] != null) 'namespace': existingData?['namespace'],
+        if (existingData?['call_id'] != null) 'call_id': existingData?['call_id'],
+        if (existingData?['started_at'] != null) 'started_at': existingData?['started_at'],
         'toolkit': toolkit,
         'tool': tool,
         'status': status,
         'arguments': arguments,
         'logs': logs,
+        if (existingData?['log_entries'] is List) 'log_entries': existingData?['log_entries'],
         'argument_delta_bytes': totalDeltaBytes,
         'argument_delta_text': argumentDeltaText,
         if (errorMessage != null && errorMessage.trim().isNotEmpty) 'error_message': errorMessage,
@@ -2428,6 +2466,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         final state = toolCallsByItemId[itemId];
         if (state != null) {
           state.logs.addAll(_agentToolCallLogLines(data?['lines']));
+          state.logEntries.addAll(_chatToolCallLogEntries(data?['lines'], null));
+          state.updatedAt = _rowTimestamp(row);
         }
         continue;
       }
@@ -2438,6 +2478,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         if (state != null) {
           state.argumentDeltaBytes += deltaBytes;
           state.appendArgumentDelta(delta);
+          state.updatedAt = _rowTimestamp(row);
         } else {
           toolArgumentDeltaBytesByItemId[itemId] = (toolArgumentDeltaBytesByItemId[itemId] ?? 0) + deltaBytes;
           toolArgumentDeltaTextByItemId[itemId] = '${toolArgumentDeltaTextByItemId[itemId] ?? ''}$delta';
@@ -3029,7 +3070,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         final expandedToolCallEntry = message.expandedToolCallEntry;
         final diffPreviewBlocks = message.diffPreviewBlocks;
         final canExpand = expandedToolCallEntry != null && expandedToolCallEntry.text != toolCallEntry.text;
-        return Padding(
+        Widget buildDefault() => Padding(
           padding: const EdgeInsets.only(left: 42, right: 18),
           child: SizedBox(
             width: double.infinity,
@@ -3056,6 +3097,15 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
               ],
             ),
           ),
+        );
+        final toolCall = message.toolCall;
+        final renderer = toolCall == null ? null : widget.toolCallRenderers?.resolve(toolCall);
+        if (toolCall == null || renderer == null) {
+          return buildDefault();
+        }
+        return KeyedSubtree(
+          key: ValueKey('tool-call:${toolCall.identity.stableKey}'),
+          child: renderer.build(context, ChatToolCallRenderContext(snapshot: toolCall, defaultBuilder: buildDefault)),
         );
       }
       if (message.kind == 'error') {
@@ -3236,18 +3286,21 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   List<_DatasetThreadFeedItem> _buildFeedItems(List<_DatasetThreadMessage> messages) {
+    final visibleMessages = widget.toolCallVisibilityPredicate == null
+        ? messages
+        : messages.where(_shouldIncludeFeedMessage).toList(growable: false);
     final items = <_DatasetThreadFeedItem>[];
     var index = 0;
-    while (index < messages.length) {
-      final segmentEnd = _nextUserMessageIndex(messages, index + 1) ?? messages.length;
+    while (index < visibleMessages.length) {
+      final segmentEnd = _nextUserMessageIndex(visibleMessages, index + 1) ?? visibleMessages.length;
       final detailIndexes = <int>{};
-      _addDatasetThreadDetailIndexesForSegment(messages, index, segmentEnd, detailIndexes);
+      _addDatasetThreadDetailIndexesForSegment(visibleMessages, index, segmentEnd, detailIndexes);
       final detailMessages = detailIndexes.toList(growable: false)..sort();
-      final groupedMessages = detailMessages.map((detailIndex) => messages[detailIndex]).toList(growable: false);
+      final groupedMessages = detailMessages.map((detailIndex) => visibleMessages[detailIndex]).toList(growable: false);
       var insertedDetailGroup = false;
       for (var segmentIndex = index; segmentIndex < segmentEnd; segmentIndex += 1) {
         if (!detailIndexes.contains(segmentIndex)) {
-          items.add(_DatasetThreadMessageFeedItem(messages[segmentIndex]));
+          items.add(_DatasetThreadMessageFeedItem(visibleMessages[segmentIndex]));
           continue;
         }
         if (insertedDetailGroup || groupedMessages.isEmpty) {
@@ -3255,9 +3308,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         }
         final group = _detailGroupForMessages(
           groupedMessages,
-          nextMessage: _nextNonDetailMessage(messages, detailIndexes, segmentIndex + 1, segmentEnd),
+          nextMessage: _nextNonDetailMessage(visibleMessages, detailIndexes, segmentIndex + 1, segmentEnd),
         );
-        if (_expandedDetailGroupIds.contains(group.id)) {
+        if (widget.initialShowCompletedToolCalls || _expandedDetailGroupIds.contains(group.id)) {
           items.add(group.expandedCopy());
         } else {
           items.add(group);
@@ -3267,6 +3320,12 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       index = segmentEnd;
     }
     return items;
+  }
+
+  bool _shouldIncludeFeedMessage(_DatasetThreadMessage message) {
+    final predicate = widget.toolCallVisibilityPredicate;
+    final toolCall = message.toolCall;
+    return predicate == null || message.kind != 'tool_call' || toolCall == null || predicate(toolCall);
   }
 
   Widget _buildExpandedDetailGroup(
@@ -3283,9 +3342,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         authorName: group.authorName,
         createdAt: group.createdAt,
         showBubbleActions: false,
-        header: ThreadTypographyOverride.showInlineDisclosureCueOf(context)
-            ? ChatThreadAuthorHeader(authorName: group.authorName, createdAt: group.createdAt, text: group.collapsedText)
-            : null,
+        header: ChatThreadAuthorHeader(authorName: group.authorName, createdAt: group.createdAt, text: group.collapsedText),
       ),
     ];
     for (final item in group.messages.indexed) {
@@ -3898,6 +3955,7 @@ class _DatasetThreadMessage {
     required this.attachments,
     required this.createdAt,
     this.image,
+    this.toolCall,
     this.toolCallEntry,
     this.expandedToolCallEntry,
     this.diffPreviewBlocks = const <_DatasetDiffPreviewBlock>[],
@@ -3913,6 +3971,7 @@ class _DatasetThreadMessage {
   final List<_DatasetThreadAttachment> attachments;
   final DateTime createdAt;
   final DatasetThreadImage? image;
+  final ChatToolCallSnapshot? toolCall;
   final ToolCallEntryDisplay? toolCallEntry;
   final ToolCallEntryDisplay? expandedToolCallEntry;
   final List<_DatasetDiffPreviewBlock> diffPreviewBlocks;
@@ -4116,41 +4175,59 @@ class _DatasetDetailLine extends StatelessWidget {
 
 class _DatasetToolCallState {
   _DatasetToolCallState({
+    required this.threadId,
+    required this.turnId,
     required this.itemId,
+    required this.namespace,
+    required this.callId,
     required this.toolkit,
     required this.tool,
     required this.arguments,
     required this.logs,
+    required this.logEntries,
     required this.argumentDeltaBytes,
     required this.argumentDeltaText,
     required this.authorName,
     required this.createdAt,
+    required this.updatedAt,
   });
 
   factory _DatasetToolCallState.fromPayload({required Map<String, Object?> row, required Map<String, Object?> payload}) {
     final tool = payload['tool']?.toString() ?? payload['tool_name']?.toString() ?? payload['name']?.toString() ?? 'tool';
     return _DatasetToolCallState(
+      threadId: payload['thread_id']?.toString() ?? row['thread_id']?.toString() ?? '',
+      turnId: payload['turn_id']?.toString() ?? row['turn_id']?.toString() ?? '',
       itemId: row['item_id']?.toString() ?? _payloadItemId(Map<String, dynamic>.from(payload)),
+      namespace: payload['namespace']?.toString() ?? 'meshagent',
+      callId: _stringValue(payload['call_id']),
       toolkit: payload['toolkit']?.toString() ?? payload['toolkit_name']?.toString() ?? '',
       tool: tool.trim().isEmpty ? 'tool' : tool,
       arguments: _mapValue(payload['arguments']),
       logs: <String>[],
+      logEntries: <ChatToolCallLogEntry>[],
       argumentDeltaBytes: _intValue(payload['argument_delta_bytes']),
       argumentDeltaText: payload['argument_delta_text']?.toString() ?? '',
       authorName: payload['sender_name']?.toString(),
       createdAt: _rowTimestamp(row),
+      updatedAt: _rowTimestamp(row),
     );
   }
 
+  final String threadId;
+  final String turnId;
   final String itemId;
+  String namespace;
+  String? callId;
   String toolkit;
   String tool;
   Map<String, Object?>? arguments;
   final List<String> logs;
+  final List<ChatToolCallLogEntry> logEntries;
   int argumentDeltaBytes;
   String argumentDeltaText;
   String? authorName;
   final DateTime createdAt;
+  DateTime updatedAt;
 
   void appendArgumentDelta(String delta) {
     if (delta.isEmpty) {
@@ -4299,6 +4376,7 @@ _DatasetThreadMessage _mergeDuplicateDatasetThreadMessage(_DatasetThreadMessage 
     attachments: existing.attachments.isEmpty ? next.attachments : existing.attachments,
     createdAt: existing.createdAt.isBefore(next.createdAt) ? existing.createdAt : next.createdAt,
     image: existing.image ?? next.image,
+    toolCall: existing.toolCall ?? next.toolCall,
     toolCallEntry: existing.toolCallEntry ?? next.toolCallEntry,
     expandedToolCallEntry: existing.expandedToolCallEntry ?? next.expandedToolCallEntry,
     diffPreviewBlocks: existing.diffPreviewBlocks.isNotEmpty ? existing.diffPreviewBlocks : next.diffPreviewBlocks,
@@ -4742,6 +4820,18 @@ _DatasetThreadMessage? _messageForRow(Map<String, Object?> row) {
       final errorMessage = data['error_message']?.toString();
       final status = data['status']?.toString();
       final argumentDeltaBytes = _intValue(data['argument_delta_bytes']);
+      final toolCall = _chatToolCallSnapshot(
+        row: row,
+        data: data,
+        itemId: itemId,
+        toolkit: toolkit,
+        tool: tool.trim().isEmpty ? 'tool' : tool,
+        arguments: arguments,
+        logs: logs,
+        errorMessage: errorMessage,
+        status: status,
+        argumentDeltaBytes: argumentDeltaBytes,
+      );
       final diffPreviewBlocks = _toolCallDiffPreviewBlocks(toolkit: toolkit, tool: tool, arguments: arguments);
       final summary = formatToolCallEntry(
         toolkit: toolkit,
@@ -4769,6 +4859,7 @@ _DatasetThreadMessage? _messageForRow(Map<String, Object?> row) {
         kind: 'tool_call',
         role: 'agent',
         text: summary.text.trim().isEmpty ? 'Tool call' : summary.text,
+        toolCall: toolCall,
         toolCallEntry: summary,
         expandedToolCallEntry: expandedSummary.text.trim().isEmpty ? null : expandedSummary,
         diffPreviewBlocks: diffPreviewBlocks,
@@ -5148,6 +5239,90 @@ bool _toolCallStatusIsPending(String? status) {
   return status?.trim().toLowerCase() == 'pending';
 }
 
+ChatToolCallStatus _chatToolCallStatus({required String? status, required String? errorMessage, required bool cancelled}) {
+  if (cancelled) {
+    return ChatToolCallStatus.cancelled;
+  }
+  if (errorMessage != null && errorMessage.trim().isNotEmpty) {
+    return ChatToolCallStatus.failed;
+  }
+  final normalized = status?.trim().toLowerCase();
+  return switch (normalized) {
+    'pending' => ChatToolCallStatus.pending,
+    null || '' || 'in_progress' || 'running' => ChatToolCallStatus.running,
+    'failed' || 'error' => ChatToolCallStatus.failed,
+    'cancelled' || 'canceled' => ChatToolCallStatus.cancelled,
+    _ => ChatToolCallStatus.succeeded,
+  };
+}
+
+Content? _toolCallResult(Object? value) {
+  if (value is! Map) {
+    return null;
+  }
+  try {
+    return unpackContent(packMessage(Map<String, dynamic>.from(value)));
+  } on Object {
+    return null;
+  }
+}
+
+List<ChatToolCallLogEntry> _chatToolCallLogEntries(Object? entries, Object? fallbackLines) {
+  final output = <ChatToolCallLogEntry>[];
+  if (entries is List) {
+    for (final entry in entries) {
+      if (entry is! Map) {
+        continue;
+      }
+      final text = entry['text']?.toString().trim() ?? '';
+      if (text.isEmpty) {
+        continue;
+      }
+      output.add(ChatToolCallLogEntry(source: entry['source']?.toString() ?? '', text: text));
+    }
+  }
+  if (output.isNotEmpty) {
+    return output;
+  }
+  return _stringList(fallbackLines).map((text) => ChatToolCallLogEntry(source: '', text: text)).toList(growable: false);
+}
+
+ChatToolCallSnapshot _chatToolCallSnapshot({
+  required Map<String, Object?> row,
+  required Map<String, Object?> data,
+  required String itemId,
+  required String toolkit,
+  required String tool,
+  required Map<String, Object?>? arguments,
+  required List<String> logs,
+  required String? errorMessage,
+  required String? status,
+  required int argumentDeltaBytes,
+  DateTime? startedAt,
+}) {
+  final timestamp = _rowTimestamp(row);
+  return ChatToolCallSnapshot(
+    identity: ChatToolCallIdentity(
+      threadId: data['thread_id']?.toString() ?? row['thread_id']?.toString() ?? '',
+      turnId: data['turn_id']?.toString() ?? row['turn_id']?.toString() ?? '',
+      itemId: itemId,
+      callId: _stringValue(data['call_id']),
+    ),
+    namespace: data['namespace']?.toString() ?? 'meshagent',
+    toolkit: toolkit,
+    tool: tool,
+    status: _chatToolCallStatus(status: status, errorMessage: errorMessage, cancelled: data['cancelled'] == true),
+    arguments: arguments,
+    logs: _chatToolCallLogEntries(data['log_entries'], logs),
+    argumentDeltaBytes: argumentDeltaBytes,
+    result: _toolCallResult(data['result']),
+    errorMessage: errorMessage,
+    authorName: _stringValue(data['sender_name']),
+    startedAt: startedAt ?? _timestampFromObject(data['started_at']) ?? timestamp,
+    updatedAt: timestamp,
+  );
+}
+
 _DatasetThreadMessage _messageForToolCallEndRow({
   required Map<String, Object?> row,
   required Map<String, Object?>? payload,
@@ -5163,6 +5338,32 @@ _DatasetThreadMessage _messageForToolCallEndRow({
   final logs = state?.logs ?? const <String>[];
   final argumentDeltaBytes = state?.argumentDeltaBytes ?? _intValue(payload?['argument_delta_bytes']);
   final errorMessage = _agentToolCallErrorMessage(payload?['error']);
+  final snapshotData = <String, Object?>{
+    'thread_id': state?.threadId ?? payload?['thread_id'],
+    'turn_id': state?.turnId ?? payload?['turn_id'],
+    'namespace': state?.namespace ?? payload?['namespace'] ?? 'meshagent',
+    'call_id': state?.callId ?? payload?['call_id'],
+    'sender_name': payload?['sender_name'] ?? state?.authorName,
+    if (state?.logEntries.isNotEmpty == true)
+      'log_entries': [
+        for (final entry in state!.logEntries) <String, Object?>{'source': entry.source, 'text': entry.text},
+      ],
+    if (payload?['result'] != null) 'result': payload?['result'],
+    if (_agentErrorIsCancellation(payload?['error'])) 'cancelled': true,
+  };
+  final toolCall = _chatToolCallSnapshot(
+    row: row,
+    data: snapshotData,
+    itemId: itemId,
+    toolkit: toolkit,
+    tool: tool.trim().isEmpty ? 'tool' : tool,
+    arguments: arguments,
+    logs: logs,
+    errorMessage: errorMessage,
+    status: errorMessage == null ? 'completed' : 'failed',
+    argumentDeltaBytes: argumentDeltaBytes,
+    startedAt: state?.createdAt,
+  );
   final diffPreviewBlocks = _toolCallDiffPreviewBlocks(toolkit: toolkit, tool: tool, arguments: arguments);
   final entry = formatToolCallEntry(
     toolkit: toolkit,
@@ -5186,6 +5387,7 @@ _DatasetThreadMessage _messageForToolCallEndRow({
     kind: 'tool_call',
     role: 'agent',
     text: entry.text,
+    toolCall: toolCall,
     toolCallEntry: entry,
     expandedToolCallEntry: expandedEntry.text.trim().isEmpty ? null : expandedEntry,
     diffPreviewBlocks: diffPreviewBlocks,

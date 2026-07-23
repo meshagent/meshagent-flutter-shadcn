@@ -30,6 +30,16 @@ class ThreadTypographyOverride extends InheritedWidget {
     this.threadParagraphLineHeight,
     this.narrowDesktopParagraphBaseFontSize,
     this.bubbleContentPadding,
+    this.agentBubbleContentPadding,
+    this.authorHeaderContentPadding,
+    this.humanMessageHeaderContentSpacing,
+    this.messageHorizontalInset,
+    this.attachmentHorizontalInset,
+    this.shrinkWrapHumanBubbles = false,
+    this.humanBubbleMaxWidthFraction,
+    this.emptyMessageAuthorHeaderWidth,
+    this.compactAuthorHeaders = false,
+    this.bottomAlignMessageActions = false,
     this.threadFeedItemSpacing,
     this.useThreadAttachmentStyle = false,
     this.normalizeParticipantDisplayName = false,
@@ -86,6 +96,16 @@ class ThreadTypographyOverride extends InheritedWidget {
   final double? threadParagraphLineHeight;
   final double? narrowDesktopParagraphBaseFontSize;
   final EdgeInsets? bubbleContentPadding;
+  final EdgeInsets? agentBubbleContentPadding;
+  final EdgeInsets? authorHeaderContentPadding;
+  final double? humanMessageHeaderContentSpacing;
+  final double? messageHorizontalInset;
+  final double? attachmentHorizontalInset;
+  final bool shrinkWrapHumanBubbles;
+  final double? humanBubbleMaxWidthFraction;
+  final double? emptyMessageAuthorHeaderWidth;
+  final bool compactAuthorHeaders;
+  final bool bottomAlignMessageActions;
   final double? threadFeedItemSpacing;
   final bool useThreadAttachmentStyle;
   final bool normalizeParticipantDisplayName;
@@ -161,6 +181,46 @@ class ThreadTypographyOverride extends InheritedWidget {
 
   static EdgeInsets? maybeBubbleContentPaddingOf(BuildContext context) {
     return maybeOf(context)?.bubbleContentPadding;
+  }
+
+  static EdgeInsets? maybeAgentBubbleContentPaddingOf(BuildContext context) {
+    return maybeOf(context)?.agentBubbleContentPadding;
+  }
+
+  static EdgeInsets? maybeAuthorHeaderContentPaddingOf(BuildContext context) {
+    return maybeOf(context)?.authorHeaderContentPadding;
+  }
+
+  static double? maybeHumanMessageHeaderContentSpacingOf(BuildContext context) {
+    return maybeOf(context)?.humanMessageHeaderContentSpacing;
+  }
+
+  static double? maybeMessageHorizontalInsetOf(BuildContext context) {
+    return maybeOf(context)?.messageHorizontalInset;
+  }
+
+  static double? maybeAttachmentHorizontalInsetOf(BuildContext context) {
+    return maybeOf(context)?.attachmentHorizontalInset;
+  }
+
+  static bool shrinkWrapHumanBubblesOf(BuildContext context) {
+    return maybeOf(context)?.shrinkWrapHumanBubbles ?? false;
+  }
+
+  static double? maybeHumanBubbleMaxWidthFractionOf(BuildContext context) {
+    return maybeOf(context)?.humanBubbleMaxWidthFraction;
+  }
+
+  static double? maybeEmptyMessageAuthorHeaderWidthOf(BuildContext context) {
+    return maybeOf(context)?.emptyMessageAuthorHeaderWidth;
+  }
+
+  static bool compactAuthorHeadersOf(BuildContext context) {
+    return maybeOf(context)?.compactAuthorHeaders ?? false;
+  }
+
+  static bool bottomAlignMessageActionsOf(BuildContext context) {
+    return maybeOf(context)?.bottomAlignMessageActions ?? false;
   }
 
   static double? maybeThreadFeedItemSpacingOf(BuildContext context) {
@@ -363,6 +423,16 @@ class ThreadTypographyOverride extends InheritedWidget {
         threadParagraphLineHeight != oldWidget.threadParagraphLineHeight ||
         narrowDesktopParagraphBaseFontSize != oldWidget.narrowDesktopParagraphBaseFontSize ||
         bubbleContentPadding != oldWidget.bubbleContentPadding ||
+        agentBubbleContentPadding != oldWidget.agentBubbleContentPadding ||
+        authorHeaderContentPadding != oldWidget.authorHeaderContentPadding ||
+        humanMessageHeaderContentSpacing != oldWidget.humanMessageHeaderContentSpacing ||
+        messageHorizontalInset != oldWidget.messageHorizontalInset ||
+        attachmentHorizontalInset != oldWidget.attachmentHorizontalInset ||
+        shrinkWrapHumanBubbles != oldWidget.shrinkWrapHumanBubbles ||
+        humanBubbleMaxWidthFraction != oldWidget.humanBubbleMaxWidthFraction ||
+        emptyMessageAuthorHeaderWidth != oldWidget.emptyMessageAuthorHeaderWidth ||
+        compactAuthorHeaders != oldWidget.compactAuthorHeaders ||
+        bottomAlignMessageActions != oldWidget.bottomAlignMessageActions ||
         threadFeedItemSpacing != oldWidget.threadFeedItemSpacing ||
         useThreadAttachmentStyle != oldWidget.useThreadAttachmentStyle ||
         normalizeParticipantDisplayName != oldWidget.normalizeParticipantDisplayName ||

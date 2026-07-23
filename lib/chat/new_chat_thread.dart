@@ -39,6 +39,7 @@ class NewChatThread extends StatefulWidget {
     this.room,
     this.chatClient,
     this.disposeChatClient = false,
+    this.waitForInjectedAgentParticipant = true,
     this.controller,
     this.composerKey,
     this.toolkit = "chat",
@@ -65,6 +66,7 @@ class NewChatThread extends StatefulWidget {
   final RoomClient? room;
   final BaseChatClient? chatClient;
   final bool disposeChatClient;
+  final bool waitForInjectedAgentParticipant;
   final String agentName;
   final NewChatThreadBuilder builder;
   final ChatThreadController? controller;
@@ -118,6 +120,8 @@ class _NewChatThreadState extends State<NewChatThread> {
   bool get _composerLocked => _creatingNewThread || _waitingForAgent;
 
   bool get _usesInjectedChatClient => widget.chatClient != null;
+
+  bool get _injectedChatClientAgentReady => !widget.waitForInjectedAgentParticipant || widget.chatClient?.agentParticipant() != null;
 
   String? get _activeThreadPath {
     final externalPath = widget.selectedThreadPath?.trim();
@@ -417,8 +421,7 @@ class _NewChatThreadState extends State<NewChatThread> {
   }
 
   void _signalWaitingForAgentReady() {
-    final chatClient = widget.chatClient;
-    if (chatClient != null && chatClient.agentParticipant() == null) {
+    if (!_injectedChatClientAgentReady) {
       return;
     }
     final completer = _waitForAgentReadyCompleter;
@@ -428,8 +431,7 @@ class _NewChatThreadState extends State<NewChatThread> {
   }
 
   Future<void> _waitForInjectedChatClientAgentReady() {
-    final chatClient = widget.chatClient;
-    if (chatClient == null || chatClient.agentParticipant() != null) {
+    if (_injectedChatClientAgentReady) {
       return Future.value();
     }
 
@@ -863,7 +865,7 @@ class _NewChatThreadState extends State<NewChatThread> {
     }
 
     final operationId = ++_newThreadOperationId;
-    final waitingForAgent = _usesInjectedChatClient ? widget.chatClient?.agentParticipant() == null : _agent == null;
+    final waitingForAgent = _usesInjectedChatClient ? !_injectedChatClientAgentReady : _agent == null;
     final senderName = _localSenderName();
     final pendingFirstMessage = PendingAgentMessage(
       messageId: pendingMessageId,

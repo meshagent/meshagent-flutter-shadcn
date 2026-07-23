@@ -98,8 +98,8 @@ import 'usage_footer_tooltip.dart';
 const webPDFFormat = SimpleFileFormat(uniformTypeIdentifiers: ['com.adobe.pdf'], mimeTypes: ['web application/pdf']);
 const List<String> _emojiFontFamilyFallback = <String>['Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji'];
 const double _chatBubbleContentHorizontalPadding = 16;
-const double _chatBubbleContentTopPadding = 4;
-const double _chatBubbleContentBottomPadding = 2;
+const double _chatBubbleContentTopPadding = 3;
+const double _chatBubbleContentBottomPadding = 3;
 const double _mobileReactionFlowDialogMaxWidth = 420;
 const double _mobileReactionFlowDialogViewportTopGap = 20;
 const double _mobileReactionFlowDialogMaxHeightFactor = 0.72;
@@ -5210,12 +5210,29 @@ class _ChatBubble extends State<ChatBubble> {
     );
   }
 
+  double _contentSizedBubbleWidth(BuildContext context, double maxWidth) {
+    final padding = _resolvedChatBubbleContentPadding(context);
+    final textStyle = threadTypographyTextStyle(
+      context,
+      ShadTheme.of(context).textTheme.p,
+    ).copyWith(fontSize: chatBubbleMarkdownBaseFontSize(context, threadTypography: true));
+    final painter = TextPainter(
+      text: TextSpan(text: widget.text, style: textStyle),
+      textDirection: Directionality.of(context),
+      textScaler: const TextScaler.linear(1),
+    )..layout(maxWidth: math.max(0, maxWidth - padding.horizontal));
+    const measurementSafetyWidth = 8.0;
+    return math.min(maxWidth, math.max(padding.horizontal, painter.width + padding.horizontal + measurementSafetyWidth));
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final cs = theme.colorScheme;
     final text = widget.text;
     final mine = widget.mine;
+    final messageHorizontalInset =
+        ThreadTypographyOverride.maybeMessageHorizontalInsetOf(context) ?? ChatThreadMessageView.chatBubbleHorizontalInset;
     final bubbleColor = widget.backgroundColor ?? (widget.accented || mine ? cs.accent : cs.background);
     final bubbleBorderColor = widget.borderColor;
     final markdownLinkColor = mine
@@ -5223,6 +5240,7 @@ class _ChatBubble extends State<ChatBubble> {
         : ThreadTypographyOverride.maybeLinkColorOf(context);
     final showActions =
         widget.showActionRail && (hovering || optionsController.isOpen || reactionController.isOpen || _keepingActionsVisible);
+    final bottomAlignActions = ThreadTypographyOverride.bottomAlignMessageActionsOf(context);
     final canLongPressReact =
         (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS) && widget.onReactFromMenu != null;
     final optionItemCount = 1 + (canLongPressReact ? 1 : 0) + (widget.room != null ? 1 : 0) + (widget.onDelete != null ? 1 : 0);
@@ -5232,7 +5250,7 @@ class _ChatBubble extends State<ChatBubble> {
       child: Opacity(
         opacity: showActions ? 1 : 0,
         child: Padding(
-          padding: EdgeInsets.only(bottom: 5),
+          padding: EdgeInsets.only(bottom: bottomAlignActions ? 0 : 5),
           child: CoordinatedShadContextMenu(
             controller: optionsController,
             groupId: _contextMenuGroupId,
@@ -5267,13 +5285,13 @@ class _ChatBubble extends State<ChatBubble> {
 
     final reactAction = SizedBox(
       width: _actionSlotSize,
-      height: 35,
+      height: bottomAlignActions ? _actionSlotSize : 35,
       child: IgnorePointer(
         ignoring: !(showActions && widget.showReactionAction),
         child: Opacity(
           opacity: showActions && widget.showReactionAction ? 1 : 0,
           child: Padding(
-            padding: const EdgeInsets.only(bottom: 5),
+            padding: EdgeInsets.only(bottom: bottomAlignActions ? 0 : 5),
             child: widget.reactionActionBuilder?.call(reactionController) ?? const SizedBox.shrink(),
           ),
         ),
@@ -5281,26 +5299,26 @@ class _ChatBubble extends State<ChatBubble> {
     );
 
     final actions = Padding(
-      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      padding: EdgeInsets.symmetric(horizontal: 8, vertical: bottomAlignActions ? 0 : 5),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           if (mine) ...[
-            reactAction,
-            const SizedBox(width: _actionGap),
+            if (widget.showReactionAction) ...[reactAction, const SizedBox(width: _actionGap)],
             optionsAction,
           ] else ...[
             optionsAction,
-            const SizedBox(width: _actionGap),
-            reactAction,
+            if (widget.showReactionAction) ...[const SizedBox(width: _actionGap), reactAction],
           ],
         ],
       ),
     );
 
     final bubble = Container(
-      padding: _resolvedChatBubbleContentPadding(context),
+      padding: widget.fullWidth
+          ? ThreadTypographyOverride.maybeAgentBubbleContentPaddingOf(context) ?? _resolvedChatBubbleContentPadding(context)
+          : _resolvedChatBubbleContentPadding(context),
       decoration: BoxDecoration(
         color: bubbleColor,
         borderRadius: BorderRadius.circular(_bubbleRadius),
@@ -5320,16 +5338,43 @@ class _ChatBubble extends State<ChatBubble> {
       ),
     );
 
+    final shrinkWrapHumanBubble = !widget.fullWidth && ThreadTypographyOverride.shrinkWrapHumanBubblesOf(context);
     final content = widget.fullWidth
         ? widget.showActionRail
-              ? Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    SizedBox(width: double.infinity, child: bubble),
-                    Positioned(bottom: 0, right: 0, child: actions),
-                  ],
-                )
+              ? bottomAlignActions
+                    ? Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Expanded(child: bubble),
+                          actions,
+                        ],
+                      )
+                    : Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          SizedBox(width: double.infinity, child: bubble),
+                          Positioned(bottom: 0, right: 0, child: actions),
+                        ],
+                      )
               : SizedBox(width: double.infinity, child: bubble)
+        : shrinkWrapHumanBubble
+        ? LayoutBuilder(
+            builder: (context, constraints) {
+              final widthFraction = ThreadTypographyOverride.maybeHumanBubbleMaxWidthFractionOf(context)?.clamp(0.0, 1.0).toDouble() ?? 1.0;
+              final actionRailWidth = widget.showActionRail ? ChatThreadMessageView.chatBubbleActionRailWidth : 0.0;
+              final maxBubbleWidth = math.min(constraints.maxWidth * widthFraction, math.max(0.0, constraints.maxWidth - actionRailWidth));
+              final bubbleWidth = _contentSizedBubbleWidth(context, maxBubbleWidth);
+              return Row(
+                mainAxisAlignment: mine ? MainAxisAlignment.end : MainAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  if (mine && widget.showActionRail) actions,
+                  SizedBox(width: bubbleWidth, child: bubble),
+                  if (!mine && widget.showActionRail) actions,
+                ],
+              );
+            },
+          )
         : Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
@@ -5368,7 +5413,7 @@ class _ChatBubble extends State<ChatBubble> {
         onTap: widget.onTap,
         cursor: widget.onTap == null ? MouseCursor.defer : SystemMouseCursors.click,
         child: Container(
-          padding: EdgeInsets.symmetric(horizontal: 5),
+          padding: EdgeInsets.symmetric(horizontal: messageHorizontalInset),
           color: Colors.transparent,
           child: Container(margin: EdgeInsets.only(top: 0), child: content),
         ),
@@ -6562,17 +6607,21 @@ class ChatThreadMessageView extends StatelessWidget {
     final resolvedBubbleBorderColor =
         bubbleBorderColor ??
         (useDefaultBubbleBorder && isAgentMessage ? ThreadTypographyOverride.maybeAgentBubbleBorderColorOf(context) : null);
-    final headerLeftInset = mine ? chatBubbleHorizontalInset + chatBubbleActionRailWidth : chatBubbleHorizontalInset;
+    final messageHorizontalInset = ThreadTypographyOverride.maybeMessageHorizontalInsetOf(context) ?? chatBubbleHorizontalInset;
+    final headerLeftInset = mine ? messageHorizontalInset + chatBubbleActionRailWidth : messageHorizontalInset;
     final headerRightInset = mine || isAgentMessage || !showBubbleActions
-        ? chatBubbleHorizontalInset
-        : chatBubbleHorizontalInset + chatBubbleActionRailWidth;
+        ? messageHorizontalInset
+        : messageHorizontalInset + chatBubbleActionRailWidth;
+    final headerContentSpacing = isAgentMessage
+        ? chatBubbleSiblingSpacing
+        : ThreadTypographyOverride.maybeHumanMessageHeaderContentSpacingOf(context) ?? chatBubbleSiblingSpacing;
     return Column(
       mainAxisAlignment: MainAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
         if (shouldShowHeader)
           Container(
-            margin: EdgeInsets.only(left: headerLeftInset, right: headerRightInset, bottom: 6),
+            margin: EdgeInsets.only(left: headerLeftInset, right: headerRightInset, bottom: headerContentSpacing),
             child: Align(
               alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
               child: header ?? ChatThreadAuthorHeader(authorName: authorName, createdAt: createdAt, text: messageText),
@@ -6610,9 +6659,11 @@ class ChatThreadMessageView extends StatelessWidget {
   }
 
   Widget _buildAttachmentWidget(BuildContext context, Widget attachmentWidget) {
-    final attachmentInset = ThreadTypographyOverride.alignAttachmentEdgesWithBubblesOf(context)
-        ? chatBubbleHorizontalInset
-        : chatBubbleHorizontalInset + _resolvedChatBubbleHorizontalPadding(context);
+    final attachmentInset =
+        ThreadTypographyOverride.maybeAttachmentHorizontalInsetOf(context) ??
+        (ThreadTypographyOverride.alignAttachmentEdgesWithBubblesOf(context)
+            ? chatBubbleHorizontalInset
+            : chatBubbleHorizontalInset + _resolvedChatBubbleHorizontalPadding(context));
     return Padding(
       key: attachmentWidget.key == null ? null : ValueKey<Object>(attachmentWidget.key!),
       padding: EdgeInsets.only(left: attachmentInset, right: attachmentInset),
@@ -10932,23 +10983,25 @@ class ChatThreadAuthorHeader extends StatelessWidget {
     final isDesktopScreen =
         ThreadTypographyOverride.useDesktopAuthorHeaderAtNarrowWidthsOf(context) || MediaQuery.sizeOf(context).width >= 600;
 
+    final emptyText = text?.trim().isEmpty ?? true;
+    final compact = ThreadTypographyOverride.compactAuthorHeadersOf(context);
+    final authorText = Text(
+      _displayParticipantName(context, authorName),
+      style: isDesktopScreen
+          ? tt.small.copyWith(fontSize: 15, fontWeight: FontWeight.w700, color: cs.foreground)
+          : tt.small.copyWith(color: cs.foreground),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    );
     return Container(
-      padding: _resolvedChatBubbleContentPadding(context),
-      width: ((text)?.isEmpty ?? true) ? 250 : double.infinity,
+      padding: ThreadTypographyOverride.maybeAuthorHeaderContentPaddingOf(context) ?? _resolvedChatBubbleContentPadding(context),
+      width: compact ? null : (emptyText ? ThreadTypographyOverride.maybeEmptyMessageAuthorHeaderWidthOf(context) ?? 250 : double.infinity),
       child: SelectionArea(
         child: Row(
+          mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
           spacing: 8,
           children: [
-            Expanded(
-              child: Text(
-                _displayParticipantName(context, authorName),
-                style: isDesktopScreen
-                    ? tt.small.copyWith(fontSize: 15, fontWeight: FontWeight.w700, color: cs.foreground)
-                    : tt.small.copyWith(color: cs.foreground),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
+            if (!compact) Expanded(child: authorText) else Flexible(child: authorText),
             Text(
               timeAgo(createdAt),
               style: tt.small.copyWith(color: cs.mutedForeground),
