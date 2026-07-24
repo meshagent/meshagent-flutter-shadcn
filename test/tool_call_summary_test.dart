@@ -60,6 +60,21 @@ void main() {
       formatToolCallSummary(toolkit: 'mail', tool: 'new_email_thread', arguments: {'subject': 'Food report'}),
       'Started email thread: Food report',
     );
+    expect(
+      formatToolCallSummary(toolkit: 'image-generation', tool: 'import_image', arguments: {'source_path': '/in/photo.webp'}),
+      'Imported image from: /in/photo.webp',
+    );
+    expect(
+      formatToolCallSummary(
+        toolkit: 'image-generation',
+        tool: 'export_image',
+        arguments: {'id': 'image-1', 'destination_path': '/out/photo.webp'},
+        result: {
+          'json': {'destination_path': '/out/photo.png'},
+        },
+      ),
+      'Exported image to: /out/photo.png',
+    );
   });
 
   test('formatToolCallSummary uses in-progress wording before completion', () {
