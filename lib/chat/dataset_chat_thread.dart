@@ -1834,11 +1834,15 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         final errorData = errorMessage == null ? const <String, Object?>{} : <String, Object?>{'error_message': errorMessage};
         final logs = _stringList(existingData?['logs']);
         final logEntries = existingData?['log_entries'];
-        final isImageGeneration = tool.trim().toLowerCase() == 'image_generation';
+        final isNativeImageGeneration = tool.trim().toLowerCase() == 'image_generation';
+        final isDatasetImageGeneration =
+            toolkit.trim().toLowerCase() == 'image-generation' && resolvedTool.trim().toLowerCase() == 'imagegen';
+        final isImageGeneration = isNativeImageGeneration || isDatasetImageGeneration;
+        final savedImage = isDatasetImageGeneration ? _savedImageFromToolResult(payload['result']) : null;
         final status = type == agentToolCallEndedType
             ? (errorMessage == null ? 'completed' : 'failed')
             : (type == agentToolCallPendingType ? 'pending' : 'running');
-        if (isImageGeneration && type == agentToolCallEndedType && payload['error'] == null) {
+        if (isNativeImageGeneration && type == agentToolCallEndedType && payload['error'] == null) {
           break;
         }
         changed =
@@ -1850,9 +1854,15 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                   ? {
                       'kind': 'image_generation',
                       'role': 'assistant',
-                      'status': payload['error'] == null ? 'in_progress' : 'failed',
+                      'status': savedImage != null ? 'completed' : (payload['error'] == null ? 'in_progress' : 'failed'),
                       'call_id': payload['call_id']?.toString(),
                       'arguments': _mapValue(payload['arguments']),
+                      if (savedImage != null)
+                        'message': {
+                          'images': [
+                            {'uri': 'dataset://images?id=${savedImage.$1}', 'mime_type': savedImage.$2, 'status': 'completed'},
+                          ],
+                        },
                       'sender_name': _senderNameFromPayload(payload) ?? _agentRowSenderName(_payloadItemId(payload)),
                     }
                   : {
@@ -1866,6 +1876,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                       'status': status,
                       'started_at': existingData?['started_at'] ?? eventTimestamp.toIso8601String(),
                       'arguments': arguments,
+                      if (payload['result'] != null) 'result': payload['result'],
                       'logs': logs,
                       if (logEntries is List) 'log_entries': logEntries,
                       if (_intValue(existingData?['argument_delta_bytes']) > 0)
@@ -1878,6 +1889,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                         toolkit: toolkit,
                         tool: resolvedTool,
                         arguments: arguments,
+                        result: payload['result'],
                         logs: logs,
                         errorMessage: errorMessage,
                         completed: type == agentToolCallEndedType,
@@ -4819,6 +4831,7 @@ _DatasetThreadMessage? _messageForRow(Map<String, Object?> row) {
       final logs = _stringList(data['logs']);
       final errorMessage = data['error_message']?.toString();
       final status = data['status']?.toString();
+      final result = data['result'];
       final argumentDeltaBytes = _intValue(data['argument_delta_bytes']);
       final toolCall = _chatToolCallSnapshot(
         row: row,
@@ -4837,6 +4850,7 @@ _DatasetThreadMessage? _messageForRow(Map<String, Object?> row) {
         toolkit: toolkit,
         tool: tool.trim().isEmpty ? 'tool' : tool,
         arguments: arguments,
+        result: result,
         logs: logs,
         errorMessage: errorMessage,
         completed: !_toolCallStatusIsRunning(status),
@@ -4847,6 +4861,7 @@ _DatasetThreadMessage? _messageForRow(Map<String, Object?> row) {
         toolkit: toolkit,
         tool: tool.trim().isEmpty ? 'tool' : tool,
         arguments: arguments,
+        result: result,
         logs: logs,
         errorMessage: errorMessage,
         completed: !_toolCallStatusIsRunning(status),
@@ -5334,6 +5349,25 @@ _DatasetThreadMessage _messageForToolCallEndRow({
       (payload == null ? const Uuid().v4() : _payloadItemId(Map<String, dynamic>.from(payload)));
   final toolkit = state?.toolkit ?? payload?['toolkit']?.toString() ?? payload?['toolkit_name']?.toString() ?? '';
   final tool = state?.tool ?? payload?['tool']?.toString() ?? payload?['tool_name']?.toString() ?? payload?['name']?.toString() ?? 'tool';
+  final generatedImage = _datasetImageGenerationToolResult(
+    toolkit: toolkit,
+    tool: tool,
+    result: payload?['result'],
+    error: payload?['error'],
+  );
+  if (generatedImage != null) {
+    return _DatasetThreadMessage(
+      id: itemId,
+      kind: 'message',
+      role: 'agent',
+      text: '',
+      authorName: payload?['sender_name']?.toString() ?? state?.authorName,
+      attachments: const [],
+      createdAt: _rowTimestamp(row),
+      turnId: row['turn_id']?.toString() ?? payload?['turn_id']?.toString(),
+      image: generatedImage,
+    );
+  }
   final arguments = state?.arguments ?? _mapValue(payload?['arguments']);
   final logs = state?.logs ?? const <String>[];
   final argumentDeltaBytes = state?.argumentDeltaBytes ?? _intValue(payload?['argument_delta_bytes']);
@@ -5369,6 +5403,7 @@ _DatasetThreadMessage _messageForToolCallEndRow({
     toolkit: toolkit,
     tool: tool.trim().isEmpty ? 'tool' : tool,
     arguments: arguments,
+    result: payload?['result'],
     logs: logs,
     errorMessage: errorMessage,
     argumentDeltaBytes: argumentDeltaBytes,
@@ -5377,6 +5412,7 @@ _DatasetThreadMessage _messageForToolCallEndRow({
     toolkit: toolkit,
     tool: tool.trim().isEmpty ? 'tool' : tool,
     arguments: arguments,
+    result: payload?['result'],
     logs: logs,
     errorMessage: errorMessage,
     detailLineLimit: null,
@@ -5398,6 +5434,27 @@ _DatasetThreadMessage _messageForToolCallEndRow({
   );
 }
 
+DatasetThreadImage? _datasetImageGenerationToolResult({
+  required String toolkit,
+  required String tool,
+  required Object? result,
+  required Object? error,
+}) {
+  if (error != null || toolkit.trim().toLowerCase() != 'image-generation' || tool.trim().toLowerCase() != 'imagegen') {
+    return null;
+  }
+  final savedImage = _savedImageFromToolResult(result);
+  if (savedImage == null) {
+    return null;
+  }
+  return DatasetThreadImage(
+    uri: 'dataset://images?id=${savedImage.$1}',
+    imageId: savedImage.$1,
+    mimeType: savedImage.$2,
+    status: 'completed',
+  );
+}
+
 @visibleForTesting
 String? agentTurnEndedErrorMessage(Map<String, Object?> payload) {
   if (payload['type'] != agentTurnEndedType) {
@@ -5408,6 +5465,16 @@ String? agentTurnEndedErrorMessage(Map<String, Object?> payload) {
     return null;
   }
   return _agentErrorMessage(error);
+}
+
+@visibleForTesting
+DatasetThreadImage? datasetImageGenerationToolResultForTesting({
+  required String toolkit,
+  required String tool,
+  required Object? result,
+  Object? error,
+}) {
+  return _datasetImageGenerationToolResult(toolkit: toolkit, tool: tool, result: result, error: error);
 }
 
 @visibleForTesting
@@ -5904,6 +5971,41 @@ Map<String, Object?>? _firstGeneratedImage(Map<String, Object?>? message) {
     return _mapValue(images.first);
   }
   return _mapValue(message['image']);
+}
+
+(String, String?)? _savedImageFromToolResult(Object? raw) {
+  Object? value = raw;
+  for (var depth = 0; depth < 6; depth++) {
+    if (value is DatasetJson) {
+      value = value.toJson();
+      continue;
+    }
+    if (value is String) {
+      try {
+        value = jsonDecode(value);
+        continue;
+      } on FormatException {
+        return null;
+      }
+    }
+    if (value is List) {
+      if (value.isEmpty) return null;
+      value = value.first;
+      continue;
+    }
+    if (value is Map) {
+      final map = Map<String, Object?>.from(value);
+      final imageId = _stringValue(map['saved_image_id']);
+      if (imageId != null) {
+        return (imageId, _stringValue(map['mime_type']));
+      }
+      value = map['json'] ?? map['result'] ?? map['content'] ?? map['value'];
+      if (value == null) return null;
+      continue;
+    }
+    return null;
+  }
+  return null;
 }
 
 bool _isImageGenerationRow(Map<String, Object?> row) {

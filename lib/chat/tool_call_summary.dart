@@ -82,6 +82,7 @@ String formatToolCallSummary({
   required String toolkit,
   required String tool,
   required Map<String, Object?>? arguments,
+  Object? result,
   bool failed = false,
   bool completed = true,
   bool pending = false,
@@ -91,6 +92,7 @@ String formatToolCallSummary({
     toolkit: toolkit,
     tool: tool,
     arguments: arguments,
+    result: result,
     failed: failed,
     completed: completed,
     pending: pending,
@@ -102,6 +104,7 @@ ToolCallHeadline toolCallHeadline({
   required String toolkit,
   required String tool,
   required Map<String, Object?>? arguments,
+  Object? result,
   bool failed = false,
   bool completed = true,
   bool pending = false,
@@ -112,6 +115,7 @@ ToolCallHeadline toolCallHeadline({
     toolkit: toolkit,
     tool: tool,
     arguments: arguments,
+    result: result,
     failed: failed,
     completed: completed,
     pending: pending,
@@ -173,6 +177,7 @@ String formatToolCallEntryText({
   required String toolkit,
   required String tool,
   required Map<String, Object?>? arguments,
+  Object? result,
   required List<String> logs,
   required String? errorMessage,
   bool completed = true,
@@ -184,6 +189,7 @@ String formatToolCallEntryText({
     toolkit: toolkit,
     tool: tool,
     arguments: arguments,
+    result: result,
     logs: logs,
     errorMessage: errorMessage,
     completed: completed,
@@ -197,6 +203,7 @@ ToolCallEntryDisplay formatToolCallEntry({
   required String toolkit,
   required String tool,
   required Map<String, Object?>? arguments,
+  Object? result,
   required List<String> logs,
   required String? errorMessage,
   bool completed = true,
@@ -209,6 +216,7 @@ ToolCallEntryDisplay formatToolCallEntry({
     toolkit: toolkit,
     tool: tool,
     arguments: arguments,
+    result: result,
     failed: failed,
     completed: completed,
     pending: pending,
@@ -291,6 +299,7 @@ ToolCallHeadline? _friendlyBuiltinHeadline({
   required String toolkit,
   required String tool,
   required Map<String, Object?>? arguments,
+  required Object? result,
   required bool failed,
   required bool completed,
   required bool pending,
@@ -305,6 +314,8 @@ ToolCallHeadline? _friendlyBuiltinHeadline({
     headline = _codexDiffHeadline(arguments: args, completed: completed, pending: pending);
   } else if (normalizedToolkit == 'storage') {
     headline = _storageHeadline(tool: normalizedTool, arguments: args, completed: completed, pending: pending);
+  } else if (normalizedToolkit == 'image-generation') {
+    headline = _headlineFromText(_imageGenerationSummary(tool: normalizedTool, arguments: args, result: result, completed: completed));
   } else if (normalizedToolkit == 'dataset') {
     headline = _headlineFromText(_datasetSummary(tool: normalizedTool, arguments: args, completed: completed));
   } else if (normalizedToolkit == 'datetime' || normalizedToolkit == 'time') {
@@ -322,6 +333,38 @@ ToolCallHeadline? _friendlyBuiltinHeadline({
   return failed
       ? ToolCallHeadline(action: 'Failed:', rest: headline.text, detailLanguageOrFilename: headline.detailLanguageOrFilename)
       : headline;
+}
+
+String? _imageGenerationSummary({
+  required String tool,
+  required Map<String, Object?> arguments,
+  required Object? result,
+  required bool completed,
+}) {
+  if (tool == 'imagegen') {
+    return completed ? 'Generated image' : 'Generating image';
+  }
+  if (tool == 'read_image') {
+    return _withOptionalSuffix(completed ? 'Read image' : 'Reading image', _stringArgument(arguments, ['id']));
+  }
+  if (tool == 'delete_image') {
+    return _withOptionalSuffix(completed ? 'Deleted image' : 'Deleting image', _stringArgument(arguments, ['id']));
+  }
+  if (tool == 'import_image') {
+    final path = completed ? _resultString(result, 'source_path') : null;
+    return _withOptionalSuffix(
+      completed ? 'Imported image from' : 'Importing image from',
+      path ?? _stringArgument(arguments, ['source_path']),
+    );
+  }
+  if (tool == 'export_image') {
+    final path = completed ? _resultString(result, 'destination_path') : null;
+    return _withOptionalSuffix(
+      completed ? 'Exported image to' : 'Exporting image to',
+      path ?? _stringArgument(arguments, ['destination_path']),
+    );
+  }
+  return null;
 }
 
 ToolCallHeadline? _applyPatchHeadline({required Map<String, Object?> arguments, required bool completed, required bool pending}) {
@@ -731,6 +774,29 @@ String? _stringArgument(Map<String, Object?> arguments, List<String> names) {
   for (final name in names) {
     final value = arguments[name];
     if (value is String && value.trim().isNotEmpty) return _singleLine(value.trim());
+  }
+  return null;
+}
+
+String? _resultString(Object? value, String name) {
+  Object? current = value;
+  if (current is String) {
+    final trimmed = current.trim();
+    if (trimmed.isEmpty) return null;
+    try {
+      current = jsonDecode(trimmed);
+    } on FormatException {
+      return _singleLine(trimmed);
+    }
+  }
+  if (current is! Map) return null;
+  final direct = current[name];
+  if (direct is String && direct.trim().isNotEmpty) {
+    return _singleLine(direct.trim());
+  }
+  for (final wrapper in ['json', 'result', 'content', 'value']) {
+    final nested = _resultString(current[wrapper], name);
+    if (nested != null) return nested;
   }
   return null;
 }
