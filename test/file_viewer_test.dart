@@ -28,6 +28,10 @@ void main() {
     expect(classifyFile('agents/assistant/threads/main.thread'), FileKind.thread);
   });
 
+  test('classifyFile detects code files whose names contain spaces', () {
+    expect(classifyFile('Project status dashboard layouts/Status Dashboard.html'), FileKind.code);
+  });
+
   test('custom thread viewers do not override the built-in thread type', () {
     customViewers['thread'] = ({Key? key, required RoomClient room, required String filename, required Uri url}) {
       return const SizedBox.shrink();
