@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:meshagent/room_server_client.dart';
 import 'package:meshagent_flutter_shadcn/chat/chat.dart';
+import 'package:meshagent_flutter_shadcn/file_preview/code.dart';
 import "package:meshagent_flutter_shadcn/file_preview/file_preview.dart";
 
 import "file/image.dart";
@@ -9,7 +10,7 @@ import "file/audio.dart";
 import "file/lance.dart";
 import "file/parquet.dart";
 
-Widget? fileViewer(RoomClient client, String path) {
+Widget? fileViewer(RoomClient client, String path, {CodePreviewEditorBuilder? codeEditorBuilder}) {
   final kind = classifyFile(path);
 
   switch (kind) {
@@ -22,7 +23,7 @@ Widget? fileViewer(RoomClient client, String path) {
     case FileKind.markdown:
     case FileKind.tsv:
     case FileKind.custom:
-      return FilePreview(room: client, path: path);
+      return FilePreview(room: client, path: path, codeEditorBuilder: codeEditorBuilder);
     case FileKind.image:
       return ImageViewer(room: client, path: path);
     case FileKind.video:

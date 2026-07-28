@@ -70,7 +70,14 @@ bool filePreviewLoadsFromRoomStorage(String path) {
   };
 }
 
-Widget filePreview({Key? key, required RoomClient room, required String filename, required Uri url, BoxFit fit = BoxFit.cover}) {
+Widget filePreview({
+  Key? key,
+  required RoomClient room,
+  required String filename,
+  required Uri url,
+  BoxFit fit = BoxFit.cover,
+  CodePreviewEditorBuilder? codeEditorBuilder,
+}) {
   final kind = classifyFile(filename);
 
   switch (kind) {
@@ -91,7 +98,7 @@ Widget filePreview({Key? key, required RoomClient room, required String filename
     case FileKind.tsv:
       return TsvPreview(filename: filename, room: room, key: key);
     case FileKind.code:
-      return CodePreview(room: room, filename: filename, url: url, key: key);
+      return CodePreview(room: room, filename: filename, url: url, key: key, editorBuilder: codeEditorBuilder);
     case FileKind.custom:
       final ext = _ext(filename);
       return customViewers[ext]!(key: key, room: room, filename: filename, url: url);
@@ -103,11 +110,12 @@ Widget filePreview({Key? key, required RoomClient room, required String filename
 }
 
 class FilePreview extends StatefulWidget {
-  FilePreview({required this.room, required this.path, this.fit = BoxFit.cover}) : super(key: Key(path));
+  FilePreview({required this.room, required this.path, this.fit = BoxFit.cover, this.codeEditorBuilder}) : super(key: Key(path));
 
   final String path;
   final RoomClient room;
   final BoxFit fit;
+  final CodePreviewEditorBuilder? codeEditorBuilder;
 
   @override
   State createState() => _FilePreviewState();
@@ -121,7 +129,7 @@ class _FilePreviewState extends State<FilePreview> {
     return switch (kind) {
       FileKind.markdown => MarkdownPreview(filename: widget.path, room: widget.room),
       FileKind.pdf => PdfPreview(room: widget.room, path: widget.path),
-      FileKind.code => CodePreview(room: widget.room, filename: widget.path),
+      FileKind.code => CodePreview(room: widget.room, filename: widget.path, editorBuilder: widget.codeEditorBuilder),
       FileKind.tsv => TsvPreview(filename: widget.path, room: widget.room),
       _ => null,
     };
@@ -143,7 +151,13 @@ class _FilePreviewState extends State<FilePreview> {
       future: urlLookup,
       builder: (context, snapshot) {
         if (snapshot.hasData) {
-          final preview = filePreview(room: widget.room, filename: widget.path, url: Uri.parse(snapshot.data!), fit: widget.fit);
+          final preview = filePreview(
+            room: widget.room,
+            filename: widget.path,
+            url: Uri.parse(snapshot.data!),
+            fit: widget.fit,
+            codeEditorBuilder: widget.codeEditorBuilder,
+          );
           if (_usesMobilePreviewLayout(context)) {
             return preview;
           }

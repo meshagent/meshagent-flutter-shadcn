@@ -61,6 +61,43 @@ diff --git a/lib/report.py b/lib/report.py
     });
   });
 
+  group('dataset image generation tool results', () {
+    test('maps saved_image_id JSON content to the native image model', () {
+      final image = datasetImageGenerationToolResultForTesting(
+        toolkit: 'image-generation',
+        tool: 'imagegen',
+        result: {
+          'type': 'json',
+          'json': {'saved_image_id': 'image-123', 'mime_type': 'image/png'},
+        },
+      );
+
+      expect(image, isNotNull);
+      expect(image!.imageId, 'image-123');
+      expect(image.uri, 'dataset://images?id=image-123');
+      expect(image.mimeType, 'image/png');
+      expect(image.status, 'completed');
+    });
+
+    test('does not replace failed or unrelated tool calls with images', () {
+      const result = {
+        'type': 'json',
+        'json': {'saved_image_id': 'image-123', 'mime_type': 'image/png'},
+      };
+
+      expect(
+        datasetImageGenerationToolResultForTesting(
+          toolkit: 'image-generation',
+          tool: 'imagegen',
+          result: result,
+          error: {'message': 'failed'},
+        ),
+        isNull,
+      );
+      expect(datasetImageGenerationToolResultForTesting(toolkit: 'image-generation', tool: 'import_image', result: result), isNull);
+    });
+  });
+
   group('dataset row timestamps', () {
     test('uses top-level timestamp when present', () {
       final timestamp = datasetRowTimestampForTesting({

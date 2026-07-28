@@ -16,6 +16,28 @@ import 'package:url_launcher/url_launcher.dart';
 
 const int codePreviewLargeFileThresholdBytes = 1024 * 1024;
 
+typedef CodePreviewEditorBuilder = Widget Function(BuildContext context, CodePreviewEditorConfiguration configuration);
+
+class CodePreviewEditorConfiguration {
+  const CodePreviewEditorConfiguration({
+    required this.filename,
+    required this.controller,
+    required this.focusNode,
+    required this.readOnly,
+    required this.padding,
+    required this.style,
+    required this.onChanged,
+  });
+
+  final String filename;
+  final CodeLineEditingController controller;
+  final FocusNode focusNode;
+  final bool readOnly;
+  final EdgeInsetsGeometry padding;
+  final CodeEditorStyle style;
+  final ValueChanged<String> onChanged;
+}
+
 bool isCodeFile(String filename) {
   return resolveLanguageIdForFilename(filename) != null;
 }
@@ -124,6 +146,7 @@ class CodePreview extends StatefulWidget {
     this.readOnly = false,
     this.showToolbar = true,
     this.controller,
+    this.editorBuilder,
   });
 
   final RoomClient? room;
@@ -133,6 +156,7 @@ class CodePreview extends StatefulWidget {
   final bool readOnly;
   final bool showToolbar;
   final CodePreviewController? controller;
+  final CodePreviewEditorBuilder? editorBuilder;
 
   @override
   State createState() => _CodePreview();
@@ -319,6 +343,19 @@ class _CodePreview extends State<CodePreview> {
 
   CodeLineEditingController? controller;
 
+  void _handleEditorChanged(String value) {
+    if (dirty) {
+      return;
+    }
+    if (text == controller!.text) return;
+
+    text = controller!.text;
+    setState(() {
+      dirty = true;
+    });
+    widget.controller?._sync(this);
+  }
+
   SelectionToolbarController? _selectionToolbarController() {
     if (!_usesSystemAdaptiveTextSelectionToolbar()) {
       return null;
@@ -342,6 +379,16 @@ class _CodePreview extends State<CodePreview> {
     final mode = resolveModeForFilename(widget.filename) ?? langPlaintext;
     final theme = _sourceCodeEditorTheme(context);
     final showEditorToolbar = !widget.readOnly && widget.showToolbar && largeFile == null;
+    final editorStyle = CodeEditorStyle(
+      cursorColor: ShadTheme.of(context).colorScheme.selection,
+      fontSize: 16,
+      fontFamily: "SourceCodePro",
+      textColor: theme["root"]?.color,
+      codeTheme: CodeHighlightTheme(
+        languages: {'default': CodeHighlightThemeMode(mode: mode)},
+        theme: theme,
+      ),
+    );
 
     return Column(
       children: [
@@ -398,37 +445,34 @@ class _CodePreview extends State<CodePreview> {
                   padding: EdgeInsets.only(right: 10),
                   color: theme["root"]!.backgroundColor!,
                   child: Builder(
-                    builder: (context) => CodeEditor(
-                      onChanged: (value) {
-                        if (dirty) {
-                          return;
-                        }
-                        if (text == controller!.text) return;
-
-                        text = controller!.text;
-                        setState(() {
-                          dirty = true;
-                        });
-                        widget.controller?._sync(this);
-                      },
-                      showCursorWhenReadOnly: false,
-
-                      readOnly: widget.readOnly,
-                      padding: EdgeInsets.only(left: 20, top: 20),
-                      style: CodeEditorStyle(
-                        cursorColor: ShadTheme.of(context).colorScheme.selection,
-                        fontSize: 16,
-                        fontFamily: "SourceCodePro",
-                        textColor: theme["root"]?.color,
-                        codeTheme: CodeHighlightTheme(
-                          languages: {'default': CodeHighlightThemeMode(mode: mode)},
-                          theme: theme,
-                        ),
-                      ),
-                      focusNode: focusNode,
-                      controller: controller,
-                      toolbarController: _selectionToolbarController(),
-                    ),
+                    builder: (context) {
+                      const padding = EdgeInsets.only(left: 20, top: 20);
+                      final editorBuilder = widget.editorBuilder;
+                      if (editorBuilder != null) {
+                        return editorBuilder(
+                          context,
+                          CodePreviewEditorConfiguration(
+                            filename: widget.filename,
+                            controller: controller!,
+                            focusNode: focusNode,
+                            readOnly: widget.readOnly,
+                            padding: padding,
+                            style: editorStyle,
+                            onChanged: _handleEditorChanged,
+                          ),
+                        );
+                      }
+                      return CodeEditor(
+                        onChanged: _handleEditorChanged,
+                        showCursorWhenReadOnly: false,
+                        readOnly: widget.readOnly,
+                        padding: padding,
+                        style: editorStyle,
+                        focusNode: focusNode,
+                        controller: controller,
+                        toolbarController: _selectionToolbarController(),
+                      );
+                    },
                   ),
                 ),
         ),
