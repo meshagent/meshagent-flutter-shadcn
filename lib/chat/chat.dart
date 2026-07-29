@@ -780,6 +780,23 @@ String? _normalizeAgentAttachmentUrl(String path) {
   return "room:///$roomPath";
 }
 
+String normalizeRoomStorageAttachmentPath(String path) {
+  final trimmedPath = path.trim();
+  if (trimmedPath.isEmpty) {
+    return "";
+  }
+
+  final uri = Uri.tryParse(trimmedPath);
+  if (uri != null && uri.scheme == "room") {
+    return [
+      if (uri.host.trim().isNotEmpty) uri.host.trim(),
+      ...uri.pathSegments.map((segment) => segment.trim()).where((segment) => segment.isNotEmpty),
+    ].join("/");
+  }
+
+  return trimmedPath.replaceFirst(RegExp(r"^/+"), "");
+}
+
 String _connectorSelectionKey(Connector connector) {
   return jsonEncode({
     "name": connector.name,
@@ -7556,7 +7573,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   }
 
   String _sanitizePath(String path) {
-    return path.replaceFirst(RegExp(r'^/'), '');
+    return normalizeRoomStorageAttachmentPath(path);
   }
 
   bool _isImageFilePath(String path) {
@@ -12640,13 +12657,17 @@ class FileDropAreaState extends State<FileDropArea> {
 
       try {
         FolderDropPayload? folderPayload;
+        FolderDropFile? directFile;
         if (reader.canProvide(Formats.fileUri)) {
           try {
             final namedUri = await _getValue(reader, Formats.fileUri);
 
             folderPayload = await resolveFolderDrop(namedUri);
+            if (folderPayload == null) {
+              directFile = await resolveFileDrop(namedUri);
+            }
           } catch (err, st) {
-            debugPrint('Error reading dropped folder uri: $err\n$st');
+            debugPrint('Error reading dropped file uri: $err\n$st');
           }
         }
 
@@ -12675,6 +12696,12 @@ class FileDropAreaState extends State<FileDropArea> {
             await widget.onFileDrop(uploadPath, file.dataStream, file.fileSize);
             droppedFile = true;
           }
+          continue;
+        }
+
+        if (directFile != null) {
+          await widget.onFileDrop(directFile.relativePath, directFile.dataStream, directFile.fileSize);
+          droppedFile = true;
           continue;
         }
 
