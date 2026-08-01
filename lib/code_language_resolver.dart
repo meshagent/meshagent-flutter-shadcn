@@ -80,12 +80,7 @@ String _normalizeLanguageOrFilename(String value) {
   if (normalized.startsWith('language-')) {
     normalized = normalized.substring('language-'.length);
   }
-  if (normalized.isEmpty) {
-    return normalized;
-  }
-
-  final firstSegment = normalized.split(RegExp(r'[\s{,:;]')).first;
-  return firstSegment.trim();
+  return normalized;
 }
 
 String? resolveLanguageIdForFilename(String filename) {

@@ -29,6 +29,20 @@ Future<FolderDropPayload?> resolveFolderDrop(Uri uri) async {
   return FolderDropPayload(folderName: folderName, files: files);
 }
 
+Future<FolderDropFile?> resolveFileDrop(Uri uri) async {
+  if (uri.scheme != 'file') return null;
+
+  final path = uri.toFilePath();
+  final file = File(path);
+  if (!await file.exists()) return null;
+
+  return FolderDropFile(
+    relativePath: pathlib.basename(path),
+    dataStream: file.openRead().map(Uint8List.fromList),
+    fileSize: await file.length(),
+  );
+}
+
 Future<FolderDropPayload?> resolveFolderDropFromEntry(dynamic entry) async {
   return null;
 }

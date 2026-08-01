@@ -7,6 +7,10 @@ Future<FolderDropPayload?> resolveFolderDrop(Uri uri) {
   return impl.resolveFolderDrop(uri);
 }
 
+Future<FolderDropFile?> resolveFileDrop(Uri uri) {
+  return impl.resolveFileDrop(uri);
+}
+
 Future<FolderDropPayload?> resolveFolderDropFromEntry(dynamic entry) {
   return impl.resolveFolderDropFromEntry(entry);
 }
