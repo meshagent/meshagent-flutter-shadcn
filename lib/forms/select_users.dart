@@ -158,17 +158,38 @@ class _SelectUsersState extends State<SelectUsers> {
 enum SelectSubjectType { user, agent, group, serviceAccount, projectUsers, projectDevelopers, projectServiceAccounts }
 
 class SelectSubjectsController extends MultiSelectController {
-  SelectSubjectsController({required this.subjectsByKey, required this.allowNewUserEmail, super.initialValue});
+  SelectSubjectsController({
+    required this.subjectsByKey,
+    required this.allowNewUserEmail,
+    this.resolveSubject,
+    this.isAllowedSubject,
+    super.initialValue,
+  });
 
   final Map<String, AccessSubject> subjectsByKey;
   final bool allowNewUserEmail;
+  final Future<AccessSubject?> Function(String email)? resolveSubject;
+  final bool Function(AccessSubject subject)? isAllowedSubject;
 
   @override
-  FutureOr<bool> canAddItem(String item) {
+  FutureOr<bool> canAddItem(String item) async {
     if (subjectsByKey.containsKey(item)) {
       return true;
     }
-    return allowNewUserEmail && SelectUsersController.emailRegex.hasMatch(item);
+    if (!SelectUsersController.emailRegex.hasMatch(item)) {
+      return false;
+    }
+
+    final resolved = await resolveSubject?.call(item);
+    if (resolved != null) {
+      if (isAllowedSubject?.call(resolved) == false) {
+        return false;
+      }
+      subjectsByKey[item] = resolved;
+      return true;
+    }
+
+    return allowNewUserEmail;
   }
 }
 
@@ -234,6 +255,14 @@ class _SelectSubjectsState extends State<SelectSubjects> {
         SelectSubjectsController(
           subjectsByKey: subjectsByKey,
           allowNewUserEmail: widget.allowNewUserEmail && widget.allowedTypes.contains(SelectSubjectType.user),
+          resolveSubject: (email) async {
+            try {
+              return await widget.client.resolveSubject(widget.projectId, email);
+            } on NotFoundException {
+              return null;
+            }
+          },
+          isAllowedSubject: _isAllowedResolvedSubject,
           initialValue: widget.initialValue.map(_subjectKey).toList(),
         );
     for (final subject in widget.initialValue) {
@@ -403,6 +432,7 @@ class _SelectSubjectsState extends State<SelectSubjects> {
   Future<List<String>> _search(String query) async {
     final lower = query.toLowerCase();
     final options = <_SubjectOption>[];
+    AccessSubject? resolvedEmailSubject;
 
     if (widget.allowedTypes.contains(SelectSubjectType.projectUsers)) {
       options.add(_optionFromSubject(AccessSubject(type: 'userset', id: widget.projectId, objectType: 'project', relation: 'member')));
@@ -467,6 +497,7 @@ class _SelectSubjectsState extends State<SelectSubjects> {
       futures.add(() async {
         try {
           final subject = await widget.client.resolveSubject(widget.projectId, query);
+          resolvedEmailSubject = subject;
           if (_isAllowedResolvedSubject(subject)) {
             options.add(_optionFromSubject(subject));
           }
@@ -480,6 +511,8 @@ class _SelectSubjectsState extends State<SelectSubjects> {
 
     if (widget.allowNewUserEmail &&
         widget.allowedTypes.contains(SelectSubjectType.user) &&
+        resolvedEmailSubject == null &&
+        !options.any((option) => option.subject.email?.toLowerCase() == lower) &&
         SelectUsersController.emailRegex.hasMatch(query)) {
       options.add(_optionFromSubject(AccessSubject(type: 'user', id: '', email: query)));
     }
@@ -519,7 +552,7 @@ class _SelectSubjectsState extends State<SelectSubjects> {
 
   Widget _selectedItemBuilder(BuildContext context, String key) {
     final option = optionsByKey[key];
-    final subject = option?.subject;
+    final subject = option?.subject ?? subjectsByKey[key];
     final label = subject?.name ?? subject?.email ?? option?.label ?? key;
     return Text(label, overflow: TextOverflow.ellipsis);
   }

@@ -289,4 +289,66 @@ void main() {
     expect(selected.single.email, 'builder@service.demo.example.test');
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('select subjects resolves a typed service account before adding a new user', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final selected = <AccessSubject>[];
+    final client = Meshagent(
+      baseUrl: 'http://example.test',
+      token: 'test-token',
+      client: MockClient((request) async {
+        if (request.url.path.endsWith('/subjects:resolve')) {
+          expect(request.url.queryParameters['email'], 'xapps-google@service.powerboards.api.meshagent.com');
+          return http.Response(
+            jsonEncode({
+              'type': 'service_account',
+              'id': 'service-account-1',
+              'name': 'xapps-google',
+              'email': 'xapps-google@service.powerboards.api.meshagent.com',
+            }),
+            200,
+          );
+        }
+        return http.Response(jsonEncode({'users': [], 'groups': [], 'service_accounts': []}), 200);
+      }),
+    );
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: Align(
+            alignment: Alignment.topCenter,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 40),
+              child: SizedBox(
+                width: 900,
+                child: SelectSubjects(
+                  client: client,
+                  projectId: 'project-1',
+                  allowedTypes: const {SelectSubjectType.user, SelectSubjectType.serviceAccount},
+                  allowNewUserEmail: true,
+                  maxSelected: 1,
+                  onChanged: (subjects) => selected
+                    ..clear()
+                    ..addAll(subjects),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byType(EditableText));
+    await tester.enterText(find.byType(EditableText), 'xapps-google@service.powerboards.api.meshagent.com');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(selected.single.type, 'service_account');
+    expect(selected.single.id, 'service-account-1');
+    expect(selected.single.email, 'xapps-google@service.powerboards.api.meshagent.com');
+    expect(tester.takeException(), isNull);
+  });
 }
