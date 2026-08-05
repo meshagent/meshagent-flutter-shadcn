@@ -55,6 +55,7 @@ class ChatBotView extends StatefulWidget {
     this.onAttachmentRemoved,
     this.fileInThreadBuilder,
     this.pendingFileInThreadBuilder,
+    this.attachmentPathResolver,
     this.datasetInlineAttachmentViewerPredicate,
     this.chatInputBoxBuilder,
     this.customInputBuilder,
@@ -111,6 +112,7 @@ class ChatBotView extends StatefulWidget {
   final ValueChanged<FileAttachment>? onAttachmentRemoved;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
   final Widget? Function(BuildContext context, String path)? pendingFileInThreadBuilder;
+  final ThreadAttachmentPathResolver? attachmentPathResolver;
   final DatasetChatInlineAttachmentViewerPredicate? datasetInlineAttachmentViewerPredicate;
   final Widget Function(BuildContext context, Widget chatBox)? chatInputBoxBuilder;
   final ChatThreadCustomInputBuilder? customInputBuilder;
@@ -280,6 +282,7 @@ class _ChatBotViewState extends State<ChatBotView> {
         custom: widget.fileInThreadBuilder,
         fallback: (context, path) => ChatThreadPreview(room: widget.room, path: path),
       ),
+      attachmentPathResolver: widget.attachmentPathResolver,
       inlineAttachmentViewerPredicate: widget.datasetInlineAttachmentViewerPredicate,
       toolsBuilder: widget.toolsBuilder,
       inputPlaceholder: widget.inputPlaceholder,
@@ -337,6 +340,7 @@ class _ChatBotViewState extends State<ChatBotView> {
           custom: widget.fileInThreadBuilder,
           fallback: (context, path) => ChatThreadPreview(room: widget.room, path: path),
         ),
+        attachmentPathResolver: widget.attachmentPathResolver,
         inlineAttachmentViewerPredicate: widget.datasetInlineAttachmentViewerPredicate,
         toolsBuilder: widget.toolsBuilder,
         inputPlaceholder: widget.inputPlaceholder,
@@ -373,6 +377,7 @@ class _ChatBotViewState extends State<ChatBotView> {
       onAttachmentRemoved: widget.onAttachmentRemoved,
       fileInThreadBuilder: widget.fileInThreadBuilder,
       pendingFileInThreadBuilder: widget.pendingFileInThreadBuilder,
+      attachmentPathResolver: widget.attachmentPathResolver,
       chatInputBoxBuilder: (context, chatBox) => _buildChatInputBox(context, chatBox),
       customInputBuilder: widget.customInputBuilder,
       openFile: widget.openFile,

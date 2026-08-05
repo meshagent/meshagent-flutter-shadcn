@@ -525,6 +525,7 @@ class DatasetChatThread extends StatefulWidget {
     this.emptyStateDescription,
     this.openFile,
     this.attachmentRenderer,
+    this.attachmentPathResolver,
     this.inlineAttachmentViewerPredicate,
     this.toolsBuilder,
     this.inputPlaceholder,
@@ -558,6 +559,7 @@ class DatasetChatThread extends StatefulWidget {
   final String? emptyStateDescription;
   final FutureOr<void> Function(String path)? openFile;
   final DatasetChatAttachmentRenderer? attachmentRenderer;
+  final ThreadAttachmentPathResolver? attachmentPathResolver;
   final DatasetChatInlineAttachmentViewerPredicate? inlineAttachmentViewerPredicate;
   final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
   final Widget? inputPlaceholder;
@@ -618,6 +620,7 @@ class RoomDatasetChatThread extends StatefulWidget {
     this.emptyStateDescription,
     this.openFile,
     this.attachmentRenderer,
+    this.attachmentPathResolver,
     this.inlineAttachmentViewerPredicate,
     this.toolsBuilder,
     this.inputPlaceholder,
@@ -642,6 +645,7 @@ class RoomDatasetChatThread extends StatefulWidget {
   final String? emptyStateDescription;
   final FutureOr<void> Function(String path)? openFile;
   final DatasetChatAttachmentRenderer? attachmentRenderer;
+  final ThreadAttachmentPathResolver? attachmentPathResolver;
   final DatasetChatInlineAttachmentViewerPredicate? inlineAttachmentViewerPredicate;
   final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
   final Widget? inputPlaceholder;
@@ -711,6 +715,7 @@ class _RoomDatasetChatThreadState extends State<RoomDatasetChatThread> {
       emptyStateDescription: widget.emptyStateDescription,
       openFile: widget.openFile,
       attachmentRenderer: widget.attachmentRenderer ?? (context, path) => ChatThreadPreview(room: widget.room, path: path),
+      attachmentPathResolver: widget.attachmentPathResolver,
       inlineAttachmentViewerPredicate: widget.inlineAttachmentViewerPredicate,
       toolsBuilder: widget.toolsBuilder,
       inputPlaceholder: widget.inputPlaceholder,
@@ -2721,7 +2726,8 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   Widget _buildAttachmentWidget(BuildContext context, _DatasetThreadAttachment attachment, {required bool mine}) {
-    final previewPath = _previewPath(attachment.url);
+    final previewPath = _resolvedAttachmentPath(attachment.url);
+    final displayName = _resolvedAttachmentDisplayName(attachment, previewPath);
     final attachmentRenderer = widget.attachmentRenderer;
     final canOpen = widget.openFile != null || _isDataUrl(previewPath);
     if (attachmentRenderer != null) {
@@ -2742,7 +2748,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             )
           : FileDefaultPreviewCard(
               icon: LucideIcons.paperclip,
-              text: attachment.displayName,
+              text: displayName,
               useThreadAttachmentStyle: ThreadTypographyOverride.useThreadAttachmentStyleOf(context),
               showActionIcon: canOpen,
             ),
@@ -2757,9 +2763,12 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   Future<void> _openAttachment(BuildContext context, _DatasetThreadAttachment attachment) async {
-    final previewPath = _previewPath(attachment.url);
+    final previewPath = _resolvedAttachmentPath(attachment.url);
     if (datasetChatShouldShowInlineAttachmentViewer(previewPath, predicate: widget.inlineAttachmentViewerPredicate)) {
-      await _showInlineAttachmentViewer(context, attachment.copyWith(url: previewPath));
+      await _showInlineAttachmentViewer(
+        context,
+        attachment.copyWith(url: previewPath, name: _resolvedAttachmentDisplayName(attachment, previewPath)),
+      );
       return;
     }
     final openFile = widget.openFile;
@@ -2774,6 +2783,20 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       useSafeArea: false,
       builder: (context) => _InlineAttachmentViewer(attachment: attachment),
     );
+  }
+
+  String _resolvedAttachmentPath(String path) {
+    final previewPath = _previewPath(path);
+    if (_isDataUrl(previewPath)) {
+      return previewPath;
+    }
+    final resolvedPath = widget.attachmentPathResolver?.call(path).trim();
+    return resolvedPath == null || resolvedPath.isEmpty ? previewPath : _previewPath(resolvedPath);
+  }
+
+  String _resolvedAttachmentDisplayName(_DatasetThreadAttachment attachment, String resolvedPath) {
+    final originalPath = _previewPath(attachment.url);
+    return resolvedPath == originalPath ? attachment.displayName : _inlineAttachmentDisplayName(resolvedPath);
   }
 
   Future<void> _attachInlineFile(String name, Stream<Uint8List> dataStream, int? size) async {
