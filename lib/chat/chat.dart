@@ -233,6 +233,7 @@ class ThreadStorageSaveSurfaceRequest {
 }
 
 typedef ThreadStorageSaveSurfacePresenter = Future<void> Function(BuildContext context, ThreadStorageSaveSurfaceRequest request);
+typedef ThreadAttachmentPathResolver = String Function(String path);
 
 String _normalizeEmojiPresentationKey(String value) {
   return value.replaceAll('\u{FE0F}', '').replaceAll('\u{FE0E}', '').replaceAll('\u{200D}', '').trim();
@@ -4971,6 +4972,7 @@ class ChatThread extends StatefulWidget {
     this.onAttachmentRemoved,
     this.fileInThreadBuilder,
     this.pendingFileInThreadBuilder,
+    this.attachmentPathResolver,
     this.chatInputBoxBuilder,
     this.customInputBuilder,
     this.openFile,
@@ -5020,6 +5022,7 @@ class ChatThread extends StatefulWidget {
   final ValueChanged<FileAttachment>? onAttachmentRemoved;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
   final Widget? Function(BuildContext context, String path)? pendingFileInThreadBuilder;
+  final ThreadAttachmentPathResolver? attachmentPathResolver;
   final Widget Function(BuildContext context, Widget chatBox)? chatInputBoxBuilder;
   final ChatThreadCustomInputBuilder? customInputBuilder;
   final FutureOr<void> Function(String path)? openFile;
@@ -6262,6 +6265,7 @@ class _ChatThreadState extends State<ChatThread> {
                       messageHeaderBuilder: widget.messageHeaderBuilder,
                       fileInThreadBuilder: widget.fileInThreadBuilder,
                       pendingFileInThreadBuilder: widget.pendingFileInThreadBuilder,
+                      attachmentPathResolver: widget.attachmentPathResolver,
                       openFile: widget.openFile,
                       emptyStateTitle: widget.emptyStateTitle,
                       emptyStateDescription: widget.emptyStateDescription,
@@ -6406,6 +6410,7 @@ class _ChatThreadState extends State<ChatThread> {
               emptyState: widget.emptyState,
               fileInThreadBuilder: widget.fileInThreadBuilder,
               pendingFileInThreadBuilder: widget.pendingFileInThreadBuilder,
+              attachmentPathResolver: widget.attachmentPathResolver,
               openFile: widget.openFile,
               mobileStorageSaveSurfacePresenter: widget.mobileStorageSaveSurfacePresenter,
               mobileUnderHeaderContentPadding: widget.mobileUnderHeaderContentPadding,
@@ -6499,6 +6504,7 @@ class ChatThreadMessages extends StatefulWidget {
     this.messageHeaderBuilder,
     this.fileInThreadBuilder,
     this.pendingFileInThreadBuilder,
+    this.attachmentPathResolver,
     this.openFile,
     this.messageBuilders,
     this.emptyStateTitle,
@@ -6542,6 +6548,7 @@ class ChatThreadMessages extends StatefulWidget {
   final Widget Function(BuildContext, MeshDocument, MeshElement)? messageHeaderBuilder;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
   final Widget? Function(BuildContext context, String path)? pendingFileInThreadBuilder;
+  final ThreadAttachmentPathResolver? attachmentPathResolver;
   final FutureOr<void> Function(String path)? openFile;
 
   @override
@@ -7570,7 +7577,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
         }
 
         final pathAttribute = attachment.getAttribute("path");
-        final path = pathAttribute is String ? _sanitizePath(pathAttribute) : null;
+        final path = pathAttribute is String ? _resolveAttachmentPath(pathAttribute) : null;
         if (path != null && path.trim().isNotEmpty && _isImageFilePath(path)) {
           final attachmentElementId = attachment.id;
           imagesInThread.add(
@@ -7625,6 +7632,12 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
 
   String _sanitizePath(String path) {
     return normalizeRoomStorageAttachmentPath(path);
+  }
+
+  String _resolveAttachmentPath(String path) {
+    final normalizedPath = _sanitizePath(path);
+    final resolvedPath = widget.attachmentPathResolver?.call(normalizedPath).trim();
+    return resolvedPath == null || resolvedPath.isEmpty ? normalizedPath : _sanitizePath(resolvedPath);
   }
 
   bool _isImageFilePath(String path) {
@@ -7988,7 +8001,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
       return keyed(const SizedBox.shrink());
     }
 
-    final normalizedPath = _sanitizePath(pathAttribute);
+    final normalizedPath = _resolveAttachmentPath(pathAttribute);
 
     if (attachment.tagName == "file" && _isImageFilePath(normalizedPath)) {
       final initialIndex = feedImages.indexWhere((entry) => entry.path == normalizedPath);
