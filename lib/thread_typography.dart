@@ -18,6 +18,9 @@ typedef ThreadAttachmentIconBuilder =
 
 typedef ThreadAttachmentActionIconBuilder = Widget Function(BuildContext context, {required Color? color, required bool hovered});
 typedef ThreadAttachmentLoadingPlaceholderBuilder = Widget Function(BuildContext context, {required BorderRadius borderRadius});
+typedef ThreadPoisonedErrorPredicate = bool Function(String message);
+typedef ThreadPoisonedErrorBuilder =
+    Widget Function(BuildContext context, {required String error, required VoidCallback? onStartNewThread});
 
 typedef ThreadMarkdownHeadingPaddingResolver = EdgeInsets? Function(String tag);
 typedef ThreadMarkdownHeadingStyleResolver = TextStyle? Function(String tag, TextStyle defaultStyle);
@@ -174,6 +177,10 @@ class ThreadTypographyOverride extends InheritedWidget {
     this.imageGenerationLoadingPlaceholderBuilder,
     this.attachmentLoadTimeout,
     this.attachmentImageCache,
+    this.poisonedErrorPredicate,
+    this.poisonedErrorBuilder,
+    this.onStartNewThread,
+    this.showAttachmentReplayWhileLoading = false,
     this.codeBlockSurfaceColor,
     this.codeBlockHeaderSurfaceColor,
     this.codeBlockBorderColor,
@@ -244,6 +251,10 @@ class ThreadTypographyOverride extends InheritedWidget {
   final ThreadAttachmentLoadingPlaceholderBuilder? imageGenerationLoadingPlaceholderBuilder;
   final Duration? attachmentLoadTimeout;
   final ThreadAttachmentImageCache? attachmentImageCache;
+  final ThreadPoisonedErrorPredicate? poisonedErrorPredicate;
+  final ThreadPoisonedErrorBuilder? poisonedErrorBuilder;
+  final VoidCallback? onStartNewThread;
+  final bool showAttachmentReplayWhileLoading;
   final Color? codeBlockSurfaceColor;
   final Color? codeBlockHeaderSurfaceColor;
   final Color? codeBlockBorderColor;
@@ -443,6 +454,22 @@ class ThreadTypographyOverride extends InheritedWidget {
     return maybeOf(context)?.attachmentImageCache;
   }
 
+  static ThreadPoisonedErrorPredicate? maybePoisonedErrorPredicateOf(BuildContext context) {
+    return maybeOf(context)?.poisonedErrorPredicate;
+  }
+
+  static ThreadPoisonedErrorBuilder? maybePoisonedErrorBuilderOf(BuildContext context) {
+    return maybeOf(context)?.poisonedErrorBuilder;
+  }
+
+  static VoidCallback? maybeOnStartNewThreadOf(BuildContext context) {
+    return maybeOf(context)?.onStartNewThread;
+  }
+
+  static bool showAttachmentReplayWhileLoadingOf(BuildContext context) {
+    return maybeOf(context)?.showAttachmentReplayWhileLoading ?? false;
+  }
+
   static Color? maybeCodeBlockSurfaceColorOf(BuildContext context) {
     return maybeOf(context)?.codeBlockSurfaceColor;
   }
@@ -589,6 +616,10 @@ class ThreadTypographyOverride extends InheritedWidget {
         imageGenerationLoadingPlaceholderBuilder != oldWidget.imageGenerationLoadingPlaceholderBuilder ||
         attachmentLoadTimeout != oldWidget.attachmentLoadTimeout ||
         attachmentImageCache != oldWidget.attachmentImageCache ||
+        poisonedErrorPredicate != oldWidget.poisonedErrorPredicate ||
+        poisonedErrorBuilder != oldWidget.poisonedErrorBuilder ||
+        onStartNewThread != oldWidget.onStartNewThread ||
+        showAttachmentReplayWhileLoading != oldWidget.showAttachmentReplayWhileLoading ||
         codeBlockSurfaceColor != oldWidget.codeBlockSurfaceColor ||
         codeBlockHeaderSurfaceColor != oldWidget.codeBlockHeaderSurfaceColor ||
         codeBlockBorderColor != oldWidget.codeBlockBorderColor ||

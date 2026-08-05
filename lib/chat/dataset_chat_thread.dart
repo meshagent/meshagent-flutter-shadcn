@@ -2380,6 +2380,23 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return messagesById.values.toList(growable: false);
   }
 
+  String? _activePoisonedThreadError(BuildContext context) {
+    return _poisonedThreadError(context, _messages());
+  }
+
+  String? _poisonedThreadError(BuildContext context, List<_DatasetThreadMessage> messages) {
+    final predicate = ThreadTypographyOverride.maybePoisonedErrorPredicateOf(context);
+    if (predicate == null) {
+      return null;
+    }
+    for (final message in messages.reversed) {
+      if (message.kind == 'error' && predicate(message.text)) {
+        return message.text;
+      }
+    }
+    return null;
+  }
+
   List<DatasetChatDebugRow> _debugRows() {
     final rows = [..._rowsByItemId.values, ..._agentDebugRowsByKey.values]..sort(_compareDatasetThreadRows);
     return [
@@ -2664,6 +2681,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   Future<void> _send(String value, List<FileAttachment> attachments) async {
+    if (_activePoisonedThreadError(context) != null) {
+      throw StateError('Start a new thread to continue.');
+    }
     if (_threadSession?.isLoading == true) {
       throw StateError('Thread is loading.');
     }
@@ -3022,7 +3042,13 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     return imagesInThread;
   }
 
-  Widget _buildInput(BuildContext context, ChatThreadSnapshot snapshot, List<PendingAgentMessage> pendingMessages, {bool loading = false}) {
+  Widget _buildInput(
+    BuildContext context,
+    ChatThreadSnapshot snapshot,
+    List<PendingAgentMessage> pendingMessages, {
+    bool loading = false,
+    String? poisonedError,
+  }) {
     PendingAgentMessage? waitingForOnlineMessage;
     for (final pending in pendingMessages) {
       if (pending.awaitingOnline) {
@@ -3036,8 +3062,10 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         final toolArea = resolveChatThreadToolArea(
           widget.toolsBuilder == null ? null : widget.toolsBuilder!(context, _controller, snapshot),
         );
-        final sendEnabled = !loading && waitingForOnlineMessage == null;
-        final sendDisabledReason = loading
+        final sendEnabled = poisonedError == null && !loading && waitingForOnlineMessage == null;
+        final sendDisabledReason = poisonedError != null
+            ? 'Start a new thread to continue.'
+            : loading
             ? 'Thread is loading.'
             : waitingForOnlineMessage == null
             ? null
@@ -3048,7 +3076,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
           placeholder: widget.inputPlaceholder,
           sendEnabled: sendEnabled,
           sendDisabledReason: sendDisabledReason,
-          readOnly: false,
+          readOnly: poisonedError != null,
           onCancelSend: null,
           onInterrupt: _canInterruptActiveTurn() ? _cancelTurn : null,
           sendPendingText: waitingForOnlineMessage == null
@@ -3070,6 +3098,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
           focusTrigger: _controller,
           sendEnabled: config.sendEnabled,
           sendDisabledReason: config.sendDisabledReason,
+          readOnly: config.readOnly,
           onCancelSend: config.onCancelSend,
           onInterrupt: config.onInterrupt,
           sendPendingText: config.sendPendingText,
@@ -3144,6 +3173,15 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         );
       }
       if (message.kind == 'error') {
+        final poisonedErrorPredicate = ThreadTypographyOverride.maybePoisonedErrorPredicateOf(context);
+        final poisonedErrorBuilder = ThreadTypographyOverride.maybePoisonedErrorBuilderOf(context);
+        if (poisonedErrorBuilder != null && poisonedErrorPredicate?.call(message.text) == true) {
+          return poisonedErrorBuilder(
+            context,
+            error: message.text,
+            onStartNewThread: ThreadTypographyOverride.maybeOnStartNewThreadOf(context),
+          );
+        }
         final errorSurfaceColor = ThreadTypographyOverride.maybeThreadErrorSurfaceColorOf(context);
         final errorTextColor = ThreadTypographyOverride.maybeThreadErrorTextColorOf(context);
         if (errorSurfaceColor != null || errorTextColor != null) {
@@ -3887,7 +3925,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }) {
     final showStatus = !loading && shouldShowChatThreadStatus(_status);
     final feedImages = _collectThreadImages(messages);
-    final children = loading
+    final canShowAttachmentReplayWhileLoading =
+        ThreadTypographyOverride.showAttachmentReplayWhileLoadingOf(context) && messages.any((message) => message.attachments.isNotEmpty);
+    final children = loading && !canShowAttachmentReplayWhileLoading
         ? const <Widget>[_DatasetThreadLoadingRow()]
         : _buildMessageWidgets(context, messages, pendingMessages, feedImages: feedImages);
     final threadView = ChatThreadViewportBody(
@@ -3948,6 +3988,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       builder: (context, _) {
         final loading = _threadSession?.isLoading ?? false;
         final messages = _messages();
+        final poisonedError = _poisonedThreadError(context, messages);
         final debugRows = _debugRows();
         _notifyDebugRowsChanged(debugRows);
         final pendingMessages = loading ? const <PendingAgentMessage>[] : _combinedPendingMessages(messages);
@@ -3967,7 +4008,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                     ?_buildQueuedPendingMessages(context, messages, pendingMessages),
                     _buildComposerWithUsageFooter(
                       context,
-                      input: _buildInput(context, snapshot, pendingMessages, loading: loading),
+                      input: _buildInput(context, snapshot, pendingMessages, loading: loading, poisonedError: poisonedError),
                       usage: snapshot.usage,
                     ),
                   ],

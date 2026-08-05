@@ -10,6 +10,7 @@ import 'package:meshagent_agents/meshagent_agents.dart' as agent_sessions;
 import 'package:meshagent_flutter_shadcn/chat/chat.dart';
 import 'package:meshagent_flutter_shadcn/chat/dataset_chat_thread.dart';
 import 'package:meshagent_flutter_shadcn/chat/new_chat_thread.dart';
+import 'package:meshagent_flutter_shadcn/thread_typography.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 class _FakeManagedAgentChatClient extends agent_sessions.BaseChatClient {
@@ -368,6 +369,145 @@ void main() {
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets('deleted attachment replay keeps loaded history visible while the agent session is loading', (tester) async {
+    final chatClient = _FakeManagedAgentChatClient(autoCompleteThreadLoad: false);
+    addTearDown(chatClient.stop);
+    final rows = <Map<String, Object?>>[
+      {
+        'item_id': 'user-1',
+        'turn_id': 'turn-1',
+        'sequence': 1,
+        'timestamp': '2026-08-05T12:00:00Z',
+        'data': {
+          'kind': 'message',
+          'role': 'user',
+          'text': 'Please inspect this image',
+          'attachments': [
+            {'url': 'room:///deleted-image.png', 'name': 'deleted-image.png'},
+          ],
+        },
+      },
+    ];
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: ThreadTypographyOverride(
+          showAttachmentReplayWhileLoading: true,
+          child: Scaffold(
+            body: DatasetChatThread(
+              path: 'dataset://threads/deleted-attachment',
+              chatClient: chatClient,
+              rowsLoader: ({required namespace, required table}) => Stream.value(rows),
+              attachmentRenderer: (context, path) => Text(path == 'deleted-image.png' ? 'Attachment unavailable' : path),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(chatClient.sentMessages.whereType<agent_sessions.OpenThread>(), isNotEmpty);
+    expect(find.text('Please inspect this image'), findsOneWidget);
+    expect(find.text('Attachment unavailable'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets('moved attachment replay uses the supplied registry resolution without entering recovery', (tester) async {
+    final chatClient = _FakeManagedAgentChatClient(autoCompleteThreadLoad: false);
+    addTearDown(chatClient.stop);
+    final rows = <Map<String, Object?>>[
+      {
+        'item_id': 'user-1',
+        'turn_id': 'turn-1',
+        'sequence': 1,
+        'timestamp': '2026-08-05T12:00:00Z',
+        'data': {
+          'kind': 'message',
+          'role': 'user',
+          'text': 'The moved attachment remains usable',
+          'attachments': [
+            {'url': 'room:///original/image.png', 'name': 'image.png'},
+          ],
+        },
+      },
+    ];
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: ThreadTypographyOverride(
+          showAttachmentReplayWhileLoading: true,
+          poisonedErrorPredicate: (message) => message.contains('unsupported image'),
+          poisonedErrorBuilder: (context, {required error, required onStartNewThread}) => const Text('Recovery required'),
+          child: Scaffold(
+            body: DatasetChatThread(
+              path: 'dataset://threads/moved-attachment',
+              chatClient: chatClient,
+              rowsLoader: ({required namespace, required table}) => Stream.value(rows),
+              attachmentPathResolver: (path) => path == 'room:///original/image.png' ? 'room:///moved/image.png' : path,
+              attachmentRenderer: (context, path) => Text('attachment:$path'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('The moved attachment remains usable'), findsOneWidget);
+    expect(find.text('attachment:moved/image.png'), findsOneWidget);
+    expect(find.text('Recovery required'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets('poisoned attachment replay replaces the provider error and locks composing until new thread', (tester) async {
+    const providerError = 'Unsupported image input format. Supported formats are PNG, JPEG, WEBP, and GIF.';
+    var startedNewThread = false;
+    final rows = <Map<String, Object?>>[
+      {
+        'item_id': 'error-1',
+        'turn_id': 'turn-1',
+        'sequence': 1,
+        'timestamp': '2026-08-05T12:00:00Z',
+        'data': {'kind': 'error', 'role': 'assistant', 'status': 'failed', 'text': providerError},
+      },
+    ];
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: ThreadTypographyOverride(
+          poisonedErrorPredicate: (message) => message == providerError,
+          poisonedErrorBuilder: (context, {required error, required onStartNewThread}) => Column(
+            children: [
+              const Text('This thread cannot continue with that attachment.'),
+              TextButton(onPressed: onStartNewThread, child: const Text('Start new thread')),
+            ],
+          ),
+          onStartNewThread: () => startedNewThread = true,
+          child: Scaffold(
+            body: DatasetChatThread(
+              path: 'dataset://threads/poisoned-attachment',
+              rowsLoader: ({required namespace, required table}) => Stream.value(rows),
+              customInputBuilder: (context, config, defaultInput) =>
+                  Text('readOnly:${config.readOnly};sendEnabled:${config.sendEnabled};reason:${config.sendDisabledReason}'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text(providerError), findsNothing);
+    expect(find.text('This thread cannot continue with that attachment.'), findsOneWidget);
+    expect(find.text('readOnly:true;sendEnabled:false;reason:Start a new thread to continue.'), findsOneWidget);
+    await tester.tap(find.text('Start new thread'));
+    expect(startedNewThread, isTrue);
   });
 
   testWidgets('managed agent widget treats local websocket participant messages as mine', (tester) async {
