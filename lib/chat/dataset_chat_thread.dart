@@ -2787,9 +2787,6 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
 
   String _resolvedAttachmentPath(String path) {
     final previewPath = _previewPath(path);
-    if (_isDataUrl(previewPath)) {
-      return previewPath;
-    }
     final resolvedPath = widget.attachmentPathResolver?.call(path).trim();
     return resolvedPath == null || resolvedPath.isEmpty ? previewPath : _previewPath(resolvedPath);
   }
