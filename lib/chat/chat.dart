@@ -9014,57 +9014,6 @@ class _ThreadStorageSaveSurfaceScaffoldState extends State<_ThreadStorageSaveSur
   }
 }
 
-typedef ThreadAttachmentMenuBuilder = Widget Function(BuildContext context, ValueChanged<bool> onMenuOpenChanged);
-
-class ThreadAttachmentOptionsRail extends StatefulWidget {
-  const ThreadAttachmentOptionsRail({super.key, required this.mine, required this.menuBuilder, required this.child});
-
-  final bool mine;
-  final ThreadAttachmentMenuBuilder menuBuilder;
-  final Widget child;
-
-  @override
-  State<ThreadAttachmentOptionsRail> createState() => _ThreadAttachmentOptionsRailState();
-}
-
-class _ThreadAttachmentOptionsRailState extends State<ThreadAttachmentOptionsRail> {
-  bool _hovered = false;
-  bool _menuOpen = false;
-
-  void _setMenuOpen(bool open) {
-    if (_menuOpen == open) {
-      return;
-    }
-
-    setState(() => _menuOpen = open);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final showMenu = _hovered || _menuOpen;
-    final menu = IgnorePointer(
-      ignoring: !showMenu,
-      child: AnimatedOpacity(
-        duration: const Duration(milliseconds: 120),
-        opacity: showMenu ? 1 : 0,
-        child: Padding(padding: const EdgeInsets.only(bottom: 5), child: widget.menuBuilder(context, _setMenuOpen)),
-      ),
-    );
-
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: widget.mine
-            ? <Widget>[menu, const SizedBox(width: 8), widget.child]
-            : <Widget>[widget.child, const SizedBox(width: 8), menu],
-      ),
-    );
-  }
-}
-
 class _AttachmentOptionsButton extends StatefulWidget {
   const _AttachmentOptionsButton({required this.items});
 
@@ -9335,11 +9284,7 @@ class ChatThreadImageAttachment extends StatefulWidget {
     this.widthPx,
     this.heightPx,
     this.roundedCorners = true,
-    this.useThreadAttachmentStyle = false,
-    this.useImageGenerationLoadingPlaceholder = true,
-    this.interactive = true,
     this.onOpenFullscreen,
-    this.onSaveAs,
   });
 
   final RoomClient? room;
@@ -9351,11 +9296,7 @@ class ChatThreadImageAttachment extends StatefulWidget {
   final double? widthPx;
   final double? heightPx;
   final bool roundedCorners;
-  final bool useThreadAttachmentStyle;
-  final bool useImageGenerationLoadingPlaceholder;
-  final bool interactive;
   final VoidCallback? onOpenFullscreen;
-  final FutureOr<void> Function()? onSaveAs;
 
   @override
   State<ChatThreadImageAttachment> createState() => _ChatThreadImageAttachmentState();
@@ -9508,10 +9449,6 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
     const maxPreviewEdge = 312.5;
     const fallbackPreviewEdge = 312.5;
 
-    if (widget.useThreadAttachmentStyle) {
-      return const Size.square(maxPreviewEdge);
-    }
-
     final rawWidth = widget.widthPx;
     final rawHeight = widget.heightPx;
     if (rawWidth == null || rawHeight == null || rawWidth <= 0 || rawHeight <= 0) {
@@ -9564,10 +9501,6 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
     }
 
     await clipboard.write([item]);
-  }
-
-  Future<void> _onDownloadImage(_ThreadImageRecord image) async {
-    await FilePicker.saveFile(dialogTitle: "Download image", fileName: _ImageMime.suggestedFileName(image.mimeType), bytes: image.data);
   }
 
   Future<void> _onSaveImage(_ThreadImageRecord image) async {
@@ -9676,33 +9609,17 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
   }
 
   Widget _wrapContextMenu({required _ThreadImageRecord image, required Widget child}) {
-    if (!widget.interactive || _usesMobileContextLayout(context)) {
+    if (_usesMobileContextLayout(context)) {
       return child;
     }
 
     return CoordinatedShadContextMenuRegion(
       items: [
-        if (widget.room != null || widget.onSaveAs != null)
-          ShadContextMenuItem(
-            height: 40,
-            onPressed: () async {
-              final onSaveAs = widget.onSaveAs;
-              if (onSaveAs != null) {
-                await onSaveAs();
-                return;
-              }
-              await _onSaveImage(image);
-            },
-            child: Text(widget.onSaveAs == null ? "Save As..." : "Save a copy as..."),
-          ),
+        if (widget.room != null) ShadContextMenuItem(height: 40, onPressed: () => _onSaveImage(image), child: const Text("Save As...")),
         ShadContextMenuItem(height: 40, onPressed: () => _onCopyImage(image), child: const Text("Copy")),
       ],
       child: child,
     );
-  }
-
-  Future<void> _runSaveAs(FutureOr<void> Function() onSaveAs) async {
-    await onSaveAs();
   }
 
   Widget _wrapWithCorners(Widget child) {
@@ -9713,42 +9630,11 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
   }
 
   Widget _wrapTapTarget(Widget child) {
-    if (!widget.interactive || widget.onOpenFullscreen == null) {
+    if (widget.onOpenFullscreen == null) {
       return child;
     }
 
-    return ShadGestureDetector(
-      cursor: widget.useThreadAttachmentStyle ? SystemMouseCursors.basic : SystemMouseCursors.zoomIn,
-      onTap: widget.onOpenFullscreen,
-      child: child,
-    );
-  }
-
-  Widget _wrapThreadAttachmentOptions({required _ThreadImageRecord image, required Widget child}) {
-    final optionsBuilder = ThreadTypographyOverride.maybeAttachmentOptionsBuilderOf(context);
-    final onOpen = widget.onOpenFullscreen;
-    final onSaveAs = widget.onSaveAs;
-    if (!widget.useThreadAttachmentStyle ||
-        _usesMobileContextLayout(context) ||
-        _isGeneratingStatus(widget.status) ||
-        optionsBuilder == null ||
-        onOpen == null ||
-        onSaveAs == null) {
-      return _wrapContextMenu(image: image, child: child);
-    }
-
-    return ThreadAttachmentOptionsRail(
-      mine: false,
-      menuBuilder: (context, onMenuOpenChanged) => optionsBuilder(
-        context,
-        mine: false,
-        onOpen: onOpen,
-        onDownload: () => unawaited(_onDownloadImage(image)),
-        onSaveCopyAs: () => unawaited(_runSaveAs(onSaveAs)),
-        onMenuOpenChanged: onMenuOpenChanged,
-      ),
-      child: child,
-    );
+    return ShadGestureDetector(cursor: SystemMouseCursors.zoomIn, onTap: widget.onOpenFullscreen, child: child);
   }
 
   Widget _buildPlaceholder(BuildContext context, {required bool showSpinner, String? label}) {
@@ -9756,8 +9642,8 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
     final trimmedLabel = label == null ? "" : label.trim();
     const borderRadius = BorderRadius.all(Radius.circular(16));
     final attachmentLoadingPlaceholderBuilder = ThreadTypographyOverride.maybeAttachmentLoadingPlaceholderBuilderOf(context);
-    final loadingPlaceholderBuilder = widget.useThreadAttachmentStyle && showSpinner
-        ? widget.useImageGenerationLoadingPlaceholder && _isGeneratingStatus(widget.status)
+    final loadingPlaceholderBuilder = showSpinner
+        ? _isGeneratingStatus(widget.status)
               ? ThreadTypographyOverride.maybeImageGenerationLoadingPlaceholderBuilderOf(context) ?? attachmentLoadingPlaceholderBuilder
               : attachmentLoadingPlaceholderBuilder
         : null;
@@ -9812,18 +9698,9 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
     final imageUri = widget.imageUri?.trim();
     final hasImageUri = imageUri != null && imageUri.isNotEmpty;
     final statusDetail = widget.statusDetail?.trim();
-    final imageFit = widget.useThreadAttachmentStyle
-        ? BoxFit.cover
-        : (widget.widthPx != null && widget.heightPx != null)
-        ? BoxFit.contain
-        : BoxFit.cover;
-
     if (!hasImageId && !hasImageUri) {
       if (_isFailedStatus(status)) {
         return FileDefaultPreviewCard(icon: LucideIcons.imageOff, text: statusDetail?.isNotEmpty == true ? statusDetail! : "Image failed");
-      }
-      if (!widget.useImageGenerationLoadingPlaceholder) {
-        return const FileDefaultPreviewCard(icon: LucideIcons.imageOff, text: "Image unavailable");
       }
       final label = _isGeneratingStatus(status) ? "Generating image" : "Loading image";
       return _buildPlaceholder(context, showSpinner: true, label: statusDetail?.isNotEmpty == true ? statusDetail : label);
@@ -9839,7 +9716,7 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
           child: _wrapWithCorners(
             Image.network(
               imageUri!,
-              fit: imageFit,
+              fit: (widget.widthPx != null && widget.heightPx != null) ? BoxFit.contain : BoxFit.cover,
               errorBuilder: (context, error, stackTrace) =>
                   const FileDefaultPreviewCard(icon: LucideIcons.imageOff, text: "Image unavailable"),
             ),
@@ -9857,7 +9734,7 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
 
         final image = snapshot.data;
         if (image == null) {
-          if (_isGeneratingStatus(status) && widget.useImageGenerationLoadingPlaceholder) {
+          if (_isGeneratingStatus(status)) {
             return _buildPlaceholder(
               context,
               showSpinner: true,
@@ -9874,12 +9751,12 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
         }
 
         final imageWidget = _ImageMime.isSvg(image.mimeType)
-            ? SvgPicture.memory(image.data, fit: imageFit)
-            : Image.memory(image.data, fit: imageFit);
+            ? SvgPicture.memory(image.data, fit: (widget.widthPx != null && widget.heightPx != null) ? BoxFit.contain : BoxFit.cover)
+            : Image.memory(image.data, fit: (widget.widthPx != null && widget.heightPx != null) ? BoxFit.contain : BoxFit.cover);
         final size = _displaySize();
 
         final imageContainer = SizedBox(width: size.width, height: size.height, child: _wrapWithCorners(imageWidget));
-        return _wrapThreadAttachmentOptions(image: image, child: _wrapTapTarget(imageContainer));
+        return _wrapContextMenu(image: image, child: _wrapTapTarget(imageContainer));
       },
     );
   }

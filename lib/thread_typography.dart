@@ -22,26 +22,7 @@ typedef ThreadAttachmentLoadingPlaceholderBuilder = Widget Function(BuildContext
 typedef ThreadMarkdownHeadingPaddingResolver = EdgeInsets? Function(String tag);
 typedef ThreadMarkdownHeadingStyleResolver = TextStyle? Function(String tag, TextStyle defaultStyle);
 typedef ThreadMarkdownLinkHandler = bool Function(BuildContext context, String url);
-typedef ThreadMarkdownLinkAvailabilityResolver = Future<bool?> Function(String url);
 typedef ThreadMarkdownTextTransformer = String Function(String markdown);
-typedef ThreadErrorTextResolver = String Function(String errorMessage);
-typedef ThreadMessageOptionsBuilder =
-    Widget Function(
-      BuildContext context, {
-      required String text,
-      required VoidCallback onCopy,
-      required VoidCallback? onSaveCopyAs,
-      required ValueChanged<bool> onMenuOpenChanged,
-    });
-typedef ThreadAttachmentOptionsBuilder =
-    Widget Function(
-      BuildContext context, {
-      required bool mine,
-      required VoidCallback onOpen,
-      required VoidCallback onDownload,
-      required VoidCallback onSaveCopyAs,
-      required ValueChanged<bool> onMenuOpenChanged,
-    });
 
 class ThreadAttachmentImageData {
   const ThreadAttachmentImageData({required this.data, required this.mimeType});
@@ -169,7 +150,6 @@ class ThreadTypographyOverride extends InheritedWidget {
     this.bottomAlignMessageActions = false,
     this.threadFeedItemSpacing,
     this.useThreadAttachmentStyle = false,
-    this.inferImageMimeTypeFromPath = false,
     this.normalizeParticipantDisplayName = false,
     this.showInlineDisclosureCue = false,
     this.useDesktopAuthorHeaderAtNarrowWidths = false,
@@ -212,7 +192,6 @@ class ThreadTypographyOverride extends InheritedWidget {
     this.inlineCodeHorizontalPadding = false,
     this.threadErrorSurfaceColor,
     this.threadErrorTextColor,
-    this.threadErrorTextResolver,
     this.markdownHorizontalRuleColor,
     this.markdownBlockquoteSideColor,
     this.markdownBlockquoteBackgroundColor,
@@ -221,10 +200,6 @@ class ThreadTypographyOverride extends InheritedWidget {
     this.markdownHeadingStyleResolver,
     this.markdownTextTransformer,
     this.markdownLinkHandler,
-    this.markdownLinkAvailabilityResolver,
-    this.markdownUnavailableLinkColor,
-    this.messageOptionsBuilder,
-    this.attachmentOptionsBuilder,
   });
 
   final String? textFontFamily;
@@ -245,7 +220,6 @@ class ThreadTypographyOverride extends InheritedWidget {
   final bool bottomAlignMessageActions;
   final double? threadFeedItemSpacing;
   final bool useThreadAttachmentStyle;
-  final bool inferImageMimeTypeFromPath;
   final bool normalizeParticipantDisplayName;
   final bool showInlineDisclosureCue;
   final bool useDesktopAuthorHeaderAtNarrowWidths;
@@ -288,7 +262,6 @@ class ThreadTypographyOverride extends InheritedWidget {
   final bool inlineCodeHorizontalPadding;
   final Color? threadErrorSurfaceColor;
   final Color? threadErrorTextColor;
-  final ThreadErrorTextResolver? threadErrorTextResolver;
   final Color? markdownHorizontalRuleColor;
   final Color? markdownBlockquoteSideColor;
   final Color? markdownBlockquoteBackgroundColor;
@@ -297,10 +270,6 @@ class ThreadTypographyOverride extends InheritedWidget {
   final ThreadMarkdownHeadingStyleResolver? markdownHeadingStyleResolver;
   final ThreadMarkdownTextTransformer? markdownTextTransformer;
   final ThreadMarkdownLinkHandler? markdownLinkHandler;
-  final ThreadMarkdownLinkAvailabilityResolver? markdownLinkAvailabilityResolver;
-  final Color? markdownUnavailableLinkColor;
-  final ThreadMessageOptionsBuilder? messageOptionsBuilder;
-  final ThreadAttachmentOptionsBuilder? attachmentOptionsBuilder;
 
   static ThreadTypographyOverride? maybeOf(BuildContext context) {
     return context.dependOnInheritedWidgetOfExactType<ThreadTypographyOverride>();
@@ -372,10 +341,6 @@ class ThreadTypographyOverride extends InheritedWidget {
 
   static double? maybeThreadFeedItemSpacingOf(BuildContext context) {
     return maybeOf(context)?.threadFeedItemSpacing;
-  }
-
-  static bool inferImageMimeTypeFromPathOf(BuildContext context) {
-    return maybeOf(context)?.inferImageMimeTypeFromPath ?? false;
   }
 
   static bool useThreadAttachmentStyleOf(BuildContext context) {
@@ -550,10 +515,6 @@ class ThreadTypographyOverride extends InheritedWidget {
     return maybeOf(context)?.threadErrorTextColor;
   }
 
-  static String resolveThreadErrorText(BuildContext context, String errorMessage) {
-    return maybeOf(context)?.threadErrorTextResolver?.call(errorMessage) ?? errorMessage;
-  }
-
   static Color? maybeMarkdownHorizontalRuleColorOf(BuildContext context) {
     return maybeOf(context)?.markdownHorizontalRuleColor;
   }
@@ -582,24 +543,8 @@ class ThreadTypographyOverride extends InheritedWidget {
     return maybeOf(context)?.markdownLinkHandler;
   }
 
-  static ThreadMarkdownLinkAvailabilityResolver? maybeMarkdownLinkAvailabilityResolverOf(BuildContext context) {
-    return maybeOf(context)?.markdownLinkAvailabilityResolver;
-  }
-
-  static Color? maybeMarkdownUnavailableLinkColorOf(BuildContext context) {
-    return maybeOf(context)?.markdownUnavailableLinkColor;
-  }
-
   static ThreadMarkdownTextTransformer? maybeMarkdownTextTransformerOf(BuildContext context) {
     return maybeOf(context)?.markdownTextTransformer;
-  }
-
-  static ThreadMessageOptionsBuilder? maybeMessageOptionsBuilderOf(BuildContext context) {
-    return maybeOf(context)?.messageOptionsBuilder;
-  }
-
-  static ThreadAttachmentOptionsBuilder? maybeAttachmentOptionsBuilderOf(BuildContext context) {
-    return maybeOf(context)?.attachmentOptionsBuilder;
   }
 
   @override
@@ -622,7 +567,6 @@ class ThreadTypographyOverride extends InheritedWidget {
         bottomAlignMessageActions != oldWidget.bottomAlignMessageActions ||
         threadFeedItemSpacing != oldWidget.threadFeedItemSpacing ||
         useThreadAttachmentStyle != oldWidget.useThreadAttachmentStyle ||
-        inferImageMimeTypeFromPath != oldWidget.inferImageMimeTypeFromPath ||
         normalizeParticipantDisplayName != oldWidget.normalizeParticipantDisplayName ||
         showInlineDisclosureCue != oldWidget.showInlineDisclosureCue ||
         useDesktopAuthorHeaderAtNarrowWidths != oldWidget.useDesktopAuthorHeaderAtNarrowWidths ||
@@ -663,7 +607,6 @@ class ThreadTypographyOverride extends InheritedWidget {
         inlineCodeHorizontalPadding != oldWidget.inlineCodeHorizontalPadding ||
         threadErrorSurfaceColor != oldWidget.threadErrorSurfaceColor ||
         threadErrorTextColor != oldWidget.threadErrorTextColor ||
-        threadErrorTextResolver != oldWidget.threadErrorTextResolver ||
         markdownHorizontalRuleColor != oldWidget.markdownHorizontalRuleColor ||
         markdownBlockquoteSideColor != oldWidget.markdownBlockquoteSideColor ||
         markdownBlockquoteBackgroundColor != oldWidget.markdownBlockquoteBackgroundColor ||
@@ -671,11 +614,7 @@ class ThreadTypographyOverride extends InheritedWidget {
         markdownHeadingPaddingResolver != oldWidget.markdownHeadingPaddingResolver ||
         markdownHeadingStyleResolver != oldWidget.markdownHeadingStyleResolver ||
         markdownTextTransformer != oldWidget.markdownTextTransformer ||
-        markdownLinkHandler != oldWidget.markdownLinkHandler ||
-        markdownLinkAvailabilityResolver != oldWidget.markdownLinkAvailabilityResolver ||
-        markdownUnavailableLinkColor != oldWidget.markdownUnavailableLinkColor ||
-        messageOptionsBuilder != oldWidget.messageOptionsBuilder ||
-        attachmentOptionsBuilder != oldWidget.attachmentOptionsBuilder;
+        markdownLinkHandler != oldWidget.markdownLinkHandler;
   }
 }
 
