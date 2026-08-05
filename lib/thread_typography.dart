@@ -36,6 +36,8 @@ typedef ThreadAttachmentOptionsBuilder =
       required VoidCallback onSaveCopyAs,
       required ValueChanged<bool> onMenuOpenChanged,
     });
+typedef ThreadGeneratedImageActionsBuilder =
+    Widget Function(BuildContext context, {required VoidCallback onSaveCopy, required VoidCallback onCopyPrompt});
 
 class ThreadTypographyOverride extends InheritedWidget {
   const ThreadTypographyOverride({
@@ -107,6 +109,7 @@ class ThreadTypographyOverride extends InheritedWidget {
     this.markdownLinkHandler,
     this.messageOptionsBuilder,
     this.attachmentOptionsBuilder,
+    this.generatedImageActionsBuilder,
   });
 
   final String? textFontFamily;
@@ -175,6 +178,7 @@ class ThreadTypographyOverride extends InheritedWidget {
   final ThreadMarkdownLinkHandler? markdownLinkHandler;
   final ThreadMessageOptionsBuilder? messageOptionsBuilder;
   final ThreadAttachmentOptionsBuilder? attachmentOptionsBuilder;
+  final ThreadGeneratedImageActionsBuilder? generatedImageActionsBuilder;
 
   static ThreadTypographyOverride? maybeOf(BuildContext context) {
     return context.dependOnInheritedWidgetOfExactType<ThreadTypographyOverride>();
@@ -444,6 +448,10 @@ class ThreadTypographyOverride extends InheritedWidget {
     return maybeOf(context)?.attachmentOptionsBuilder;
   }
 
+  static ThreadGeneratedImageActionsBuilder? maybeGeneratedImageActionsBuilderOf(BuildContext context) {
+    return maybeOf(context)?.generatedImageActionsBuilder;
+  }
+
   @override
   bool updateShouldNotify(ThreadTypographyOverride oldWidget) {
     return textFontFamily != oldWidget.textFontFamily ||
@@ -509,7 +517,8 @@ class ThreadTypographyOverride extends InheritedWidget {
         markdownTextTransformer != oldWidget.markdownTextTransformer ||
         markdownLinkHandler != oldWidget.markdownLinkHandler ||
         messageOptionsBuilder != oldWidget.messageOptionsBuilder ||
-        attachmentOptionsBuilder != oldWidget.attachmentOptionsBuilder;
+        attachmentOptionsBuilder != oldWidget.attachmentOptionsBuilder ||
+        generatedImageActionsBuilder != oldWidget.generatedImageActionsBuilder;
   }
 }
 

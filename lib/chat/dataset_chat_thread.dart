@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 import 'package:meshagent_agents/meshagent_agents.dart'
     show
         ToolkitCapabilities,
@@ -2465,7 +2466,33 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         messagesById[messageKey] = existing == null ? message : _mergeDuplicateDatasetThreadMessage(existing, message);
       }
     }
-    return messagesById.values.toList(growable: false);
+    final messages = messagesById.values.toList(growable: false);
+    final lastUserPromptByTurnId = <String, String>{};
+    String? lastUserPrompt;
+    for (var index = 0; index < messages.length; index += 1) {
+      final message = messages[index];
+      final text = message.text.trim();
+      if (message.role == 'user' && message.kind == 'message' && text.isNotEmpty) {
+        lastUserPrompt = text;
+        final turnId = message.turnId?.trim();
+        if (turnId != null && turnId.isNotEmpty) {
+          lastUserPromptByTurnId[turnId] = text;
+        }
+        continue;
+      }
+
+      final image = message.image;
+      if (image == null || image.sourcePrompt?.trim().isNotEmpty == true) {
+        continue;
+      }
+      final turnId = message.turnId?.trim();
+      final correlatedPrompt = turnId == null || turnId.isEmpty ? lastUserPrompt : lastUserPromptByTurnId[turnId] ?? lastUserPrompt;
+      if (correlatedPrompt == null || correlatedPrompt.isEmpty) {
+        continue;
+      }
+      messages[index] = message.copyWith(image: image.copyWith(sourcePrompt: correlatedPrompt));
+    }
+    return messages;
   }
 
   List<DatasetChatDebugRow> _debugRows() {
@@ -3404,6 +3431,18 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         : widget.onGeneratedImageOpen == null
         ? (imageInitialIndex == -1 ? null : () => _openThreadImageViewer(context, images: feedImages, initialIndex: imageInitialIndex))
         : () => widget.onGeneratedImageOpen!(message.image!);
+    final generatedImage = message.image;
+    final generatedImagePrompt = generatedImage?.sourcePrompt?.trim().isNotEmpty == true
+        ? generatedImage!.sourcePrompt!.trim()
+        : generatedImage?.prompt?.trim();
+    final generatedImageActionsBuilder = ThreadTypographyOverride.maybeGeneratedImageActionsBuilderOf(context);
+    final showGeneratedImageActions =
+        generatedImage != null &&
+        generatedImagePrompt != null &&
+        generatedImagePrompt.isNotEmpty &&
+        _isCompletedImageGenerationStatus(generatedImage.status) &&
+        widget.onGeneratedImageSave != null &&
+        generatedImageActionsBuilder != null;
 
     return ChatThreadMessageView(
       key: ValueKey(message.id),
@@ -3430,6 +3469,12 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                 onOpenFullscreen: generatedImageOpen,
                 onSaveAs: widget.onGeneratedImageSave == null ? null : () => widget.onGeneratedImageSave!(context, message.image!),
               ),
+        if (showGeneratedImageActions)
+          generatedImageActionsBuilder(
+            context,
+            onSaveCopy: () => unawaited(Future<void>.sync(() => widget.onGeneratedImageSave!(context, generatedImage))),
+            onCopyPrompt: () => unawaited(Clipboard.setData(ClipboardData(text: generatedImagePrompt))),
+          ),
       ],
     );
   }
@@ -4238,6 +4283,24 @@ class _DatasetThreadMessage {
   final String? authorName;
   final String? phase;
   final String? turnId;
+
+  _DatasetThreadMessage copyWith({DatasetThreadImage? image}) {
+    return _DatasetThreadMessage(
+      id: id,
+      kind: kind,
+      role: role,
+      text: text,
+      attachments: attachments,
+      createdAt: createdAt,
+      image: image ?? this.image,
+      toolCallEntry: toolCallEntry,
+      expandedToolCallEntry: expandedToolCallEntry,
+      diffPreviewBlocks: diffPreviewBlocks,
+      authorName: authorName,
+      phase: phase,
+      turnId: turnId,
+    );
+  }
 }
 
 class _DatasetThreadAttachment {
@@ -4715,6 +4778,21 @@ class DatasetThreadImage {
   final double? height;
   final String? sourcePrompt;
   final String? prompt;
+
+  DatasetThreadImage copyWith({String? sourcePrompt}) {
+    return DatasetThreadImage(
+      generationId: generationId,
+      uri: uri,
+      imageId: imageId,
+      mimeType: mimeType,
+      status: status,
+      statusDetail: statusDetail,
+      width: width,
+      height: height,
+      sourcePrompt: sourcePrompt ?? this.sourcePrompt,
+      prompt: prompt,
+    );
+  }
 }
 
 int _compareDatasetThreadRows(Map<String, Object?> left, Map<String, Object?> right) {
@@ -6447,6 +6525,10 @@ bool _isImageGenerationFailedStatus(String? status) {
 bool _isTerminalImageGenerationStatus(String? status) {
   final normalized = _normalizedImageGenerationStatus(status);
   return normalized == 'completed' || _isImageGenerationFailedStatus(normalized);
+}
+
+bool _isCompletedImageGenerationStatus(String? status) {
+  return _normalizedImageGenerationStatus(status) == 'completed';
 }
 
 String? _normalizedImageGenerationStatus(String? status) {

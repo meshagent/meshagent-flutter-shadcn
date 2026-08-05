@@ -10,6 +10,7 @@ import 'package:meshagent_agents/meshagent_agents.dart' as agent_sessions;
 import 'package:meshagent_flutter_shadcn/chat/chat.dart';
 import 'package:meshagent_flutter_shadcn/chat/dataset_chat_thread.dart';
 import 'package:meshagent_flutter_shadcn/chat/new_chat_thread.dart';
+import 'package:meshagent_flutter_shadcn/thread_typography.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 class _FakeManagedAgentChatClient extends agent_sessions.BaseChatClient {
@@ -365,6 +366,165 @@ void main() {
     final finalDebugRows = debugRows.last;
     expect(finalDebugRows.map((row) => row.type), contains(agent_sessions.agentImageGenerationCompletedType));
     expect(find.byKey(const Key('rendered-generated-image')), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets('live generated image correlates the source user prompt', (tester) async {
+    final chatClient = _FakeManagedAgentChatClient();
+    final changedImages = <DatasetThreadImage>[];
+    addTearDown(chatClient.stop);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: DatasetChatThread(
+            chatClient: chatClient,
+            path: 'thread-live-image-prompt',
+            generatedImageAttachmentRenderer: (context, image, onOpenFullscreen) => const Text('live image'),
+            onGeneratedImageChanged: changedImages.add,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    chatClient.emit(
+      agent_sessions.TurnStart(
+        threadId: 'thread-live-image-prompt',
+        messageId: 'user-message-1',
+        senderName: 'jesse.ezell',
+        content: agent_sessions.agentInputContent(text: 'Create an image of a cat in a library', attachments: const []),
+      ),
+    );
+    chatClient.emit(
+      agent_sessions.TurnStarted(
+        threadId: 'thread-live-image-prompt',
+        turnId: 'turn-1',
+        sourceMessageId: 'user-message-1',
+        messageId: 'turn-started-1',
+      ),
+    );
+    chatClient.emit(
+      agent_sessions.AgentImageGenerationCompleted(
+        threadId: 'thread-live-image-prompt',
+        turnId: 'turn-1',
+        itemId: 'image-1',
+        messageId: 'image-completed-1',
+        images: const [agent_sessions.AgentGeneratedImage(uri: 'data:image/png;base64,cG5n', mimeType: 'image/png', status: 'completed')],
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('live image'), findsOneWidget);
+    expect(changedImages.last.sourcePrompt, 'Create an image of a cat in a library');
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets('replayed generated images correlate distinct prompts and expose completion actions', (tester) async {
+    final savedPrompts = <String>[];
+    final changedImages = <DatasetThreadImage>[];
+    final clipboardWrites = <MethodCall>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') {
+        clipboardWrites.add(call);
+      }
+      return null;
+    });
+    addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
+
+    final rows = <Map<String, Object?>>[
+      {
+        'item_id': 'user-1',
+        'turn_id': 'turn-1',
+        'sequence': 1,
+        'timestamp': '2026-08-05T12:00:00Z',
+        'data': {'kind': 'message', 'role': 'user', 'text': 'Create an image of a red fox in snow'},
+      },
+      {
+        'item_id': 'image-1',
+        'turn_id': 'turn-1',
+        'sequence': 2,
+        'timestamp': '2026-08-05T12:00:01Z',
+        'data': {
+          'kind': 'image_generation',
+          'status': 'completed',
+          'message': {
+            'images': [
+              {'uri': 'data:image/png;base64,cG5nMQ==', 'mime_type': 'image/png', 'status': 'completed'},
+            ],
+          },
+        },
+      },
+      {
+        'item_id': 'user-2',
+        'turn_id': 'turn-2',
+        'sequence': 3,
+        'timestamp': '2026-08-05T12:01:00Z',
+        'data': {'kind': 'message', 'role': 'user', 'text': 'Create an image of a blue whale at sunset'},
+      },
+      {
+        'item_id': 'image-2',
+        'turn_id': 'turn-2',
+        'sequence': 4,
+        'timestamp': '2026-08-05T12:01:01Z',
+        'data': {
+          'kind': 'image_generation',
+          'status': 'completed',
+          'message': {
+            'images': [
+              {'uri': 'data:image/png;base64,cG5nMg==', 'mime_type': 'image/png', 'status': 'completed'},
+            ],
+          },
+        },
+      },
+    ];
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: ThreadTypographyOverride(
+          generatedImageActionsBuilder: (context, {required onSaveCopy, required onCopyPrompt}) => Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextButton(onPressed: onSaveCopy, child: const Text('Save a copy')),
+              TextButton(onPressed: onCopyPrompt, child: const Text('Copy prompt')),
+            ],
+          ),
+          child: Scaffold(
+            body: DatasetChatThread(
+              path: 'dataset://threads/replay-images',
+              rowsLoader: ({required namespace, required table}) => Stream.value(rows),
+              generatedImageAttachmentRenderer: (context, image, onOpenFullscreen) => Text('image:${image.generationId}'),
+              onGeneratedImageChanged: changedImages.add,
+              onGeneratedImageSave: (context, image) => savedPrompts.add(image.sourcePrompt!),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      changedImages.map((image) => image.sourcePrompt),
+      containsAll(<String>['Create an image of a red fox in snow', 'Create an image of a blue whale at sunset']),
+    );
+    expect(find.text('Save a copy'), findsNWidgets(2));
+    expect(find.text('Copy prompt'), findsNWidgets(2));
+
+    final firstImageMessage = find.ancestor(of: find.text('image:image-1'), matching: find.byType(ChatThreadMessageView));
+    final secondImageMessage = find.ancestor(of: find.text('image:image-2'), matching: find.byType(ChatThreadMessageView));
+    await tester.tap(find.descendant(of: firstImageMessage, matching: find.text('Save a copy')));
+    await tester.pump();
+    expect(savedPrompts, ['Create an image of a red fox in snow']);
+
+    await tester.tap(find.descendant(of: secondImageMessage, matching: find.text('Copy prompt')));
+    await tester.pump();
+    expect(clipboardWrites, hasLength(1));
+    expect((clipboardWrites.single.arguments as Map<Object?, Object?>)['text'], 'Create an image of a blue whale at sunset');
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 2));
