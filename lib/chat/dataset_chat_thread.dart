@@ -70,6 +70,7 @@ import 'package:meshagent_flutter_shadcn/thread_typography.dart';
 import 'package:mime/mime.dart';
 import 'package:pdfrx/pdfrx.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 
 import 'chat.dart';
@@ -87,6 +88,9 @@ typedef DatasetChatRowsLoader = Stream<List<Map<String, Object?>>> Function({req
 typedef DatasetChatFileDropHandler = Future<void> Function(String name, Stream<Uint8List> dataStream, int? size);
 typedef DatasetChatGeneratedImageAttachmentRenderer =
     Widget Function(BuildContext context, DatasetThreadImage image, VoidCallback? onOpenFullscreen);
+typedef DatasetChatGeneratedImageOpenHandler = void Function(DatasetThreadImage image);
+typedef DatasetChatGeneratedImageChangedHandler = void Function(DatasetThreadImage image);
+typedef DatasetChatGeneratedImageSaveHandler = FutureOr<void> Function(BuildContext context, DatasetThreadImage image);
 typedef DatasetChatImageGalleryBuilder =
     Widget Function(BuildContext context, List<ChatThreadFeedImage> images, int initialIndex, VoidCallback onClose);
 
@@ -526,6 +530,11 @@ class DatasetChatThread extends StatefulWidget {
     this.openFile,
     this.attachmentRenderer,
     this.attachmentPathResolver,
+    this.attachmentAvailabilityResolver,
+    this.attachmentUnavailableBuilder,
+    this.onAttachmentUnavailable,
+    this.attachmentStorageRoom,
+    this.mobileStorageSaveSurfacePresenter,
     this.inlineAttachmentViewerPredicate,
     this.toolsBuilder,
     this.inputPlaceholder,
@@ -539,6 +548,9 @@ class DatasetChatThread extends StatefulWidget {
     this.localParticipant,
     this.localParticipantName,
     this.generatedImageAttachmentRenderer,
+    this.onGeneratedImageOpen,
+    this.onGeneratedImageChanged,
+    this.onGeneratedImageSave,
     this.imageGalleryBuilder,
     this.secretRequestHandler,
     this.onDebugRowsChanged,
@@ -560,6 +572,11 @@ class DatasetChatThread extends StatefulWidget {
   final FutureOr<void> Function(String path)? openFile;
   final DatasetChatAttachmentRenderer? attachmentRenderer;
   final ThreadAttachmentPathResolver? attachmentPathResolver;
+  final ThreadAttachmentAvailabilityResolver? attachmentAvailabilityResolver;
+  final ThreadAttachmentUnavailableBuilder? attachmentUnavailableBuilder;
+  final ThreadAttachmentUnavailableHandler? onAttachmentUnavailable;
+  final RoomClient? attachmentStorageRoom;
+  final ThreadStorageSaveSurfacePresenter? mobileStorageSaveSurfacePresenter;
   final DatasetChatInlineAttachmentViewerPredicate? inlineAttachmentViewerPredicate;
   final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
   final Widget? inputPlaceholder;
@@ -573,6 +590,9 @@ class DatasetChatThread extends StatefulWidget {
   final Participant? localParticipant;
   final String? localParticipantName;
   final DatasetChatGeneratedImageAttachmentRenderer? generatedImageAttachmentRenderer;
+  final DatasetChatGeneratedImageOpenHandler? onGeneratedImageOpen;
+  final DatasetChatGeneratedImageChangedHandler? onGeneratedImageChanged;
+  final DatasetChatGeneratedImageSaveHandler? onGeneratedImageSave;
   final DatasetChatImageGalleryBuilder? imageGalleryBuilder;
   final DatasetChatSecretRequestHandler? secretRequestHandler;
   final DatasetChatDebugRowsChanged? onDebugRowsChanged;
@@ -621,6 +641,10 @@ class RoomDatasetChatThread extends StatefulWidget {
     this.openFile,
     this.attachmentRenderer,
     this.attachmentPathResolver,
+    this.attachmentAvailabilityResolver,
+    this.attachmentUnavailableBuilder,
+    this.onAttachmentUnavailable,
+    this.mobileStorageSaveSurfacePresenter,
     this.inlineAttachmentViewerPredicate,
     this.toolsBuilder,
     this.inputPlaceholder,
@@ -632,6 +656,9 @@ class RoomDatasetChatThread extends StatefulWidget {
     this.modelController,
     this.toolCallRenderers,
     this.toolCallVisibilityPredicate,
+    this.onGeneratedImageOpen,
+    this.onGeneratedImageChanged,
+    this.onGeneratedImageSave,
     this.initialShowCompletedToolCalls = false,
     this.showUsageFooter = false,
   });
@@ -646,6 +673,10 @@ class RoomDatasetChatThread extends StatefulWidget {
   final FutureOr<void> Function(String path)? openFile;
   final DatasetChatAttachmentRenderer? attachmentRenderer;
   final ThreadAttachmentPathResolver? attachmentPathResolver;
+  final ThreadAttachmentAvailabilityResolver? attachmentAvailabilityResolver;
+  final ThreadAttachmentUnavailableBuilder? attachmentUnavailableBuilder;
+  final ThreadAttachmentUnavailableHandler? onAttachmentUnavailable;
+  final ThreadStorageSaveSurfacePresenter? mobileStorageSaveSurfacePresenter;
   final DatasetChatInlineAttachmentViewerPredicate? inlineAttachmentViewerPredicate;
   final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
   final Widget? inputPlaceholder;
@@ -657,11 +688,54 @@ class RoomDatasetChatThread extends StatefulWidget {
   final DatasetChatModelController? modelController;
   final ChatToolCallRendererRegistry? toolCallRenderers;
   final ChatToolCallVisibilityPredicate? toolCallVisibilityPredicate;
+  final DatasetChatGeneratedImageOpenHandler? onGeneratedImageOpen;
+  final DatasetChatGeneratedImageChangedHandler? onGeneratedImageChanged;
+  final DatasetChatGeneratedImageSaveHandler? onGeneratedImageSave;
   final bool initialShowCompletedToolCalls;
   final bool showUsageFooter;
 
   @override
   State<RoomDatasetChatThread> createState() => _RoomDatasetChatThreadState();
+}
+
+class _DatasetAttachmentAvailabilityGate extends StatefulWidget {
+  const _DatasetAttachmentAvailabilityGate({
+    super.key,
+    required this.path,
+    required this.resolver,
+    required this.unavailable,
+    required this.child,
+  });
+
+  final String path;
+  final ThreadAttachmentAvailabilityResolver resolver;
+  final Widget unavailable;
+  final Widget child;
+
+  @override
+  State<_DatasetAttachmentAvailabilityGate> createState() => _DatasetAttachmentAvailabilityGateState();
+}
+
+class _DatasetAttachmentAvailabilityGateState extends State<_DatasetAttachmentAvailabilityGate> {
+  late Future<ThreadAttachmentAvailability> _availability = widget.resolver(widget.path);
+
+  @override
+  void didUpdateWidget(covariant _DatasetAttachmentAvailabilityGate oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.path != widget.path || oldWidget.resolver != widget.resolver) {
+      _availability = widget.resolver(widget.path);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<ThreadAttachmentAvailability>(
+      future: _availability,
+      builder: (context, snapshot) {
+        return snapshot.data == ThreadAttachmentAvailability.unavailable ? widget.unavailable : widget.child;
+      },
+    );
+  }
 }
 
 class _RoomDatasetChatThreadState extends State<RoomDatasetChatThread> {
@@ -704,6 +778,7 @@ class _RoomDatasetChatThreadState extends State<RoomDatasetChatThread> {
 
   @override
   Widget build(BuildContext context) {
+    final useThreadAttachmentStyle = widget.onGeneratedImageOpen != null;
     return DatasetChatThread(
       key: widget.key,
       path: widget.path,
@@ -716,6 +791,11 @@ class _RoomDatasetChatThreadState extends State<RoomDatasetChatThread> {
       openFile: widget.openFile,
       attachmentRenderer: widget.attachmentRenderer ?? (context, path) => ChatThreadPreview(room: widget.room, path: path),
       attachmentPathResolver: widget.attachmentPathResolver,
+      attachmentAvailabilityResolver: widget.attachmentAvailabilityResolver,
+      attachmentUnavailableBuilder: widget.attachmentUnavailableBuilder,
+      onAttachmentUnavailable: widget.onAttachmentUnavailable,
+      attachmentStorageRoom: widget.room,
+      mobileStorageSaveSurfacePresenter: widget.mobileStorageSaveSurfacePresenter,
       inlineAttachmentViewerPredicate: widget.inlineAttachmentViewerPredicate,
       toolsBuilder: widget.toolsBuilder,
       inputPlaceholder: widget.inputPlaceholder,
@@ -738,9 +818,15 @@ class _RoomDatasetChatThreadState extends State<RoomDatasetChatThread> {
         statusDetail: image.statusDetail,
         widthPx: image.width,
         heightPx: image.height,
-        roundedCorners: false,
+        roundedCorners: useThreadAttachmentStyle,
+        useThreadAttachmentStyle: useThreadAttachmentStyle,
+        interactive: !useThreadAttachmentStyle || onOpenFullscreen != null,
         onOpenFullscreen: onOpenFullscreen,
+        onSaveAs: widget.onGeneratedImageSave == null ? null : () => widget.onGeneratedImageSave!(context, image),
       ),
+      onGeneratedImageOpen: widget.onGeneratedImageOpen,
+      onGeneratedImageChanged: widget.onGeneratedImageChanged,
+      onGeneratedImageSave: widget.onGeneratedImageSave,
       imageGalleryBuilder: (context, images, initialIndex, onClose) =>
           ChatThreadImageGalleryPage(room: widget.room, images: images, initialIndex: initialIndex, onClose: onClose),
       modelController: widget.modelController,
@@ -785,6 +871,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   final Map<agent_sessions.AgentMessageEvent, VoidCallback> _threadSessionMessageListeners =
       <agent_sessions.AgentMessageEvent, VoidCallback>{};
   final Map<agent_sessions.AgentMessageEvent, int> _consumedToolArgumentDeltaLengths = <agent_sessions.AgentMessageEvent, int>{};
+  final Map<String, int> _generatedImageChangeSignatures = <String, int>{};
   String? _lastDebugRowsSignature;
   final OverlayPortalController _imageViewerController = OverlayPortalController();
   LocalHistoryEntry? _imageViewerHistoryEntry;
@@ -880,6 +967,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     _rowsByItemId.clear();
     _agentRowsByItemId.clear();
     _agentDebugRowsByKey.clear();
+    _generatedImageChangeSignatures.clear();
     _bufferedAgentPayloads.clear();
     _liveTextContent.clear();
     _liveReasoningContent.clear();
@@ -2728,13 +2816,41 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   Widget _buildAttachmentWidget(BuildContext context, _DatasetThreadAttachment attachment, {required bool mine}) {
     final previewPath = _resolvedAttachmentPath(attachment.url);
     final displayName = _resolvedAttachmentDisplayName(attachment, previewPath);
+    final availabilityResolver = widget.attachmentAvailabilityResolver;
+    final unavailableBuilder = widget.attachmentUnavailableBuilder;
+    final available = _buildAvailableAttachmentWidget(context, attachment, mine: mine, previewPath: previewPath, displayName: displayName);
+    if (availabilityResolver == null || unavailableBuilder == null) {
+      return available;
+    }
+    return _DatasetAttachmentAvailabilityGate(
+      key: ValueKey('attachment-availability:$previewPath'),
+      path: previewPath,
+      resolver: availabilityResolver,
+      unavailable: unavailableBuilder(
+        context,
+        previewPath,
+        displayName,
+        () => unawaited(_notifyAttachmentUnavailable(context, previewPath, displayName)),
+      ),
+      child: available,
+    );
+  }
+
+  Widget _buildAvailableAttachmentWidget(
+    BuildContext context,
+    _DatasetThreadAttachment attachment, {
+    required bool mine,
+    required String previewPath,
+    required String displayName,
+  }) {
     final attachmentRenderer = widget.attachmentRenderer;
     final canOpen = widget.openFile != null || _isDataUrl(previewPath);
     if (attachmentRenderer != null) {
-      return GestureDetector(
+      final renderedAttachment = GestureDetector(
         onTap: canOpen ? () => unawaited(_openAttachment(context, attachment)) : null,
         child: attachmentRenderer.call(context, previewPath),
       );
+      return _buildAttachmentWithOptions(context, attachment: attachment, mine: mine, child: renderedAttachment);
     }
     final isInlineImage = previewPath.startsWith('data:image/');
     final card = ConstrainedBox(
@@ -2754,16 +2870,71 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ),
     );
     if (!canOpen) {
-      return card;
+      return _buildAttachmentWithOptions(context, attachment: attachment, mine: mine, child: card);
     }
-    return MouseRegion(
+    final renderedAttachment = MouseRegion(
       cursor: SystemMouseCursors.click,
       child: GestureDetector(onTap: () => unawaited(_openAttachment(context, attachment)), child: card),
+    );
+    return _buildAttachmentWithOptions(context, attachment: attachment, mine: mine, child: renderedAttachment);
+  }
+
+  Widget _buildAttachmentWithOptions(
+    BuildContext context, {
+    required _DatasetThreadAttachment attachment,
+    required bool mine,
+    required Widget child,
+  }) {
+    final room = widget.attachmentStorageRoom;
+    final optionsBuilder = ThreadTypographyOverride.maybeAttachmentOptionsBuilderOf(context);
+    final path = _resolvedAttachmentPath(attachment.url);
+    if (room == null || optionsBuilder == null || usesMobileChatContextLayout(context) || path.trim().isEmpty || _isDataUrl(path)) {
+      return child;
+    }
+    return ThreadAttachmentOptionsRail(
+      mine: mine,
+      menuBuilder: (context, onMenuOpenChanged) => optionsBuilder(
+        context,
+        mine: mine,
+        onOpen: () => unawaited(_openAttachment(context, attachment)),
+        onDownload: () => unawaited(_downloadAttachment(context, room, attachment, path)),
+        onSaveCopyAs: () => unawaited(_saveAttachmentCopy(context, room, attachment, path)),
+        onMenuOpenChanged: onMenuOpenChanged,
+      ),
+      child: child,
+    );
+  }
+
+  Future<void> _downloadAttachment(BuildContext context, RoomClient room, _DatasetThreadAttachment attachment, String path) async {
+    if (!await _ensureAttachmentAvailable(context, attachment, path)) {
+      return;
+    }
+    final url = await room.storage.downloadUrl(path);
+    await launchUrl(Uri.parse(url));
+  }
+
+  Future<void> _saveAttachmentCopy(BuildContext context, RoomClient room, _DatasetThreadAttachment attachment, String path) async {
+    if (!await _ensureAttachmentAvailable(context, attachment, path) || !context.mounted) {
+      return;
+    }
+    await showThreadStorageSaveSurface(
+      context,
+      room: room,
+      title: 'Save a copy as...',
+      suggestedFileName: _inlineAttachmentDisplayName(path),
+      fileNameLabel: 'Enter a name for your file',
+      contentType: ThreadStorageSaveContentType.attachment,
+      initialFolderPath: _inlineAttachmentParentPath(path),
+      mobilePresenter: widget.mobileStorageSaveSurfacePresenter,
+      loadContent: () => room.storage.download(path),
     );
   }
 
   Future<void> _openAttachment(BuildContext context, _DatasetThreadAttachment attachment) async {
     final previewPath = _resolvedAttachmentPath(attachment.url);
+    if (!await _ensureAttachmentAvailable(context, attachment, previewPath) || !context.mounted) {
+      return;
+    }
     if (datasetChatShouldShowInlineAttachmentViewer(previewPath, predicate: widget.inlineAttachmentViewerPredicate)) {
       await _showInlineAttachmentViewer(
         context,
@@ -2775,6 +2946,28 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (openFile != null) {
       await openFile(previewPath);
     }
+  }
+
+  Future<bool> _ensureAttachmentAvailable(BuildContext context, _DatasetThreadAttachment attachment, String path) async {
+    final resolver = widget.attachmentAvailabilityResolver;
+    if (resolver == null) {
+      return true;
+    }
+    try {
+      if (await resolver(path) != ThreadAttachmentAvailability.unavailable) {
+        return true;
+      }
+    } catch (_) {
+      return true;
+    }
+    if (context.mounted) {
+      await _notifyAttachmentUnavailable(context, path, _resolvedAttachmentDisplayName(attachment, path));
+    }
+    return false;
+  }
+
+  Future<void> _notifyAttachmentUnavailable(BuildContext context, String path, String displayName) async {
+    await widget.onAttachmentUnavailable?.call(context, path, displayName);
   }
 
   Future<void> _showInlineAttachmentViewer(BuildContext context, _DatasetThreadAttachment attachment) {
@@ -3097,6 +3290,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     required List<ChatThreadFeedImage> feedImages,
     required bool shouldShowParticipantHeader,
   }) {
+    if (message.image != null) {
+      _scheduleGeneratedImageChanged(message);
+    }
     final theme = ShadTheme.of(context);
     if (message.kind != 'message') {
       if (message.kind == 'tool_call') {
@@ -3203,6 +3399,11 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             (authorName == null && message.role == 'user'));
     final imageAttachmentId = message.id;
     final imageInitialIndex = feedImages.indexWhere((entry) => entry.attachmentElementId == imageAttachmentId);
+    final generatedImageOpen = message.image == null
+        ? null
+        : widget.onGeneratedImageOpen == null
+        ? (imageInitialIndex == -1 ? null : () => _openThreadImageViewer(context, images: feedImages, initialIndex: imageInitialIndex))
+        : () => widget.onGeneratedImageOpen!(message.image!);
 
     return ChatThreadMessageView(
       key: ValueKey(message.id),
@@ -3216,11 +3417,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       attachmentWidgets: [
         for (final attachment in message.attachments) _buildAttachmentWidget(context, attachment, mine: mine),
         if (message.image != null)
-          widget.generatedImageAttachmentRenderer?.call(
-                context,
-                message.image!,
-                imageInitialIndex == -1 ? null : () => _openThreadImageViewer(context, images: feedImages, initialIndex: imageInitialIndex),
-              ) ??
+          widget.generatedImageAttachmentRenderer?.call(context, message.image!, generatedImageOpen) ??
               ChatThreadImageAttachment(
                 imageId: message.image!.imageId,
                 imageUri: message.image!.uri,
@@ -3229,12 +3426,40 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                 statusDetail: message.image!.statusDetail,
                 widthPx: message.image!.width,
                 heightPx: message.image!.height,
-                onOpenFullscreen: imageInitialIndex == -1
-                    ? null
-                    : () => _openThreadImageViewer(context, images: feedImages, initialIndex: imageInitialIndex),
+                useThreadAttachmentStyle: widget.onGeneratedImageOpen != null,
+                onOpenFullscreen: generatedImageOpen,
+                onSaveAs: widget.onGeneratedImageSave == null ? null : () => widget.onGeneratedImageSave!(context, message.image!),
               ),
       ],
     );
+  }
+
+  void _scheduleGeneratedImageChanged(_DatasetThreadMessage message) {
+    final callback = widget.onGeneratedImageChanged;
+    final image = message.image;
+    if (callback == null || image == null) {
+      return;
+    }
+    final signature = Object.hash(
+      image.uri,
+      image.imageId,
+      image.mimeType,
+      image.status,
+      image.statusDetail,
+      image.width,
+      image.height,
+      image.sourcePrompt,
+      image.prompt,
+    );
+    if (_generatedImageChangeSignatures[message.id] == signature) {
+      return;
+    }
+    _generatedImageChangeSignatures[message.id] = signature;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _generatedImageChangeSignatures[message.id] == signature) {
+        callback(image);
+      }
+    });
   }
 
   String? _datasetMessageParticipantKey(_DatasetThreadMessage message) {
@@ -4467,8 +4692,20 @@ bool _datasetThreadMessageReconcilesLiveMessage({
 }
 
 class DatasetThreadImage {
-  const DatasetThreadImage({this.uri, this.imageId, this.mimeType, this.status, this.statusDetail, this.width, this.height});
+  const DatasetThreadImage({
+    this.generationId,
+    this.uri,
+    this.imageId,
+    this.mimeType,
+    this.status,
+    this.statusDetail,
+    this.width,
+    this.height,
+    this.sourcePrompt,
+    this.prompt,
+  });
 
+  final String? generationId;
   final String? uri;
   final String? imageId;
   final String? mimeType;
@@ -4476,6 +4713,8 @@ class DatasetThreadImage {
   final String? statusDetail;
   final double? width;
   final double? height;
+  final String? sourcePrompt;
+  final String? prompt;
 }
 
 int _compareDatasetThreadRows(Map<String, Object?> left, Map<String, Object?> right) {
@@ -4805,6 +5044,7 @@ _DatasetThreadMessage? _messageForRow(Map<String, Object?> row) {
       );
     case 'image_generation':
       final message = _mapValue(data['message']);
+      final arguments = _mapValue(data['arguments']) ?? _mapValue(message?['arguments']);
       final image = _firstGeneratedImage(message);
       final dimensions = _imageGenerationDimensions(data: data, message: message, image: image);
       final imageUri = _stringValue(image?['uri']);
@@ -4820,6 +5060,7 @@ _DatasetThreadMessage? _messageForRow(Map<String, Object?> row) {
         phase: phase,
         turnId: turnId,
         image: DatasetThreadImage(
+          generationId: itemId,
           uri: imageUri,
           imageId: imageId,
           mimeType: _stringValue(image?['mime_type']),
@@ -4830,6 +5071,8 @@ _DatasetThreadMessage? _messageForRow(Map<String, Object?> row) {
           statusDetail: _stringValue(image?['status_detail']),
           width: dimensions.$1,
           height: dimensions.$2,
+          sourcePrompt: _generatedImageSourcePrompt(arguments),
+          prompt: _generatedImagePrompt(arguments),
         ),
       );
     case 'reasoning':
@@ -5206,6 +5449,7 @@ _DatasetThreadMessage? _messageForAgentPayload(Map<String, Object?> row, Map<Str
     case agentImageGenerationPartialType:
     case agentImageGenerationCompletedType:
     case agentImageGenerationFailedType:
+      final arguments = _mapValue(payload['arguments']);
       final image = _firstGeneratedImage(payload);
       final dimensions = _imageGenerationDimensions(data: const <String, Object?>{}, message: payload, image: image);
       final imageUri = _stringValue(image?['uri']);
@@ -5219,6 +5463,7 @@ _DatasetThreadMessage? _messageForAgentPayload(Map<String, Object?> row, Map<Str
         createdAt: createdAt,
         turnId: turnId,
         image: DatasetThreadImage(
+          generationId: itemId,
           uri: imageUri,
           imageId: _imageIdFromDatasetUri(imageUri),
           mimeType: _stringValue(image?['mime_type']),
@@ -5226,6 +5471,8 @@ _DatasetThreadMessage? _messageForAgentPayload(Map<String, Object?> row, Map<Str
           statusDetail: _stringValue(image?['status_detail']),
           width: dimensions.$1,
           height: dimensions.$2,
+          sourcePrompt: _generatedImageSourcePrompt(arguments),
+          prompt: _generatedImagePrompt(arguments),
         ),
       );
     case agentToolCallStartedType:
@@ -5375,6 +5622,7 @@ _DatasetThreadMessage _messageForToolCallEndRow({
   final generatedImage = _datasetImageGenerationToolResult(
     toolkit: toolkit,
     tool: tool,
+    arguments: state?.arguments ?? _mapValue(payload?['arguments']),
     result: payload?['result'],
     error: payload?['error'],
   );
@@ -5460,6 +5708,7 @@ _DatasetThreadMessage _messageForToolCallEndRow({
 DatasetThreadImage? _datasetImageGenerationToolResult({
   required String toolkit,
   required String tool,
+  Map<String, Object?>? arguments,
   required Object? result,
   required Object? error,
 }) {
@@ -5475,7 +5724,17 @@ DatasetThreadImage? _datasetImageGenerationToolResult({
     imageId: savedImage.$1,
     mimeType: savedImage.$2,
     status: 'completed',
+    sourcePrompt: _generatedImageSourcePrompt(arguments),
+    prompt: _generatedImagePrompt(arguments),
   );
+}
+
+String? _generatedImageSourcePrompt(Map<String, Object?>? arguments) {
+  return _stringValue(arguments?['prompt']);
+}
+
+String? _generatedImagePrompt(Map<String, Object?>? arguments) {
+  return _stringValue(arguments?['revised_prompt']) ?? _generatedImageSourcePrompt(arguments);
 }
 
 @visibleForTesting
@@ -5926,6 +6185,12 @@ String _inlineAttachmentDisplayName(String path) {
   final header = commaIndex == -1 ? trimmed.substring(5) : trimmed.substring(5, commaIndex);
   final mimeType = header.split(';').firstOrNull?.trim();
   return mimeType == null || mimeType.isEmpty ? 'Inline attachment' : 'Inline attachment ($mimeType)';
+}
+
+String _inlineAttachmentParentPath(String path) {
+  final normalized = path.trim().replaceAll(RegExp(r'/+$'), '');
+  final slash = normalized.lastIndexOf('/');
+  return slash <= 0 ? '' : normalized.substring(0, slash);
 }
 
 String _comparableThreadAttachmentPath(String path) {

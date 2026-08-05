@@ -19,6 +19,23 @@ typedef ThreadMarkdownHeadingPaddingResolver = EdgeInsets? Function(String tag);
 typedef ThreadMarkdownHeadingStyleResolver = TextStyle? Function(String tag, TextStyle defaultStyle);
 typedef ThreadMarkdownLinkHandler = bool Function(BuildContext context, String url);
 typedef ThreadMarkdownTextTransformer = String Function(String markdown);
+typedef ThreadMessageOptionsBuilder =
+    Widget Function(
+      BuildContext context, {
+      required String text,
+      required VoidCallback onCopy,
+      required VoidCallback? onSaveCopyAs,
+      required ValueChanged<bool> onMenuOpenChanged,
+    });
+typedef ThreadAttachmentOptionsBuilder =
+    Widget Function(
+      BuildContext context, {
+      required bool mine,
+      required VoidCallback onOpen,
+      required VoidCallback onDownload,
+      required VoidCallback onSaveCopyAs,
+      required ValueChanged<bool> onMenuOpenChanged,
+    });
 
 class ThreadTypographyOverride extends InheritedWidget {
   const ThreadTypographyOverride({
@@ -88,6 +105,8 @@ class ThreadTypographyOverride extends InheritedWidget {
     this.markdownHeadingStyleResolver,
     this.markdownTextTransformer,
     this.markdownLinkHandler,
+    this.messageOptionsBuilder,
+    this.attachmentOptionsBuilder,
   });
 
   final String? textFontFamily;
@@ -154,6 +173,8 @@ class ThreadTypographyOverride extends InheritedWidget {
   final ThreadMarkdownHeadingStyleResolver? markdownHeadingStyleResolver;
   final ThreadMarkdownTextTransformer? markdownTextTransformer;
   final ThreadMarkdownLinkHandler? markdownLinkHandler;
+  final ThreadMessageOptionsBuilder? messageOptionsBuilder;
+  final ThreadAttachmentOptionsBuilder? attachmentOptionsBuilder;
 
   static ThreadTypographyOverride? maybeOf(BuildContext context) {
     return context.dependOnInheritedWidgetOfExactType<ThreadTypographyOverride>();
@@ -415,6 +436,14 @@ class ThreadTypographyOverride extends InheritedWidget {
     return maybeOf(context)?.markdownTextTransformer;
   }
 
+  static ThreadMessageOptionsBuilder? maybeMessageOptionsBuilderOf(BuildContext context) {
+    return maybeOf(context)?.messageOptionsBuilder;
+  }
+
+  static ThreadAttachmentOptionsBuilder? maybeAttachmentOptionsBuilderOf(BuildContext context) {
+    return maybeOf(context)?.attachmentOptionsBuilder;
+  }
+
   @override
   bool updateShouldNotify(ThreadTypographyOverride oldWidget) {
     return textFontFamily != oldWidget.textFontFamily ||
@@ -478,7 +507,9 @@ class ThreadTypographyOverride extends InheritedWidget {
         markdownHeadingPaddingResolver != oldWidget.markdownHeadingPaddingResolver ||
         markdownHeadingStyleResolver != oldWidget.markdownHeadingStyleResolver ||
         markdownTextTransformer != oldWidget.markdownTextTransformer ||
-        markdownLinkHandler != oldWidget.markdownLinkHandler;
+        markdownLinkHandler != oldWidget.markdownLinkHandler ||
+        messageOptionsBuilder != oldWidget.messageOptionsBuilder ||
+        attachmentOptionsBuilder != oldWidget.attachmentOptionsBuilder;
   }
 }
 

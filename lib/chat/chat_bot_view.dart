@@ -56,6 +56,9 @@ class ChatBotView extends StatefulWidget {
     this.fileInThreadBuilder,
     this.pendingFileInThreadBuilder,
     this.attachmentPathResolver,
+    this.attachmentAvailabilityResolver,
+    this.attachmentUnavailableBuilder,
+    this.onAttachmentUnavailable,
     this.datasetInlineAttachmentViewerPredicate,
     this.chatInputBoxBuilder,
     this.customInputBuilder,
@@ -69,6 +72,9 @@ class ChatBotView extends StatefulWidget {
     this.inputContextMenuBuilder,
     this.inputOnPressedOutside,
     this.mobileStorageSaveSurfacePresenter,
+    this.onGeneratedImageOpen,
+    this.onGeneratedImageChanged,
+    this.onGeneratedImageSave,
     this.mobileUnderHeaderContentPadding,
     this.centerComposer = false,
     this.showCenteredComposerTitle = true,
@@ -113,6 +119,9 @@ class ChatBotView extends StatefulWidget {
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
   final Widget? Function(BuildContext context, String path)? pendingFileInThreadBuilder;
   final ThreadAttachmentPathResolver? attachmentPathResolver;
+  final ThreadAttachmentAvailabilityResolver? attachmentAvailabilityResolver;
+  final ThreadAttachmentUnavailableBuilder? attachmentUnavailableBuilder;
+  final ThreadAttachmentUnavailableHandler? onAttachmentUnavailable;
   final DatasetChatInlineAttachmentViewerPredicate? datasetInlineAttachmentViewerPredicate;
   final Widget Function(BuildContext context, Widget chatBox)? chatInputBoxBuilder;
   final ChatThreadCustomInputBuilder? customInputBuilder;
@@ -126,6 +135,9 @@ class ChatBotView extends StatefulWidget {
   final EditableTextContextMenuBuilder? inputContextMenuBuilder;
   final TapRegionCallback? inputOnPressedOutside;
   final ThreadStorageSaveSurfacePresenter? mobileStorageSaveSurfacePresenter;
+  final DatasetChatGeneratedImageOpenHandler? onGeneratedImageOpen;
+  final DatasetChatGeneratedImageChangedHandler? onGeneratedImageChanged;
+  final DatasetChatGeneratedImageSaveHandler? onGeneratedImageSave;
   final double? mobileUnderHeaderContentPadding;
   final bool centerComposer;
   final bool showCenteredComposerTitle;
@@ -283,6 +295,11 @@ class _ChatBotViewState extends State<ChatBotView> {
         fallback: (context, path) => ChatThreadPreview(room: widget.room, path: path),
       ),
       attachmentPathResolver: widget.attachmentPathResolver,
+      attachmentAvailabilityResolver: widget.attachmentAvailabilityResolver,
+      attachmentUnavailableBuilder: widget.attachmentUnavailableBuilder,
+      onAttachmentUnavailable: widget.onAttachmentUnavailable,
+      attachmentStorageRoom: widget.room,
+      mobileStorageSaveSurfacePresenter: widget.mobileStorageSaveSurfacePresenter,
       inlineAttachmentViewerPredicate: widget.datasetInlineAttachmentViewerPredicate,
       toolsBuilder: widget.toolsBuilder,
       inputPlaceholder: widget.inputPlaceholder,
@@ -302,9 +319,15 @@ class _ChatBotViewState extends State<ChatBotView> {
         statusDetail: image.statusDetail,
         widthPx: image.width,
         heightPx: image.height,
-        roundedCorners: false,
+        roundedCorners: widget.onGeneratedImageOpen != null,
+        useThreadAttachmentStyle: widget.onGeneratedImageOpen != null,
+        interactive: widget.onGeneratedImageOpen == null || onOpenFullscreen != null,
         onOpenFullscreen: onOpenFullscreen,
+        onSaveAs: widget.onGeneratedImageSave == null ? null : () => widget.onGeneratedImageSave!(context, image),
       ),
+      onGeneratedImageOpen: widget.onGeneratedImageOpen,
+      onGeneratedImageChanged: widget.onGeneratedImageChanged,
+      onGeneratedImageSave: widget.onGeneratedImageSave,
       imageGalleryBuilder: (context, images, initialIndex, onClose) =>
           ChatThreadImageGalleryPage(room: widget.room, images: images, initialIndex: initialIndex, onClose: onClose),
       modelController: modelController,
@@ -341,6 +364,13 @@ class _ChatBotViewState extends State<ChatBotView> {
           fallback: (context, path) => ChatThreadPreview(room: widget.room, path: path),
         ),
         attachmentPathResolver: widget.attachmentPathResolver,
+        attachmentAvailabilityResolver: widget.attachmentAvailabilityResolver,
+        attachmentUnavailableBuilder: widget.attachmentUnavailableBuilder,
+        onAttachmentUnavailable: widget.onAttachmentUnavailable,
+        mobileStorageSaveSurfacePresenter: widget.mobileStorageSaveSurfacePresenter,
+        onGeneratedImageOpen: widget.onGeneratedImageOpen,
+        onGeneratedImageChanged: widget.onGeneratedImageChanged,
+        onGeneratedImageSave: widget.onGeneratedImageSave,
         inlineAttachmentViewerPredicate: widget.datasetInlineAttachmentViewerPredicate,
         toolsBuilder: widget.toolsBuilder,
         inputPlaceholder: widget.inputPlaceholder,
