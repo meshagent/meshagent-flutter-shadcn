@@ -10,7 +10,6 @@ import 'package:meshagent_agents/meshagent_agents.dart' as agent_sessions;
 import 'package:meshagent_flutter_shadcn/chat/chat.dart';
 import 'package:meshagent_flutter_shadcn/chat/dataset_chat_thread.dart';
 import 'package:meshagent_flutter_shadcn/chat/new_chat_thread.dart';
-import 'package:meshagent_flutter_shadcn/thread_typography.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 class _FakeManagedAgentChatClient extends agent_sessions.BaseChatClient {
@@ -425,7 +424,7 @@ void main() {
     await tester.pump(const Duration(seconds: 2));
   });
 
-  testWidgets('replayed generated images correlate distinct prompts and expose completion actions', (tester) async {
+  testWidgets('replayed generated images expose completion links inside assistant bubbles', (tester) async {
     final savedPrompts = <String>[];
     final changedImages = <DatasetThreadImage>[];
     final clipboardWrites = <MethodCall>[];
@@ -461,16 +460,23 @@ void main() {
         },
       },
       {
+        'item_id': 'answer-1',
+        'turn_id': 'turn-1',
+        'sequence': 3,
+        'timestamp': '2026-08-05T12:00:02Z',
+        'data': {'kind': 'message', 'role': 'agent', 'phase': 'final_answer', 'text': 'Created the red fox image.'},
+      },
+      {
         'item_id': 'user-2',
         'turn_id': 'turn-2',
-        'sequence': 3,
+        'sequence': 4,
         'timestamp': '2026-08-05T12:01:00Z',
         'data': {'kind': 'message', 'role': 'user', 'text': 'Create an image of a blue whale at sunset'},
       },
       {
         'item_id': 'image-2',
         'turn_id': 'turn-2',
-        'sequence': 4,
+        'sequence': 5,
         'timestamp': '2026-08-05T12:01:01Z',
         'data': {
           'kind': 'image_generation',
@@ -482,26 +488,32 @@ void main() {
           },
         },
       },
+      {
+        'item_id': 'answer-2',
+        'turn_id': 'turn-2',
+        'sequence': 6,
+        'timestamp': '2026-08-05T12:01:02Z',
+        'data': {'kind': 'message', 'role': 'agent', 'phase': 'final_answer', 'text': 'Created the blue whale image.'},
+      },
     ];
 
     await tester.pumpWidget(
       ShadApp(
-        home: ThreadTypographyOverride(
-          generatedImageActionsBuilder: (context, {required onSaveCopy, required onCopyPrompt}) => Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextButton(onPressed: onSaveCopy, child: const Text('Save a copy')),
-              TextButton(onPressed: onCopyPrompt, child: const Text('Copy prompt')),
-            ],
-          ),
-          child: Scaffold(
-            body: DatasetChatThread(
-              path: 'dataset://threads/replay-images',
-              rowsLoader: ({required namespace, required table}) => Stream.value(rows),
-              generatedImageAttachmentRenderer: (context, image, onOpenFullscreen) => Text('image:${image.generationId}'),
-              onGeneratedImageChanged: changedImages.add,
-              onGeneratedImageSave: (context, image) => savedPrompts.add(image.sourcePrompt!),
-            ),
+        home: Scaffold(
+          body: DatasetChatThread(
+            path: 'dataset://threads/replay-images',
+            rowsLoader: ({required namespace, required table}) => Stream.value(rows),
+            generatedImageAttachmentRenderer: (context, image, onOpenFullscreen) => Text('image:${image.generationId}'),
+            onGeneratedImageChanged: changedImages.add,
+            onGeneratedImageSave: (context, image) => savedPrompts.add(image.sourcePrompt!),
+            generatedImageReadyText: '''
+Your image is ready. You can:
+
+- [Save a copy] to your files,
+- [Copy prompt] used.
+
+Or continue to refine it.''',
+            replaceGeneratedImageTurnFinalAnswer: true,
           ),
         ),
       ),
@@ -512,19 +524,32 @@ void main() {
       changedImages.map((image) => image.sourcePrompt),
       containsAll(<String>['Create an image of a red fox in snow', 'Create an image of a blue whale at sunset']),
     );
-    expect(find.text('Save a copy'), findsNWidgets(2));
-    expect(find.text('Copy prompt'), findsNWidgets(2));
+    expect(find.textContaining('Save a copy'), findsNWidgets(2));
+    expect(find.textContaining('Copy prompt'), findsNWidgets(2));
+    expect(find.textContaining('Created the red fox image.'), findsNothing);
+    expect(find.textContaining('Created the blue whale image.'), findsNothing);
+    expect(find.byType(TextButton), findsNothing);
 
-    final firstImageMessage = find.ancestor(of: find.text('image:image-1'), matching: find.byType(ChatThreadMessageView));
-    final secondImageMessage = find.ancestor(of: find.text('image:image-2'), matching: find.byType(ChatThreadMessageView));
-    await tester.tap(find.descendant(of: firstImageMessage, matching: find.text('Save a copy')));
+    final completionMessages = find.byWidgetPredicate(
+      (widget) =>
+          widget is ChatThreadMessageView &&
+          widget.text?.contains('meshagent-action://generated-image/save-copy') == true &&
+          widget.text?.contains('meshagent-action://generated-image/copy-prompt') == true,
+    );
+    expect(completionMessages, findsNWidgets(2));
+    final firstCompletion = tester.widget<ChatThreadMessageView>(completionMessages.first);
+    firstCompletion.markdownLinkHandler!(tester.element(completionMessages.first), 'meshagent-action://generated-image/save-copy');
     await tester.pump();
-    expect(savedPrompts, ['Create an image of a red fox in snow']);
+    expect(savedPrompts, hasLength(1));
 
-    await tester.tap(find.descendant(of: secondImageMessage, matching: find.text('Copy prompt')));
+    final secondCompletion = tester.widget<ChatThreadMessageView>(completionMessages.last);
+    secondCompletion.markdownLinkHandler!(tester.element(completionMessages.last), 'meshagent-action://generated-image/copy-prompt');
     await tester.pump();
     expect(clipboardWrites, hasLength(1));
-    expect((clipboardWrites.single.arguments as Map<Object?, Object?>)['text'], 'Create an image of a blue whale at sunset');
+    expect(
+      {savedPrompts.single, (clipboardWrites.single.arguments as Map<Object?, Object?>)['text']},
+      {'Create an image of a red fox in snow', 'Create an image of a blue whale at sunset'},
+    );
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 2));

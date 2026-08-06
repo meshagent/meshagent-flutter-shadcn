@@ -82,6 +82,8 @@ import 'tool_call_rendering.dart';
 import 'usage_footer_tooltip.dart';
 
 const double _datasetDiffPreviewHorizontalPadding = 16;
+const String _datasetGeneratedImageSaveCopyUrl = 'meshagent-action://generated-image/save-copy';
+const String _datasetGeneratedImageCopyPromptUrl = 'meshagent-action://generated-image/copy-prompt';
 
 typedef DatasetChatAttachmentRenderer = Widget Function(BuildContext context, String path);
 typedef DatasetChatInlineAttachmentViewerPredicate = bool Function(String path);
@@ -552,6 +554,8 @@ class DatasetChatThread extends StatefulWidget {
     this.onGeneratedImageOpen,
     this.onGeneratedImageChanged,
     this.onGeneratedImageSave,
+    this.generatedImageReadyText,
+    this.replaceGeneratedImageTurnFinalAnswer = false,
     this.imageGalleryBuilder,
     this.secretRequestHandler,
     this.onDebugRowsChanged,
@@ -594,6 +598,8 @@ class DatasetChatThread extends StatefulWidget {
   final DatasetChatGeneratedImageOpenHandler? onGeneratedImageOpen;
   final DatasetChatGeneratedImageChangedHandler? onGeneratedImageChanged;
   final DatasetChatGeneratedImageSaveHandler? onGeneratedImageSave;
+  final String? generatedImageReadyText;
+  final bool replaceGeneratedImageTurnFinalAnswer;
   final DatasetChatImageGalleryBuilder? imageGalleryBuilder;
   final DatasetChatSecretRequestHandler? secretRequestHandler;
   final DatasetChatDebugRowsChanged? onDebugRowsChanged;
@@ -660,6 +666,8 @@ class RoomDatasetChatThread extends StatefulWidget {
     this.onGeneratedImageOpen,
     this.onGeneratedImageChanged,
     this.onGeneratedImageSave,
+    this.generatedImageReadyText,
+    this.replaceGeneratedImageTurnFinalAnswer = false,
     this.initialShowCompletedToolCalls = false,
     this.showUsageFooter = false,
   });
@@ -692,6 +700,8 @@ class RoomDatasetChatThread extends StatefulWidget {
   final DatasetChatGeneratedImageOpenHandler? onGeneratedImageOpen;
   final DatasetChatGeneratedImageChangedHandler? onGeneratedImageChanged;
   final DatasetChatGeneratedImageSaveHandler? onGeneratedImageSave;
+  final String? generatedImageReadyText;
+  final bool replaceGeneratedImageTurnFinalAnswer;
   final bool initialShowCompletedToolCalls;
   final bool showUsageFooter;
 
@@ -828,6 +838,8 @@ class _RoomDatasetChatThreadState extends State<RoomDatasetChatThread> {
       onGeneratedImageOpen: widget.onGeneratedImageOpen,
       onGeneratedImageChanged: widget.onGeneratedImageChanged,
       onGeneratedImageSave: widget.onGeneratedImageSave,
+      generatedImageReadyText: widget.generatedImageReadyText,
+      replaceGeneratedImageTurnFinalAnswer: widget.replaceGeneratedImageTurnFinalAnswer,
       imageGalleryBuilder: (context, images, initialIndex, onClose) =>
           ChatThreadImageGalleryPage(room: widget.room, images: images, initialIndex: initialIndex, onClose: onClose),
       modelController: widget.modelController,
@@ -3431,18 +3443,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         : widget.onGeneratedImageOpen == null
         ? (imageInitialIndex == -1 ? null : () => _openThreadImageViewer(context, images: feedImages, initialIndex: imageInitialIndex))
         : () => widget.onGeneratedImageOpen!(message.image!);
-    final generatedImage = message.image;
-    final generatedImagePrompt = generatedImage?.sourcePrompt?.trim().isNotEmpty == true
-        ? generatedImage!.sourcePrompt!.trim()
-        : generatedImage?.prompt?.trim();
-    final generatedImageActionsBuilder = ThreadTypographyOverride.maybeGeneratedImageActionsBuilderOf(context);
-    final showGeneratedImageActions =
-        generatedImage != null &&
-        generatedImagePrompt != null &&
-        generatedImagePrompt.isNotEmpty &&
-        _isCompletedImageGenerationStatus(generatedImage.status) &&
-        widget.onGeneratedImageSave != null &&
-        generatedImageActionsBuilder != null;
+    final generatedImageActionTarget = message.generatedImageActionTarget;
 
     return ChatThreadMessageView(
       key: ValueKey(message.id),
@@ -3453,6 +3454,22 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       authorName: authorName ?? '',
       createdAt: message.createdAt,
       shouldShowHeader: shouldShowParticipantHeader,
+      markdownLinkHandler: generatedImageActionTarget == null
+          ? null
+          : (context, url) {
+              if (url == _datasetGeneratedImageSaveCopyUrl) {
+                widget.onGeneratedImageSave?.call(context, generatedImageActionTarget);
+                return true;
+              }
+              final prompt = generatedImageActionTarget.prompt?.trim().isNotEmpty == true
+                  ? generatedImageActionTarget.prompt!.trim()
+                  : generatedImageActionTarget.sourcePrompt?.trim();
+              if (url == _datasetGeneratedImageCopyPromptUrl && prompt != null && prompt.isNotEmpty) {
+                unawaited(Clipboard.setData(ClipboardData(text: prompt)));
+                return true;
+              }
+              return false;
+            },
       attachmentWidgets: [
         for (final attachment in message.attachments) _buildAttachmentWidget(context, attachment, mine: mine),
         if (message.image != null)
@@ -3469,12 +3486,6 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                 onOpenFullscreen: generatedImageOpen,
                 onSaveAs: widget.onGeneratedImageSave == null ? null : () => widget.onGeneratedImageSave!(context, message.image!),
               ),
-        if (showGeneratedImageActions)
-          generatedImageActionsBuilder(
-            context,
-            onSaveCopy: () => unawaited(Future<void>.sync(() => widget.onGeneratedImageSave!(context, generatedImage))),
-            onCopyPrompt: () => unawaited(Clipboard.setData(ClipboardData(text: generatedImagePrompt))),
-          ),
       ],
     );
   }
@@ -3595,9 +3606,18 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         ? messages
         : messages.where(_shouldIncludeFeedMessage).toList(growable: false);
     final items = <_DatasetThreadFeedItem>[];
+    final replacedFinalAnswerTurnIds = widget.replaceGeneratedImageTurnFinalAnswer
+        ? messages
+              .where((message) => message.image != null && _generatedImageReadyFeedMessage(message) != null)
+              .map((message) => message.turnId?.trim())
+              .whereType<String>()
+              .where((turnId) => turnId.isNotEmpty)
+              .toSet()
+        : const <String>{};
     var index = 0;
     while (index < visibleMessages.length) {
       final segmentEnd = _nextUserMessageIndex(visibleMessages, index + 1) ?? visibleMessages.length;
+      final finalAgentMessageIndex = _finalAgentMessageIndexForSegment(visibleMessages, index, segmentEnd);
       final detailIndexes = <int>{};
       _addDatasetThreadDetailIndexesForSegment(visibleMessages, index, segmentEnd, detailIndexes);
       final detailMessages = detailIndexes.toList(growable: false)..sort();
@@ -3605,7 +3625,14 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       var insertedDetailGroup = false;
       for (var segmentIndex = index; segmentIndex < segmentEnd; segmentIndex += 1) {
         if (!detailIndexes.contains(segmentIndex)) {
-          items.add(_DatasetThreadMessageFeedItem(visibleMessages[segmentIndex]));
+          final message = visibleMessages[segmentIndex];
+          if (message.image == null &&
+              message.role == 'agent' &&
+              (message.phase == 'final_answer' || segmentIndex == finalAgentMessageIndex) &&
+              replacedFinalAnswerTurnIds.contains(message.turnId?.trim())) {
+            continue;
+          }
+          items.add(_DatasetThreadMessageFeedItem(message));
           continue;
         }
         if (insertedDetailGroup || groupedMessages.isEmpty) {
@@ -3624,7 +3651,53 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       }
       index = segmentEnd;
     }
-    return items;
+    final resolvedItems = <_DatasetThreadFeedItem>[];
+    for (final item in items) {
+      resolvedItems.add(item);
+      if (item is! _DatasetThreadMessageFeedItem) {
+        continue;
+      }
+      final readyMessage = _generatedImageReadyFeedMessage(item.message);
+      if (readyMessage != null) {
+        resolvedItems.add(_DatasetThreadMessageFeedItem(readyMessage));
+      }
+    }
+    return resolvedItems;
+  }
+
+  _DatasetThreadMessage? _generatedImageReadyFeedMessage(_DatasetThreadMessage message) {
+    final image = message.image;
+    final readyText = widget.generatedImageReadyText?.trim();
+    if (image == null ||
+        readyText == null ||
+        readyText.isEmpty ||
+        widget.onGeneratedImageSave == null ||
+        !_isCompletedImageGenerationStatus(image.status)) {
+      return null;
+    }
+    final prompt = image.prompt?.trim().isNotEmpty == true ? image.prompt!.trim() : image.sourcePrompt?.trim();
+    var markdown = readyText.replaceFirstMapped(
+      RegExp(r'\[save a copy\]', caseSensitive: false),
+      (match) => '${match.group(0)}($_datasetGeneratedImageSaveCopyUrl)',
+    );
+    if (prompt != null && prompt.isNotEmpty) {
+      markdown = markdown.replaceFirstMapped(
+        RegExp(r'\[copy prompt\]', caseSensitive: false),
+        (match) => '${match.group(0)}($_datasetGeneratedImageCopyPromptUrl)',
+      );
+    }
+    return _DatasetThreadMessage(
+      id: '${message.id}:generated-image-ready',
+      kind: 'message',
+      role: 'agent',
+      text: markdown,
+      attachments: const <_DatasetThreadAttachment>[],
+      createdAt: message.createdAt.add(const Duration(microseconds: 1)),
+      authorName: message.authorName,
+      phase: 'final_answer',
+      turnId: message.turnId,
+      generatedImageActionTarget: image,
+    );
   }
 
   bool _shouldIncludeFeedMessage(_DatasetThreadMessage message) {
@@ -4267,6 +4340,7 @@ class _DatasetThreadMessage {
     this.authorName,
     this.phase,
     this.turnId,
+    this.generatedImageActionTarget,
   });
 
   final String id;
@@ -4283,6 +4357,7 @@ class _DatasetThreadMessage {
   final String? authorName;
   final String? phase;
   final String? turnId;
+  final DatasetThreadImage? generatedImageActionTarget;
 
   _DatasetThreadMessage copyWith({DatasetThreadImage? image}) {
     return _DatasetThreadMessage(
@@ -4299,6 +4374,7 @@ class _DatasetThreadMessage {
       authorName: authorName,
       phase: phase,
       turnId: turnId,
+      generatedImageActionTarget: generatedImageActionTarget,
     );
   }
 }

@@ -75,6 +75,8 @@ class ChatBotView extends StatefulWidget {
     this.onGeneratedImageOpen,
     this.onGeneratedImageChanged,
     this.onGeneratedImageSave,
+    this.generatedImageReadyText,
+    this.replaceGeneratedImageTurnFinalAnswer = false,
     this.mobileUnderHeaderContentPadding,
     this.centerComposer = false,
     this.showCenteredComposerTitle = true,
@@ -138,6 +140,8 @@ class ChatBotView extends StatefulWidget {
   final DatasetChatGeneratedImageOpenHandler? onGeneratedImageOpen;
   final DatasetChatGeneratedImageChangedHandler? onGeneratedImageChanged;
   final DatasetChatGeneratedImageSaveHandler? onGeneratedImageSave;
+  final String? generatedImageReadyText;
+  final bool replaceGeneratedImageTurnFinalAnswer;
   final double? mobileUnderHeaderContentPadding;
   final bool centerComposer;
   final bool showCenteredComposerTitle;
@@ -328,6 +332,8 @@ class _ChatBotViewState extends State<ChatBotView> {
       onGeneratedImageOpen: widget.onGeneratedImageOpen,
       onGeneratedImageChanged: widget.onGeneratedImageChanged,
       onGeneratedImageSave: widget.onGeneratedImageSave,
+      generatedImageReadyText: widget.generatedImageReadyText,
+      replaceGeneratedImageTurnFinalAnswer: widget.replaceGeneratedImageTurnFinalAnswer,
       imageGalleryBuilder: (context, images, initialIndex, onClose) =>
           ChatThreadImageGalleryPage(room: widget.room, images: images, initialIndex: initialIndex, onClose: onClose),
       modelController: modelController,
@@ -371,6 +377,8 @@ class _ChatBotViewState extends State<ChatBotView> {
         onGeneratedImageOpen: widget.onGeneratedImageOpen,
         onGeneratedImageChanged: widget.onGeneratedImageChanged,
         onGeneratedImageSave: widget.onGeneratedImageSave,
+        generatedImageReadyText: widget.generatedImageReadyText,
+        replaceGeneratedImageTurnFinalAnswer: widget.replaceGeneratedImageTurnFinalAnswer,
         inlineAttachmentViewerPredicate: widget.datasetInlineAttachmentViewerPredicate,
         toolsBuilder: widget.toolsBuilder,
         inputPlaceholder: widget.inputPlaceholder,
