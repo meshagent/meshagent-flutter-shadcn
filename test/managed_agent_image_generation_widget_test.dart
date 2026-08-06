@@ -467,7 +467,7 @@ void main() {
   });
 
   testWidgets('poisoned attachment replay replaces the provider error and locks composing until new thread', (tester) async {
-    const providerError = 'Unsupported image input format. Supported formats are PNG, JPEG, WEBP, and GIF.';
+    const providerError = 'The image data you provided does not represent a valid image. Please check your input and try again.';
     var startedNewThread = false;
     final rows = <Map<String, Object?>>[
       {
