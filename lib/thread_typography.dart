@@ -62,6 +62,7 @@ class ThreadTypographyOverride extends InheritedWidget {
     this.alignAttachmentEdgesWithBubbles = false,
     this.attachmentIconBuilder,
     this.attachmentActionIconBuilder,
+    this.showAttachmentReplayWhileLoading = false,
     this.codeBlockSurfaceColor,
     this.codeBlockHeaderSurfaceColor,
     this.codeBlockBorderColor,
@@ -128,6 +129,7 @@ class ThreadTypographyOverride extends InheritedWidget {
   final bool alignAttachmentEdgesWithBubbles;
   final ThreadAttachmentIconBuilder? attachmentIconBuilder;
   final ThreadAttachmentActionIconBuilder? attachmentActionIconBuilder;
+  final bool showAttachmentReplayWhileLoading;
   final Color? codeBlockSurfaceColor;
   final Color? codeBlockHeaderSurfaceColor;
   final Color? codeBlockBorderColor;
@@ -311,6 +313,10 @@ class ThreadTypographyOverride extends InheritedWidget {
     return maybeOf(context)?.attachmentActionIconBuilder;
   }
 
+  static bool showAttachmentReplayWhileLoadingOf(BuildContext context) {
+    return maybeOf(context)?.showAttachmentReplayWhileLoading ?? false;
+  }
+
   static Color? maybeCodeBlockSurfaceColorOf(BuildContext context) {
     return maybeOf(context)?.codeBlockSurfaceColor;
   }
@@ -453,6 +459,7 @@ class ThreadTypographyOverride extends InheritedWidget {
         alignAttachmentEdgesWithBubbles != oldWidget.alignAttachmentEdgesWithBubbles ||
         attachmentIconBuilder != oldWidget.attachmentIconBuilder ||
         attachmentActionIconBuilder != oldWidget.attachmentActionIconBuilder ||
+        showAttachmentReplayWhileLoading != oldWidget.showAttachmentReplayWhileLoading ||
         codeBlockSurfaceColor != oldWidget.codeBlockSurfaceColor ||
         codeBlockHeaderSurfaceColor != oldWidget.codeBlockHeaderSurfaceColor ||
         codeBlockBorderColor != oldWidget.codeBlockBorderColor ||

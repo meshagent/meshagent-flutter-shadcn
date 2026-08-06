@@ -526,6 +526,9 @@ class DatasetChatThread extends StatefulWidget {
     this.openFile,
     this.attachmentRenderer,
     this.attachmentPathResolver,
+    this.attachmentAvailabilityResolver,
+    this.attachmentUnavailableBuilder,
+    this.onAttachmentUnavailable,
     this.inlineAttachmentViewerPredicate,
     this.toolsBuilder,
     this.inputPlaceholder,
@@ -560,6 +563,9 @@ class DatasetChatThread extends StatefulWidget {
   final FutureOr<void> Function(String path)? openFile;
   final DatasetChatAttachmentRenderer? attachmentRenderer;
   final ThreadAttachmentPathResolver? attachmentPathResolver;
+  final ThreadAttachmentAvailabilityResolver? attachmentAvailabilityResolver;
+  final ThreadAttachmentUnavailableBuilder? attachmentUnavailableBuilder;
+  final ThreadAttachmentUnavailableHandler? onAttachmentUnavailable;
   final DatasetChatInlineAttachmentViewerPredicate? inlineAttachmentViewerPredicate;
   final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
   final Widget? inputPlaceholder;
@@ -621,6 +627,9 @@ class RoomDatasetChatThread extends StatefulWidget {
     this.openFile,
     this.attachmentRenderer,
     this.attachmentPathResolver,
+    this.attachmentAvailabilityResolver,
+    this.attachmentUnavailableBuilder,
+    this.onAttachmentUnavailable,
     this.inlineAttachmentViewerPredicate,
     this.toolsBuilder,
     this.inputPlaceholder,
@@ -646,6 +655,9 @@ class RoomDatasetChatThread extends StatefulWidget {
   final FutureOr<void> Function(String path)? openFile;
   final DatasetChatAttachmentRenderer? attachmentRenderer;
   final ThreadAttachmentPathResolver? attachmentPathResolver;
+  final ThreadAttachmentAvailabilityResolver? attachmentAvailabilityResolver;
+  final ThreadAttachmentUnavailableBuilder? attachmentUnavailableBuilder;
+  final ThreadAttachmentUnavailableHandler? onAttachmentUnavailable;
   final DatasetChatInlineAttachmentViewerPredicate? inlineAttachmentViewerPredicate;
   final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
   final Widget? inputPlaceholder;
@@ -662,6 +674,46 @@ class RoomDatasetChatThread extends StatefulWidget {
 
   @override
   State<RoomDatasetChatThread> createState() => _RoomDatasetChatThreadState();
+}
+
+class _DatasetAttachmentAvailabilityGate extends StatefulWidget {
+  const _DatasetAttachmentAvailabilityGate({
+    super.key,
+    required this.path,
+    required this.resolver,
+    required this.unavailable,
+    required this.child,
+  });
+
+  final String path;
+  final ThreadAttachmentAvailabilityResolver resolver;
+  final Widget unavailable;
+  final Widget child;
+
+  @override
+  State<_DatasetAttachmentAvailabilityGate> createState() => _DatasetAttachmentAvailabilityGateState();
+}
+
+class _DatasetAttachmentAvailabilityGateState extends State<_DatasetAttachmentAvailabilityGate> {
+  late Future<ThreadAttachmentAvailability> _availability = widget.resolver(widget.path);
+
+  @override
+  void didUpdateWidget(covariant _DatasetAttachmentAvailabilityGate oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.path != widget.path || oldWidget.resolver != widget.resolver) {
+      _availability = widget.resolver(widget.path);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<ThreadAttachmentAvailability>(
+      future: _availability,
+      builder: (context, snapshot) {
+        return snapshot.data == ThreadAttachmentAvailability.unavailable ? widget.unavailable : widget.child;
+      },
+    );
+  }
 }
 
 class _RoomDatasetChatThreadState extends State<RoomDatasetChatThread> {
@@ -716,6 +768,9 @@ class _RoomDatasetChatThreadState extends State<RoomDatasetChatThread> {
       openFile: widget.openFile,
       attachmentRenderer: widget.attachmentRenderer ?? (context, path) => ChatThreadPreview(room: widget.room, path: path),
       attachmentPathResolver: widget.attachmentPathResolver,
+      attachmentAvailabilityResolver: widget.attachmentAvailabilityResolver,
+      attachmentUnavailableBuilder: widget.attachmentUnavailableBuilder,
+      onAttachmentUnavailable: widget.onAttachmentUnavailable,
       inlineAttachmentViewerPredicate: widget.inlineAttachmentViewerPredicate,
       toolsBuilder: widget.toolsBuilder,
       inputPlaceholder: widget.inputPlaceholder,
@@ -2728,6 +2783,32 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   Widget _buildAttachmentWidget(BuildContext context, _DatasetThreadAttachment attachment, {required bool mine}) {
     final previewPath = _resolvedAttachmentPath(attachment.url);
     final displayName = _resolvedAttachmentDisplayName(attachment, previewPath);
+    final availabilityResolver = widget.attachmentAvailabilityResolver;
+    final unavailableBuilder = widget.attachmentUnavailableBuilder;
+    final available = _buildAvailableAttachmentWidget(context, attachment, previewPath: previewPath, displayName: displayName);
+    if (availabilityResolver == null || unavailableBuilder == null) {
+      return available;
+    }
+    return _DatasetAttachmentAvailabilityGate(
+      key: ValueKey('attachment-availability:$previewPath'),
+      path: previewPath,
+      resolver: availabilityResolver,
+      unavailable: unavailableBuilder(
+        context,
+        previewPath,
+        displayName,
+        () => unawaited(_notifyAttachmentUnavailable(context, previewPath, displayName)),
+      ),
+      child: available,
+    );
+  }
+
+  Widget _buildAvailableAttachmentWidget(
+    BuildContext context,
+    _DatasetThreadAttachment attachment, {
+    required String previewPath,
+    required String displayName,
+  }) {
     final attachmentRenderer = widget.attachmentRenderer;
     final canOpen = widget.openFile != null || _isDataUrl(previewPath);
     if (attachmentRenderer != null) {
@@ -2764,6 +2845,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
 
   Future<void> _openAttachment(BuildContext context, _DatasetThreadAttachment attachment) async {
     final previewPath = _resolvedAttachmentPath(attachment.url);
+    if (!await _ensureAttachmentAvailable(context, attachment, previewPath) || !context.mounted) {
+      return;
+    }
     if (datasetChatShouldShowInlineAttachmentViewer(previewPath, predicate: widget.inlineAttachmentViewerPredicate)) {
       await _showInlineAttachmentViewer(
         context,
@@ -2775,6 +2859,28 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     if (openFile != null) {
       await openFile(previewPath);
     }
+  }
+
+  Future<bool> _ensureAttachmentAvailable(BuildContext context, _DatasetThreadAttachment attachment, String path) async {
+    final resolver = widget.attachmentAvailabilityResolver;
+    if (resolver == null) {
+      return true;
+    }
+    try {
+      if (await resolver(path) != ThreadAttachmentAvailability.unavailable) {
+        return true;
+      }
+    } catch (_) {
+      return true;
+    }
+    if (context.mounted) {
+      await _notifyAttachmentUnavailable(context, path, _resolvedAttachmentDisplayName(attachment, path));
+    }
+    return false;
+  }
+
+  Future<void> _notifyAttachmentUnavailable(BuildContext context, String path, String displayName) async {
+    await widget.onAttachmentUnavailable?.call(context, path, displayName);
   }
 
   Future<void> _showInlineAttachmentViewer(BuildContext context, _DatasetThreadAttachment attachment) {
@@ -3884,7 +3990,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }) {
     final showStatus = !loading && shouldShowChatThreadStatus(_status);
     final feedImages = _collectThreadImages(messages);
-    final children = loading
+    final canShowAttachmentReplayWhileLoading =
+        ThreadTypographyOverride.showAttachmentReplayWhileLoadingOf(context) && messages.any((message) => message.attachments.isNotEmpty);
+    final children = loading && !canShowAttachmentReplayWhileLoading
         ? const <Widget>[_DatasetThreadLoadingRow()]
         : _buildMessageWidgets(context, messages, pendingMessages, feedImages: feedImages);
     final threadView = ChatThreadViewportBody(

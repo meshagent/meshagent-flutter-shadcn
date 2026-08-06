@@ -56,6 +56,9 @@ class ChatBotView extends StatefulWidget {
     this.fileInThreadBuilder,
     this.pendingFileInThreadBuilder,
     this.attachmentPathResolver,
+    this.attachmentAvailabilityResolver,
+    this.attachmentUnavailableBuilder,
+    this.onAttachmentUnavailable,
     this.datasetInlineAttachmentViewerPredicate,
     this.chatInputBoxBuilder,
     this.customInputBuilder,
@@ -113,6 +116,9 @@ class ChatBotView extends StatefulWidget {
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
   final Widget? Function(BuildContext context, String path)? pendingFileInThreadBuilder;
   final ThreadAttachmentPathResolver? attachmentPathResolver;
+  final ThreadAttachmentAvailabilityResolver? attachmentAvailabilityResolver;
+  final ThreadAttachmentUnavailableBuilder? attachmentUnavailableBuilder;
+  final ThreadAttachmentUnavailableHandler? onAttachmentUnavailable;
   final DatasetChatInlineAttachmentViewerPredicate? datasetInlineAttachmentViewerPredicate;
   final Widget Function(BuildContext context, Widget chatBox)? chatInputBoxBuilder;
   final ChatThreadCustomInputBuilder? customInputBuilder;
@@ -283,6 +289,9 @@ class _ChatBotViewState extends State<ChatBotView> {
         fallback: (context, path) => ChatThreadPreview(room: widget.room, path: path),
       ),
       attachmentPathResolver: widget.attachmentPathResolver,
+      attachmentAvailabilityResolver: widget.attachmentAvailabilityResolver,
+      attachmentUnavailableBuilder: widget.attachmentUnavailableBuilder,
+      onAttachmentUnavailable: widget.onAttachmentUnavailable,
       inlineAttachmentViewerPredicate: widget.datasetInlineAttachmentViewerPredicate,
       toolsBuilder: widget.toolsBuilder,
       inputPlaceholder: widget.inputPlaceholder,
@@ -341,6 +350,9 @@ class _ChatBotViewState extends State<ChatBotView> {
           fallback: (context, path) => ChatThreadPreview(room: widget.room, path: path),
         ),
         attachmentPathResolver: widget.attachmentPathResolver,
+        attachmentAvailabilityResolver: widget.attachmentAvailabilityResolver,
+        attachmentUnavailableBuilder: widget.attachmentUnavailableBuilder,
+        onAttachmentUnavailable: widget.onAttachmentUnavailable,
         inlineAttachmentViewerPredicate: widget.datasetInlineAttachmentViewerPredicate,
         toolsBuilder: widget.toolsBuilder,
         inputPlaceholder: widget.inputPlaceholder,

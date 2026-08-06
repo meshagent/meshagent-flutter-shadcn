@@ -235,6 +235,12 @@ class ThreadStorageSaveSurfaceRequest {
 typedef ThreadStorageSaveSurfacePresenter = Future<void> Function(BuildContext context, ThreadStorageSaveSurfaceRequest request);
 typedef ThreadAttachmentPathResolver = String Function(String path);
 
+enum ThreadAttachmentAvailability { available, unavailable, unknown }
+
+typedef ThreadAttachmentAvailabilityResolver = Future<ThreadAttachmentAvailability> Function(String path);
+typedef ThreadAttachmentUnavailableBuilder = Widget Function(BuildContext context, String path, String displayName, VoidCallback onPressed);
+typedef ThreadAttachmentUnavailableHandler = FutureOr<void> Function(BuildContext context, String path, String displayName);
+
 String _normalizeEmojiPresentationKey(String value) {
   return value.replaceAll('\u{FE0F}', '').replaceAll('\u{FE0E}', '').replaceAll('\u{200D}', '').trim();
 }
