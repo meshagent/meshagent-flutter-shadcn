@@ -21,17 +21,14 @@ class ImagePreview extends StatelessWidget {
   bool get isSvg {
     final pathExt = _ext(url.path);
     final queryPathExt = _ext(url.queryParameters['path'] ?? "");
-    return svgExtensions.contains(pathExt) ||
-        svgExtensions.contains(queryPathExt);
+    return svgExtensions.contains(pathExt) || svgExtensions.contains(queryPathExt);
   }
 
   Widget _previewUnavailable(BuildContext context) {
     return Center(
       child: Text(
         "No preview available",
-        style: ShadTheme.of(context).textTheme.large.copyWith(
-          color: ShadTheme.of(context).colorScheme.mutedForeground,
-        ),
+        style: ShadTheme.of(context).textTheme.large.copyWith(color: ShadTheme.of(context).colorScheme.mutedForeground),
         textAlign: TextAlign.center,
       ),
     );
@@ -42,9 +39,7 @@ class ImagePreview extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.hasBoundedWidth ? constraints.maxWidth : null;
-        final height = constraints.hasBoundedHeight
-            ? constraints.maxHeight
-            : null;
+        final height = constraints.hasBoundedHeight ? constraints.maxHeight : null;
         final fallback = _previewUnavailable(context);
 
         if (isSvg) {
@@ -53,8 +48,7 @@ class ImagePreview extends StatelessWidget {
             fit: fit,
             width: width,
             height: height,
-            placeholderBuilder: (context) =>
-                Center(child: CircularProgressIndicator()),
+            placeholderBuilder: (context) => Center(child: CircularProgressIndicator()),
             errorBuilder: (_, _, _) => fallback,
           );
         }
@@ -73,13 +67,7 @@ class ImagePreview extends StatelessWidget {
 }
 
 class ImageDataPreview extends StatelessWidget {
-  const ImageDataPreview({
-    super.key,
-    required this.data,
-    required this.path,
-    required this.fit,
-    this.mimeType,
-  });
+  const ImageDataPreview({super.key, required this.data, required this.path, required this.fit, this.mimeType});
 
   final Uint8List data;
   final String path;
@@ -88,9 +76,7 @@ class ImageDataPreview extends StatelessWidget {
 
   bool get isSvg {
     final normalizedMimeType = mimeType?.trim().toLowerCase();
-    if (normalizedMimeType == 'image/svg+xml' ||
-        normalizedMimeType == 'image/svg' ||
-        normalizedMimeType == 'public.svg-image') {
+    if (normalizedMimeType == 'image/svg+xml' || normalizedMimeType == 'image/svg' || normalizedMimeType == 'public.svg-image') {
       return true;
     }
 
@@ -105,9 +91,7 @@ class ImageDataPreview extends StatelessWidget {
     return Center(
       child: Text(
         'No preview available',
-        style: ShadTheme.of(context).textTheme.large.copyWith(
-          color: ShadTheme.of(context).colorScheme.mutedForeground,
-        ),
+        style: ShadTheme.of(context).textTheme.large.copyWith(color: ShadTheme.of(context).colorScheme.mutedForeground),
         textAlign: TextAlign.center,
       ),
     );
@@ -118,9 +102,7 @@ class ImageDataPreview extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.hasBoundedWidth ? constraints.maxWidth : null;
-        final height = constraints.hasBoundedHeight
-            ? constraints.maxHeight
-            : null;
+        final height = constraints.hasBoundedHeight ? constraints.maxHeight : null;
         final fallback = _previewUnavailable(context);
 
         if (isSvg) {
@@ -129,8 +111,7 @@ class ImageDataPreview extends StatelessWidget {
             fit: fit,
             width: width,
             height: height,
-            placeholderBuilder: (context) =>
-                const Center(child: CircularProgressIndicator()),
+            placeholderBuilder: (context) => const Center(child: CircularProgressIndicator()),
             errorBuilder: (_, _, _) => fallback,
           );
         }

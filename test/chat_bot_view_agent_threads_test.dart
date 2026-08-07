@@ -148,8 +148,7 @@ void main() {
           body: DatasetChatThread(
             path: 'dataset://threads/test',
             openFile: (_) {},
-            attachmentPathResolver: (path) =>
-                path == 'room:///Move%20test/logo.svg' ? 'samples/Move test/logo-renamed.svg' : path,
+            attachmentPathResolver: (path) => path == 'room:///Move%20test/logo.svg' ? 'samples/Move test/logo-renamed.svg' : path,
             rowsLoader: ({required namespace, required table}) => Stream.value([
               {
                 'item_id': 'message-1',
