@@ -121,7 +121,13 @@ class _NewChatThreadState extends State<NewChatThread> {
 
   bool get _usesInjectedChatClient => widget.chatClient != null;
 
-  bool get _injectedChatClientAgentReady => !widget.waitForInjectedAgentParticipant || widget.chatClient?.agentParticipant() != null;
+  bool get _injectedChatClientAgentReady {
+    final chatClient = widget.chatClient;
+    return !widget.waitForInjectedAgentParticipant ||
+        chatClient == null ||
+        !chatClient.requiresAgentParticipant ||
+        chatClient.agentParticipant() != null;
+  }
 
   String? get _activeThreadPath {
     final externalPath = widget.selectedThreadPath?.trim();

@@ -150,7 +150,7 @@ void main() {
     expect(find.text('keep this draft'), findsOneWidget);
   });
 
-  testWidgets('injected websocket-style clients can send without a room agent participant', (tester) async {
+  testWidgets('injected direct clients can send without a room agent participant', (tester) async {
     final chatClient = _NoParticipantChatClient();
     final controller = ChatThreadController(room: null);
     addTearDown(controller.dispose);
@@ -162,7 +162,6 @@ void main() {
             width: 640,
             child: NewChatThread(
               chatClient: chatClient,
-              waitForInjectedAgentParticipant: false,
               agentName: 'assistant',
               controller: controller,
               builder: (context, threadPath) => Text('Resolved $threadPath'),
