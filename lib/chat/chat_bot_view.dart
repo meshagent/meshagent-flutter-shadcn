@@ -60,6 +60,7 @@ class ChatBotView extends StatefulWidget {
     this.attachmentUnavailableBuilder,
     this.onAttachmentUnavailable,
     this.datasetInlineAttachmentViewerPredicate,
+    this.datasetAgentMessageTextTransformer,
     this.chatInputBoxBuilder,
     this.customInputBuilder,
     this.openFile,
@@ -120,6 +121,7 @@ class ChatBotView extends StatefulWidget {
   final ThreadAttachmentUnavailableBuilder? attachmentUnavailableBuilder;
   final ThreadAttachmentUnavailableHandler? onAttachmentUnavailable;
   final DatasetChatInlineAttachmentViewerPredicate? datasetInlineAttachmentViewerPredicate;
+  final DatasetChatAgentMessageTextTransformer? datasetAgentMessageTextTransformer;
   final Widget Function(BuildContext context, Widget chatBox)? chatInputBoxBuilder;
   final ChatThreadCustomInputBuilder? customInputBuilder;
   final FutureOr<void> Function(String path)? openFile;
@@ -293,6 +295,7 @@ class _ChatBotViewState extends State<ChatBotView> {
       attachmentUnavailableBuilder: widget.attachmentUnavailableBuilder,
       onAttachmentUnavailable: widget.onAttachmentUnavailable,
       inlineAttachmentViewerPredicate: widget.datasetInlineAttachmentViewerPredicate,
+      agentMessageTextTransformer: widget.datasetAgentMessageTextTransformer,
       toolsBuilder: widget.toolsBuilder,
       inputPlaceholder: widget.inputPlaceholder,
       attachmentBuilder: widget.attachmentBuilder,
@@ -354,6 +357,7 @@ class _ChatBotViewState extends State<ChatBotView> {
         attachmentUnavailableBuilder: widget.attachmentUnavailableBuilder,
         onAttachmentUnavailable: widget.onAttachmentUnavailable,
         inlineAttachmentViewerPredicate: widget.datasetInlineAttachmentViewerPredicate,
+        agentMessageTextTransformer: widget.datasetAgentMessageTextTransformer,
         toolsBuilder: widget.toolsBuilder,
         inputPlaceholder: widget.inputPlaceholder,
         attachmentBuilder: widget.attachmentBuilder,

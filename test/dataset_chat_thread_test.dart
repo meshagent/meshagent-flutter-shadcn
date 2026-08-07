@@ -2,6 +2,21 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:meshagent_flutter_shadcn/chat/dataset_chat_thread.dart';
 
 void main() {
+  test('Assistant message attachment contexts reset at each user turn', () {
+    final contexts = datasetChatContextAttachmentPathsForTesting([
+      (isUserMessage: true, attachmentPaths: <String>['folder-one']),
+      (isUserMessage: false, attachmentPaths: const <String>[]),
+      (isUserMessage: true, attachmentPaths: <String>['folder-two']),
+      (isUserMessage: false, attachmentPaths: const <String>[]),
+      (isUserMessage: true, attachmentPaths: const <String>[]),
+      (isUserMessage: false, attachmentPaths: const <String>[]),
+    ]);
+
+    expect(contexts[1], <String>['folder-one']);
+    expect(contexts[3], <String>['folder-two']);
+    expect(contexts[5], isEmpty);
+  });
+
   group('agentTurnEndedErrorMessage', () {
     test('extracts process turn errors from turn ended payloads', () {
       final message = agentTurnEndedErrorMessage({

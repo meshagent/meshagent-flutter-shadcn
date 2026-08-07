@@ -83,6 +83,7 @@ const double _datasetDiffPreviewHorizontalPadding = 16;
 
 typedef DatasetChatAttachmentRenderer = Widget Function(BuildContext context, String path);
 typedef DatasetChatInlineAttachmentViewerPredicate = bool Function(String path);
+typedef DatasetChatAgentMessageTextTransformer = String Function(String markdown, List<String> contextAttachmentPaths);
 typedef DatasetChatRowsLoader = Stream<List<Map<String, Object?>>> Function({required List<String>? namespace, required String table});
 typedef DatasetChatFileDropHandler = Future<void> Function(String name, Stream<Uint8List> dataStream, int? size);
 typedef DatasetChatGeneratedImageAttachmentRenderer =
@@ -93,6 +94,32 @@ typedef DatasetChatImageGalleryBuilder =
 @visibleForTesting
 bool datasetChatShouldShowInlineAttachmentViewer(String path, {DatasetChatInlineAttachmentViewerPredicate? predicate}) {
   return _isDataUrl(path) && (predicate?.call(path) ?? true);
+}
+
+@visibleForTesting
+List<List<String>> datasetChatContextAttachmentPathsForTesting(List<({bool isUserMessage, List<String> attachmentPaths})> messages) {
+  return _datasetContextAttachmentPaths(
+    messages,
+    isUserMessage: (message) => message.isUserMessage,
+    attachmentPaths: (message) => message.attachmentPaths,
+  );
+}
+
+List<List<String>> _datasetContextAttachmentPaths<T>(
+  List<T> messages, {
+  required bool Function(T message) isUserMessage,
+  required List<String> Function(T message) attachmentPaths,
+}) {
+  var currentAttachmentPaths = const <String>[];
+  return [
+    for (final message in messages)
+      () {
+        if (isUserMessage(message)) {
+          currentAttachmentPaths = List<String>.unmodifiable(attachmentPaths(message));
+        }
+        return currentAttachmentPaths;
+      }(),
+  ];
 }
 
 typedef DatasetChatSecretRequestHandler = Future<AgentSecretResponse> Function(BuildContext context, AgentSecretRequested request);
@@ -530,6 +557,7 @@ class DatasetChatThread extends StatefulWidget {
     this.attachmentUnavailableBuilder,
     this.onAttachmentUnavailable,
     this.inlineAttachmentViewerPredicate,
+    this.agentMessageTextTransformer,
     this.toolsBuilder,
     this.inputPlaceholder,
     this.attachmentBuilder,
@@ -567,6 +595,7 @@ class DatasetChatThread extends StatefulWidget {
   final ThreadAttachmentUnavailableBuilder? attachmentUnavailableBuilder;
   final ThreadAttachmentUnavailableHandler? onAttachmentUnavailable;
   final DatasetChatInlineAttachmentViewerPredicate? inlineAttachmentViewerPredicate;
+  final DatasetChatAgentMessageTextTransformer? agentMessageTextTransformer;
   final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
   final Widget? inputPlaceholder;
   final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
@@ -631,6 +660,7 @@ class RoomDatasetChatThread extends StatefulWidget {
     this.attachmentUnavailableBuilder,
     this.onAttachmentUnavailable,
     this.inlineAttachmentViewerPredicate,
+    this.agentMessageTextTransformer,
     this.toolsBuilder,
     this.inputPlaceholder,
     this.attachmentBuilder,
@@ -659,6 +689,7 @@ class RoomDatasetChatThread extends StatefulWidget {
   final ThreadAttachmentUnavailableBuilder? attachmentUnavailableBuilder;
   final ThreadAttachmentUnavailableHandler? onAttachmentUnavailable;
   final DatasetChatInlineAttachmentViewerPredicate? inlineAttachmentViewerPredicate;
+  final DatasetChatAgentMessageTextTransformer? agentMessageTextTransformer;
   final Widget Function(BuildContext, ChatThreadController, ChatThreadSnapshot)? toolsBuilder;
   final Widget? inputPlaceholder;
   final Widget Function(BuildContext context, FileAttachment upload)? attachmentBuilder;
@@ -772,6 +803,7 @@ class _RoomDatasetChatThreadState extends State<RoomDatasetChatThread> {
       attachmentUnavailableBuilder: widget.attachmentUnavailableBuilder,
       onAttachmentUnavailable: widget.onAttachmentUnavailable,
       inlineAttachmentViewerPredicate: widget.inlineAttachmentViewerPredicate,
+      agentMessageTextTransformer: widget.agentMessageTextTransformer,
       toolsBuilder: widget.toolsBuilder,
       inputPlaceholder: widget.inputPlaceholder,
       attachmentBuilder: widget.attachmentBuilder,
@@ -3199,6 +3231,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     _DatasetThreadMessage message, {
     required List<ChatThreadFeedImage> feedImages,
     required bool shouldShowParticipantHeader,
+    required List<String> contextAttachmentPaths,
   }) {
     final theme = ShadTheme.of(context);
     if (message.kind != 'message') {
@@ -3298,6 +3331,9 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
 
     final localParticipantName = _localParticipantName();
     final isAgentMessage = message.role == 'agent';
+    final renderedText = isAgentMessage
+        ? widget.agentMessageTextTransformer?.call(message.text, contextAttachmentPaths) ?? message.text
+        : message.text;
     final rawAuthorName = message.authorName;
     final authorName = rawAuthorName == null || rawAuthorName.trim().isEmpty ? null : rawAuthorName.trim();
     final mine =
@@ -3312,7 +3348,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       room: null,
       mine: mine,
       isAgentMessage: isAgentMessage,
-      text: message.text,
+      text: renderedText,
       authorName: authorName ?? '',
       createdAt: message.createdAt,
       shouldShowHeader: shouldShowParticipantHeader,
@@ -3365,6 +3401,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }) {
     final messageWidgets = <Widget>[];
     final feedItems = _buildFeedItems(messages);
+    final contextAttachmentPaths = _datasetMessageContextAttachmentPaths(messages);
     for (final item in feedItems.indexed) {
       if (messageWidgets.isNotEmpty) {
         messageWidgets.insert(0, SizedBox(height: _datasetThreadFeedItemSpacing(context, feedItems[item.$1 - 1], item.$2)));
@@ -3381,12 +3418,16 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                 feedItem.message,
                 feedImages: feedImages,
                 shouldShowParticipantHeader: _shouldShowParticipantHeaderForFeedItem(feedItems, item.$1),
+                contextAttachmentPaths: contextAttachmentPaths[feedItem.message.id] ?? const <String>[],
               ),
             ),
           );
         case _DatasetThreadDetailGroupFeedItem():
           if (feedItem.expanded) {
-            messageWidgets.insert(0, _buildExpandedDetailGroup(context, feedItem, feedImages: feedImages));
+            messageWidgets.insert(
+              0,
+              _buildExpandedDetailGroup(context, feedItem, feedImages: feedImages, contextAttachmentPaths: contextAttachmentPaths),
+            );
           } else {
             messageWidgets.insert(
               0,
@@ -3470,6 +3511,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
     BuildContext context,
     _DatasetThreadDetailGroupFeedItem group, {
     required List<ChatThreadFeedImage> feedImages,
+    required Map<String, List<String>> contextAttachmentPaths,
   }) {
     final children = <Widget>[
       ChatThreadMessageView(
@@ -3489,7 +3531,15 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
       } else {
         children.add(SizedBox(height: _datasetThreadMessageSpacing(group.messages[item.$1 - 1], item.$2)));
       }
-      children.add(_buildMessage(context, item.$2, feedImages: feedImages, shouldShowParticipantHeader: false));
+      children.add(
+        _buildMessage(
+          context,
+          item.$2,
+          feedImages: feedImages,
+          shouldShowParticipantHeader: false,
+          contextAttachmentPaths: contextAttachmentPaths[item.$2.id] ?? const <String>[],
+        ),
+      );
     }
     return Column(
       key: ValueKey(group.id),
@@ -4118,6 +4168,15 @@ class _DatasetThreadMessage {
   final String? authorName;
   final String? phase;
   final String? turnId;
+}
+
+Map<String, List<String>> _datasetMessageContextAttachmentPaths(List<_DatasetThreadMessage> messages) {
+  final contexts = _datasetContextAttachmentPaths(
+    messages,
+    isUserMessage: (message) => message.kind == 'message' && message.role == 'user',
+    attachmentPaths: (message) => [for (final attachment in message.attachments) attachment.url],
+  );
+  return <String, List<String>>{for (final indexed in messages.indexed) indexed.$2.id: contexts[indexed.$1]};
 }
 
 class _DatasetThreadAttachment {
