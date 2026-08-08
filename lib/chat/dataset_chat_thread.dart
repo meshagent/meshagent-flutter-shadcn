@@ -4739,6 +4739,19 @@ Map<String, Object?> _mergeDatasetAndLiveRow({required Map<String, Object?> data
   final liveKind = liveData['kind']?.toString();
   final datasetType = datasetData['type']?.toString();
   final liveType = liveData['type']?.toString();
+  final isImageGeneration = _isImageGenerationRow(datasetRow) || _isImageGenerationRow(liveRow);
+  if (isImageGeneration) {
+    final datasetStatus = _messageForRow(datasetRow)?.image?.status;
+    final liveStatus = _messageForRow(liveRow)?.image?.status;
+    if (_isTerminalImageGenerationStatus(liveStatus) && !_isTerminalImageGenerationStatus(datasetStatus)) {
+      return <String, Object?>{
+        ...liveRow,
+        ...datasetRow,
+        'data': <String, Object?>{...datasetData, ...liveData},
+      };
+    }
+    return datasetRow;
+  }
   final isToolCall =
       datasetKind == 'tool_call' ||
       liveKind == 'tool_call' ||
@@ -4771,6 +4784,11 @@ Map<String, Object?> _mergeDatasetAndLiveRow({required Map<String, Object?> data
   }
 
   return <String, Object?>{...liveRow, ...datasetRow, 'data': mergedData};
+}
+
+@visibleForTesting
+Map<String, Object?> mergeDatasetAndLiveRowForTesting({required Map<String, Object?> datasetRow, required Map<String, Object?> liveRow}) {
+  return _mergeDatasetAndLiveRow(datasetRow: datasetRow, liveRow: liveRow);
 }
 
 _DatasetThreadMessage _mergeDuplicateDatasetThreadMessage(_DatasetThreadMessage existing, _DatasetThreadMessage next) {

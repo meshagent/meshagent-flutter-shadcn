@@ -470,6 +470,115 @@ Or continue to refine it.''',
     await tester.pump(const Duration(seconds: 2));
   });
 
+  test('live completed image wins while its persisted lifecycle row is still pending', () {
+    final merged = mergeDatasetAndLiveRowForTesting(
+      datasetRow: {
+        'item_id': 'image-2',
+        'turn_id': 'turn-2',
+        'sequence': 4,
+        'data': {
+          'kind': 'image_generation',
+          'role': 'assistant',
+          'status': 'in_progress',
+          'arguments': {'prompt': 'Create a blue whale at sunset'},
+          'message': {'type': agent_sessions.agentImageGenerationStartedType, 'item_id': 'image-2'},
+        },
+      },
+      liveRow: {
+        'item_id': 'image-2',
+        'turn_id': 'turn-2',
+        'sequence': 8,
+        'data': {
+          'kind': 'image_generation',
+          'role': 'assistant',
+          'status': 'completed',
+          'arguments': {'prompt': 'Create a blue whale at sunset', 'revised_prompt': 'A blue whale surfacing beneath a vivid sunset'},
+          'message': {
+            'type': agent_sessions.agentImageGenerationCompletedType,
+            'item_id': 'image-2',
+            'images': [
+              {'uri': 'dataset://images?id=saved-image-2', 'mime_type': 'image/png', 'status': 'completed'},
+            ],
+          },
+        },
+      },
+    );
+
+    expect(merged['sequence'], 4);
+    final mergedData = merged['data']! as Map<String, Object?>;
+    expect(mergedData['status'], 'completed');
+    final images = (mergedData['message']! as Map<String, Object?>)['images']! as List<Object?>;
+    expect((images.single! as Map<String, Object?>)['uri'], 'dataset://images?id=saved-image-2');
+    expect((mergedData['arguments']! as Map<String, Object?>)['revised_prompt'], 'A blue whale surfacing beneath a vivid sunset');
+  });
+
+  testWidgets('two generated image turns keep independent completed lifecycle rows', (tester) async {
+    final chatClient = _FakeManagedAgentChatClient();
+    final changedImages = <DatasetThreadImage>[];
+    addTearDown(chatClient.stop);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: DatasetChatThread(
+            chatClient: chatClient,
+            path: 'thread-two-live-images',
+            generatedImageAttachmentRenderer: (context, image, onOpenFullscreen) => Text('image:${image.generationId}'),
+            onGeneratedImageChanged: changedImages.add,
+            onGeneratedImageSave: (context, image) {},
+            generatedImageReadyText: 'Image ready. [Save a copy]. [Copy prompt].',
+            replaceGeneratedImageTurnFinalAnswer: true,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    for (final turn in const [('turn-1', 'image-1', 'first'), ('turn-2', 'image-2', 'second')]) {
+      chatClient.emit(
+        agent_sessions.TurnStart(
+          threadId: 'thread-two-live-images',
+          messageId: 'user-${turn.$1}',
+          content: agent_sessions.agentInputContent(text: 'Create the ${turn.$3} image', attachments: const []),
+        ),
+      );
+      chatClient.emit(
+        agent_sessions.AgentImageGenerationStarted(
+          threadId: 'thread-two-live-images',
+          turnId: turn.$1,
+          itemId: turn.$2,
+          messageId: 'started-${turn.$2}',
+          arguments: {'prompt': 'Create the ${turn.$3} image'},
+        ),
+      );
+      chatClient.emit(
+        agent_sessions.AgentImageGenerationCompleted(
+          threadId: 'thread-two-live-images',
+          turnId: turn.$1,
+          itemId: turn.$2,
+          messageId: 'completed-${turn.$2}',
+          arguments: {'prompt': 'Create the ${turn.$3} image', 'revised_prompt': 'Revised ${turn.$3} image'},
+          images: [
+            agent_sessions.AgentGeneratedImage(uri: 'dataset://images?id=saved-${turn.$2}', mimeType: 'image/png', status: 'completed'),
+          ],
+        ),
+      );
+    }
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('image:image-1'), findsOneWidget);
+    expect(find.text('image:image-2'), findsOneWidget);
+    expect(find.textContaining('Image ready.'), findsNWidgets(2));
+    expect(
+      changedImages.where((image) => image.status == 'completed').map((image) => image.generationId),
+      containsAll(['image-1', 'image-2']),
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 2));
+  });
+
   testWidgets('replayed generated images expose completion links inside assistant bubbles', (tester) async {
     final savedPrompts = <String>[];
     final changedImages = <DatasetThreadImage>[];
