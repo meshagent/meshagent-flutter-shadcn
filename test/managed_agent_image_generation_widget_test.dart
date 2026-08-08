@@ -512,6 +512,133 @@ Or continue to refine it.''',
     expect((mergedData['arguments']! as Map<String, Object?>)['revised_prompt'], 'A blue whale surfacing beneath a vivid sunset');
   });
 
+  test('sequence-keyed dataset lifecycle merges with its live image completion', () {
+    final rows = mergeDatasetAndLiveRowsForTesting(
+      datasetRowsByKey: {
+        'sequence:4': {
+          'item_id': 'image-2',
+          'turn_id': 'turn-2',
+          'sequence': 4,
+          'data': {
+            'kind': 'image_generation',
+            'role': 'assistant',
+            'status': 'in_progress',
+            'message': {'type': agent_sessions.agentImageGenerationStartedType, 'item_id': 'image-2'},
+          },
+        },
+      },
+      liveRowsByKey: {
+        'image-2': {
+          'item_id': 'image-2',
+          'turn_id': 'turn-2',
+          'sequence': 8,
+          'data': {
+            'kind': 'image_generation',
+            'role': 'assistant',
+            'status': 'completed',
+            'message': {
+              'type': agent_sessions.agentImageGenerationCompletedType,
+              'item_id': 'image-2',
+              'images': [
+                {'uri': 'dataset://images?id=saved-image-2', 'mime_type': 'image/png', 'status': 'completed'},
+              ],
+            },
+          },
+        },
+      },
+    );
+
+    expect(rows, hasLength(1));
+    final image = (rows.single['data']! as Map<String, Object?>)['message']! as Map<String, Object?>;
+    expect(image['type'], agent_sessions.agentImageGenerationCompletedType);
+    expect(((image['images']! as List<Object?>).single! as Map<String, Object?>)['uri'], 'dataset://images?id=saved-image-2');
+  });
+
+  test('reused image item identifiers do not correlate across turns', () {
+    final rows = mergeDatasetAndLiveRowsForTesting(
+      datasetRowsByKey: {
+        'sequence:2': {
+          'item_id': 'image-generation',
+          'turn_id': 'turn-1',
+          'sequence': 2,
+          'data': {
+            'kind': 'image_generation',
+            'status': 'completed',
+            'message': {
+              'type': agent_sessions.agentImageGenerationCompletedType,
+              'item_id': 'image-generation',
+              'images': [
+                {'uri': 'dataset://images?id=first', 'status': 'completed'},
+              ],
+            },
+          },
+        },
+      },
+      liveRowsByKey: {
+        'image-generation': {
+          'item_id': 'image-generation',
+          'turn_id': 'turn-2',
+          'sequence': 5,
+          'data': {
+            'kind': 'image_generation',
+            'status': 'completed',
+            'message': {
+              'type': agent_sessions.agentImageGenerationCompletedType,
+              'item_id': 'image-generation',
+              'images': [
+                {'uri': 'dataset://images?id=second', 'status': 'completed'},
+              ],
+            },
+          },
+        },
+      },
+    );
+
+    expect(rows, hasLength(2));
+    expect(rows.map((row) => row['turn_id']), containsAll(<String>['turn-1', 'turn-2']));
+  });
+
+  testWidgets('turn end terminalizes an image lifecycle left pending by the provider', (tester) async {
+    final chatClient = _FakeManagedAgentChatClient();
+    final changedImages = <DatasetThreadImage>[];
+    addTearDown(chatClient.stop);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: DatasetChatThread(
+          chatClient: chatClient,
+          path: 'thread-incomplete-image',
+          generatedImageAttachmentRenderer: (context, image, onOpenFullscreen) => Text('image:${image.status}'),
+          onGeneratedImageChanged: changedImages.add,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    chatClient.emit(
+      agent_sessions.AgentImageGenerationStarted(
+        threadId: 'thread-incomplete-image',
+        turnId: 'turn-1',
+        itemId: 'image-1',
+        messageId: 'image-started-1',
+        arguments: const {'prompt': 'Create a dinosaur chasing a taxi'},
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(changedImages.last.status, 'pending');
+
+    chatClient.emit(agent_sessions.TurnEnded(threadId: 'thread-incomplete-image', turnId: 'turn-1', messageId: 'turn-ended-1'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(changedImages.last.status, 'failed');
+    expect(find.text('image:failed'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 2));
+  });
+
   testWidgets('two generated image turns keep independent completed lifecycle rows', (tester) async {
     final chatClient = _FakeManagedAgentChatClient();
     final changedImages = <DatasetThreadImage>[];

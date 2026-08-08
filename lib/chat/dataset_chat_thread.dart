@@ -2068,6 +2068,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             changed;
         break;
       case agentTurnEndedType:
+        changed = _terminalizePendingImageGenerationsForTurn(_payloadTurnId(payload)) || changed;
         final errorMessage = agentTurnEndedErrorMessage(payload);
         if (errorMessage == null) {
           break;
@@ -2088,6 +2089,39 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
             ) ||
             changed;
         break;
+    }
+    return changed;
+  }
+
+  bool _terminalizePendingImageGenerationsForTurn(String? turnId) {
+    final normalizedTurnId = turnId?.trim();
+    if (normalizedTurnId == null || normalizedTurnId.isEmpty) {
+      return false;
+    }
+
+    var changed = false;
+    for (final entry in _agentRowsByItemId.entries.toList(growable: false)) {
+      final row = entry.value;
+      if (row['turn_id']?.toString().trim() != normalizedTurnId || !_isImageGenerationRow(row)) {
+        continue;
+      }
+      final data = _rowData(row);
+      final image = _messageForRow(row)?.image;
+      if (data == null || !_isImageGenerationPendingStatus(image?.status)) {
+        continue;
+      }
+      final message = <String, Object?>{
+        ...?_mapValue(data['message']),
+        'type': agentImageGenerationFailedType,
+        'item_id': row['item_id'],
+        'turn_id': normalizedTurnId,
+        'error': const <String, Object?>{'message': 'Image generation ended without a completed image', 'code': 'incomplete'},
+      };
+      _agentRowsByItemId[entry.key] = <String, Object?>{
+        ...row,
+        'data': <String, Object?>{...data, 'status': 'failed', 'message': message},
+      };
+      changed = true;
     }
     return changed;
   }
@@ -2461,13 +2495,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
   }
 
   List<_DatasetThreadMessage> _messages() {
-    final mergedRowsByItemId = <String, Map<String, Object?>>{};
-    mergedRowsByItemId.addAll(_agentRowsByItemId);
-    for (final entry in _rowsByItemId.entries) {
-      final liveRow = mergedRowsByItemId[entry.key];
-      mergedRowsByItemId[entry.key] = liveRow == null ? entry.value : _mergeDatasetAndLiveRow(datasetRow: entry.value, liveRow: liveRow);
-    }
-    final rows = mergedRowsByItemId.values.toList(growable: false)..sort(_compareDatasetThreadRows);
+    final rows = _mergeDatasetAndLiveRows(datasetRowsByKey: _rowsByItemId, liveRowsByKey: _agentRowsByItemId);
     final messagesById = <String, _DatasetThreadMessage>{};
     for (final parsed in _messagesForRows(rows)) {
       final row = parsed.row;
@@ -4743,7 +4771,8 @@ Map<String, Object?> _mergeDatasetAndLiveRow({required Map<String, Object?> data
   if (isImageGeneration) {
     final datasetStatus = _messageForRow(datasetRow)?.image?.status;
     final liveStatus = _messageForRow(liveRow)?.image?.status;
-    if (_isTerminalImageGenerationStatus(liveStatus) && !_isTerminalImageGenerationStatus(datasetStatus)) {
+    if ((_isCompletedImageGenerationStatus(liveStatus) && !_isCompletedImageGenerationStatus(datasetStatus)) ||
+        (_isTerminalImageGenerationStatus(liveStatus) && !_isTerminalImageGenerationStatus(datasetStatus))) {
       return <String, Object?>{
         ...liveRow,
         ...datasetRow,
@@ -4784,6 +4813,62 @@ Map<String, Object?> _mergeDatasetAndLiveRow({required Map<String, Object?> data
   }
 
   return <String, Object?>{...liveRow, ...datasetRow, 'data': mergedData};
+}
+
+List<Map<String, Object?>> _mergeDatasetAndLiveRows({
+  required Map<String, Map<String, Object?>> datasetRowsByKey,
+  required Map<String, Map<String, Object?>> liveRowsByKey,
+}) {
+  final mergedRowsByKey = <String, Map<String, Object?>>{...datasetRowsByKey};
+  final datasetEntries = datasetRowsByKey.entries.toList(growable: false);
+  for (final liveEntry in liveRowsByKey.entries) {
+    final liveRow = liveEntry.value;
+    MapEntry<String, Map<String, Object?>>? matchedDatasetEntry;
+    for (final datasetEntry in datasetEntries) {
+      final datasetRow = datasetEntry.value;
+      final isImageGeneration = _isImageGenerationRow(liveRow) || _isImageGenerationRow(datasetRow);
+      final isToolCall = _isToolCallRow(liveRow) || _isToolCallRow(datasetRow);
+      final matches = isImageGeneration
+          ? _imageGenerationRowsCorrelate(datasetRow: datasetRow, liveRow: liveRow)
+          : isToolCall && _datasetAndLiveRowsShareItemAndTurn(datasetRow: datasetRow, liveRow: liveRow);
+      if (!matches) {
+        continue;
+      }
+      if (matchedDatasetEntry == null || _intValue(datasetRow['sequence']) > _intValue(matchedDatasetEntry.value['sequence'])) {
+        matchedDatasetEntry = datasetEntry;
+      }
+    }
+    if (matchedDatasetEntry == null) {
+      mergedRowsByKey['live:${liveEntry.key}'] = liveRow;
+      continue;
+    }
+    mergedRowsByKey[matchedDatasetEntry.key] = _mergeDatasetAndLiveRow(datasetRow: matchedDatasetEntry.value, liveRow: liveRow);
+  }
+  return mergedRowsByKey.values.toList(growable: false)..sort(_compareDatasetThreadRows);
+}
+
+bool _isToolCallRow(Map<String, Object?> row) {
+  final data = _rowData(row);
+  final kind = data?['kind']?.toString();
+  final type = data?['type']?.toString();
+  return kind == 'tool_call' || type?.startsWith('meshagent.agent.tool_call.') == true;
+}
+
+bool _datasetAndLiveRowsShareItemAndTurn({required Map<String, Object?> datasetRow, required Map<String, Object?> liveRow}) {
+  if (datasetRow['item_id']?.toString() != liveRow['item_id']?.toString()) {
+    return false;
+  }
+  final datasetTurnId = _stringValue(datasetRow['turn_id']) ?? _stringValue(_rowData(datasetRow)?['turn_id']);
+  final liveTurnId = _stringValue(liveRow['turn_id']) ?? _stringValue(_rowData(liveRow)?['turn_id']);
+  return datasetTurnId == null || liveTurnId == null || datasetTurnId == liveTurnId;
+}
+
+@visibleForTesting
+List<Map<String, Object?>> mergeDatasetAndLiveRowsForTesting({
+  required Map<String, Map<String, Object?>> datasetRowsByKey,
+  required Map<String, Map<String, Object?>> liveRowsByKey,
+}) {
+  return _mergeDatasetAndLiveRows(datasetRowsByKey: datasetRowsByKey, liveRowsByKey: liveRowsByKey);
 }
 
 @visibleForTesting
@@ -6534,11 +6619,7 @@ Set<String> _imageGenerationCorrelationKeys(Map<String, Object?> row) {
 }
 
 bool _imageGenerationRowsReconcile({required Map<String, Object?> datasetRow, required Map<String, Object?> liveRow}) {
-  if (!_isImageGenerationRow(datasetRow) || !_isImageGenerationRow(liveRow)) {
-    return false;
-  }
-  final liveKeys = _imageGenerationCorrelationKeys(liveRow);
-  if (liveKeys.isEmpty || !_imageGenerationCorrelationKeys(datasetRow).any(liveKeys.contains)) {
+  if (!_imageGenerationRowsCorrelate(datasetRow: datasetRow, liveRow: liveRow)) {
     return false;
   }
 
@@ -6548,6 +6629,19 @@ bool _imageGenerationRowsReconcile({required Map<String, Object?> datasetRow, re
     return _isTerminalImageGenerationStatus(datasetStatus);
   }
   return true;
+}
+
+bool _imageGenerationRowsCorrelate({required Map<String, Object?> datasetRow, required Map<String, Object?> liveRow}) {
+  if (!_isImageGenerationRow(datasetRow) || !_isImageGenerationRow(liveRow)) {
+    return false;
+  }
+  final datasetTurnId = _stringValue(datasetRow['turn_id']) ?? _stringValue(_rowData(datasetRow)?['turn_id']);
+  final liveTurnId = _stringValue(liveRow['turn_id']) ?? _stringValue(_rowData(liveRow)?['turn_id']);
+  if (datasetTurnId != null && liveTurnId != null && datasetTurnId != liveTurnId) {
+    return false;
+  }
+  final liveKeys = _imageGenerationCorrelationKeys(liveRow);
+  return liveKeys.isNotEmpty && _imageGenerationCorrelationKeys(datasetRow).any(liveKeys.contains);
 }
 
 Set<String> _datasetThreadImageReferenceKeys(DatasetThreadImage image) {
