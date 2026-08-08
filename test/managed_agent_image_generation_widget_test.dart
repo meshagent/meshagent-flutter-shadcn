@@ -370,10 +370,19 @@ void main() {
     await tester.pump(const Duration(seconds: 2));
   });
 
-  testWidgets('live generated image correlates the source user prompt', (tester) async {
+  testWidgets('live generated image completion links dispatch save and copy actions', (tester) async {
     final chatClient = _FakeManagedAgentChatClient();
     final changedImages = <DatasetThreadImage>[];
+    final savedPrompts = <String>[];
+    final clipboardWrites = <MethodCall>[];
     addTearDown(chatClient.stop);
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') {
+        clipboardWrites.add(call);
+      }
+      return null;
+    });
+    addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
 
     await tester.pumpWidget(
       ShadApp(
@@ -383,6 +392,15 @@ void main() {
             path: 'thread-live-image-prompt',
             generatedImageAttachmentRenderer: (context, image, onOpenFullscreen) => const Text('live image'),
             onGeneratedImageChanged: changedImages.add,
+            onGeneratedImageSave: (context, image) => savedPrompts.add(image.sourcePrompt!),
+            generatedImageReadyText: '''
+Your image is ready. You can:
+
+- [Save a copy] to your files,
+- [Copy prompt] used.
+
+Or continue to refine it.''',
+            replaceGeneratedImageTurnFinalAnswer: true,
           ),
         ),
       ),
@@ -419,6 +437,17 @@ void main() {
 
     expect(find.text('live image'), findsOneWidget);
     expect(changedImages.last.sourcePrompt, 'Create an image of a cat in a library');
+    expect(find.textContaining('Save a copy'), findsOneWidget);
+    expect(find.textContaining('Copy prompt'), findsOneWidget);
+
+    await tester.tapOnText(find.textRange.ofSubstring('Save a copy'));
+    await tester.pump();
+    expect(savedPrompts, ['Create an image of a cat in a library']);
+
+    await tester.tapOnText(find.textRange.ofSubstring('Copy prompt'));
+    await tester.pump();
+    expect(clipboardWrites, hasLength(1));
+    expect((clipboardWrites.single.arguments as Map<Object?, Object?>)['text'], 'Create an image of a cat in a library');
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 2));

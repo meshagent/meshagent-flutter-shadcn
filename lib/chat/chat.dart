@@ -5428,6 +5428,7 @@ class _ChatBubble extends State<ChatBubble> {
           selectable: widget.selectable && kIsWeb,
           color: widget.textColor,
           linkColor: markdownLinkColor,
+          linkHandler: widget.markdownLinkHandler,
         ),
       ),
     );
