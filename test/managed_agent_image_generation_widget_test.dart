@@ -429,7 +429,19 @@ Or continue to refine it.''',
         turnId: 'turn-1',
         itemId: 'image-1',
         messageId: 'image-completed-1',
+        arguments: const {
+          'prompt': 'Create an image of a cat in a library',
+          'revised_prompt': 'A curious orange cat reading beneath tall library shelves',
+        },
         images: const [agent_sessions.AgentGeneratedImage(uri: 'data:image/png;base64,cG5n', mimeType: 'image/png', status: 'completed')],
+      ),
+    );
+    chatClient.emit(
+      agent_sessions.TurnEnded(
+        threadId: 'thread-live-image-prompt',
+        turnId: 'turn-1',
+        messageId: 'turn-ended-1',
+        error: const agent_sessions.AgentError(message: 'Cannot write to closing transport'),
       ),
     );
     await tester.pump();
@@ -437,8 +449,10 @@ Or continue to refine it.''',
 
     expect(find.text('live image'), findsOneWidget);
     expect(changedImages.last.sourcePrompt, 'Create an image of a cat in a library');
+    expect(changedImages.last.effectivePrompt, 'A curious orange cat reading beneath tall library shelves');
     expect(find.textContaining('Save a copy'), findsOneWidget);
     expect(find.textContaining('Copy prompt'), findsOneWidget);
+    expect(find.text('Cannot write to closing transport'), findsNothing);
 
     await tester.tapOnText(find.textRange.ofSubstring('Save a copy'));
     await tester.pump();
@@ -447,7 +461,10 @@ Or continue to refine it.''',
     await tester.tapOnText(find.textRange.ofSubstring('Copy prompt'));
     await tester.pump();
     expect(clipboardWrites, hasLength(1));
-    expect((clipboardWrites.single.arguments as Map<Object?, Object?>)['text'], 'Create an image of a cat in a library');
+    expect(
+      (clipboardWrites.single.arguments as Map<Object?, Object?>)['text'],
+      'A curious orange cat reading beneath tall library shelves',
+    );
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 2));

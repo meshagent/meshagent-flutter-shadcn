@@ -2478,7 +2478,19 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         messagesById[messageKey] = existing == null ? message : _mergeDuplicateDatasetThreadMessage(existing, message);
       }
     }
-    final messages = messagesById.values.toList(growable: false);
+    final messages = messagesById.values.toList(growable: true);
+    final completedImageTurnIds = <String>{
+      for (final message in messages)
+        if (message.image != null && _isCompletedImageGenerationStatus(message.image!.status) && message.turnId?.trim().isNotEmpty == true)
+          message.turnId!.trim(),
+    };
+    messages.removeWhere((message) {
+      final turnId = message.turnId?.trim();
+      return message.kind == 'error' &&
+          turnId != null &&
+          completedImageTurnIds.contains(turnId) &&
+          message.text.trim().toLowerCase().contains('cannot write to closing transport');
+    });
     final lastUserPromptByTurnId = <String, String>{};
     String? lastUserPrompt;
     for (var index = 0; index < messages.length; index += 1) {
@@ -3461,9 +3473,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
                 widget.onGeneratedImageSave?.call(context, generatedImageActionTarget);
                 return true;
               }
-              final prompt = generatedImageActionTarget.prompt?.trim().isNotEmpty == true
-                  ? generatedImageActionTarget.prompt!.trim()
-                  : generatedImageActionTarget.sourcePrompt?.trim();
+              final prompt = generatedImageActionTarget.effectivePrompt;
               if (url == _datasetGeneratedImageCopyPromptUrl && prompt != null && prompt.isNotEmpty) {
                 unawaited(Clipboard.setData(ClipboardData(text: prompt)));
                 return true;
@@ -3675,7 +3685,7 @@ class _DatasetChatThreadState extends State<DatasetChatThread> {
         !_isCompletedImageGenerationStatus(image.status)) {
       return null;
     }
-    final prompt = image.prompt?.trim().isNotEmpty == true ? image.prompt!.trim() : image.sourcePrompt?.trim();
+    final prompt = image.effectivePrompt;
     var markdown = readyText.replaceFirstMapped(
       RegExp(r'\[save a copy\]', caseSensitive: false),
       (match) => '${match.group(0)}($_datasetGeneratedImageSaveCopyUrl)',
@@ -4854,6 +4864,15 @@ class DatasetThreadImage {
   final double? height;
   final String? sourcePrompt;
   final String? prompt;
+
+  String? get effectivePrompt {
+    final generatedPrompt = prompt?.trim();
+    if (generatedPrompt != null && generatedPrompt.isNotEmpty) {
+      return generatedPrompt;
+    }
+    final originalPrompt = sourcePrompt?.trim();
+    return originalPrompt == null || originalPrompt.isEmpty ? null : originalPrompt;
+  }
 
   DatasetThreadImage copyWith({String? sourcePrompt}) {
     return DatasetThreadImage(
