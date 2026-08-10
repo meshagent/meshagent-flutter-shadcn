@@ -27,6 +27,8 @@ class MultiThreadView extends StatefulWidget {
     this.newThreadResetVersion = 0,
     this.centerComposer = true,
     this.showCenteredComposerTitle = true,
+    this.centeredComposerTitle = "Start a new thread",
+    this.centeredComposerTitleStyle,
     this.showUsageFooter = false,
     this.emptyState,
     this.inputPlaceholder,
@@ -55,6 +57,8 @@ class MultiThreadView extends StatefulWidget {
   final int newThreadResetVersion;
   final bool centerComposer;
   final bool showCenteredComposerTitle;
+  final String centeredComposerTitle;
+  final TextStyle? centeredComposerTitleStyle;
   final bool showUsageFooter;
   final Widget? emptyState;
   final Widget? inputPlaceholder;
@@ -141,6 +145,8 @@ class _MultiThreadViewState extends State<MultiThreadView> {
       onThreadResolved: widget.onSelectedThreadResolved,
       centerComposer: widget.centerComposer,
       showCenteredComposerTitle: widget.showCenteredComposerTitle,
+      centeredComposerTitle: widget.centeredComposerTitle,
+      centeredComposerTitleStyle: widget.centeredComposerTitleStyle,
       showUsageFooter: widget.showUsageFooter,
       emptyState: widget.emptyState,
       inputPlaceholder: widget.inputPlaceholder,

@@ -36,6 +36,25 @@ class _NoParticipantChatClient extends BaseChatClient {
   }
 }
 
+class _PendingThreadChatClient extends BaseChatClient {
+  StartThread? pendingStart;
+
+  @override
+  Future<void> sendAgentMessage(AgentMessage message, {Uint8List? attachment}) async {
+    if (message is StartThread) {
+      pendingStart = message;
+    }
+  }
+
+  void resolve() {
+    final start = pendingStart;
+    if (start == null) {
+      throw StateError('No thread start is pending.');
+    }
+    handleAgentMessage(ThreadStarted(sourceMessageId: start.messageId, threadId: 'dataset://threads/custom-title'));
+  }
+}
+
 class _MultiThreadFocusHarness extends StatefulWidget {
   const _MultiThreadFocusHarness({required this.room, required this.controller});
 
@@ -181,6 +200,51 @@ void main() {
 
     expect(chatClient.startedThreadCount, 1);
     expect(find.text('Resolved dataset://threads/first-send'), findsOneWidget);
+  });
+
+  testWidgets('custom centered title hides while the first message is pending and after resolution', (tester) async {
+    final chatClient = _PendingThreadChatClient();
+    final controller = ChatThreadController(room: null);
+    const centeredTitleStyle = TextStyle(fontSize: 28, fontWeight: FontWeight.w700);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 640,
+            child: NewChatThread(
+              chatClient: chatClient,
+              agentName: 'assistant',
+              controller: controller,
+              centeredComposerTitle: 'How can I help you?',
+              centeredComposerTitleStyle: centeredTitleStyle,
+              builder: (context, threadPath) => Text('Resolved $threadPath'),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('How can I help you?'), findsOneWidget);
+    expect(tester.widget<Text>(find.text('How can I help you?')).style, centeredTitleStyle);
+
+    controller.textFieldController.text = 'send once';
+    await tester.pump();
+    final sendGesture = tester.widget<ShadGestureDetector>(
+      find.ancestor(of: find.byIcon(LucideIcons.arrowUp), matching: find.byType(ShadGestureDetector)),
+    );
+    sendGesture.onTap!.call();
+    await tester.pump();
+
+    expect(chatClient.pendingStart, isNotNull);
+    expect(find.text('How can I help you?'), findsNothing);
+
+    chatClient.resolve();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Resolved dataset://threads/custom-title'), findsOneWidget);
+    expect(find.text('How can I help you?'), findsNothing);
   });
 
   testWidgets('wraps the new thread composer in a file drop area', (tester) async {
