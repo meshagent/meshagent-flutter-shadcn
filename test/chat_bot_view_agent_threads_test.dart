@@ -141,6 +141,75 @@ void main() {
     expect(openedPath, 'samples/Move test/logo-renamed.svg');
   });
 
+  testWidgets('dataset thread attachment resolvers can update structured data URLs', (tester) async {
+    const original = 'data:text/plain;base64,b2xkLWZvbGRlcg==';
+    const resolved = 'data:text/plain;base64,bmV3LWZvbGRlcg==';
+    String? resolverInput;
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: DatasetChatThread(
+            path: 'dataset://threads/test',
+            attachmentPathResolver: (path) {
+              resolverInput = path;
+              return path == original ? resolved : path;
+            },
+            attachmentRenderer: (context, path) => Text('Folder: $path'),
+            rowsLoader: ({required namespace, required table}) => Stream.value([
+              {
+                'item_id': 'message-1',
+                'timestamp': '2026-07-20T12:00:00Z',
+                'data': {
+                  'kind': 'message',
+                  'role': 'user',
+                  'attachments': [
+                    {'url': original, 'name': 'old-folder'},
+                  ],
+                },
+              },
+            ]),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(resolverInput, original);
+    expect(find.text('Folder: $resolved'), findsOneWidget);
+  });
+
+  testWidgets('dataset thread data attachments stay unchanged without a resolver', (tester) async {
+    const original = 'data:text/plain;base64,bGVnYWN5LWZvbGRlcg==';
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: DatasetChatThread(
+            path: 'dataset://threads/test',
+            attachmentRenderer: (context, path) => Text('Folder: $path'),
+            rowsLoader: ({required namespace, required table}) => Stream.value([
+              {
+                'item_id': 'message-1',
+                'timestamp': '2026-07-20T12:00:00Z',
+                'data': {
+                  'kind': 'message',
+                  'role': 'user',
+                  'attachments': [
+                    {'url': original, 'name': 'legacy-folder'},
+                  ],
+                },
+              },
+            ]),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Folder: $original'), findsOneWidget);
+  });
+
   testWidgets('dataset thread attachment labels use the resolved filename after a move', (tester) async {
     await tester.pumpWidget(
       ShadApp(

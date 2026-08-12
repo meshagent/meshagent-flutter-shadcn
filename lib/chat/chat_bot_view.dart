@@ -60,6 +60,7 @@ class ChatBotView extends StatefulWidget {
     this.attachmentUnavailableBuilder,
     this.onAttachmentUnavailable,
     this.datasetInlineAttachmentViewerPredicate,
+    this.datasetAgentMessageTextTransformer,
     this.chatInputBoxBuilder,
     this.customInputBuilder,
     this.openFile,
@@ -80,6 +81,8 @@ class ChatBotView extends StatefulWidget {
     this.mobileUnderHeaderContentPadding,
     this.centerComposer = false,
     this.showCenteredComposerTitle = true,
+    this.centeredComposerTitle = "Start a new thread",
+    this.centeredComposerTitleStyle,
     this.hideChatInput = false,
     this.showThreadList = true,
     this.threadListWidth = 280,
@@ -125,6 +128,7 @@ class ChatBotView extends StatefulWidget {
   final ThreadAttachmentUnavailableBuilder? attachmentUnavailableBuilder;
   final ThreadAttachmentUnavailableHandler? onAttachmentUnavailable;
   final DatasetChatInlineAttachmentViewerPredicate? datasetInlineAttachmentViewerPredicate;
+  final DatasetChatAgentMessageTextTransformer? datasetAgentMessageTextTransformer;
   final Widget Function(BuildContext context, Widget chatBox)? chatInputBoxBuilder;
   final ChatThreadCustomInputBuilder? customInputBuilder;
   final FutureOr<void> Function(String path)? openFile;
@@ -145,6 +149,8 @@ class ChatBotView extends StatefulWidget {
   final double? mobileUnderHeaderContentPadding;
   final bool centerComposer;
   final bool showCenteredComposerTitle;
+  final String centeredComposerTitle;
+  final TextStyle? centeredComposerTitleStyle;
   final bool hideChatInput;
   final bool showThreadList;
   final double threadListWidth;
@@ -305,6 +311,7 @@ class _ChatBotViewState extends State<ChatBotView> {
       attachmentStorageRoom: widget.room,
       mobileStorageSaveSurfacePresenter: widget.mobileStorageSaveSurfacePresenter,
       inlineAttachmentViewerPredicate: widget.datasetInlineAttachmentViewerPredicate,
+      agentMessageTextTransformer: widget.datasetAgentMessageTextTransformer,
       toolsBuilder: widget.toolsBuilder,
       inputPlaceholder: widget.inputPlaceholder,
       attachmentBuilder: widget.attachmentBuilder,
@@ -380,6 +387,7 @@ class _ChatBotViewState extends State<ChatBotView> {
         generatedImageReadyText: widget.generatedImageReadyText,
         replaceGeneratedImageTurnFinalAnswer: widget.replaceGeneratedImageTurnFinalAnswer,
         inlineAttachmentViewerPredicate: widget.datasetInlineAttachmentViewerPredicate,
+        agentMessageTextTransformer: widget.datasetAgentMessageTextTransformer,
         toolsBuilder: widget.toolsBuilder,
         inputPlaceholder: widget.inputPlaceholder,
         attachmentBuilder: widget.attachmentBuilder,
@@ -459,6 +467,8 @@ class _ChatBotViewState extends State<ChatBotView> {
       newThreadResetVersion: widget.newThreadResetVersion,
       centerComposer: widget.centerComposer,
       showCenteredComposerTitle: widget.showCenteredComposerTitle,
+      centeredComposerTitle: widget.centeredComposerTitle,
+      centeredComposerTitleStyle: widget.centeredComposerTitleStyle,
       showUsageFooter: widget.showUsageFooter,
       emptyState: widget.emptyState,
       inputPlaceholder: widget.inputPlaceholder,

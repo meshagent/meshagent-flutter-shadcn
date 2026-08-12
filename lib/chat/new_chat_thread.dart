@@ -50,6 +50,8 @@ class NewChatThread extends StatefulWidget {
     this.onThreadResolved,
     this.centerComposer = true,
     this.showCenteredComposerTitle = true,
+    this.centeredComposerTitle = "Start a new thread",
+    this.centeredComposerTitleStyle,
     this.showUsageFooter = false,
     this.emptyState,
     this.inputPlaceholder,
@@ -79,6 +81,8 @@ class NewChatThread extends StatefulWidget {
   final void Function(String? path, String? displayName)? onThreadResolved;
   final bool centerComposer;
   final bool showCenteredComposerTitle;
+  final String centeredComposerTitle;
+  final TextStyle? centeredComposerTitleStyle;
   final bool showUsageFooter;
   final Widget? emptyState;
   final Widget? inputPlaceholder;
@@ -1101,7 +1105,7 @@ class _NewChatThreadState extends State<NewChatThread> {
 
   Widget _buildNewThreadComposer(BuildContext context) {
     final snapshot = _buildSnapshot();
-    final headingStyle = ShadTheme.of(context).textTheme.h4;
+    final headingStyle = widget.centeredComposerTitleStyle ?? ShadTheme.of(context).textTheme.h4;
     final input = AnimatedBuilder(
       animation: Listenable.merge([_modelController, _controller]),
       builder: (context, _) {
@@ -1224,7 +1228,7 @@ class _NewChatThreadState extends State<NewChatThread> {
                   mainAxisSize: MainAxisSize.min,
                   spacing: 12,
                   children: [
-                    if (widget.showCenteredComposerTitle) Text("Start a new thread", style: headingStyle),
+                    if (widget.showCenteredComposerTitle) Text(widget.centeredComposerTitle, style: headingStyle),
                     composer,
                     if (_newThreadError != null) ...[
                       ShadAlert.destructive(title: const Text("Unable to start thread"), description: Text(_newThreadError!)),
