@@ -162,6 +162,10 @@ bool _usesMobileContextLayout(BuildContext context) {
   return MediaQuery.sizeOf(context).width < _mobileScreenWidthMax;
 }
 
+bool usesMobileChatContextLayout(BuildContext context) {
+  return _usesMobileContextLayout(context);
+}
+
 bool _usesNativeMobileReactionFlowDialog(BuildContext context) {
   if (kIsWeb || !_usesMobileContextLayout(context)) {
     return false;
@@ -195,6 +199,12 @@ String _defaultSuggestedFileNameFromPath(String path) {
   return trimmed.substring(slash + 1);
 }
 
+String _storageParentPath(String path) {
+  final normalized = path.trim().replaceAll(RegExp(r'/+$'), '');
+  final slash = normalized.lastIndexOf('/');
+  return slash <= 0 ? '' : normalized.substring(0, slash);
+}
+
 String _applySuggestedFileExtension(String rawPath, {required String suggestedFileName}) {
   final trimmed = rawPath.trim();
   if (trimmed.isEmpty) {
@@ -216,23 +226,38 @@ String _applySuggestedFileExtension(String rawPath, {required String suggestedFi
   return "$trimmed$extension";
 }
 
+enum ThreadStorageSaveContentType { comment, attachment }
+
 class ThreadStorageSaveSurfaceRequest {
   const ThreadStorageSaveSurfaceRequest({
     required this.room,
     required this.title,
     required this.suggestedFileName,
     required this.fileNameLabel,
+    required this.contentType,
     required this.loadContent,
+    this.initialFolderPath = '',
+    this.offerKeepBothOnConflict = false,
   });
 
   final RoomClient room;
   final String title;
   final String suggestedFileName;
   final String fileNameLabel;
+  final ThreadStorageSaveContentType contentType;
   final Future<FileContent> Function() loadContent;
+  final String initialFolderPath;
+  final bool offerKeepBothOnConflict;
 }
 
 typedef ThreadStorageSaveSurfacePresenter = Future<void> Function(BuildContext context, ThreadStorageSaveSurfaceRequest request);
+typedef ThreadAttachmentPathResolver = String Function(String path);
+
+enum ThreadAttachmentAvailability { available, unavailable, unknown }
+
+typedef ThreadAttachmentAvailabilityResolver = Future<ThreadAttachmentAvailability> Function(String path);
+typedef ThreadAttachmentUnavailableBuilder = Widget Function(BuildContext context, String path, String displayName, VoidCallback onPressed);
+typedef ThreadAttachmentUnavailableHandler = FutureOr<void> Function(BuildContext context, String path, String displayName);
 
 String _normalizeEmojiPresentationKey(String value) {
   return value.replaceAll('\u{FE0F}', '').replaceAll('\u{FE0E}', '').replaceAll('\u{200D}', '').trim();
@@ -344,13 +369,15 @@ Future<bool> _showStorageOverwriteConfirmation(BuildContext context, {required S
   return overwrite == true;
 }
 
-Future<void> _showThreadStorageSaveSurface(
+Future<void> showThreadStorageSaveSurface(
   BuildContext context, {
   required RoomClient room,
   required String title,
   required String suggestedFileName,
   required String fileNameLabel,
+  required ThreadStorageSaveContentType contentType,
   required Future<FileContent> Function() loadContent,
+  String initialFolderPath = '',
   ThreadStorageSaveSurfacePresenter? mobilePresenter,
 }) async {
   if (mobilePresenter != null) {
@@ -361,7 +388,9 @@ Future<void> _showThreadStorageSaveSurface(
         title: title,
         suggestedFileName: suggestedFileName,
         fileNameLabel: fileNameLabel,
+        contentType: contentType,
         loadContent: loadContent,
+        initialFolderPath: initialFolderPath,
       ),
     );
     return;
@@ -4971,6 +5000,7 @@ class ChatThread extends StatefulWidget {
     this.onAttachmentRemoved,
     this.fileInThreadBuilder,
     this.pendingFileInThreadBuilder,
+    this.attachmentPathResolver,
     this.chatInputBoxBuilder,
     this.customInputBuilder,
     this.openFile,
@@ -5020,6 +5050,7 @@ class ChatThread extends StatefulWidget {
   final ValueChanged<FileAttachment>? onAttachmentRemoved;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
   final Widget? Function(BuildContext context, String path)? pendingFileInThreadBuilder;
+  final ThreadAttachmentPathResolver? attachmentPathResolver;
   final Widget Function(BuildContext context, Widget chatBox)? chatInputBoxBuilder;
   final ChatThreadCustomInputBuilder? customInputBuilder;
   final FutureOr<void> Function(String path)? openFile;
@@ -5050,6 +5081,7 @@ class ChatBubble extends StatefulWidget {
     this.backgroundColor,
     this.borderColor,
     this.textColor,
+    this.markdownLinkHandler,
     this.selectable = true,
     this.showActionRail = true,
     this.onTap,
@@ -5068,6 +5100,7 @@ class ChatBubble extends StatefulWidget {
   final Color? backgroundColor;
   final Color? borderColor;
   final Color? textColor;
+  final ThreadMarkdownLinkHandler? markdownLinkHandler;
   final bool selectable;
   final bool showActionRail;
   final VoidCallback? onTap;
@@ -5085,6 +5118,7 @@ class _ChatBubble extends State<ChatBubble> {
 
   bool hovering = false;
   bool _keepingActionsVisible = false;
+  bool _customOptionsOpen = false;
   Timer? _actionVisibilityTimer;
 
   final optionsController = ShadContextMenuController();
@@ -5154,7 +5188,7 @@ class _ChatBubble extends State<ChatBubble> {
   void _scheduleActionVisibilityHide() {
     _actionVisibilityTimer?.cancel();
     _actionVisibilityTimer = Timer(_menuReverseDuration, () {
-      if (!mounted || hovering || optionsController.isOpen || reactionController.isOpen) {
+      if (!mounted || hovering || optionsController.isOpen || reactionController.isOpen || _customOptionsOpen) {
         return;
       }
 
@@ -5162,6 +5196,22 @@ class _ChatBubble extends State<ChatBubble> {
         _keepingActionsVisible = false;
       });
     });
+  }
+
+  void _handleCustomOptionsOpenChanged(bool open) {
+    if (_customOptionsOpen == open) {
+      return;
+    }
+
+    _actionVisibilityTimer?.cancel();
+    setState(() {
+      _customOptionsOpen = open;
+      _keepingActionsVisible = open || hovering;
+    });
+
+    if (!open && !hovering) {
+      _scheduleActionVisibilityHide();
+    }
   }
 
   Future<void> _onCopy() async {
@@ -5188,12 +5238,13 @@ class _ChatBubble extends State<ChatBubble> {
   }
 
   Future<void> _onSave(RoomClient room) async {
-    await _showThreadStorageSaveSurface(
+    await showThreadStorageSaveSurface(
       context,
       room: room,
       title: "Save comment file as ...",
       suggestedFileName: "chat-comment.md",
       fileNameLabel: "Enter File Name",
+      contentType: ThreadStorageSaveContentType.comment,
       mobilePresenter: widget.mobileStorageSaveSurfacePresenter,
       loadContent: () async {
         final bytes = Uint8List.fromList(utf8.encode(widget.text));
@@ -5255,14 +5306,16 @@ class _ChatBubble extends State<ChatBubble> {
     final markdownLinkColor = mine
         ? ThreadTypographyOverride.maybeMineBubbleLinkColorOf(context) ?? ThreadTypographyOverride.maybeLinkColorOf(context)
         : ThreadTypographyOverride.maybeLinkColorOf(context);
+    final messageOptionsBuilder = ThreadTypographyOverride.maybeMessageOptionsBuilderOf(context);
     final showActions =
-        widget.showActionRail && (hovering || optionsController.isOpen || reactionController.isOpen || _keepingActionsVisible);
+        widget.showActionRail &&
+        (hovering || optionsController.isOpen || reactionController.isOpen || _customOptionsOpen || _keepingActionsVisible);
     final bottomAlignActions = ThreadTypographyOverride.bottomAlignMessageActionsOf(context);
     final canLongPressReact =
         (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS) && widget.onReactFromMenu != null;
     final optionItemCount = 1 + (canLongPressReact ? 1 : 0) + (widget.room != null ? 1 : 0) + (widget.onDelete != null ? 1 : 0);
 
-    final optionsAction = IgnorePointer(
+    final defaultOptionsAction = IgnorePointer(
       ignoring: !showActions,
       child: Opacity(
         opacity: showActions ? 1 : 0,
@@ -5299,6 +5352,30 @@ class _ChatBubble extends State<ChatBubble> {
         ),
       ),
     );
+    final optionsAction = messageOptionsBuilder == null
+        ? defaultOptionsAction
+        : IgnorePointer(
+            ignoring: !showActions,
+            child: Opacity(
+              opacity: showActions ? 1 : 0,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 5),
+                child: messageOptionsBuilder(
+                  context,
+                  text: widget.text,
+                  onCopy: () {
+                    unawaited(_onCopy());
+                  },
+                  onSaveCopyAs: widget.room == null
+                      ? null
+                      : () {
+                          unawaited(_onSave(widget.room!));
+                        },
+                  onMenuOpenChanged: _handleCustomOptionsOpenChanged,
+                ),
+              ),
+            ),
+          );
 
     final reactAction = SizedBox(
       width: _actionSlotSize,
@@ -5351,6 +5428,7 @@ class _ChatBubble extends State<ChatBubble> {
           selectable: widget.selectable && kIsWeb,
           color: widget.textColor,
           linkColor: markdownLinkColor,
+          linkHandler: widget.markdownLinkHandler,
         ),
       ),
     );
@@ -5422,7 +5500,7 @@ class _ChatBubble extends State<ChatBubble> {
             }
           });
 
-          if (!h && !optionsController.isOpen && !reactionController.isOpen) {
+          if (!h && !optionsController.isOpen && !reactionController.isOpen && !_customOptionsOpen) {
             _scheduleActionVisibilityHide();
           }
         },
@@ -6262,6 +6340,7 @@ class _ChatThreadState extends State<ChatThread> {
                       messageHeaderBuilder: widget.messageHeaderBuilder,
                       fileInThreadBuilder: widget.fileInThreadBuilder,
                       pendingFileInThreadBuilder: widget.pendingFileInThreadBuilder,
+                      attachmentPathResolver: widget.attachmentPathResolver,
                       openFile: widget.openFile,
                       emptyStateTitle: widget.emptyStateTitle,
                       emptyStateDescription: widget.emptyStateDescription,
@@ -6406,6 +6485,7 @@ class _ChatThreadState extends State<ChatThread> {
               emptyState: widget.emptyState,
               fileInThreadBuilder: widget.fileInThreadBuilder,
               pendingFileInThreadBuilder: widget.pendingFileInThreadBuilder,
+              attachmentPathResolver: widget.attachmentPathResolver,
               openFile: widget.openFile,
               mobileStorageSaveSurfacePresenter: widget.mobileStorageSaveSurfacePresenter,
               mobileUnderHeaderContentPadding: widget.mobileUnderHeaderContentPadding,
@@ -6499,6 +6579,7 @@ class ChatThreadMessages extends StatefulWidget {
     this.messageHeaderBuilder,
     this.fileInThreadBuilder,
     this.pendingFileInThreadBuilder,
+    this.attachmentPathResolver,
     this.openFile,
     this.messageBuilders,
     this.emptyStateTitle,
@@ -6542,6 +6623,7 @@ class ChatThreadMessages extends StatefulWidget {
   final Widget Function(BuildContext, MeshDocument, MeshElement)? messageHeaderBuilder;
   final Widget Function(BuildContext context, String path)? fileInThreadBuilder;
   final Widget? Function(BuildContext context, String path)? pendingFileInThreadBuilder;
+  final ThreadAttachmentPathResolver? attachmentPathResolver;
   final FutureOr<void> Function(String path)? openFile;
 
   @override
@@ -6570,6 +6652,7 @@ class ChatThreadMessageView extends StatelessWidget {
     this.bubbleBorderColor,
     this.useDefaultBubbleBorder = true,
     this.textColor,
+    this.markdownLinkHandler,
     this.selectable = true,
     this.showBubbleActions = true,
     this.onTap,
@@ -6599,6 +6682,7 @@ class ChatThreadMessageView extends StatelessWidget {
   final Color? bubbleBorderColor;
   final bool useDefaultBubbleBorder;
   final Color? textColor;
+  final ThreadMarkdownLinkHandler? markdownLinkHandler;
   final bool selectable;
   final bool showBubbleActions;
   final VoidCallback? onTap;
@@ -6661,6 +6745,7 @@ class ChatThreadMessageView extends StatelessWidget {
               backgroundColor: resolvedBubbleColor,
               borderColor: resolvedBubbleBorderColor,
               textColor: resolvedTextColor,
+              markdownLinkHandler: markdownLinkHandler,
               selectable: selectable,
               showActionRail: showBubbleActions,
               onTap: onTap,
@@ -7570,7 +7655,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
         }
 
         final pathAttribute = attachment.getAttribute("path");
-        final path = pathAttribute is String ? _sanitizePath(pathAttribute) : null;
+        final path = pathAttribute is String ? _resolveAttachmentPath(pathAttribute) : null;
         if (path != null && path.trim().isNotEmpty && _isImageFilePath(path)) {
           final attachmentElementId = attachment.id;
           imagesInThread.add(
@@ -7625,6 +7710,12 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
 
   String _sanitizePath(String path) {
     return normalizeRoomStorageAttachmentPath(path);
+  }
+
+  String _resolveAttachmentPath(String path) {
+    final normalizedPath = _sanitizePath(path);
+    final resolvedPath = widget.attachmentPathResolver?.call(normalizedPath).trim();
+    return resolvedPath == null || resolvedPath.isEmpty ? normalizedPath : _sanitizePath(resolvedPath);
   }
 
   bool _isImageFilePath(String path) {
@@ -7734,12 +7825,14 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
   }
 
   Future<void> _saveStoragePath(String path) async {
-    await _showThreadStorageSaveSurface(
+    await showThreadStorageSaveSurface(
       context,
       room: room,
       title: "Save file as ...",
       suggestedFileName: _defaultSuggestedFileNameFromPath(path),
       fileNameLabel: "File name or path",
+      contentType: ThreadStorageSaveContentType.attachment,
+      initialFolderPath: _storageParentPath(path),
       mobilePresenter: mobileStorageSaveSurfacePresenter,
       loadContent: () => room.storage.download(path),
     );
@@ -7808,6 +7901,26 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
       onTap: () async {
         await _openPath(path);
       },
+      child: child,
+    );
+  }
+
+  Widget _buildFileAttachmentWithOptions(BuildContext context, {required bool mine, required String path, required Widget child}) {
+    final optionsBuilder = ThreadTypographyOverride.maybeAttachmentOptionsBuilderOf(context);
+    if (optionsBuilder == null || _usesMobileContextLayout(context)) {
+      return child;
+    }
+
+    return ThreadAttachmentOptionsRail(
+      mine: mine,
+      menuBuilder: (context, onMenuOpenChanged) => optionsBuilder(
+        context,
+        mine: mine,
+        onOpen: () => unawaited(_openPath(path)),
+        onDownload: () => unawaited(_downloadPath(path)),
+        onSaveCopyAs: () => unawaited(_saveStoragePath(path)),
+        onMenuOpenChanged: onMenuOpenChanged,
+      ),
       child: child,
     );
   }
@@ -7988,7 +8101,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
       return keyed(const SizedBox.shrink());
     }
 
-    final normalizedPath = _sanitizePath(pathAttribute);
+    final normalizedPath = _resolveAttachmentPath(pathAttribute);
 
     if (attachment.tagName == "file" && _isImageFilePath(normalizedPath)) {
       final initialIndex = feedImages.indexWhere((entry) => entry.path == normalizedPath);
@@ -8017,7 +8130,19 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
             return Column(
               crossAxisAlignment: mine ? .end : .start,
               children: [
-                _buildFileImageInThread(context, normalizedPath, imageRecord, loading, items: items, onOpenFullscreen: onOpenFullscreen),
+                _buildFileAttachmentWithOptions(
+                  context,
+                  mine: mine,
+                  path: normalizedPath,
+                  child: _buildFileImageInThread(
+                    context,
+                    normalizedPath,
+                    imageRecord,
+                    loading,
+                    items: items,
+                    onOpenFullscreen: onOpenFullscreen,
+                  ),
+                ),
                 if (normalizedAttachmentRef != null)
                   _buildReactionRow(
                     context,
@@ -8038,12 +8163,17 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
       Column(
         crossAxisAlignment: mine ? .end : .start,
         children: [
-          _buildFileInThread(
+          _buildFileAttachmentWithOptions(
             context,
-            normalizedPath,
-            items: _usesMobileContextLayout(context)
-                ? _buildMobileAttachmentOptions(message: message, attachmentRef: normalizedAttachmentRef, path: normalizedPath)
-                : _buildAttachmentOptions(path: normalizedPath),
+            mine: mine,
+            path: normalizedPath,
+            child: _buildFileInThread(
+              context,
+              normalizedPath,
+              items: _usesMobileContextLayout(context)
+                  ? _buildMobileAttachmentOptions(message: message, attachmentRef: normalizedAttachmentRef, path: normalizedPath)
+                  : _buildAttachmentOptions(path: normalizedPath),
+            ),
           ),
           if (normalizedAttachmentRef != null)
             _buildReactionRow(
@@ -8087,6 +8217,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
 
   List<ShadContextMenuItem> _buildAttachmentOptions({_ThreadImageRecord? imageRecord, String? path}) {
     final isMobile = _usesMobileContextLayout(context);
+    final useCustomOptions = !isMobile && ThreadTypographyOverride.maybeAttachmentOptionsBuilderOf(context) != null;
 
     return [
       if (path != null)
@@ -8098,7 +8229,7 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
           leading: const Icon(LucideIcons.externalLink, size: 14),
           child: const Text("Open"),
         ),
-      if (imageRecord != null)
+      if (imageRecord != null && !useCustomOptions)
         ShadContextMenuItem(
           height: 40,
           onPressed: () async {
@@ -8115,6 +8246,15 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
           },
           leading: const Icon(LucideIcons.download, size: 14),
           child: const Text("Download"),
+        ),
+      if (path != null && useCustomOptions)
+        ShadContextMenuItem(
+          height: 40,
+          onPressed: () async {
+            await _saveStoragePath(path);
+          },
+          leading: const Icon(LucideIcons.folderInput, size: 14),
+          child: const Text("Save a copy as..."),
         ),
     ];
   }
@@ -8166,6 +8306,10 @@ class _ChatThreadMessagesState extends State<ChatThreadMessages> {
           ),
         ),
       ];
+    }
+
+    if (ThreadTypographyOverride.maybeAttachmentOptionsBuilderOf(context) != null) {
+      return const <Widget>[];
     }
 
     final items = _buildAttachmentOptions(imageRecord: imageRecord, path: path);
@@ -9001,6 +9145,57 @@ class _ThreadStorageSaveSurfaceScaffoldState extends State<_ThreadStorageSaveSur
   }
 }
 
+typedef ThreadAttachmentMenuBuilder = Widget Function(BuildContext context, ValueChanged<bool> onMenuOpenChanged);
+
+class ThreadAttachmentOptionsRail extends StatefulWidget {
+  const ThreadAttachmentOptionsRail({super.key, required this.mine, required this.menuBuilder, required this.child});
+
+  final bool mine;
+  final ThreadAttachmentMenuBuilder menuBuilder;
+  final Widget child;
+
+  @override
+  State<ThreadAttachmentOptionsRail> createState() => _ThreadAttachmentOptionsRailState();
+}
+
+class _ThreadAttachmentOptionsRailState extends State<ThreadAttachmentOptionsRail> {
+  bool _hovered = false;
+  bool _menuOpen = false;
+
+  void _setMenuOpen(bool open) {
+    if (_menuOpen == open) {
+      return;
+    }
+
+    setState(() => _menuOpen = open);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final showMenu = _hovered || _menuOpen;
+    final menu = IgnorePointer(
+      ignoring: !showMenu,
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 120),
+        opacity: showMenu ? 1 : 0,
+        child: Padding(padding: const EdgeInsets.only(bottom: 5), child: widget.menuBuilder(context, _setMenuOpen)),
+      ),
+    );
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: widget.mine
+            ? <Widget>[menu, const SizedBox(width: 8), widget.child]
+            : <Widget>[widget.child, const SizedBox(width: 8), menu],
+      ),
+    );
+  }
+}
+
 class _AttachmentOptionsButton extends StatefulWidget {
   const _AttachmentOptionsButton({required this.items});
 
@@ -9053,6 +9248,41 @@ class _ThreadImageRecord {
 
   final Uint8List data;
   final String mimeType;
+}
+
+class ChatThreadGeneratedImageContent {
+  const ChatThreadGeneratedImageContent({required this.data, required this.mimeType, required this.suggestedFileName});
+
+  final Uint8List data;
+  final String mimeType;
+  final String suggestedFileName;
+}
+
+Future<ChatThreadGeneratedImageContent?> loadChatThreadGeneratedImageContent(
+  RoomClient? room, {
+  String? imageId,
+  String? imageUri,
+  String? fallbackMimeType,
+}) async {
+  _ThreadImageRecord? record;
+  final normalizedUri = imageUri?.trim();
+  if (normalizedUri != null && normalizedUri.isNotEmpty) {
+    record = await _loadGeneratedThreadImageRecordFromUri(room, imageUri: normalizedUri, fallbackMimeType: fallbackMimeType);
+  }
+
+  final normalizedImageId = imageId?.trim();
+  if (record == null && room != null && normalizedImageId != null && normalizedImageId.isNotEmpty) {
+    record = await _loadGeneratedThreadImageRecord(room, imageId: normalizedImageId, fallbackMimeType: fallbackMimeType);
+  }
+  if (record == null) {
+    return null;
+  }
+
+  return ChatThreadGeneratedImageContent(
+    data: record.data,
+    mimeType: record.mimeType,
+    suggestedFileName: _ImageMime.suggestedFileName(record.mimeType),
+  );
 }
 
 _ThreadImageRecord? _threadImageRecordFromDataUri(String imageUri, {String? fallbackMimeType}) {
@@ -9271,7 +9501,10 @@ class ChatThreadImageAttachment extends StatefulWidget {
     this.widthPx,
     this.heightPx,
     this.roundedCorners = true,
+    this.useThreadAttachmentStyle = false,
+    this.interactive = true,
     this.onOpenFullscreen,
+    this.onSaveAs,
   });
 
   final RoomClient? room;
@@ -9283,7 +9516,10 @@ class ChatThreadImageAttachment extends StatefulWidget {
   final double? widthPx;
   final double? heightPx;
   final bool roundedCorners;
+  final bool useThreadAttachmentStyle;
+  final bool interactive;
   final VoidCallback? onOpenFullscreen;
+  final FutureOr<void> Function()? onSaveAs;
 
   @override
   State<ChatThreadImageAttachment> createState() => _ChatThreadImageAttachmentState();
@@ -9356,6 +9592,10 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
   Size _displaySize() {
     const maxPreviewEdge = 312.5;
     const fallbackPreviewEdge = 312.5;
+
+    if (widget.useThreadAttachmentStyle) {
+      return const Size.square(maxPreviewEdge);
+    }
 
     final rawWidth = widget.widthPx;
     final rawHeight = widget.heightPx;
@@ -9516,14 +9756,30 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
     fileNameController.dispose();
   }
 
+  Future<void> _onDownloadImage(_ThreadImageRecord image) async {
+    await FilePicker.saveFile(dialogTitle: "Download image", fileName: _ImageMime.suggestedFileName(image.mimeType), bytes: image.data);
+  }
+
   Widget _wrapContextMenu({required _ThreadImageRecord image, required Widget child}) {
-    if (_usesMobileContextLayout(context)) {
+    if (!widget.interactive || _usesMobileContextLayout(context)) {
       return child;
     }
 
     return CoordinatedShadContextMenuRegion(
       items: [
-        if (widget.room != null) ShadContextMenuItem(height: 40, onPressed: () => _onSaveImage(image), child: const Text("Save As...")),
+        if (widget.room != null || widget.onSaveAs != null)
+          ShadContextMenuItem(
+            height: 40,
+            onPressed: () async {
+              final onSaveAs = widget.onSaveAs;
+              if (onSaveAs != null) {
+                await onSaveAs();
+                return;
+              }
+              await _onSaveImage(image);
+            },
+            child: Text(widget.onSaveAs == null ? "Save As..." : "Save a copy as..."),
+          ),
         ShadContextMenuItem(height: 40, onPressed: () => _onCopyImage(image), child: const Text("Copy")),
       ],
       child: child,
@@ -9538,11 +9794,42 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
   }
 
   Widget _wrapTapTarget(Widget child) {
-    if (widget.onOpenFullscreen == null) {
+    if (!widget.interactive || widget.onOpenFullscreen == null) {
       return child;
     }
 
-    return ShadGestureDetector(cursor: SystemMouseCursors.zoomIn, onTap: widget.onOpenFullscreen, child: child);
+    return ShadGestureDetector(
+      cursor: widget.useThreadAttachmentStyle ? SystemMouseCursors.basic : SystemMouseCursors.zoomIn,
+      onTap: widget.onOpenFullscreen,
+      child: child,
+    );
+  }
+
+  Widget _wrapThreadAttachmentOptions({required _ThreadImageRecord image, required Widget child}) {
+    final optionsBuilder = ThreadTypographyOverride.maybeAttachmentOptionsBuilderOf(context);
+    final onOpen = widget.onOpenFullscreen;
+    final onSaveAs = widget.onSaveAs;
+    if (!widget.useThreadAttachmentStyle ||
+        _usesMobileContextLayout(context) ||
+        _isGeneratingStatus(widget.status) ||
+        optionsBuilder == null ||
+        onOpen == null ||
+        onSaveAs == null) {
+      return _wrapContextMenu(image: image, child: child);
+    }
+
+    return ThreadAttachmentOptionsRail(
+      mine: false,
+      menuBuilder: (context, onMenuOpenChanged) => optionsBuilder(
+        context,
+        mine: false,
+        onOpen: onOpen,
+        onDownload: () => unawaited(_onDownloadImage(image)),
+        onSaveCopyAs: () => unawaited(Future<void>.sync(onSaveAs)),
+        onMenuOpenChanged: onMenuOpenChanged,
+      ),
+      child: child,
+    );
   }
 
   Widget _buildPlaceholder(BuildContext context, {required bool showSpinner, String? label}) {
@@ -9591,6 +9878,11 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
     final imageUri = widget.imageUri?.trim();
     final hasImageUri = imageUri != null && imageUri.isNotEmpty;
     final statusDetail = widget.statusDetail?.trim();
+    final imageFit = widget.useThreadAttachmentStyle
+        ? BoxFit.cover
+        : (widget.widthPx != null && widget.heightPx != null)
+        ? BoxFit.contain
+        : BoxFit.cover;
 
     if (!hasImageId && !hasImageUri) {
       if (_isFailedStatus(status)) {
@@ -9610,7 +9902,7 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
           child: _wrapWithCorners(
             Image.network(
               imageUri!,
-              fit: (widget.widthPx != null && widget.heightPx != null) ? BoxFit.contain : BoxFit.cover,
+              fit: imageFit,
               errorBuilder: (context, error, stackTrace) =>
                   const FileDefaultPreviewCard(icon: LucideIcons.imageOff, text: "Image unavailable"),
             ),
@@ -9645,12 +9937,12 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
         }
 
         final imageWidget = _ImageMime.isSvg(image.mimeType)
-            ? SvgPicture.memory(image.data, fit: (widget.widthPx != null && widget.heightPx != null) ? BoxFit.contain : BoxFit.cover)
-            : Image.memory(image.data, fit: (widget.widthPx != null && widget.heightPx != null) ? BoxFit.contain : BoxFit.cover);
+            ? SvgPicture.memory(image.data, fit: imageFit)
+            : Image.memory(image.data, fit: imageFit);
         final size = _displaySize();
 
         final imageContainer = SizedBox(width: size.width, height: size.height, child: _wrapWithCorners(imageWidget));
-        return _wrapContextMenu(image: image, child: _wrapTapTarget(imageContainer));
+        return _wrapThreadAttachmentOptions(image: image, child: _wrapTapTarget(imageContainer));
       },
     );
   }

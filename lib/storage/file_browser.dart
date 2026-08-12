@@ -33,6 +33,7 @@ class FileBrowserRowViewModel {
     required this.entry,
     required this.fullPath,
     required this.displayName,
+    required this.hasDisplayNameOverride,
     required this.selected,
     required this.canActivate,
     required this.onPressed,
@@ -43,6 +44,7 @@ class FileBrowserRowViewModel {
   final StorageEntry entry;
   final String fullPath;
   final String displayName;
+  final bool hasDisplayNameOverride;
   final bool selected;
   final bool canActivate;
   final VoidCallback onPressed;
@@ -52,8 +54,10 @@ class FileBrowserRowViewModel {
 
 typedef FileBrowserHeaderBuilder = Widget Function(BuildContext context, FileBrowserPathViewModel model);
 typedef FileBrowserRowBuilder = Widget Function(BuildContext context, FileBrowserRowViewModel model);
+typedef FileBrowserListBuilder = Widget Function(BuildContext context, List<FileBrowserRowViewModel> rows);
 typedef FileBrowserSeparatorBuilder = Widget Function(BuildContext context, int index);
 typedef FileBrowserEmptyBuilder = Widget Function(BuildContext context);
+typedef FileBrowserErrorBuilder = Widget Function(BuildContext context, Object error);
 
 const String _defaultUntitledThreadName = 'New Chat';
 const String _threadIndexFileName = 'index.threadl';
@@ -121,11 +125,15 @@ class FileBrowser extends StatefulWidget {
     this.rootLabel = "Files",
     this.headerBuilder,
     this.rowBuilder,
+    this.listBuilder,
     this.separatorBuilder,
     this.emptyBuilder,
+    this.loadingBuilder,
+    this.errorBuilder,
     this.showFilesWhenSelectingFolders = false,
     this.allowedFileExtensions,
     this.onPathChanged,
+    this.displayNamesByPath = const <String, String>{},
   });
 
   final RoomClient room;
@@ -136,11 +144,19 @@ class FileBrowser extends StatefulWidget {
   final String rootLabel;
   final FileBrowserHeaderBuilder? headerBuilder;
   final FileBrowserRowBuilder? rowBuilder;
+  final FileBrowserListBuilder? listBuilder;
   final FileBrowserSeparatorBuilder? separatorBuilder;
   final FileBrowserEmptyBuilder? emptyBuilder;
+  final WidgetBuilder? loadingBuilder;
+  final FileBrowserErrorBuilder? errorBuilder;
   final bool showFilesWhenSelectingFolders;
   final Set<String>? allowedFileExtensions;
   final void Function(String path)? onPathChanged;
+
+  /// Presentation-only labels keyed by normalized storage path.
+  ///
+  /// Navigation and selection continue to use the underlying storage paths.
+  final Map<String, String> displayNamesByPath;
 
   @override
   State createState() => _FileBrowser();
@@ -237,10 +253,28 @@ class _FileBrowser extends State<FileBrowser> {
   }
 
   String _displayNameForEntry(StorageEntry entry) {
+    final fullPath = join(path, entry.name);
+    final override = widget.displayNamesByPath[_normalizeThreadStoragePath(fullPath)]?.trim();
+    if (override != null && override.isNotEmpty) {
+      return override;
+    }
+
     if (entry.isFolder) {
       return entry.name;
     }
-    return _displayNameForPath(join(path, entry.name));
+    return _displayNameForPath(fullPath);
+  }
+
+  List<String> _displayPathSegments(List<String> segments) {
+    var fullPath = '';
+    return [
+      for (final segment in segments)
+        () {
+          fullPath = join(fullPath, segment);
+          final override = widget.displayNamesByPath[_normalizeThreadStoragePath(fullPath)]?.trim();
+          return override != null && override.isNotEmpty ? override : segment;
+        }(),
+    ];
   }
 
   String? _threadIndexPathForFolder(String folder) {
@@ -487,6 +521,7 @@ class _FileBrowser extends State<FileBrowser> {
   }
 
   Widget _buildDefaultHeader(BuildContext context, List<String> fileItems, ShadTextTheme tt, ShadColorScheme cs) {
+    final displayItems = _displayPathSegments(fileItems);
     return Padding(
       padding: const EdgeInsets.only(top: 10.0, bottom: 8),
       child: Row(
@@ -505,7 +540,7 @@ class _FileBrowser extends State<FileBrowser> {
                 ShadBreadcrumbLink(onPressed: _openRoot, child: const Text('Home')),
                 if (path != "")
                   for (final segment in fileItems.indexed)
-                    ShadBreadcrumbLink(onPressed: () => _openSegment(fileItems, segment.$1), child: Text(segment.$2)),
+                    ShadBreadcrumbLink(onPressed: () => _openSegment(fileItems, segment.$1), child: Text(displayItems[segment.$1])),
               ],
             ),
           ),
@@ -553,11 +588,11 @@ class _FileBrowser extends State<FileBrowser> {
     final cs = theme.colorScheme;
 
     if (files == null) {
-      return Center(child: CircularProgressIndicator());
+      return widget.loadingBuilder?.call(context) ?? Center(child: CircularProgressIndicator());
     }
 
     if (error != null) {
-      return ShadAlert.destructive(description: Text("$error"));
+      return widget.errorBuilder?.call(context, error!) ?? ShadAlert.destructive(description: Text("$error"));
     }
 
     final allowedFileExtensions = widget.allowedFileExtensions?.map((extension) {
@@ -575,8 +610,32 @@ class _FileBrowser extends State<FileBrowser> {
 
     final showingFoldersOnly = widget.selectionMode == FileBrowserSelectionMode.folders && !widget.showFilesWhenSelectingFolders;
     final extensionFilteredFiles = files!.where(extensionAllowed);
-    final filteredFiles = showingFoldersOnly ? extensionFilteredFiles.where((x) => x.isFolder) : extensionFilteredFiles;
+    final filteredFiles = (showingFoldersOnly ? extensionFilteredFiles.where((x) => x.isFolder) : extensionFilteredFiles).toList(
+      growable: false,
+    );
     final currentSelectionCount = filteredFiles.where((file) => selection.contains(join(path, file.name))).length;
+    final rows = [
+      for (final file in filteredFiles)
+        FileBrowserRowViewModel(
+          entry: file,
+          fullPath: join(path, file.name),
+          displayName: _displayNameForEntry(file),
+          hasDisplayNameOverride: widget.displayNamesByPath.containsKey(_normalizeThreadStoragePath(join(path, file.name))),
+          selected: selection.contains(join(path, file.name)),
+          canActivate: switch (widget.selectionMode) {
+            FileBrowserSelectionMode.folders => file.isFolder,
+            FileBrowserSelectionMode.files => !file.isFolder || currentSelectionCount == 0,
+          },
+          onPressed: () => _onEntryPressed(file),
+          canToggleSelection: switch (widget.selectionMode) {
+            FileBrowserSelectionMode.folders => file.isFolder,
+            FileBrowserSelectionMode.files => !file.isFolder,
+          },
+          onToggleSelection: widget.selectionMode == FileBrowserSelectionMode.folders
+              ? (file.isFolder ? () => _onEntryPressed(file) : null)
+              : (file.isFolder ? null : () => _toggleFileSelection(file)),
+        ),
+    ];
 
     final fileItems = path.split("/");
     final header =
@@ -584,7 +643,7 @@ class _FileBrowser extends State<FileBrowser> {
           context,
           FileBrowserPathViewModel(
             path: path,
-            segments: fileItems.where((segment) => segment.isNotEmpty).toList(growable: false),
+            segments: _displayPathSegments(fileItems.where((segment) => segment.isNotEmpty).toList(growable: false)),
             currentSelectionCount: currentSelectionCount,
             rootLabel: widget.rootLabel,
             onRootPressed: _openRoot,
@@ -599,42 +658,17 @@ class _FileBrowser extends State<FileBrowser> {
       children: [
         header,
         Expanded(
-          child: filteredFiles.isEmpty
+          child: rows.isEmpty
               ? (widget.emptyBuilder?.call(context) ?? const SizedBox.shrink())
-              : ListView.separated(
-                  itemCount: filteredFiles.length,
-                  separatorBuilder: widget.separatorBuilder ?? (_, _) => const SizedBox.shrink(),
-                  itemBuilder: (context, index) {
-                    final file = filteredFiles.elementAt(index);
-                    final fullPath = join(path, file.name);
-
-                    final canActivate = switch (widget.selectionMode) {
-                      FileBrowserSelectionMode.folders => file.isFolder,
-                      FileBrowserSelectionMode.files => !file.isFolder || currentSelectionCount == 0,
-                    };
-                    final canToggleSelection = switch (widget.selectionMode) {
-                      FileBrowserSelectionMode.folders => file.isFolder,
-                      FileBrowserSelectionMode.files => !file.isFolder,
-                    };
-
-                    return widget.rowBuilder?.call(
-                          context,
-                          FileBrowserRowViewModel(
-                            entry: file,
-                            fullPath: fullPath,
-                            displayName: _displayNameForEntry(file),
-                            selected: selection.contains(fullPath),
-                            canActivate: canActivate,
-                            onPressed: () => _onEntryPressed(file),
-                            canToggleSelection: canToggleSelection,
-                            onToggleSelection: widget.selectionMode == FileBrowserSelectionMode.folders
-                                ? (file.isFolder ? () => _onEntryPressed(file) : null)
-                                : (file.isFolder ? null : () => _toggleFileSelection(file)),
-                          ),
-                        ) ??
-                        _buildDefaultRow(context, file, theme);
-                  },
-                ),
+              : widget.listBuilder?.call(context, rows) ??
+                    ListView.separated(
+                      itemCount: rows.length,
+                      separatorBuilder: widget.separatorBuilder ?? (_, _) => const SizedBox.shrink(),
+                      itemBuilder: (context, index) {
+                        final row = rows[index];
+                        return widget.rowBuilder?.call(context, row) ?? _buildDefaultRow(context, row.entry, theme);
+                      },
+                    ),
         ),
       ],
     );

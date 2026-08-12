@@ -263,6 +263,7 @@ MarkdownConfig buildChatBubbleMarkdownConfig(
   Color? color,
   double? baseFontSize,
   Color? linkColor,
+  ThreadMarkdownLinkHandler? linkHandler,
   bool threadTypography = false,
   Color? horizontalRuleColor,
   double horizontalRuleHeight = 1,
@@ -301,7 +302,7 @@ MarkdownConfig buildChatBubbleMarkdownConfig(
     ),
   );
   final resolvedLinkColor = linkColor ?? ThreadTypographyOverride.maybeLinkColorOf(context) ?? theme.linkButtonTheme.foregroundColor;
-  final markdownLinkHandler = ThreadTypographyOverride.maybeMarkdownLinkHandlerOf(context);
+  final markdownLinkHandler = linkHandler ?? ThreadTypographyOverride.maybeMarkdownLinkHandlerOf(context);
 
   final headingBase = threadTypographyTextStyle(
     context,

@@ -101,6 +101,77 @@ void main() {
     expect(fallbackCalls, 0);
   });
 
+  testWidgets('dataset thread attachments use the resolved path for rendering and opening', (tester) async {
+    String? openedPath;
+    String? resolverInput;
+
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: DatasetChatThread(
+            path: 'dataset://threads/test',
+            openFile: (path) => openedPath = path,
+            attachmentPathResolver: (path) {
+              resolverInput = path;
+              return path == 'room:///Move%20test/logo.svg' ? 'samples/Move test/logo-renamed.svg' : path;
+            },
+            attachmentRenderer: (context, path) => Text('File: $path'),
+            rowsLoader: ({required namespace, required table}) => Stream.value([
+              {
+                'item_id': 'message-1',
+                'timestamp': '2026-07-20T12:00:00Z',
+                'data': {
+                  'kind': 'message',
+                  'role': 'user',
+                  'attachments': [
+                    {'url': 'room:///Move%20test/logo.svg', 'name': 'logo.svg'},
+                  ],
+                },
+              },
+            ]),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(resolverInput, 'room:///Move%20test/logo.svg');
+    expect(find.text('File: samples/Move test/logo-renamed.svg'), findsOneWidget);
+    await tester.tap(find.text('File: samples/Move test/logo-renamed.svg'));
+    expect(openedPath, 'samples/Move test/logo-renamed.svg');
+  });
+
+  testWidgets('dataset thread attachment labels use the resolved filename after a move', (tester) async {
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: DatasetChatThread(
+            path: 'dataset://threads/test',
+            openFile: (_) {},
+            attachmentPathResolver: (path) => path == 'room:///Move%20test/logo.svg' ? 'samples/Move test/logo-renamed.svg' : path,
+            rowsLoader: ({required namespace, required table}) => Stream.value([
+              {
+                'item_id': 'message-1',
+                'timestamp': '2026-07-20T12:00:00Z',
+                'data': {
+                  'kind': 'message',
+                  'role': 'user',
+                  'attachments': [
+                    {'url': 'room:///Move%20test/logo.svg', 'name': 'logo.svg'},
+                  ],
+                },
+              },
+            ]),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('logo-renamed.svg'), findsOneWidget);
+    expect(find.text('logo.svg'), findsNothing);
+  });
+
   testWidgets('default-new ChatBotView loads selected threads through agent messages', (tester) async {
     final room = RoomClient(protocolFactory: Protocol.createFactory(channel: _NoopProtocolChannel()));
     final chatClient = _FakeChatClient();
