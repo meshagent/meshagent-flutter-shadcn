@@ -9527,11 +9527,29 @@ class ChatThreadImageAttachment extends StatefulWidget {
 
 class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
   late Future<_ThreadImageRecord?> _lookup;
+  Duration? _attachmentLoadTimeout;
+  ThreadAttachmentImageCache? _attachmentImageCache;
+  bool _resolvedAttachmentDependencies = false;
+  Timer? _attachmentLoadTimer;
+  int _attachmentLoadGeneration = 0;
 
   @override
   void initState() {
     super.initState();
-    _lookup = _loadImage();
+    _lookup = SynchronousFuture<_ThreadImageRecord?>(null);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final nextTimeout = ThreadTypographyOverride.maybeAttachmentLoadTimeoutOf(context);
+    final nextCache = ThreadTypographyOverride.maybeAttachmentImageCacheOf(context);
+    if (!_resolvedAttachmentDependencies || nextTimeout != _attachmentLoadTimeout || nextCache != _attachmentImageCache) {
+      _resolvedAttachmentDependencies = true;
+      _attachmentLoadTimeout = nextTimeout;
+      _attachmentImageCache = nextCache;
+      _lookup = _loadImage();
+    }
   }
 
   @override
@@ -9542,7 +9560,61 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
     }
   }
 
-  Future<_ThreadImageRecord?> _loadImage() async {
+  Future<_ThreadImageRecord?> _loadImage() {
+    _attachmentLoadTimer?.cancel();
+    final generation = ++_attachmentLoadGeneration;
+    final cached = _attachmentImageCache?.read(imageId: widget.imageId, imageUri: widget.imageUri);
+    if (cached != null) {
+      return SynchronousFuture<_ThreadImageRecord?>(_ThreadImageRecord(data: cached.data, mimeType: cached.mimeType));
+    }
+    final lookup = _loadImageWithoutTimeout();
+    final timeout = _attachmentLoadTimeout;
+    if (timeout == null) {
+      return lookup;
+    }
+    final result = Completer<_ThreadImageRecord?>();
+    _attachmentLoadTimer = Timer(timeout, () {
+      if (generation == _attachmentLoadGeneration && !result.isCompleted) {
+        result.complete(null);
+      }
+    });
+    lookup.then(
+      (image) {
+        if (generation != _attachmentLoadGeneration || result.isCompleted) {
+          return;
+        }
+        _attachmentLoadTimer?.cancel();
+        result.complete(image);
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        if (generation != _attachmentLoadGeneration || result.isCompleted) {
+          return;
+        }
+        _attachmentLoadTimer?.cancel();
+        result.completeError(error, stackTrace);
+      },
+    );
+    return result.future;
+  }
+
+  Future<_ThreadImageRecord?> _loadImageWithoutTimeout() {
+    final cache = _attachmentImageCache;
+    if (cache == null) {
+      return _loadImageRecord();
+    }
+    return cache
+        .load(
+          imageId: widget.imageId,
+          imageUri: widget.imageUri,
+          loader: () async {
+            final image = await _loadImageRecord();
+            return image == null ? null : ThreadAttachmentImageData(data: image.data, mimeType: image.mimeType);
+          },
+        )
+        .then((image) => image == null ? null : _ThreadImageRecord(data: image.data, mimeType: image.mimeType));
+  }
+
+  Future<_ThreadImageRecord?> _loadImageRecord() async {
     final imageUri = widget.imageUri;
     if (imageUri != null && imageUri.trim().isNotEmpty) {
       final record = await _loadGeneratedThreadImageRecordFromUri(
@@ -9566,6 +9638,13 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
     }
 
     return _loadGeneratedThreadImageRecord(room, imageId: imageId, fallbackMimeType: widget.fallbackMimeType);
+  }
+
+  @override
+  void dispose() {
+    _attachmentLoadGeneration += 1;
+    _attachmentLoadTimer?.cancel();
+    super.dispose();
   }
 
   bool _isGeneratingStatus(String? status) {
@@ -9835,6 +9914,21 @@ class _ChatThreadImageAttachmentState extends State<ChatThreadImageAttachment> {
   Widget _buildPlaceholder(BuildContext context, {required bool showSpinner, String? label}) {
     final size = _displaySize();
     final trimmedLabel = label == null ? "" : label.trim();
+    const borderRadius = BorderRadius.all(Radius.circular(16));
+    final attachmentLoadingPlaceholderBuilder = ThreadTypographyOverride.maybeAttachmentLoadingPlaceholderBuilderOf(context);
+    final loadingPlaceholderBuilder = showSpinner
+        ? _isGeneratingStatus(widget.status)
+              ? ThreadTypographyOverride.maybeImageGenerationLoadingPlaceholderBuilderOf(context) ?? attachmentLoadingPlaceholderBuilder
+              : attachmentLoadingPlaceholderBuilder
+        : null;
+
+    if (loadingPlaceholderBuilder != null) {
+      return SizedBox(
+        width: size.width,
+        height: size.height,
+        child: loadingPlaceholderBuilder(context, borderRadius: borderRadius),
+      );
+    }
 
     return SizedBox(
       width: size.width,

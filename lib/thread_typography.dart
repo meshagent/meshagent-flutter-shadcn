@@ -1,3 +1,6 @@
+import 'dart:collection';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
@@ -14,6 +17,10 @@ typedef ThreadAttachmentIconBuilder =
     });
 
 typedef ThreadAttachmentActionIconBuilder = Widget Function(BuildContext context, {required Color? color, required bool hovered});
+typedef ThreadAttachmentLoadingPlaceholderBuilder = Widget Function(BuildContext context, {required BorderRadius borderRadius});
+typedef ThreadPoisonedErrorPredicate = bool Function(String message);
+typedef ThreadPoisonedErrorBuilder =
+    Widget Function(BuildContext context, {required String error, required VoidCallback? onStartNewThread});
 
 typedef ThreadMarkdownHeadingPaddingResolver = EdgeInsets? Function(String tag);
 typedef ThreadMarkdownHeadingStyleResolver = TextStyle? Function(String tag, TextStyle defaultStyle);
@@ -38,6 +45,110 @@ typedef ThreadAttachmentOptionsBuilder =
     });
 typedef ThreadGeneratedImageActionsBuilder =
     Widget Function(BuildContext context, {required VoidCallback onSaveCopy, required VoidCallback onCopyPrompt});
+
+class ThreadAttachmentImageData {
+  const ThreadAttachmentImageData({required this.data, required this.mimeType});
+
+  final Uint8List data;
+  final String mimeType;
+}
+
+class ThreadAttachmentImageCache {
+  ThreadAttachmentImageCache({this.maximumBytes = 32 * 1024 * 1024});
+
+  final int maximumBytes;
+  final LinkedHashMap<String, ThreadAttachmentImageData> _entries = LinkedHashMap<String, ThreadAttachmentImageData>();
+  final Map<String, Future<ThreadAttachmentImageData?>> _inFlight = <String, Future<ThreadAttachmentImageData?>>{};
+  int _cachedBytes = 0;
+
+  String? _key({String? imageId, String? imageUri}) {
+    final normalizedImageId = imageId?.trim();
+    if (normalizedImageId != null && normalizedImageId.isNotEmpty) {
+      return 'id:$normalizedImageId';
+    }
+    final normalizedUri = imageUri?.trim();
+    if (normalizedUri != null && normalizedUri.isNotEmpty) {
+      final parsed = Uri.tryParse(normalizedUri);
+      if (parsed?.scheme == 'dataset') {
+        final datasetImageId = parsed?.queryParameters['id']?.trim();
+        return datasetImageId == null || datasetImageId.isEmpty ? 'uri:$normalizedUri' : 'id:$datasetImageId';
+      }
+    }
+    return null;
+  }
+
+  ThreadAttachmentImageData? read({String? imageId, String? imageUri}) {
+    final key = _key(imageId: imageId, imageUri: imageUri);
+    if (key == null) {
+      return null;
+    }
+    final value = _entries.remove(key);
+    if (value != null) {
+      _entries[key] = value;
+    }
+    return value;
+  }
+
+  void write({String? imageId, String? imageUri, required Uint8List data, required String mimeType}) {
+    final key = _key(imageId: imageId, imageUri: imageUri);
+    if (key == null || data.isEmpty || data.lengthInBytes > maximumBytes) {
+      return;
+    }
+    final previous = _entries.remove(key);
+    if (previous != null) {
+      _cachedBytes -= previous.data.lengthInBytes;
+    }
+    _entries[key] = ThreadAttachmentImageData(data: data, mimeType: mimeType);
+    _cachedBytes += data.lengthInBytes;
+    while (_cachedBytes > maximumBytes && _entries.isNotEmpty) {
+      final oldestKey = _entries.keys.first;
+      final removed = _entries.remove(oldestKey);
+      if (removed != null) {
+        _cachedBytes -= removed.data.lengthInBytes;
+      }
+    }
+  }
+
+  Future<ThreadAttachmentImageData?> load({
+    String? imageId,
+    String? imageUri,
+    required Future<ThreadAttachmentImageData?> Function() loader,
+  }) {
+    final cached = read(imageId: imageId, imageUri: imageUri);
+    if (cached != null) {
+      return Future<ThreadAttachmentImageData?>.value(cached);
+    }
+    final key = _key(imageId: imageId, imageUri: imageUri);
+    if (key == null) {
+      return loader();
+    }
+    final activeLoad = _inFlight[key];
+    if (activeLoad != null) {
+      return activeLoad;
+    }
+    late final Future<ThreadAttachmentImageData?> load;
+    load = loader()
+        .then((value) {
+          if (value != null) {
+            write(imageId: imageId, imageUri: imageUri, data: value.data, mimeType: value.mimeType);
+          }
+          return value;
+        })
+        .whenComplete(() {
+          if (identical(_inFlight[key], load)) {
+            _inFlight.remove(key);
+          }
+        });
+    _inFlight[key] = load;
+    return load;
+  }
+
+  void clear() {
+    _entries.clear();
+    _inFlight.clear();
+    _cachedBytes = 0;
+  }
+}
 
 class ThreadTypographyOverride extends InheritedWidget {
   const ThreadTypographyOverride({
@@ -81,6 +192,13 @@ class ThreadTypographyOverride extends InheritedWidget {
     this.alignAttachmentEdgesWithBubbles = false,
     this.attachmentIconBuilder,
     this.attachmentActionIconBuilder,
+    this.attachmentLoadingPlaceholderBuilder,
+    this.imageGenerationLoadingPlaceholderBuilder,
+    this.attachmentLoadTimeout,
+    this.attachmentImageCache,
+    this.poisonedErrorPredicate,
+    this.poisonedErrorBuilder,
+    this.onStartNewThread,
     this.showAttachmentReplayWhileLoading = false,
     this.codeBlockSurfaceColor,
     this.codeBlockHeaderSurfaceColor,
@@ -151,6 +269,13 @@ class ThreadTypographyOverride extends InheritedWidget {
   final bool alignAttachmentEdgesWithBubbles;
   final ThreadAttachmentIconBuilder? attachmentIconBuilder;
   final ThreadAttachmentActionIconBuilder? attachmentActionIconBuilder;
+  final ThreadAttachmentLoadingPlaceholderBuilder? attachmentLoadingPlaceholderBuilder;
+  final ThreadAttachmentLoadingPlaceholderBuilder? imageGenerationLoadingPlaceholderBuilder;
+  final Duration? attachmentLoadTimeout;
+  final ThreadAttachmentImageCache? attachmentImageCache;
+  final ThreadPoisonedErrorPredicate? poisonedErrorPredicate;
+  final ThreadPoisonedErrorBuilder? poisonedErrorBuilder;
+  final VoidCallback? onStartNewThread;
   final bool showAttachmentReplayWhileLoading;
   final Color? codeBlockSurfaceColor;
   final Color? codeBlockHeaderSurfaceColor;
@@ -338,6 +463,34 @@ class ThreadTypographyOverride extends InheritedWidget {
     return maybeOf(context)?.attachmentActionIconBuilder;
   }
 
+  static ThreadAttachmentLoadingPlaceholderBuilder? maybeAttachmentLoadingPlaceholderBuilderOf(BuildContext context) {
+    return maybeOf(context)?.attachmentLoadingPlaceholderBuilder;
+  }
+
+  static ThreadAttachmentLoadingPlaceholderBuilder? maybeImageGenerationLoadingPlaceholderBuilderOf(BuildContext context) {
+    return maybeOf(context)?.imageGenerationLoadingPlaceholderBuilder;
+  }
+
+  static Duration? maybeAttachmentLoadTimeoutOf(BuildContext context) {
+    return maybeOf(context)?.attachmentLoadTimeout;
+  }
+
+  static ThreadAttachmentImageCache? maybeAttachmentImageCacheOf(BuildContext context) {
+    return maybeOf(context)?.attachmentImageCache;
+  }
+
+  static ThreadPoisonedErrorPredicate? maybePoisonedErrorPredicateOf(BuildContext context) {
+    return maybeOf(context)?.poisonedErrorPredicate;
+  }
+
+  static ThreadPoisonedErrorBuilder? maybePoisonedErrorBuilderOf(BuildContext context) {
+    return maybeOf(context)?.poisonedErrorBuilder;
+  }
+
+  static VoidCallback? maybeOnStartNewThreadOf(BuildContext context) {
+    return maybeOf(context)?.onStartNewThread;
+  }
+
   static bool showAttachmentReplayWhileLoadingOf(BuildContext context) {
     return maybeOf(context)?.showAttachmentReplayWhileLoading ?? false;
   }
@@ -496,6 +649,13 @@ class ThreadTypographyOverride extends InheritedWidget {
         alignAttachmentEdgesWithBubbles != oldWidget.alignAttachmentEdgesWithBubbles ||
         attachmentIconBuilder != oldWidget.attachmentIconBuilder ||
         attachmentActionIconBuilder != oldWidget.attachmentActionIconBuilder ||
+        attachmentLoadingPlaceholderBuilder != oldWidget.attachmentLoadingPlaceholderBuilder ||
+        imageGenerationLoadingPlaceholderBuilder != oldWidget.imageGenerationLoadingPlaceholderBuilder ||
+        attachmentLoadTimeout != oldWidget.attachmentLoadTimeout ||
+        attachmentImageCache != oldWidget.attachmentImageCache ||
+        poisonedErrorPredicate != oldWidget.poisonedErrorPredicate ||
+        poisonedErrorBuilder != oldWidget.poisonedErrorBuilder ||
+        onStartNewThread != oldWidget.onStartNewThread ||
         showAttachmentReplayWhileLoading != oldWidget.showAttachmentReplayWhileLoading ||
         codeBlockSurfaceColor != oldWidget.codeBlockSurfaceColor ||
         codeBlockHeaderSurfaceColor != oldWidget.codeBlockHeaderSurfaceColor ||
