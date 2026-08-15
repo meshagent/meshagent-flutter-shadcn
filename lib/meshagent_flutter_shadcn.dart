@@ -12,6 +12,7 @@ export "forms/select_users_dialog.dart";
 export "forms/metadata_editors.dart";
 export "data_grid/data_grid.dart";
 export "markdown_viewer.dart";
+export "room_idle_disconnect.dart";
 export "theme/colors.dart";
 export "thread_typography.dart";
 export "voice/voice.dart";

@@ -25,12 +25,20 @@ Future<livekit.RoomOptions> getSavedRoomOptions() async {
 }
 
 class MeetingScope extends StatefulWidget {
-  const MeetingScope({super.key, required this.client, this.breakoutRoom, required this.builder, this.roomOptions});
+  const MeetingScope({
+    super.key,
+    required this.client,
+    this.breakoutRoom,
+    required this.builder,
+    this.roomOptions,
+    this.onControllerCreated,
+  });
 
   final livekit.RoomOptions? roomOptions;
   final RoomClient client;
   final String? breakoutRoom;
   final Widget Function(BuildContext, MeetingController) builder;
+  final ValueChanged<MeetingController>? onControllerCreated;
 
   @override
   State createState() => _MeetingScopeState();
@@ -42,6 +50,7 @@ class _MeetingScopeState extends State<MeetingScope> {
   @override
   void initState() {
     super.initState();
+    widget.onControllerCreated?.call(controller);
     controller.configure(breakoutRoom: widget.breakoutRoom);
   }
 
