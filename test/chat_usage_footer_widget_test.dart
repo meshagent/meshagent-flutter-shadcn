@@ -74,9 +74,8 @@ class _MessagingHarness {
 }
 
 class _FakeMessagingServer {
-  _FakeMessagingServer({ArrowRecordBatch? initialDatasetBatch, Completer<void>? initialReadyGate})
-    : _initialDatasetBatch = initialDatasetBatch ?? _usageRowsBatch(),
-      _initialReadyGate = initialReadyGate;
+  _FakeMessagingServer({ArrowRecordBatch? initialDatasetBatch, this._initialReadyGate})
+    : _initialDatasetBatch = initialDatasetBatch ?? _usageRowsBatch();
 
   final ArrowRecordBatch _initialDatasetBatch;
   final Completer<void>? _initialReadyGate;
