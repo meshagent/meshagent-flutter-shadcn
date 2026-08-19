@@ -1,8 +1,6 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -16,8 +14,6 @@ void main() {
   setUpAll(initializeCodeEditorForTesting);
 
   testWidgets('metadata editor uses shad input decoration and editor surface colors', (tester) async {
-    final restoreCodeForgeAssets = await _installCodeForgeFontAssets();
-    addTearDown(restoreCodeForgeAssets);
     final controller = JsonMetadataEditingController(value: const {'service': 'github'});
     addTearDown(controller.dispose);
     final colorScheme = ShadNeutralColorScheme.dark();
@@ -210,8 +206,6 @@ void main() {
   });
 
   testWidgets('user secrets pane creates updates and deletes user secrets', (tester) async {
-    final restoreCodeForgeAssets = await _installCodeForgeFontAssets();
-    addTearDown(restoreCodeForgeAssets);
     final flutterErrors = _captureFlutterErrors();
     addTearDown(flutterErrors.restore);
     final requests = <_RecordedRequest>[];
@@ -337,68 +331,6 @@ void main() {
 
 http.Response _json(Object body) {
   return http.Response(jsonEncode(body), 200, headers: {'content-type': 'application/json'});
-}
-
-Future<VoidCallback> _installCodeForgeFontAssets() async {
-  var directory = File(Platform.resolvedExecutable).parent;
-  File? fontFile;
-  while (true) {
-    final candidates = [
-      File(
-        '${directory.path}/cache/dart-sdk/bin/resources/devtools/assets/packages/devtools_app_shared/fonts/Roboto_Mono/RobotoMono-Regular.ttf',
-      ),
-      File(
-        '${directory.path}/bin/cache/dart-sdk/bin/resources/devtools/assets/packages/devtools_app_shared/fonts/Roboto_Mono/RobotoMono-Regular.ttf',
-      ),
-    ];
-    for (final candidate in candidates) {
-      if (candidate.existsSync()) {
-        fontFile = candidate;
-        break;
-      }
-    }
-    if (fontFile != null || directory.parent.path == directory.path) {
-      break;
-    }
-    directory = directory.parent;
-  }
-  final resolvedFontFile = fontFile;
-  if (resolvedFontFile == null) {
-    throw StateError('Unable to locate a local monospace font for source editor tests.');
-  }
-  final fontBytes = resolvedFontFile.readAsBytesSync();
-  const assets = [
-    'packages/code_forge_web/assets/icons/method.ttf',
-    'packages/code_forge_web/assets/icons/variable.ttf',
-    'packages/code_forge_web/assets/icons/class.ttf',
-    'packages/code_forge_web/assets/icons/reference.ttf',
-    'packages/code_forge_web/assets/icons/struct.ttf',
-    'packages/code_forge_web/assets/icons/event.ttf',
-    'packages/code_forge_web/assets/icons/operator.ttf',
-    'packages/code_forge_web/assets/icons/parameter.ttf',
-    'packages/code_forge_web/assets/icons/interface.ttf',
-    'packages/code_forge_web/assets/icons/field.ttf',
-  ];
-  final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-  messenger.setMockMessageHandler('flutter/assets', (message) async {
-    if (message == null) {
-      return null;
-    }
-    final key = utf8.decode(message.buffer.asUint8List(message.offsetInBytes, message.lengthInBytes));
-    if (key == 'AssetManifest.bin') {
-      return const StandardMessageCodec().encodeMessage({
-        for (final asset in assets)
-          asset: [
-            {'asset': asset},
-          ],
-      });
-    }
-    if (assets.contains(key)) {
-      return ByteData.sublistView(fontBytes);
-    }
-    return null;
-  });
-  return () => messenger.setMockMessageHandler('flutter/assets', null);
 }
 
 Future<void> _pumpEditorSheet(WidgetTester tester) async {

@@ -1,7 +1,7 @@
 import 'dart:async';
 
-import 'package:code_forge_web/code_forge_web.dart' as forge;
 import 'package:flutter/material.dart';
+import 'package:lapce_editor_flutter/lapce_editor_flutter.dart' as lapce;
 
 import 'code_editor_types.dart';
 
@@ -9,11 +9,11 @@ Future<void> initializeCodeEditor() async {}
 Future<void> initializeCodeEditorForTesting() async {}
 
 class PlatformCodeLineEditingController {
-  PlatformCodeLineEditingController({required String initialText}) : _delegate = forge.CodeForgeWebController() {
-    _delegate.text = initialText;
-  }
+  PlatformCodeLineEditingController({required String initialText}) : _delegate = lapce.LapceEditorController(text: initialText);
 
-  final forge.CodeForgeWebController _delegate;
+  static const _clipboard = lapce.SystemEditorClipboard();
+
+  final lapce.LapceEditorController _delegate;
 
   void addListener(VoidCallback listener) {
     _delegate.addListener(listener);
@@ -26,25 +26,40 @@ class PlatformCodeLineEditingController {
   String get text => _delegate.text;
 
   set text(String value) {
-    _delegate.text = value;
+    final readOnly = _delegate.readOnly;
+    _delegate.readOnly = false;
+    _delegate.setText(value);
+    _delegate.readOnly = readOnly;
   }
 
-  TextSelection get selection => _delegate.selection;
+  TextSelection get selection {
+    final region = _delegate.selection.lastInserted;
+    if (region == null) {
+      return const TextSelection.collapsed(offset: 0);
+    }
+    return TextSelection(baseOffset: region.start.value, extentOffset: region.end.value);
+  }
 
   set selection(TextSelection value) {
-    _delegate.selection = value;
+    final textLength = _delegate.textLength;
+    _delegate.setSelection(
+      lapce.Selection.region(
+        lapce.TextOffset(value.baseOffset.clamp(0, textLength)),
+        lapce.TextOffset(value.extentOffset.clamp(0, textLength)),
+      ),
+    );
   }
 
   Future<void> copy() {
-    return Future.sync(_delegate.copy);
+    return _delegate.copy(_clipboard);
   }
 
   void cut() {
-    _delegate.cut();
+    unawaited(_delegate.cut(_clipboard));
   }
 
   void paste() {
-    _delegate.paste();
+    unawaited(_delegate.paste(_clipboard));
   }
 
   void selectAll() {
@@ -55,7 +70,7 @@ class PlatformCodeLineEditingController {
     _delegate.dispose();
   }
 
-  forge.CodeForgeWebController get rawController => _delegate;
+  lapce.LapceEditorController get rawController => _delegate;
 }
 
 Widget buildCodeEditor({
@@ -67,55 +82,115 @@ Widget buildCodeEditor({
   required FocusNode? focusNode,
   required bool showGutter,
 }) {
-  final codeTheme = style?.codeTheme;
-  final defaultMode = codeTheme?.languages['default']?.mode;
-  final textStyle = TextStyle(fontFamily: style?.fontFamily, fontSize: style?.fontSize, color: style?.textColor);
-  final editor = forge.CodeForgeWeb(
+  return _LapceCodeEditor(
     controller: controller.rawController,
-    language: defaultMode,
-    editorTheme: codeTheme?.theme,
-    focusNode: focusNode,
-    textStyle: textStyle,
-    innerPadding: padding is EdgeInsets ? padding : null,
+    style: style,
+    padding: padding,
     readOnly: readOnly,
-    lineWrap: wordWrap,
-    enableGutter: showGutter,
-    enableGutterDivider: showGutter,
-    selectionStyle: forge.CodeSelectionStyle(
-      cursorColor: style?.cursorColor ?? textStyle.color ?? Colors.blue,
-      selectionColor: _selectionColor(style?.cursorColor ?? textStyle.color ?? Colors.blue),
-    ),
-    gutterStyle: showGutter
-        ? forge.GutterStyle(
-            backgroundColor: style?.backgroundColor,
-            lineNumberStyle: textStyle.copyWith(color: textStyle.color?.withValues(alpha: 0.7)),
-            activeLineNumberColor: textStyle.color,
-          )
-        : null,
+    wordWrap: wordWrap,
+    focusNode: focusNode,
+    showGutter: showGutter,
   );
-
-  final scopedEditor = LayoutBuilder(
-    builder: (context, constraints) {
-      final mediaQuery = MediaQuery.of(context);
-      final resolvedPadding = padding?.resolve(Directionality.of(context)) ?? EdgeInsets.zero;
-      final rawWidth = constraints.hasBoundedWidth ? constraints.maxWidth : mediaQuery.size.width;
-      final rawHeight = constraints.hasBoundedHeight ? constraints.maxHeight : mediaQuery.size.height;
-      final width = (rawWidth - resolvedPadding.right).clamp(0.0, double.infinity);
-      final height = (rawHeight - resolvedPadding.bottom).clamp(0.0, double.infinity);
-      return MediaQuery(
-        data: mediaQuery.copyWith(size: Size(width, height)),
-        child: editor,
-      );
-    },
-  );
-
-  if (style?.backgroundColor == null) {
-    return scopedEditor;
-  }
-
-  return ColoredBox(color: style!.backgroundColor!, child: scopedEditor);
 }
 
-Color _selectionColor(Color cursorColor) {
-  return cursorColor.withValues(alpha: 0.25);
+class _LapceCodeEditor extends StatefulWidget {
+  const _LapceCodeEditor({
+    required this.controller,
+    required this.style,
+    required this.padding,
+    required this.readOnly,
+    required this.wordWrap,
+    required this.focusNode,
+    required this.showGutter,
+  });
+
+  final lapce.LapceEditorController controller;
+  final CodeEditorStyle? style;
+  final EdgeInsetsGeometry? padding;
+  final bool readOnly;
+  final bool wordWrap;
+  final FocusNode? focusNode;
+  final bool showGutter;
+
+  @override
+  State<_LapceCodeEditor> createState() => _LapceCodeEditorState();
+}
+
+class _LapceCodeEditorState extends State<_LapceCodeEditor> {
+  lapce.TreeSitterSyntaxHighlighter? _syntaxHighlighter;
+
+  @override
+  void initState() {
+    super.initState();
+    _replaceSyntaxHighlighter();
+  }
+
+  @override
+  void didUpdateWidget(covariant _LapceCodeEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller ||
+        _languageForStyle(oldWidget.style) != _languageForStyle(widget.style) ||
+        !identical(oldWidget.style?.codeTheme?.theme, widget.style?.codeTheme?.theme)) {
+      _replaceSyntaxHighlighter();
+    }
+  }
+
+  @override
+  void dispose() {
+    _syntaxHighlighter?.dispose();
+    super.dispose();
+  }
+
+  void _replaceSyntaxHighlighter() {
+    _syntaxHighlighter?.dispose();
+    final language = _languageForStyle(widget.style);
+    if (language == lapce.LapceLanguage.plainText) {
+      _syntaxHighlighter = null;
+      return;
+    }
+    _syntaxHighlighter = lapce.TreeSitterSyntaxHighlighter(
+      controller: widget.controller,
+      language: language,
+      theme: lapce.SyntaxHighlightTheme(widget.style?.codeTheme?.theme ?? const <String, TextStyle>{}),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    widget.controller.readOnly = widget.readOnly;
+    final defaultTextStyle = DefaultTextStyle.of(context).style;
+    final cursorColor = widget.style?.cursorColor ?? defaultTextStyle.color ?? Colors.blue;
+    final backgroundColor = widget.style?.backgroundColor ?? Colors.transparent;
+    final foregroundColor = widget.style?.textColor ?? defaultTextStyle.color ?? Colors.black;
+    final resolvedPadding = widget.padding?.resolve(Directionality.of(context)) ?? EdgeInsets.zero;
+
+    return lapce.LapceEditor(
+      controller: widget.controller,
+      focusNode: widget.focusNode,
+      showGutter: widget.showGutter,
+      syntaxHighlightProvider: _syntaxHighlighter,
+      theme: lapce.LapceEditorTheme(
+        background: backgroundColor,
+        foreground: foregroundColor,
+        caret: cursorColor,
+        selection: cursorColor.withValues(alpha: 0.25),
+        currentLine: Colors.transparent,
+        textStyle: defaultTextStyle.copyWith(
+          fontFamily: widget.style?.fontFamily,
+          fontSize: widget.style?.fontSize,
+          color: foregroundColor,
+        ),
+        padding: resolvedPadding,
+        wrapMethod: widget.wordWrap ? const lapce.WrapMethod.editorWidth() : const lapce.WrapMethod.none(),
+      ),
+    );
+  }
+}
+
+lapce.LapceLanguage _languageForStyle(CodeEditorStyle? style) {
+  final modeName = style?.codeTheme?.languages['default']?.mode.name;
+  if (modeName == null || modeName.isEmpty) {
+    return lapce.LapceLanguage.plainText;
+  }
+  return lapce.LapceLanguage.fromName(modeName) ?? lapce.LapceLanguage.plainText;
 }
