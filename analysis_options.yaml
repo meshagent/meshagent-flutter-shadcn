@@ -14,6 +14,13 @@ analyzer:
     - lib/data_grid/swayze/**
     - lib/data_grid/swayze_math/**
     - test/data_grid/**
+    - build/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**
 
 linter:
   # The lint rules applied to this project can be customized in the
