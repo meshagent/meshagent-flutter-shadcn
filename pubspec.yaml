@@ -40,7 +40,6 @@ dependencies:
   shadcn_ui: ^0.54.0
   markdown_widget: ^2.3.2+6
   lucide_icons_flutter: ^3.1.1
-  google_fonts: ^6.2.1
   image_picker: ^1.0.7
   interactive_viewer_2: ^0.1.0
   just_audio: ^0.10.5

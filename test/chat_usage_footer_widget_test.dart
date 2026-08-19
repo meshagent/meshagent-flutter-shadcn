@@ -1,12 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:google_fonts/google_fonts.dart';
 // ignore: depend_on_referenced_packages
 import 'package:irondash_message_channel/irondash_message_channel.dart';
 import 'package:meshagent/meshagent.dart';
@@ -373,53 +371,6 @@ Future<void> _pumpUntil(WidgetTester tester, bool Function() condition, {int max
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  GoogleFonts.config.allowRuntimeFetching = false;
-  setUpAll(() async {
-    var directory = File(Platform.resolvedExecutable).parent;
-    File? fontFile;
-    while (true) {
-      final candidates = [
-        File(
-          '${directory.path}/cache/dart-sdk/bin/resources/devtools/assets/packages/devtools_app_shared/fonts/Roboto_Mono/RobotoMono-Regular.ttf',
-        ),
-        File(
-          '${directory.path}/bin/cache/dart-sdk/bin/resources/devtools/assets/packages/devtools_app_shared/fonts/Roboto_Mono/RobotoMono-Regular.ttf',
-        ),
-      ];
-      for (final candidate in candidates) {
-        if (candidate.existsSync()) {
-          fontFile = candidate;
-          break;
-        }
-      }
-      if (fontFile != null || directory.parent.path == directory.path) {
-        break;
-      }
-      directory = directory.parent;
-    }
-    final resolvedFontFile = fontFile;
-    if (resolvedFontFile == null) {
-      throw StateError('Unable to locate a local monospace font for google_fonts tests.');
-    }
-    final fontBytes = resolvedFontFile.readAsBytesSync();
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMessageHandler('flutter/assets', (message) async {
-      if (message == null) {
-        return null;
-      }
-      final key = utf8.decode(message.buffer.asUint8List());
-      if (key == 'AssetManifest.bin') {
-        return const StandardMessageCodec().encodeMessage({
-          'google_fonts/SourceCodePro-Regular.ttf': [
-            {'asset': 'google_fonts/SourceCodePro-Regular.ttf'},
-          ],
-        });
-      }
-      if (key == 'google_fonts/SourceCodePro-Regular.ttf') {
-        return ByteData.sublistView(fontBytes);
-      }
-      return null;
-    });
-  });
   TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
     const MethodChannel('dev.irondash.engine_context'),
     (call) async {

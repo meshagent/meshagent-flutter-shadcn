@@ -2,7 +2,6 @@ import 'dart:collection';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 const String defaultThreadCodeFontFamily = 'SourceCodePro';
@@ -749,8 +748,9 @@ TextStyle threadTypographyCodeTextStyle(
     );
   }
 
-  return GoogleFonts.sourceCodePro(
-    textStyle: textStyle,
+  return _plainTextStyleWithFontFamily(
+    textStyle ?? TextStyle(inherit: inherit),
+    fontFamily: 'monospace',
     color: color,
     backgroundColor: backgroundColor,
     fontSize: fontSize,
@@ -769,7 +769,9 @@ TextStyle threadTypographyCodeTextStyle(
     decorationColor: decorationColor,
     decorationStyle: decorationStyle,
     decorationThickness: decorationThickness,
-  ).copyWith(overflow: overflow, inherit: inherit);
+    overflow: overflow,
+    inherit: inherit,
+  );
 }
 
 TextTheme threadTypographyMaterialTextTheme(TextTheme base, String fontFamily) {

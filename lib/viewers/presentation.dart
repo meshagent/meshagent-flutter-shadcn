@@ -1,4 +1,3 @@
-import 'package:google_fonts/google_fonts.dart';
 import 'package:meshagent/document.dart' as docs;
 import 'package:meshagent/room_server_client.dart';
 import 'package:meshagent_flutter_shadcn/viewers/editor_state.dart';
@@ -106,7 +105,7 @@ class _PresentationViewerElementState extends State<PresentationViewerElement> {
                         controller: controller,
                         element: slide,
                         attributeName: "title",
-                        style: GoogleFonts.outfit(
+                        style: const TextStyle(
                           textBaseline: TextBaseline.alphabetic,
                           fontSize: 50,
                           color: Colors.white,
@@ -124,7 +123,7 @@ class _PresentationViewerElementState extends State<PresentationViewerElement> {
                               controller: controller,
                               element: bp,
                               attributeName: "line",
-                              style: GoogleFonts.outfit(
+                              style: const TextStyle(
                                 textBaseline: TextBaseline.alphabetic,
                                 fontSize: 30,
                                 color: Colors.white,
