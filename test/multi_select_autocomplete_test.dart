@@ -10,6 +10,33 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'dart:convert';
 
 void main() {
+  testWidgets('subject search requests user profiles without project roles', (tester) async {
+    final queries = <Map<String, String>>[];
+    final client = Meshagent(
+      baseUrl: 'http://example.test',
+      token: 'test-token',
+      client: MockClient((request) async {
+        if (request.url.path.endsWith('/users')) {
+          queries.add(request.url.queryParameters);
+        }
+        return http.Response(jsonEncode({'users': []}), 200);
+      }),
+    );
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: SelectSubjects(client: client, projectId: 'project-1', allowedTypes: const {SelectSubjectType.user}, onChanged: (_) {}),
+        ),
+      ),
+    );
+    await tester.enterText(find.byType(EditableText), 'alice');
+    await tester.pump();
+    await tester.pumpAndSettle(const Duration(milliseconds: 350));
+    expect(queries, isNotEmpty);
+    expect(queries.last['filter'], 'alice');
+    expect(queries.last['include_roles'], 'false');
+  });
+
   testWidgets('renders dropdown option text visibly in dark mode', (tester) async {
     await tester.binding.setSurfaceSize(const Size(800, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -39,6 +66,10 @@ void main() {
       ),
     );
 
+    final input = tester.widget<EditableText>(find.byType(EditableText));
+    expect(input.autofillHints, isNull);
+    expect(input.autocorrect, isFalse);
+    expect(input.enableSuggestions, isFalse);
     await tester.tap(find.byType(EditableText));
     await tester.enterText(find.byType(EditableText), 'jes');
     await tester.pump();

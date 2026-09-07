@@ -543,6 +543,9 @@ class _MultiSelectAutocompleteState extends State<MultiSelectAutocomplete> {
                                             actions: actions,
                                             child: EditableText(
                                               key: editableTextKey,
+                                              autofillHints: null,
+                                              autocorrect: false,
+                                              enableSuggestions: false,
                                               autofocus: _isOffstageMeasurement ? false : (widget.autofocus ?? false),
                                               backgroundCursorColor: const Color(0xFF9E9E9E),
                                               cursorColor: cursorColor,

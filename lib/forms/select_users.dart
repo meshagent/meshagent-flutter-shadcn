@@ -448,7 +448,7 @@ class _SelectSubjectsState extends State<SelectSubjects> {
     final futures = <Future<void>>[];
     if (widget.allowedTypes.contains(SelectSubjectType.user)) {
       futures.add(() async {
-        final users = await widget.client.getUsersInProject(widget.projectId, pageSize: 100, filter: query);
+        final users = await widget.client.getUsersInProject(widget.projectId, pageSize: 100, filter: query, includeRoles: false);
         options.addAll(
           users.map(
             (user) => _optionFromSubject(
