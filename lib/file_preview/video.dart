@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:chewie/chewie.dart';
 import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
@@ -112,86 +114,99 @@ class _VideoAttachmentState extends State<VideoAttachment> {
     reset();
   }
 
+  bool hasError = false;
+  bool playing = false;
+
+  @override
+  void didUpdateWidget(covariant VideoAttachment oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.videoUrl != widget.videoUrl) {
+      reset();
+    }
+  }
+
+  void _disposePlayer() {
+    final previous = controller;
+    controller = null;
+    previous?.removeListener(_onVideoChanged);
+    chewieController?.dispose();
+    chewieController = null;
+    if (previous != null) {
+      unawaited(previous.dispose());
+    }
+  }
+
   void reset() {
-    controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl));
+    _disposePlayer();
+    isLoaded = false;
+    hasError = false;
+    playing = false;
+    final current = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl));
+    controller = current;
     chewieController = ChewieController(
       customControls: const MaterialControls(),
       showControlsOnInitialize: false,
       hideControlsTimer: const Duration(milliseconds: 1000),
       showControls: widget.onPlay == null,
       allowFullScreen: widget.allowNativeFullscreen,
-      videoPlayerController: controller!,
+      videoPlayerController: current,
     );
-    controller!.initialize().then((value) {
-      if (mounted) {
-        setState(() {
-          isLoaded = true;
-        });
-      }
-
-      if (widget.autoPlay) {
-        controller!.play();
-      }
-    });
-    controller!.addListener(() {
-      if (controller!.value.hasError) {
-        controller!.dispose();
-        reset();
-      }
-
-      final v = controller!.value;
-      final currentlyPlaying = v
-          .isPlaying /*&&
-          controller!.value.position != controller!.value.duration &&
-          controller!.value.position > Duration.zero*/;
-
-      if (playing != currentlyPlaying) {
-        playing = currentlyPlaying;
-        if (!playing) {
-          if (widget.onPreviewPaused != null) {
-            widget.onPreviewPaused!();
-          }
-        } else {
-          if (widget.onPreviewStarted != null) {
-            widget.onPreviewStarted!(v.duration);
-          }
-        }
-      }
-
-      if (widget.onPositionChanged != null) {
-        controller!.position.then((duration) => widget.onPositionChanged!(duration ?? Duration.zero));
-      }
-
-      if (mounted) {
-        setState(() {});
-      }
-    });
+    current.addListener(_onVideoChanged);
+    unawaited(_initialize(current));
   }
 
-  bool playing = false;
+  Future<void> _initialize(VideoPlayerController current) async {
+    try {
+      await current.initialize();
+      if (!mounted || controller != current || hasError) return;
+      setState(() => isLoaded = true);
+      if (widget.autoPlay) {
+        await current.play();
+      }
+    } catch (_) {
+      // Initialization failures also arrive through the controller listener.
+      // Do not recreate the player automatically: a failed URL would loop.
+      if (mounted && controller == current) {
+        setState(() => hasError = true);
+      }
+    }
+  }
+
+  void _onVideoChanged() {
+    final current = controller;
+    if (!mounted || current == null || hasError) return;
+    final value = current.value;
+    if (value.hasError) {
+      setState(() => hasError = true);
+      if (playing) {
+        playing = false;
+        widget.onPreviewPaused?.call();
+      }
+      return;
+    }
+    if (playing != value.isPlaying) {
+      playing = value.isPlaying;
+      if (playing) {
+        widget.onPreviewStarted?.call(value.duration);
+      } else {
+        widget.onPreviewPaused?.call();
+      }
+    }
+    widget.onPositionChanged?.call(value.position);
+    setState(() {});
+  }
 
   @override
   void dispose() {
-    super.dispose();
+    _disposePlayer();
     if (playing) {
-      if (widget.onPreviewStopped != null) {
-        widget.onPreviewStopped!();
-      }
+      widget.onPreviewStopped?.call();
     }
-    chewieController?.dispose();
-    controller?.dispose();
+    super.dispose();
   }
 
   Widget buildPlayer(BuildContext context) {
-    if (controller != null) {
-      return LayoutBuilder(
-        builder: (builder, constraints) {
-          return isLoaded ? Chewie(controller: chewieController!) : SizedBox();
-        },
-      );
-    } else {
-      return Container(color: Color.from(alpha: 1, red: 0, green: 0, blue: 0));
-    }
+    return isLoaded && chewieController != null ? Chewie(controller: chewieController!) : const SizedBox();
   }
 
   bool processing = false;
@@ -215,8 +230,27 @@ class _VideoAttachmentState extends State<VideoAttachment> {
 
   @override
   Widget build(BuildContext context) {
-    if (controller?.value.isInitialized != true) {
-      return AspectRatio(aspectRatio: 1, child: Container(color: Color.from(alpha: 1, red: 0, green: 0, blue: 0)));
+    if (hasError || controller?.value.isInitialized != true) {
+      return AspectRatio(
+        aspectRatio: 1,
+        child: Material(
+          color: Colors.black,
+          child: Center(
+            child: hasError
+                ? Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('Unable to play video.', style: TextStyle(color: Colors.white)),
+                      TextButton(
+                        onPressed: () => setState(reset),
+                        child: const Text('Retry', style: TextStyle(color: Colors.white)),
+                      ),
+                    ],
+                  )
+                : const CircularProgressIndicator(color: Colors.white),
+          ),
+        ),
+      );
     }
 
     var scale = 1.0;
