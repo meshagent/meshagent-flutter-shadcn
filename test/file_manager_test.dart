@@ -25,6 +25,7 @@ class TestSource implements FileDataSource {
   final changesController = StreamController<void>.broadcast();
   Object? failure;
   Completer<void>? pendingMkdir;
+  Completer<FilesPage>? pendingPage;
   bool writable = false;
   bool paginate = false;
   @override
@@ -35,6 +36,7 @@ class TestSource implements FileDataSource {
   Future<FilesPage> listPage(String path, {String? continuationToken}) async {
     requests.add('list:$path:${continuationToken ?? ''}');
     if (failure != null) throw failure!;
+    if (pendingPage != null) return pendingPage!.future;
     return FilesPage(
       entries: path.isNotEmpty
           ? [entry('nested.txt')]
@@ -199,6 +201,42 @@ void main() {
     expect(find.textContaining('You do not have permission to upload'), findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  for (final style in FileManagerStyle.values) {
+    testWidgets('${style.name} keeps rows mounted during mutation and change-event refreshes', (tester) async {
+      final source = TestSource()..writable = true;
+      await mount(tester, source, style: style);
+      final originalRow = tester.element(find.text('alpha.txt').first);
+      final refresh = Completer<FilesPage>();
+      source.pendingPage = refresh;
+      await tester.tap(find.text('New folder').first);
+      await tester.pumpAndSettle();
+      expect(tester.element(find.text('alpha.txt').first), same(originalRow));
+      await tester.enterText(find.byType(EditableText).last, 'Quarter 1');
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(source.requests, contains('mkdir:Quarter 1'));
+      expect(tester.element(find.text('alpha.txt').first), same(originalRow));
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      refresh.complete(FilesPage(entries: [entry('alpha.txt'), entry('Quarter 1', folder: true)]));
+      await tester.pumpAndSettle();
+      expect(find.text('Quarter 1'), findsOneWidget);
+      expect(find.text('zebra.txt'), findsNothing);
+
+      final updatedRow = tester.element(find.text('alpha.txt').first);
+      final changeRefresh = Completer<FilesPage>();
+      source.pendingPage = changeRefresh;
+      source.changesController.add(null);
+      await tester.pumpAndSettle();
+      expect(tester.element(find.text('alpha.txt').first), same(updatedRow));
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      changeRefresh.complete(FilesPage(entries: [entry('alpha.txt'), entry('new.txt')]));
+      await tester.pumpAndSettle();
+      expect(find.text('new.txt'), findsOneWidget);
+      expect(find.text('Quarter 1'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   testWidgets('closing the browser aborts an active streamed download', (tester) async {
     final source = PendingSource();

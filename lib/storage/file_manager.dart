@@ -96,7 +96,7 @@ class _FileManagerState extends State<FileManager> {
       _path = '';
       _preview = null;
       _subscribe();
-      unawaited(_load());
+      unawaited(_load(reset: true));
     }
   }
 
@@ -145,14 +145,14 @@ class _FileManagerState extends State<FileManager> {
     }
   }
 
-  Future<void> _load({bool more = false}) async {
+  Future<void> _load({bool more = false, bool reset = false}) async {
     if (more && (_next == null || _loading)) return;
     final generation = ++_generation;
     final path = _path;
     setState(() {
       _loading = true;
       _error = null;
-      if (!more) {
+      if (reset) {
         _items = [];
         _selected.clear();
         _seenTokens.clear();
@@ -171,7 +171,7 @@ class _FileManagerState extends State<FileManager> {
       final page = results[0] as FilesPage;
       final permissions = results[1] as FilePermissions;
       if (!mounted || generation != _generation) return;
-      if (page.continuationToken != null && !_seenTokens.add(page.continuationToken!)) {
+      if (more && page.continuationToken != null && _seenTokens.contains(page.continuationToken!)) {
         throw StateError('Files server returned a repeated pagination token');
       }
       final entries = page.entries.map((entry) {
@@ -193,7 +193,13 @@ class _FileManagerState extends State<FileManager> {
         );
       });
       setState(() {
-        _items = [..._items, ...entries];
+        if (!more) {
+          _seenTokens.clear();
+          _rowPermissions.clear();
+        }
+        if (page.continuationToken != null) _seenTokens.add(page.continuationToken!);
+        _items = [if (more) ..._items, ...entries];
+        _selected.retainAll(_items.map((item) => item.id));
         _permissions = permissions;
         _next = page.continuationToken;
       });
@@ -246,7 +252,7 @@ class _FileManagerState extends State<FileManager> {
       _preview = null;
       _filter.clear();
     });
-    unawaited(_load());
+    unawaited(_load(reset: true));
   }
 
   Future<void> _activate(PbFilesItemData item) async {
@@ -645,10 +651,10 @@ class _FileManagerState extends State<FileManager> {
                       );
               }
               content = Padding(padding: const EdgeInsets.all(8), child: content);
-              return _canCreate
+              return _hasCreatePermission
                   ? FileDropArea(
                       onFileDrop: _drop,
-                      overlayBuilder: (context, dragging) => dragging
+                      overlayBuilder: (context, dragging) => dragging && _canCreate
                           ? ColoredBox(
                               color: colors.background.withValues(alpha: .9),
                               child: Center(child: Text('Drop files to upload', style: theme.textTheme.large)),
@@ -941,7 +947,7 @@ class _FileManagerState extends State<FileManager> {
                   ],
                 );
         }
-        return _canCreate
+        return _hasCreatePermission
             ? PbFilesDropTargetLayer(
                 dropTargetTop: 76,
                 padding: _padding,
