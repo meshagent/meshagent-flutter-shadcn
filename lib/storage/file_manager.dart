@@ -8,6 +8,8 @@ import 'package:meshagent/meshagent.dart';
 import 'package:mime/mime.dart';
 import 'package:path/path.dart' as p;
 import 'package:pdfrx/pdfrx.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
+import '../ui/coordinated_context_menu.dart';
 
 import 'file_data_source.dart';
 import 'save_download.dart';
@@ -22,13 +24,19 @@ import 'powerboards/components/layouts/pb_room_panel.dart';
 import 'powerboards/models/pb_attachment_file_metadata.dart';
 import 'powerboards/theme/pb_colors.dart';
 
+part 'shad_file_preview.dart';
+
+/// Presentation supplied by the host application.
+enum FileManagerStyle { shadcn, powerboards }
+
 typedef FileManagerDownload = Future<void> Function(String name, Stream<List<int>> bytes);
 
-/// Powerboards' file widgets with an interchangeable storage transport.
+/// File browser with an interchangeable storage transport and host styling.
 class FileManager extends StatefulWidget {
-  const FileManager({super.key, required this.source, this.onDownload});
+  const FileManager({super.key, required this.source, this.onDownload, this.style = FileManagerStyle.powerboards});
 
   final FileDataSource source;
+  final FileManagerStyle style;
   final FileManagerDownload? onDownload;
 
   @override
@@ -156,7 +164,10 @@ class _FileManagerState extends State<FileManager> {
     try {
       final pageFuture = widget.source.listPage(path, continuationToken: more ? _next : null);
       final permissionsFuture = widget.source.permissions(path);
-      final results = await Future.wait<Object>([pageFuture, permissionsFuture]);
+      final results = await Future.wait<Object>([pageFuture, permissionsFuture], eagerError: true).timeout(
+        const Duration(seconds: 30),
+        onTimeout: () => throw TimeoutException('The files service did not respond. Retry to reload files and permissions.'),
+      );
       final page = results[0] as FilesPage;
       final permissions = results[1] as FilePermissions;
       if (!mounted || generation != _generation) return;
@@ -206,7 +217,9 @@ class _FileManagerState extends State<FileManager> {
     return item != null && (_permissions?.recursiveActions.contains(action) ?? false);
   }
 
-  bool get _canCreate => !_busy && (_permissions?.recursiveActions.contains(FileAction.write) ?? false);
+  bool get _hasCreatePermission => _permissions?.recursiveActions.contains(FileAction.write) ?? false;
+
+  bool get _canCreate => !_busy && _hasCreatePermission;
 
   List<PbFilesItemData> get _visible {
     final query = _filter.text.toLowerCase();
@@ -279,22 +292,39 @@ class _FileManagerState extends State<FileManager> {
 
   Future<String?> _prompt(String title, {String initial = '', bool component = true}) async {
     var value = initial;
-    final result = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: TextFormField(
-          initialValue: initial,
-          autofocus: true,
-          onChanged: (text) => value = text,
-          onFieldSubmitted: (value) => Navigator.pop(context, value),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(context, value), child: const Text('Save')),
-        ],
-      ),
-    );
+    final result = widget.style == FileManagerStyle.shadcn
+        ? await showShadDialog<String>(
+            context: context,
+            builder: (context) => ShadDialog(
+              title: Text(title),
+              actions: [
+                ShadButton.outline(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+                ShadButton(onPressed: () => Navigator.pop(context, value), child: const Text('Save')),
+              ],
+              child: ShadInput(
+                initialValue: initial,
+                autofocus: true,
+                onChanged: (text) => value = text,
+                onSubmitted: (value) => Navigator.pop(context, value),
+              ),
+            ),
+          )
+        : await showDialog<String>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: Text(title),
+              content: TextFormField(
+                initialValue: initial,
+                autofocus: true,
+                onChanged: (text) => value = text,
+                onFieldSubmitted: (value) => Navigator.pop(context, value),
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+                TextButton(onPressed: () => Navigator.pop(context, value), child: const Text('Save')),
+              ],
+            ),
+          );
     if (!mounted || result == null) return null;
     final location = FileLocation(
       target: FilesTarget(projectId: 'validation', kind: FilesTargetKind.room, name: 'validation'),
@@ -324,17 +354,29 @@ class _FileManagerState extends State<FileManager> {
   });
 
   Future<void> _delete(List<PbFilesItemData> items) => _run(() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Delete ${items.length == 1 ? items.single.title : '${items.length} items'}?'),
-        content: const Text('Folders and their contents will be deleted.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
-        ],
-      ),
-    );
+    final confirmed = widget.style == FileManagerStyle.shadcn
+        ? await showShadDialog<bool>(
+            context: context,
+            builder: (context) => ShadDialog(
+              title: Text('Delete ${items.length == 1 ? items.single.title : '${items.length} items'}?'),
+              description: const Text('Folders and their contents will be deleted.'),
+              actions: [
+                ShadButton.outline(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+                ShadButton.destructive(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+              ],
+            ),
+          )
+        : await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: Text('Delete ${items.length == 1 ? items.single.title : '${items.length} items'}?'),
+              content: const Text('Folders and their contents will be deleted.'),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+                TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+              ],
+            ),
+          );
     if (confirmed != true) return;
     for (final item in items) {
       await widget.source.delete(item.id, recursive: item.kind == PbFilesItemKind.folder);
@@ -441,8 +483,305 @@ class _FileManagerState extends State<FileManager> {
     );
   }
 
+  Widget _buildShadcn(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final colors = theme.colorScheme;
+    final selected = _items.where((item) => _selected.contains(item.id)).toList();
+    final canDelete =
+        !_busy &&
+        selected.isNotEmpty &&
+        selected.every((item) => _can(FileAction.delete, item: item, recursive: item.kind == PbFilesItemKind.folder));
+    final canDownload =
+        !_busy && selected.isNotEmpty && selected.every((item) => item.kind == PbFilesItemKind.file && _can(FileAction.read, item: item));
+    Widget action(String label, VoidCallback? onPressed) => ShadButton.outline(onPressed: onPressed, child: Text(label));
+    return Material(
+      key: const ValueKey('themed-file-manager'),
+      color: colors.background,
+      child: DefaultTextStyle(
+        style: theme.textTheme.small.copyWith(color: colors.foreground),
+        child: IconTheme(
+          data: IconThemeData(color: colors.foreground, size: 18),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final browser = Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      ShadButton.ghost(onPressed: () => _navigate(''), child: const Text('Files')),
+                      for (var index = 0; index < _path.split('/').where((part) => part.isNotEmpty).length; index++) ...[
+                        const Icon(LucideIcons.chevronRight, size: 14),
+                        ShadButton.ghost(
+                          onPressed: () => _navigate(_path.split('/').take(index + 1).join('/')),
+                          child: Text(_path.split('/')[index]),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      action('Upload', _canCreate ? () => unawaited(_upload()) : null),
+                      action('New folder', _canCreate ? () => unawaited(_create(folder: true)) : null),
+                      action('New text file', _canCreate ? () => unawaited(_create(folder: false)) : null),
+                      action('Refresh', _loading || _busy ? null : () => unawaited(_load())),
+                      if (selected.isNotEmpty) ...[
+                        action('Download', canDownload ? () => unawaited(_download(selected)) : null),
+                        action('Delete', canDelete ? () => unawaited(_delete(selected)) : null),
+                        ShadButton.ghost(onPressed: () => setState(_selected.clear), child: Text('Clear ${selected.length} selected')),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  ShadInput(controller: _filter, placeholder: const Text('Filter files'), onChanged: (_) => setState(() {})),
+                  if (_busy && _uploadSize != null) ...[
+                    const SizedBox(height: 8),
+                    LinearProgressIndicator(
+                      color: colors.primary,
+                      backgroundColor: colors.muted,
+                      value: _uploadSize == 0 ? null : (_uploaded / _uploadSize!).clamp(0, 1),
+                    ),
+                  ],
+                  if (_message != null)
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(_message!, style: theme.textTheme.small.copyWith(color: colors.destructive)),
+                        ),
+                        ShadIconButton.ghost(icon: const Icon(LucideIcons.x), onPressed: () => setState(() => _message = null)),
+                      ],
+                    ),
+                  if (!_loading && _error == null && _permissions != null && !_hasCreatePermission)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Text(
+                        'You do not have permission to upload files here. Ask an administrator to update Permissions.',
+                        style: theme.textTheme.muted,
+                      ),
+                    ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: _loading && _items.isEmpty
+                        ? Center(child: CircularProgressIndicator(color: colors.primary))
+                        : _error != null
+                        ? Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text('Unable to load files: ${_errorText(_error!)}', textAlign: TextAlign.center),
+                                const SizedBox(height: 12),
+                                action('Retry', () => unawaited(_load())),
+                              ],
+                            ),
+                          )
+                        : _visible.isEmpty
+                        ? Center(child: Text(_filter.text.isEmpty ? 'No files yet' : 'No matching files', style: theme.textTheme.muted))
+                        : LayoutBuilder(builder: (context, tableConstraints) => _shadTable(context, tableConstraints.maxWidth)),
+                  ),
+                  if (_next != null)
+                    ShadButton.ghost(
+                      onPressed: _loading ? null : () => unawaited(_load(more: true)),
+                      child: Text(_loading ? 'Loading…' : 'Load more'),
+                    ),
+                ],
+              );
+              final preview = _preview;
+              Widget content = browser;
+              if (preview != null) {
+                final pane = Container(
+                  decoration: BoxDecoration(
+                    border: Border.all(color: colors.border),
+                    borderRadius: theme.radius,
+                  ),
+                  child: Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: Row(
+                          children: [
+                            Expanded(child: Text(preview.title, overflow: TextOverflow.ellipsis)),
+                            ShadIconButton.ghost(
+                              icon: const Icon(LucideIcons.download),
+                              onPressed: !_busy && _can(FileAction.read, item: preview) ? () => unawaited(_download([preview])) : null,
+                            ),
+                            if (constraints.maxWidth >= 800)
+                              ShadIconButton.ghost(
+                                icon: Icon(_fullscreen ? LucideIcons.minimize : LucideIcons.maximize),
+                                onPressed: () => setState(() => _fullscreen = !_fullscreen),
+                              ),
+                            ShadIconButton.ghost(
+                              icon: const Icon(LucideIcons.x),
+                              onPressed: () {
+                                _cancelPreviews();
+                                setState(() {
+                                  _preview = null;
+                                  _fullscreen = false;
+                                });
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                      Expanded(
+                        child: _ShadFilePreview(key: ValueKey(preview.id), source: _previewSource(preview)),
+                      ),
+                    ],
+                  ),
+                );
+                content = _fullscreen || constraints.maxWidth < 800
+                    ? pane
+                    : Row(
+                        children: [
+                          Expanded(child: browser),
+                          const SizedBox(width: 16),
+                          Expanded(child: pane),
+                        ],
+                      );
+              }
+              content = Padding(padding: const EdgeInsets.all(8), child: content);
+              return _canCreate
+                  ? FileDropArea(
+                      onFileDrop: _drop,
+                      overlayBuilder: (context, dragging) => dragging
+                          ? ColoredBox(
+                              color: colors.background.withValues(alpha: .9),
+                              child: Center(child: Text('Drop files to upload', style: theme.textTheme.large)),
+                            )
+                          : const SizedBox.shrink(),
+                      child: content,
+                    )
+                  : content;
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _shadTable(BuildContext context, double width) {
+    final colors = ShadTheme.of(context).colorScheme;
+    final items = _visible;
+    final compact = width < 650;
+    final columns = [PbFilesSortKey.name, if (!compact) PbFilesSortKey.size, if (!compact) PbFilesSortKey.updated];
+    return ShadTable(
+      columnCount: columns.length + 2,
+      rowCount: items.length,
+      pinnedRowCount: 1,
+      columnSpanExtent: (column) => FixedSpanExtent(
+        column == 0
+            ? 64
+            : column == columns.length + 1
+            ? 72
+            : column == 1
+            ? (width - (compact ? 136 : 416)).clamp(180, double.infinity)
+            : 140,
+      ),
+      rowSpanBackgroundDecoration: (row) =>
+          row > 0 && _selected.contains(items[row - 1].id) ? TableSpanDecoration(color: colors.muted) : null,
+      onRowTap: (row) {
+        if (row > 0) unawaited(_activate(items[row - 1]));
+      },
+      header: (context, column) {
+        if (column == 0 || column > columns.length) return const ShadTableCell.header(child: SizedBox.shrink());
+        final sort = columns[column - 1];
+        return ShadTableCell.header(
+          child: ShadButton.ghost(
+            padding: EdgeInsets.zero,
+            onPressed: () => setState(() {
+              _descending = sort == _sort ? !_descending : false;
+              _sort = sort;
+            }),
+            child: Text(
+              '${switch (sort) {
+                PbFilesSortKey.name => 'Name',
+                PbFilesSortKey.size => 'Size',
+                _ => 'Updated',
+              }}${_sort == sort
+                  ? _descending
+                        ? ' ↓'
+                        : ' ↑'
+                  : ''}',
+            ),
+          ),
+        );
+      },
+      builder: (context, vicinity) {
+        final item = items[vicinity.row];
+        final column = vicinity.column;
+        if (column == 0) {
+          return ShadTableCell(
+            child: ShadCheckbox(
+              value: _selected.contains(item.id),
+              onChanged: (checked) => setState(() {
+                if (checked) {
+                  _selected.add(item.id);
+                } else {
+                  _selected.remove(item.id);
+                }
+              }),
+            ),
+          );
+        }
+        if (column > columns.length) {
+          final canRename =
+              !_busy &&
+              _can(FileAction.write, item: item, recursive: item.kind == PbFilesItemKind.folder) &&
+              _can(FileAction.delete, item: item, recursive: item.kind == PbFilesItemKind.folder) &&
+              _canCreate;
+          return ShadTableCell(
+            child: CoordinatedShadContextMenuRegion(
+              tapEnabled: true,
+              items: [
+                ShadContextMenuItem(
+                  onPressed: () => unawaited(_activate(item)),
+                  child: Text(item.kind == PbFilesItemKind.folder ? 'Open folder' : 'Preview'),
+                ),
+                ShadContextMenuItem(
+                  enabled: !_busy && item.kind == PbFilesItemKind.file && _can(FileAction.read, item: item),
+                  onPressed: () => unawaited(_download([item])),
+                  child: const Text('Download'),
+                ),
+                ShadContextMenuItem(enabled: canRename, onPressed: () => unawaited(_rename(item)), child: const Text('Rename...')),
+                ShadContextMenuItem(
+                  enabled: canRename,
+                  onPressed: () => unawaited(_rename(item, move: true)),
+                  child: const Text('Move...'),
+                ),
+                ShadContextMenuItem(
+                  enabled: !_busy && _can(FileAction.delete, item: item, recursive: item.kind == PbFilesItemKind.folder),
+                  onPressed: () => unawaited(_delete([item])),
+                  child: const Text('Delete'),
+                ),
+              ],
+              child: Semantics(button: true, label: 'File actions', child: const Icon(LucideIcons.ellipsis)),
+            ),
+          );
+        }
+        return ShadTableCell(
+          child: switch (columns[column - 1]) {
+            PbFilesSortKey.name => Row(
+              children: [
+                Icon(item.kind == PbFilesItemKind.folder ? LucideIcons.folder : LucideIcons.file, size: 16),
+                const SizedBox(width: 8),
+                Expanded(child: Text(item.title, overflow: TextOverflow.ellipsis)),
+              ],
+            ),
+            PbFilesSortKey.size => Text(item.sizeLabel),
+            _ => Text(item.updatedLabel, overflow: TextOverflow.ellipsis),
+          },
+        );
+      },
+    );
+  }
+
   @override
-  Widget build(BuildContext context) => Material(
+  Widget build(BuildContext context) => widget.style == FileManagerStyle.shadcn ? _buildShadcn(context) : _buildPowerboards(context);
+
+  Widget _buildPowerboards(BuildContext context) => Material(
     color: PbColors.surfacePanel,
     child: LayoutBuilder(
       builder: (context, constraints) {

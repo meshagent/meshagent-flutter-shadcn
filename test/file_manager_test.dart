@@ -2,6 +2,11 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+// ignore: depend_on_referenced_packages
+import 'package:irondash_message_channel/irondash_message_channel.dart';
+// ignore: depend_on_referenced_packages
+import 'package:super_native_extensions/src/native/context.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:meshagent/meshagent.dart';
 import 'package:meshagent_flutter_shadcn/storage/file_data_source.dart';
@@ -19,6 +24,7 @@ class TestSource implements FileDataSource {
   final requests = <String>[];
   final changesController = StreamController<void>.broadcast();
   Object? failure;
+  Completer<void>? pendingMkdir;
   bool writable = false;
   bool paginate = false;
   @override
@@ -66,6 +72,7 @@ class TestSource implements FileDataSource {
   @override
   Future<void> mkdir(String path) async {
     requests.add('mkdir:$path');
+    await pendingMkdir?.future;
   }
 
   @override
@@ -94,14 +101,19 @@ class PendingSource extends TestSource {
   }
 }
 
-Future<void> mount(WidgetTester tester, TestSource source, {FileManagerDownload? download}) async {
+Future<void> mount(
+  WidgetTester tester,
+  TestSource source, {
+  FileManagerDownload? download,
+  FileManagerStyle style = FileManagerStyle.powerboards,
+}) async {
   await tester.binding.setSurfaceSize(const Size(1400, 900));
   addTearDown(() => tester.binding.setSurfaceSize(null));
   addTearDown(source.changesController.close);
   await tester.pumpWidget(
     ShadApp(
       home: Scaffold(
-        body: FileManager(source: source, onDownload: download),
+        body: FileManager(source: source, onDownload: download, style: style),
       ),
     ),
   );
@@ -109,6 +121,79 @@ Future<void> mount(WidgetTester tester, TestSource source, {FileManagerDownload?
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+    const MethodChannel('dev.irondash.engine_context'),
+    (call) async => call.method == 'getEngineHandle' ? 0 : null,
+  );
+  final nativeContext = superNativeExtensionsContext;
+  if (nativeContext is MockMessageChannelContext) {
+    nativeContext.registerMockMethodCallHandler('DropManager', (MethodCall call) async => null);
+    nativeContext.registerMockMethodCallHandler('DragManager', (MethodCall call) async => null);
+  }
+  testWidgets('Studio styling retains writable creation, text editing and navigation', (tester) async {
+    final source = TestSource()..writable = true;
+    await mount(tester, source, style: FileManagerStyle.shadcn);
+    expect(find.byType(PbFilesTable), findsNothing);
+    expect(tester.widget<ShadButton>(find.widgetWithText(ShadButton, 'Upload')).onPressed, isNotNull);
+    await tester.tap(find.text('New folder'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ShadDialog), findsOneWidget);
+    await tester.enterText(find.byType(EditableText).last, 'Quarter 1');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(source.requests, contains('mkdir:Quarter 1'));
+    await tester.tap(find.text('alpha.txt'));
+    await tester.pumpAndSettle();
+    expect(find.byType(PbFilesSidePane), findsNothing);
+    expect(find.text('hello'), findsOneWidget);
+    await tester.enterText(find.byType(EditableText).last, 'updated');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(source.requests, contains('upload:alpha.txt'));
+    await tester.tap(find.byIcon(LucideIcons.x).last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('folder'));
+    await tester.pumpAndSettle();
+    expect(find.text('nested.txt'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+  testWidgets('Studio loading errors show Retry instead of a blank browser', (tester) async {
+    final source = TestSource()..failure = MeshagentException('Access denied', statusCode: 403);
+    await mount(tester, source, style: FileManagerStyle.shadcn);
+    expect(find.text('Unable to load files: Access denied'), findsOneWidget);
+    expect(find.textContaining('You do not have permission to upload'), findsNothing);
+    source.failure = null;
+    await tester.tap(find.text('Retry'));
+    await tester.pumpAndSettle();
+    expect(find.text('alpha.txt'), findsOneWidget);
+    expect(find.textContaining('You do not have permission to upload'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Studio does not report missing upload permission during a file operation', (tester) async {
+    final operation = Completer<void>();
+    final source = TestSource()
+      ..writable = true
+      ..pendingMkdir = operation;
+    await mount(tester, source, style: FileManagerStyle.shadcn);
+    expect(find.textContaining('You do not have permission to upload'), findsNothing);
+    await tester.tap(find.text('New folder'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(EditableText).last, 'Quarter 1');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(source.requests, contains('mkdir:Quarter 1'));
+    expect(tester.widget<ShadButton>(find.widgetWithText(ShadButton, 'Upload')).onPressed, isNull);
+    expect(find.textContaining('You do not have permission to upload'), findsNothing);
+    operation.complete();
+    await tester.pumpAndSettle();
+    expect(tester.widget<ShadButton>(find.widgetWithText(ShadButton, 'Upload')).onPressed, isNotNull);
+    expect(find.textContaining('You do not have permission to upload'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('closing the browser aborts an active streamed download', (tester) async {
     final source = PendingSource();
     await mount(tester, source, download: (name, bytes) => bytes.drain<void>());
