@@ -135,6 +135,7 @@ void main() {
     final source = TestSource()..writable = true;
     await mount(tester, source, style: FileManagerStyle.shadcn);
     expect(find.byType(PbFilesTable), findsNothing);
+    expect(find.text('Files'), findsNothing);
     expect(tester.widget<ShadButton>(find.widgetWithText(ShadButton, 'Upload')).onPressed, isNotNull);
     await tester.tap(find.text('New folder'));
     await tester.pumpAndSettle();
@@ -157,6 +158,11 @@ void main() {
     await tester.tap(find.text('folder'));
     await tester.pumpAndSettle();
     expect(find.text('nested.txt'), findsOneWidget);
+    expect(find.text('Files'), findsOneWidget);
+    await tester.tap(find.text('Files'));
+    await tester.pumpAndSettle();
+    expect(find.text('Files'), findsNothing);
+    expect(find.text('alpha.txt'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
   testWidgets('Studio loading errors show Retry instead of a blank browser', (tester) async {

@@ -506,20 +506,22 @@ class _FileManagerState extends State<FileManager> {
               final browser = Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Wrap(
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      ShadButton.ghost(onPressed: () => _navigate(''), child: const Text('Files')),
-                      for (var index = 0; index < _path.split('/').where((part) => part.isNotEmpty).length; index++) ...[
-                        const Icon(LucideIcons.chevronRight, size: 14),
-                        ShadButton.ghost(
-                          onPressed: () => _navigate(_path.split('/').take(index + 1).join('/')),
-                          child: Text(_path.split('/')[index]),
-                        ),
+                  if (_path.isNotEmpty) ...[
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        ShadButton.ghost(onPressed: () => _navigate(''), child: const Text('Files')),
+                        for (var index = 0; index < _path.split('/').where((part) => part.isNotEmpty).length; index++) ...[
+                          const Icon(LucideIcons.chevronRight, size: 14),
+                          ShadButton.ghost(
+                            onPressed: () => _navigate(_path.split('/').take(index + 1).join('/')),
+                            child: Text(_path.split('/')[index]),
+                          ),
+                        ],
                       ],
-                    ],
-                  ),
-                  const SizedBox(height: 12),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
