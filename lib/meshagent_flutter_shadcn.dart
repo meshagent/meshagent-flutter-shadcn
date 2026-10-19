@@ -21,3 +21,5 @@ export "usage_graph.dart";
 export "chat/outbound_delivery_status.dart";
 export "secrets/keychain_dialog.dart";
 export "web_context_menu_manager.dart";
+export "storage/file_data_source.dart";
+export "storage/file_manager.dart";

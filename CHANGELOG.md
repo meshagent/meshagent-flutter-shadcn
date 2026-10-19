@@ -1,3 +1,15 @@
+## [0.54.0]
+- Stability
+
+## [Unreleased]
+- WebSocket download URL creation now requires both read and explicit presign permission. Legacy storage grants do not delegate public URLs; use authenticated downloads or an explicit file policy. OAuth participant tokens retain file-action scopes and IAM path exclusions.
+- Shared Powerboards file widgets, previews, styles and assets with Studio, retaining compatibility exports in Powerboards. Added a file manager with REST and WebSocket data-source adapters, permission-aware actions, navigation, filtering, pagination, streaming transfers and authenticated previews.
+
+## [0.53.5]
+- Added typed project and global profile models, `project`, `user`, and `merged` views, project-local profile updates with inheritance, and sysadmin user search and profile administration.
+- Project member listings now default to merged profile data.
+- Project profile updates require `user_profile_editor`; global profile access is self-only and global annotations require sysadmin APIs.
+
 ## [0.53.4]
 - Stability
 

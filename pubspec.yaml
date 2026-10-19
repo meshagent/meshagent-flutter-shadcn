@@ -17,7 +17,7 @@ homepage: https://www.meshagent.com
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 0.53.4
+version: 0.54.0
 
 environment:
   sdk: ^3.12.0
@@ -31,6 +31,7 @@ resolution: workspace
 # the latest version available on pub.dev. To see which dependencies have newer
 # versions available, run `flutter pub outdated`.
 dependencies:
+  flutter_solidart: ^2.5.0
   flutter:
     sdk: flutter
   video_player: ^2.9.2
@@ -54,9 +55,9 @@ dependencies:
   synchronized: ^3.3.0+3
   logging: ^1.3.0
   path: ^1.9.1
-  meshagent: ^0.53.4
-  meshagent_agents: ^0.53.4
-  meshagent_flutter: ^0.53.4
+  meshagent: ^0.54.0
+  meshagent_agents: ^0.54.0
+  meshagent_flutter: ^0.54.0
   lapce_editor_flutter: ^0.1.1
   re_highlight: ^0.0.3
   flutter_highlight: ^0.7.0
@@ -93,3 +94,25 @@ dev_dependencies:
     sdk: flutter
   integration_test:
     sdk: flutter
+
+flutter:
+  uses-material-design: true
+  assets:
+    - lib/storage/powerboards/assets/icons/
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: lib/storage/powerboards/assets/fonts/Inter-Regular.ttf
+          weight: 400
+        - asset: lib/storage/powerboards/assets/fonts/Inter-Medium.ttf
+          weight: 500
+        - asset: lib/storage/powerboards/assets/fonts/Inter-SemiBold.ttf
+          weight: 600
+        - asset: lib/storage/powerboards/assets/fonts/Inter-Bold.ttf
+          weight: 700
+        - asset: lib/storage/powerboards/assets/fonts/Inter-ExtraBold.ttf
+          weight: 800
+    - family: DM Mono
+      fonts:
+        - asset: lib/storage/powerboards/assets/fonts/DMMono-Regular.ttf
+          weight: 400
