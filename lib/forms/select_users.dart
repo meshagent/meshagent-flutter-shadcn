@@ -155,7 +155,7 @@ class _SelectUsersState extends State<SelectUsers> {
   );
 }
 
-enum SelectSubjectType { user, agent, group, serviceAccount, projectUsers, projectDevelopers, projectServiceAccounts }
+enum SelectSubjectType { everyone, user, agent, group, serviceAccount, projectUsers, projectDevelopers, projectServiceAccounts }
 
 class SelectSubjectsController extends MultiSelectController {
   SelectSubjectsController({
@@ -321,6 +321,13 @@ class _SelectSubjectsState extends State<SelectSubjects> {
 
   _SubjectOption _optionFromSubject(AccessSubject subject) {
     return switch (subject.type) {
+      'everyone' => _SubjectOption(
+        key: _subjectKey(subject),
+        subject: subject,
+        label: 'Everyone (including anonymous)',
+        kindLabel: 'Public',
+        icon: LucideIcons.globe,
+      ),
       'agent' => _SubjectOption(
         key: _subjectKey(subject),
         subject: subject,
@@ -375,6 +382,7 @@ class _SelectSubjectsState extends State<SelectSubjects> {
 
   bool _isAllowedResolvedSubject(AccessSubject subject) {
     return switch (subject.type) {
+      'everyone' => widget.allowedTypes.contains(SelectSubjectType.everyone),
       'user' => widget.allowedTypes.contains(SelectSubjectType.user),
       'agent' => widget.allowedTypes.contains(SelectSubjectType.agent),
       'group' => widget.allowedTypes.contains(SelectSubjectType.group),
@@ -433,6 +441,10 @@ class _SelectSubjectsState extends State<SelectSubjects> {
     final lower = query.toLowerCase();
     final options = <_SubjectOption>[];
     AccessSubject? resolvedEmailSubject;
+
+    if (widget.allowedTypes.contains(SelectSubjectType.everyone)) {
+      options.add(_optionFromSubject(const AccessSubject(type: 'everyone', id: 'all')));
+    }
 
     if (widget.allowedTypes.contains(SelectSubjectType.projectUsers)) {
       options.add(_optionFromSubject(AccessSubject(type: 'userset', id: widget.projectId, objectType: 'project', relation: 'member')));

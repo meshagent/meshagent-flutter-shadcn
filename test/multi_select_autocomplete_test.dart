@@ -10,6 +10,44 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'dart:convert';
 
 void main() {
+  testWidgets('public principal is selectable without creating or looking up a user', (tester) async {
+    final selected = <AccessSubject>[];
+    final client = Meshagent(
+      baseUrl: 'http://example.test',
+      token: 'test-token',
+      client: MockClient((request) async => throw StateError('Everyone must not require a user lookup')),
+    );
+    await tester.pumpWidget(
+      ShadApp(
+        home: Scaffold(
+          body: Align(
+            alignment: Alignment.topCenter,
+            child: SizedBox(
+              width: 500,
+              child: SelectSubjects(
+                client: client,
+                projectId: 'project-1',
+                allowedTypes: const {SelectSubjectType.everyone},
+                onChanged: (subjects) => selected
+                  ..clear()
+                  ..addAll(subjects),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byType(EditableText));
+    await tester.enterText(find.byType(EditableText), 'anonymous');
+    await tester.pumpAndSettle();
+    expect(find.text('Everyone (including anonymous)'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(selected.single.type, 'everyone');
+    expect(selected.single.id, 'all');
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('subject search requests user profiles without project roles', (tester) async {
     final queries = <Map<String, String>>[];
     final client = Meshagent(
